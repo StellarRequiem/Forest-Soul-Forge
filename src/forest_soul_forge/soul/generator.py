@@ -23,7 +23,7 @@ from forest_soul_forge.core.trait_engine import (
     TraitEngine,
     TraitProfile,
 )
-from forest_soul_forge.soul.dna import Lineage, dna_full, dna_short
+from forest_soul_forge.core.dna import Lineage, dna_full, dna_short
 
 # Trait value bands. These label the qualitative intensity that shows up in prose.
 BANDS: list[tuple[int, str]] = [
@@ -131,6 +131,8 @@ class SoulGenerator:
         agent_version: str = "v1",
         *,
         lineage: Lineage | None = None,
+        constitution_hash: str | None = None,
+        constitution_file: str | None = None,
     ) -> SoulDocument:
         """Generate a soul.md from a profile.
 
@@ -146,7 +148,19 @@ class SoulGenerator:
             If this agent was spawned by another agent, pass the child lineage
             produced via `Lineage.from_parent(...)`. None means root agent
             (spawned by a human).
+        constitution_hash : str | None
+            Full SHA-256 hex of the agent's derived constitution. When set,
+            emitted in frontmatter so consumers can verify the paired
+            constitution file hasn't been tampered with. Must be paired with
+            ``constitution_file``.
+        constitution_file : str | None
+            Relative filename of the paired ``.constitution.yaml`` (sibling of
+            the soul file). Informational — the hash is the tamper-evidence.
         """
+        if (constitution_hash is None) != (constitution_file is None):
+            raise ValueError(
+                "constitution_hash and constitution_file must be provided together"
+            )
         engine = self.engine
         lineage = lineage or Lineage.root()
 
@@ -177,6 +191,8 @@ class SoulGenerator:
             dna=dna,
             dna_full_hex=dna_full_hex,
             lineage=lineage,
+            constitution_hash=constitution_hash,
+            constitution_file=constitution_file,
         ))
 
         # ---- header ------------------------------------------------------
@@ -281,6 +297,8 @@ class SoulGenerator:
         dna: str,
         dna_full_hex: str,
         lineage: Lineage,
+        constitution_hash: str | None = None,
+        constitution_file: str | None = None,
     ) -> list[str]:
         """Hand-rolled YAML emitter — avoids the pyyaml dep at generation-time
         and guarantees a stable, sorted trait_values block (which keeps
@@ -294,6 +312,11 @@ class SoulGenerator:
         out.append(f'agent_name: "{agent_name}"')
         out.append(f'agent_version: "{agent_version}"')
         out.append(f'generated_at: "{generated_at}"')
+
+        # Constitution binding (optional — omitted when no constitution is attached).
+        if constitution_hash is not None and constitution_file is not None:
+            out.append(f'constitution_hash: "{constitution_hash}"')
+            out.append(f'constitution_file: "{constitution_file}"')
 
         # Lineage
         if lineage.is_root():

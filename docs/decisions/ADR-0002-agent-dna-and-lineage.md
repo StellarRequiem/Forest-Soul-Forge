@@ -49,8 +49,15 @@ Two display forms:
   personal-scale agent population; the full form is always present for
   disambiguation.
 
-Implementation lives in `src/forest_soul_forge/soul/dna.py`, with a public
+Implementation lives in `src/forest_soul_forge/core/dna.py`, with a public
 `verify(profile, claimed_dna) -> bool` that accepts either short or full form.
+
+> **Amendment (2026-04-21, during ADR-0003 implementation):** originally placed
+> at `src/forest_soul_forge/soul/dna.py`. Moved to `core/` so that the grading
+> engine (also in core) can import DNA without inverting the layer direction.
+> DNA is an identity primitive over a `TraitProfile` (a core concept), so
+> `core/` is its correct home. The public API is unchanged; only the import
+> path moved (`forest_soul_forge.soul.dna` → `forest_soul_forge.core.dna`).
 
 ### Lineage
 

@@ -13,6 +13,12 @@ Hash: sha256 over a canonical UTF-8 JSON rendering (sorted keys, no whitespace,
 integers for trait values, floats for weights). `short()` returns the first 12
 hex chars, which is what shows up in soul.md headers — like a git short SHA.
 
+Module location note: this started out in ``soul/dna.py``. It moved to ``core/``
+because DNA is an identity primitive over a TraitProfile (a core concept), and
+the grading engine — also in core — needs it. Keeping DNA in soul/ forced
+``core/grading.py`` to import upward into soul/, inverting the intended layer
+direction. See docs/decisions/ADR-0003-grading-engine.md for context.
+
 Design reference: docs/decisions/ADR-0002-agent-dna-and-lineage.md
 """
 from __future__ import annotations

@@ -42,3 +42,6 @@ What else did we look at, and why not?
 
 - [ADR-0001 — Hierarchical trait tree with themed domains and tiered weights](ADR-0001-hierarchical-trait-tree.md) — Accepted 2026-04-21
 - [ADR-0002 — Agent DNA and lineage](ADR-0002-agent-dna-and-lineage.md) — Accepted 2026-04-21
+- [ADR-0003 — Grading engine (config-grade)](ADR-0003-grading-engine.md) — Accepted 2026-04-21
+- [ADR-0004 — Constitution builder](ADR-0004-constitution-builder.md) — Accepted 2026-04-21
+- [ADR-0005 — Audit chain (tamper-evident, v0.1 threat model)](ADR-0005-audit-chain.md) — Accepted 2026-04-21

@@ -5,7 +5,9 @@ dna_full: "d1378144188d476ef994d4b80f990b6b24451caec86fc75d29d1297cec130a1b"
 role: anomaly_investigator
 agent_name: "HuntMasterScout"
 agent_version: "v1"
-generated_at: "2026-04-21 20:01:25Z"
+generated_at: "2026-04-22 03:36:53Z"
+constitution_hash: "d5efdf36076830f046644cebd9223e94e30cd1f11a4999c112cfbd30a33d8ba2"
+constitution_file: "lineage_child_scout.constitution.yaml"
 parent_dna: 66af29e14dee
 spawned_by: "HuntMaster"
 lineage:
@@ -46,7 +48,7 @@ domain_weight_overrides: {}
 **Role:** `anomaly_investigator` — Root-cause-analysis specialist for suspicious events.
 **DNA:** `d1378144188d` (schema v1)
 **Spawned by:** HuntMaster (`66af29e14dee`) — depth 1
-**Generated:** 2026-04-21 20:01:25Z _(auto-generated; do not hand-edit)_
+**Generated:** 2026-04-22 03:36:53Z _(auto-generated; do not hand-edit)_
 
 You are the **HuntMasterScout** agent. Your behavior below is shaped by a
 structured trait profile. The profile values are not suggestions — they are

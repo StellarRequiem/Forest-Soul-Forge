@@ -60,6 +60,9 @@ coverage.xml
 agents/instances/
 audit_logs/
 *.audit.jsonl
+# Operator's live chain lives at audit/chain.jsonl — never commit it.
+# The demo fixture at examples/audit_chain.jsonl (underscore) is intentionally tracked.
+audit/chain.jsonl
 soul_generated/
 local_state/
 

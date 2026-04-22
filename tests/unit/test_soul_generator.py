@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from forest_soul_forge.core.trait_engine import TraitEngine
-from forest_soul_forge.soul.dna import Lineage, dna_full, dna_short, verify
+from forest_soul_forge.core.dna import Lineage, dna_full, dna_short, verify
 from forest_soul_forge.soul.generator import (
     BANDS,
     FRONTMATTER_SCHEMA_VERSION,
