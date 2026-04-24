@@ -14,6 +14,7 @@ catch regressions before the user runs `pytest` on their own machine.
 """
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import sys
 import traceback
@@ -40,6 +41,18 @@ class _ApproxShim:
 
     def __repr__(self) -> str:
         return f"approx({self.expected})"
+
+
+class _SkipModule(Exception):
+    """Signal that the current test module should be skipped wholesale.
+
+    Emitted by :meth:`_PytestShim.importorskip` when a required dependency
+    (e.g. FastAPI) isn't installed in the sandbox.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class _PytestShim(ModuleType):
@@ -83,6 +96,15 @@ class _PytestShim(ModuleType):
             return
         raise AssertionError(f"Expected {exc_type.__name__} to be raised")
 
+    @staticmethod
+    def importorskip(modname: str, reason: str | None = None):
+        try:
+            return importlib.import_module(modname)
+        except ImportError as e:
+            raise _SkipModule(
+                reason or f"requires {modname} (not installed in sandbox): {e}"
+            ) from e
+
 
 sys.modules["pytest"] = _PytestShim()
 
@@ -97,12 +119,17 @@ def _load_module(path: Path) -> ModuleType:
     return mod
 
 
-def _build_fixtures(mod: ModuleType) -> dict[str, object]:
+def _build_fixtures(mod: ModuleType, *, fresh_tmp_path: bool = False) -> dict[str, object]:
     # Built-in pytest fixtures the harness provides itself.
+    # pytest gives every test its own tmp_path; we mirror that when
+    # ``fresh_tmp_path`` is true. At module scan time we build once to resolve
+    # user fixtures with stable engines, then regenerate tmp_path per test.
     import tempfile
     fixtures: dict[str, object] = {
         "tmp_path": Path(tempfile.mkdtemp(prefix="fsf_test_")),
     }
+    if fresh_tmp_path:
+        return fixtures
     # Resolve user fixtures in dependency order. Simple: iterate until nothing new.
     remaining = {
         name: obj
@@ -130,6 +157,13 @@ def _run_method(cls_obj, method_name: str, method, fixtures: dict[str, object]) 
     if argnames and argnames[0] == "self":
         argnames = argnames[1:]
 
+    # Fresh tmp_path per invocation mirrors pytest semantics: tests that
+    # write to tmp_path / "chain.jsonl" must not see state from previous tests.
+    if "tmp_path" in argnames:
+        import tempfile
+        fixtures = dict(fixtures)
+        fixtures["tmp_path"] = Path(tempfile.mkdtemp(prefix="fsf_test_"))
+
     param_spec = getattr(method, "_parametrize", None)
     if param_spec is None:
         # No parametrize: resolve args from fixtures.
@@ -151,8 +185,12 @@ def _run_method(cls_obj, method_name: str, method, fixtures: dict[str, object]) 
     return test_ids
 
 
-def run_module(path: Path) -> tuple[int, int, list[str]]:
-    mod = _load_module(path)
+def run_module(path: Path) -> tuple[int, int, list[str], str | None]:
+    """Return ``(passed, failed, failure_names, skip_reason_or_None)``."""
+    try:
+        mod = _load_module(path)
+    except _SkipModule as e:
+        return 0, 0, [], e.reason
     fixtures = _build_fixtures(mod)
 
     passed = 0
@@ -193,7 +231,7 @@ def run_module(path: Path) -> tuple[int, int, list[str]]:
             print(f"  FAIL  {name}")
             traceback.print_exc()
 
-    return passed, len(failed_names), failed_names
+    return passed, len(failed_names), failed_names, None
 
 
 def main() -> int:
@@ -201,15 +239,23 @@ def main() -> int:
     test_files = sorted(tests_dir.glob("test_*.py"))
     total_pass = 0
     total_fail = 0
+    total_skipped_modules = 0
     all_failed: list[str] = []
     for f in test_files:
         print(f"--- {f.relative_to(REPO_ROOT)} ---")
-        p, fc, failed = run_module(f)
+        p, fc, failed, skip_reason = run_module(f)
+        if skip_reason is not None:
+            total_skipped_modules += 1
+            print(f"  SKIPPED: {skip_reason}")
+            continue
         total_pass += p
         total_fail += fc
         all_failed.extend(failed)
     print()
-    print(f"Passed: {total_pass}   Failed: {total_fail}")
+    print(
+        f"Passed: {total_pass}   Failed: {total_fail}   "
+        f"Skipped modules: {total_skipped_modules}"
+    )
     if all_failed:
         print("Failures:")
         for f in all_failed:

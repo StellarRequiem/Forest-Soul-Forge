@@ -65,6 +65,10 @@ audit_logs/
 audit/chain.jsonl
 soul_generated/
 local_state/
+# SQLite registry is an index rebuildable from canonical artifacts — never commit.
+registry.sqlite
+registry.sqlite-shm
+registry.sqlite-wal
 
 # Streamlit
 .streamlit/secrets.toml

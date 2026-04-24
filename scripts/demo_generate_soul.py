@@ -92,9 +92,12 @@ def main() -> int:
 
     # Reset the demo audit chain so each run is reproducible. The real
     # operator chain under audit/ is untouched by this script.
+    # Prefer truncate-in-place over unlink — some mounts (containerized dev
+    # envs) allow writes but forbid unlink on bind-mounted files.
     demo_chain_path = out_dir / "audit_chain.jsonl"
     if demo_chain_path.exists():
-        demo_chain_path.unlink()
+        with demo_chain_path.open("w", encoding="utf-8"):
+            pass  # truncate to zero bytes; AuditChain genesis will fill it
 
     engine = TraitEngine(yaml_path)
     gen = SoulGenerator(engine)
@@ -108,8 +111,8 @@ def main() -> int:
     print(f"  audit:     {demo_chain_path.relative_to(REPO_ROOT)} (genesis written)")
     print()
 
-    assert len(engine.list_traits()) == 26, "Expected 26 traits in v0.1"
-    assert set(engine.domains) == {"security", "audit", "emotional", "cognitive", "communication"}
+    assert len(engine.list_traits()) == 29, "Expected 29 traits in v0.2 (26 from v0.1 + 3 embodiment.presentation)"
+    assert set(engine.domains) == {"security", "audit", "emotional", "cognitive", "communication", "embodiment"}
 
     # Every trait should now have scale_mid populated.
     missing_mid = [t.name for t in engine.list_traits() if not t.scale_mid]
