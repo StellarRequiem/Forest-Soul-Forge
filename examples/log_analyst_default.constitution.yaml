@@ -1,8 +1,8 @@
 schema_version: 1
 constitution_hash: 256fada47aedddc5d49306fa39da5dad5e4bea3f0f90b3b92f03e13930219cc1
 agent:
-  dna: ae00ed0d2099
-  dna_full: ae00ed0d20992e8bed5d92a6278c139c7098d263559700e08f25d0aa701bc08c
+  dna: 58a053df0dea
+  dna_full: 58a053df0dea589c6ba7aaa4135df9ba755712c7110857ac725c696ca14ccb33
   role: log_analyst
   agent_name: LogAnalyst
 policies:

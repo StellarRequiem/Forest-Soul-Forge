@@ -1,8 +1,8 @@
 schema_version: 1
 constitution_hash: 67cc2592b47cd6656219b231b4edf673028c38f42c91eee9728e330155097076
 agent:
-  dna: a9966f117bf7
-  dna_full: a9966f117bf706ba0e20b6e55be2874917565e048382286331ce74db02526e8d
+  dna: 411cc8a518c2
+  dna_full: 411cc8a518c261e28e4d662ee03b85939ea263b4dc4fd29ab93827a910625499
   role: network_watcher
   agent_name: ContradictoryAgent
 policies:

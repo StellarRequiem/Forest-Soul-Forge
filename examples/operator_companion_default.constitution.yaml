@@ -1,8 +1,8 @@
 schema_version: 1
 constitution_hash: a4b9f99e7038b23a07fc6799c8eee15b4f25afd83cd7719724833730c75fa3b2
 agent:
-  dna: e1ad29559c02
-  dna_full: e1ad29559c02740a68462b277df3e313ba50f6bb0d379aca2d76cf597e1dac18
+  dna: 7c383891a876
+  dna_full: 7c383891a87667c207118ee614a72521d86cdc7394fb8ac90906af59a019ad74
   role: operator_companion
   agent_name: OperatorCompanion
 policies:

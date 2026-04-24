@@ -1,8 +1,18 @@
 # Forest Soul Forge — Hierarchical Trait Tree
-# v0.1 — accepted 2026-04-21 (ADR-0001). See docs/architecture/trait-tree-design.md.
+# v0.2 — 2026-04-23. Phase 3 bump: adds 'embodiment' domain with 'presentation'
+#        subdomain (visual_density, signature_warmth, motion_liveliness).
+#        v0.1 was accepted 2026-04-21 (ADR-0001); v0.2 is a backward-compatible
+#        superset that extends the tree. See docs/architecture/trait-tree-design.md.
+#
+# Forward-compat note: adding a domain changes every TraitProfile's canonical
+# form (build_profile includes every trait's default), so every DNA recomputes.
+# Existing v0.1 examples in examples/ were regenerated in the same commit that
+# landed v0.2. Old soul.md files archived outside the repo would still verify
+# against their own frontmatter (self-verifying body) but would not match a
+# freshly generated profile of the same role.
 #
 # Three orthogonal structures:
-#   1. domains         — thematic grouping (security, audit, emotional, cognitive, communication)
+#   1. domains         — thematic grouping (security, audit, emotional, cognitive, communication, embodiment)
 #   2. subdomains      — within-domain clusters with tier-weighted traits
 #   3. roles           — per-agent domain emphasis weights
 #
@@ -14,7 +24,7 @@
 #   mid  — how it manifests at 40-59 (also used for 20-39 softened, 60-79 softened)
 #   high — how it manifests at 80-100
 
-version: "0.1"
+version: "0.2"
 schema_version: 1
 
 # ---------------------------------------------------------------------------
@@ -295,6 +305,45 @@ domains:
               mid: "Light levity where appropriate."
               high: "Jokes and asides common."
 
+  # ---- EMBODIMENT --------------------------------------------------------
+  # Added in v0.2 (2026-04-23). Reserves trait-tree space for how the agent
+  # presents itself — visual density of UI, warmth of its signature/voice,
+  # liveliness of motion. Phase 3 uses the first two for frontend polish;
+  # motion_liveliness is forward-compat for Phase 5+ avatar/screen-presence
+  # work so it has a hashed home in DNA now rather than requiring a future
+  # schema bump.
+  embodiment:
+    description: "How the agent presents itself — visual, tonal signature, motion."
+    subdomains:
+
+      presentation:
+        description: "Surface qualities of the agent's outward expression."
+        traits:
+          visual_density:
+            tier: tertiary
+            default: 50
+            desc: "Information density in the agent's rendered UI surfaces."
+            scale:
+              low: "Sparse — one idea per screen, generous whitespace."
+              mid: "Balanced — readable, moderate grouping."
+              high: "Saturated — dashboards dense with data and indicators."
+          signature_warmth:
+            tier: tertiary
+            default: 50
+            desc: "Warmth of the agent's tonal signature (separate from conversational warmth)."
+            scale:
+              low: "Cool and clinical — function-first framing."
+              mid: "Neutral and approachable."
+              high: "Warm and welcoming — relational framing."
+          motion_liveliness:
+            tier: tertiary
+            default: 40
+            desc: "Motion and animation character of the agent's presence."
+            scale:
+              low: "Still — static surfaces, no motion."
+              mid: "Subtle — transitions, occasional indicators."
+              high: "Animated — continuous motion, pulse, reactive elements."
+
 # ---------------------------------------------------------------------------
 # ROLES — per-agent domain emphasis weights
 # ---------------------------------------------------------------------------
@@ -311,6 +360,7 @@ roles:
       cognitive: 1.0
       communication: 0.8
       emotional: 0.5
+      embodiment: 0.5
 
   log_analyst:
     description: "Parses, correlates, and reports on log data; audit-heavy role."
@@ -320,6 +370,7 @@ roles:
       cognitive: 1.5
       communication: 0.8
       emotional: 0.5
+      embodiment: 0.5
 
   anomaly_investigator:
     description: "Root-cause-analysis specialist for suspicious events."
@@ -329,6 +380,7 @@ roles:
       cognitive: 2.0
       communication: 1.0
       emotional: 0.7
+      embodiment: 0.7
 
   incident_communicator:
     description: "Translates technical findings into human-readable incident updates."
@@ -338,6 +390,7 @@ roles:
       cognitive: 1.0
       communication: 1.8
       emotional: 1.5
+      embodiment: 1.2
 
   operator_companion:
     description: "User-facing advisory agent; prioritizes clarity and rapport."
@@ -347,6 +400,7 @@ roles:
       cognitive: 1.2
       communication: 1.3
       emotional: 1.8
+      embodiment: 1.5
 
 # ---------------------------------------------------------------------------
 # META — constraints enforced by the trait engine

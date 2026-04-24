@@ -28,16 +28,18 @@ def engine() -> TraitEngine:
 # ----- loading ------------------------------------------------------------
 class TestLoading:
     def test_loads_real_yaml(self, engine: TraitEngine) -> None:
-        assert engine.version == "0.1"
+        assert engine.version == "0.2"
 
-    def test_all_five_domains_present(self, engine: TraitEngine) -> None:
+    def test_all_six_domains_present(self, engine: TraitEngine) -> None:
+        # v0.2 added 'embodiment' domain.
         assert set(engine.domains) == {
-            "security", "audit", "emotional", "cognitive", "communication"
+            "security", "audit", "emotional", "cognitive", "communication", "embodiment"
         }
 
     def test_expected_trait_count(self, engine: TraitEngine) -> None:
-        # ADR-0001 accepted 26 traits in v0.1.
-        assert len(engine.list_traits()) == 26
+        # v0.1 had 26 traits (ADR-0001). v0.2 added 3 to embodiment.presentation,
+        # bringing the total to 29.
+        assert len(engine.list_traits()) == 29
 
     def test_expected_role_count(self, engine: TraitEngine) -> None:
         assert len(engine.roles) == 5

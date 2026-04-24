@@ -1,8 +1,8 @@
 schema_version: 1
 constitution_hash: d0031113ac9d5d2176c5b6084be5cf583f2b267da7627e79f7f00595a318b09b
 agent:
-  dna: ebc9e1377a0c
-  dna_full: ebc9e1377a0cf4581885f9ab3262f303ab180f92d2f88f741f28d7548194112c
+  dna: ca5da96e68f1
+  dna_full: ca5da96e68f194412d3d10fd1740d84b4af47d24f33fae0486e2f11817c44ae7
   role: incident_communicator
   agent_name: IncidentCommunicator
 policies:

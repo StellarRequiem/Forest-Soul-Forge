@@ -1,8 +1,8 @@
 schema_version: 1
 constitution_hash: d5efdf36076830f046644cebd9223e94e30cd1f11a4999c112cfbd30a33d8ba2
 agent:
-  dna: 66af29e14dee
-  dna_full: 66af29e14deecf483ad6c612b8450cc95da4fe00ab544a49269d5aa81c45d32d
+  dna: 487f434bbc7c
+  dna_full: 487f434bbc7c5af6bdb226c034c4b921e5ba5d4c012358e5dfcb83a6bacabfa7
   role: anomaly_investigator
   agent_name: HuntMaster
 policies:

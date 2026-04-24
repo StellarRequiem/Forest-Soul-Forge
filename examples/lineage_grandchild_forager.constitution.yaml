@@ -1,8 +1,8 @@
 schema_version: 1
 constitution_hash: d5efdf36076830f046644cebd9223e94e30cd1f11a4999c112cfbd30a33d8ba2
 agent:
-  dna: 7ca059608677
-  dna_full: 7ca059608677545275c3f2324466a21a569cb957a7cab10c659b0bbe4cd448dc
+  dna: 983b6c3fd334
+  dna_full: 983b6c3fd3340b17e993015993f0d76ec407677aee313643473d060084bdfd98
   role: anomaly_investigator
   agent_name: Forager
 policies:

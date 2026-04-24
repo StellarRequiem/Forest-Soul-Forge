@@ -41,6 +41,7 @@ CANONICAL_DOMAIN_ORDER: tuple[str, ...] = (
     "emotional",
     "cognitive",
     "communication",
+    "embodiment",  # added v0.2 (trait_tree 2026-04-23); tie-break last among canonical domains.
 )
 
 GRADING_SCHEMA_VERSION: int = 1
@@ -246,9 +247,20 @@ def _dominant_domain(per_domain: dict[str, DomainGrade]) -> str:
     (ADR-0001): any canonical domain beats any non-canonical domain on a tie;
     within the canonical list, earlier wins. Non-canonical ties fall back to
     insertion order in ``per_domain``.
+
+    Float-tolerance note: tier weights include 0.3 (tertiary), which is not
+    exactly representable in binary. A subdomain of all-tertiary traits
+    accumulates rounding: 0.3 + 0.3 + 0.3 = 0.8999999999999999. That made
+    the bare ``s == best_score`` comparison non-deterministic for ties on
+    domains whose subdomains have different tier compositions. We use an
+    absolute epsilon to collapse near-ties onto the canonical tie-break.
+    Epsilon chosen at 1e-9: scores live in [0, 100], so 1e-9 is many orders
+    of magnitude below any meaningful configuration difference.
     """
     if not per_domain:
         raise ValueError("grade() produced no per-domain results")
+
+    TIE_EPSILON = 1e-9
 
     def tie_key(domain_name: str) -> tuple[int, int]:
         try:
@@ -263,9 +275,13 @@ def _dominant_domain(per_domain: dict[str, DomainGrade]) -> str:
     for name, g in per_domain.items():
         s = g.weighted_score
         tk = tie_key(name)
-        if s > best_score or (s == best_score and tk < best_tie):
+        if s > best_score + TIE_EPSILON:
             best_name = name
             best_score = s
+            best_tie = tk
+        elif abs(s - best_score) <= TIE_EPSILON and tk < best_tie:
+            best_name = name
+            # keep best_score at the earlier value so subsequent near-ties still compare tie_keys
             best_tie = tk
     assert best_name is not None  # per_domain non-empty, loop ran
     return best_name

@@ -1,8 +1,8 @@
 schema_version: 1
 constitution_hash: aff8bde62ed18d6477c6f0d7b20a6075a7c3d4cbb11533a386b0ac73760f8856
 agent:
-  dna: 34d7b558476e
-  dna_full: 34d7b558476e32f07fb02aa4acbee712e97c142b77086065c300deaa81310f3a
+  dna: 5937afd40a51
+  dna_full: 5937afd40a513bcbff635091157c49ef60603c473af5f16278abeceba8e8760c
   role: network_watcher
   agent_name: NetworkWatcher
 policies:

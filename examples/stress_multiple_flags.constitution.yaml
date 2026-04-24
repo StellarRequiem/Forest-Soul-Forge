@@ -1,8 +1,8 @@
 schema_version: 1
 constitution_hash: aab2f8b9f311988239f3d4326bb5b78b85742814e423f1c3ec64e9edfadef717
 agent:
-  dna: 9045a19cef0c
-  dna_full: 9045a19cef0c03bbf8e945af7eadd9f285e55cbe7d08287a81bbfe21852f8263
+  dna: bbd5a100dff5
+  dna_full: bbd5a100dff55d063ade97488ba31146aa335cad5c46c6963fd8ea08c6a801ae
   role: network_watcher
   agent_name: EdgyWatcher
 policies:
