@@ -1,0 +1,129 @@
+"""Daemon configuration — pydantic-settings loaded from env.
+
+Every setting has a ``FSF_``-prefixed env var. Defaults are chosen so a
+fresh clone of the repo with no env vars set will come up on
+``localhost:7423``, bind the registry to ``./registry.sqlite``, and
+default to the local provider pointed at Ollama's default port.
+
+Change any of these without editing code by exporting the env var.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from forest_soul_forge.daemon.providers import TaskKind
+
+
+# Default local model — a solid consumer-hardware workhorse. Every
+# task_kind defaults to the same tag for simplicity; set
+# ``FSF_LOCAL_MODEL_CLASSIFY`` etc. to override per-task.
+_DEFAULT_LOCAL_MODEL = "llama3.1:8b"
+
+
+class DaemonSettings(BaseSettings):
+    """Runtime knobs for the FSF daemon.
+
+    Prefer env vars over hard-coding in tests — pass a ``DaemonSettings``
+    instance directly into ``build_app`` to override.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="FSF_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # ----- server ----------------------------------------------------------
+    host: str = Field(default="127.0.0.1", description="Bind host. Do NOT set 0.0.0.0 casually — local-first.")
+    port: int = Field(default=7423, ge=1, le=65535, description="Bind port.")
+
+    # ----- registry / artifacts -------------------------------------------
+    registry_db_path: Path = Field(
+        default=Path("registry.sqlite"),
+        description="Where the SQLite registry lives. Rebuildable from artifacts.",
+    )
+    artifacts_dir: Path = Field(
+        default=Path("examples"),
+        description="Canonical artifacts root (soul.md / constitution.yaml files).",
+    )
+    audit_chain_path: Path = Field(
+        default=Path("examples/audit_chain.jsonl"),
+        description="Audit chain JSONL file.",
+    )
+    # When True, /runtime endpoints can trigger a rebuild-from-artifacts.
+    # Off by default to protect registries in production-ish use.
+    allow_rebuild_endpoint: bool = Field(default=False)
+
+    # ----- active provider -------------------------------------------------
+    # Default is "local" by mission (ADR-0008). Changing this default is a
+    # policy decision, not a convenience tweak.
+    default_provider: str = Field(default="local")
+
+    # ----- local provider --------------------------------------------------
+    local_base_url: str = Field(
+        default="http://127.0.0.1:11434",
+        description="Ollama-compatible HTTP endpoint. Works with LM Studio / llama.cpp server too.",
+    )
+    local_model: str = Field(
+        default=_DEFAULT_LOCAL_MODEL,
+        description="Default model tag for all task_kinds unless overridden below.",
+    )
+    local_model_classify: str | None = None
+    local_model_generate: str | None = None
+    local_model_safety_check: str | None = None
+    local_model_conversation: str | None = None
+    local_model_tool_use: str | None = None
+    local_timeout_s: float = Field(default=60.0, gt=0)
+
+    # ----- frontier provider (opt-in) -------------------------------------
+    frontier_enabled: bool = Field(default=False)
+    frontier_base_url: str = Field(
+        default="https://api.openai.com",
+        description="OpenAI-compatible base URL. Works with gateways (LiteLLM, etc.).",
+    )
+    frontier_api_key: str | None = None
+    frontier_model: str = Field(default="gpt-4o-mini")
+    frontier_model_classify: str | None = None
+    frontier_model_generate: str | None = None
+    frontier_model_safety_check: str | None = None
+    frontier_model_conversation: str | None = None
+    frontier_model_tool_use: str | None = None
+    frontier_timeout_s: float = Field(default=60.0, gt=0)
+
+    # ----- cors ------------------------------------------------------------
+    # Allow the local frontend (file:// and localhost) to call the daemon
+    # during dev. Tighten for any non-local deployment.
+    cors_allow_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173", "null"],
+    )
+
+    # ----- derived maps ----------------------------------------------------
+    def local_model_map(self) -> dict[TaskKind, str]:
+        """Return the task_kind → model tag map for the local provider."""
+        return {
+            TaskKind.CLASSIFY: self.local_model_classify or self.local_model,
+            TaskKind.GENERATE: self.local_model_generate or self.local_model,
+            TaskKind.SAFETY_CHECK: self.local_model_safety_check or self.local_model,
+            TaskKind.CONVERSATION: self.local_model_conversation or self.local_model,
+            TaskKind.TOOL_USE: self.local_model_tool_use or self.local_model,
+        }
+
+    def frontier_model_map(self) -> dict[TaskKind, str]:
+        return {
+            TaskKind.CLASSIFY: self.frontier_model_classify or self.frontier_model,
+            TaskKind.GENERATE: self.frontier_model_generate or self.frontier_model,
+            TaskKind.SAFETY_CHECK: self.frontier_model_safety_check or self.frontier_model,
+            TaskKind.CONVERSATION: self.frontier_model_conversation or self.frontier_model,
+            TaskKind.TOOL_USE: self.frontier_model_tool_use or self.frontier_model,
+        }
+
+
+def build_settings(**overrides: Any) -> DaemonSettings:
+    """Small helper so tests can pass kwargs without env-var gymnastics."""
+    return DaemonSettings(**overrides)
