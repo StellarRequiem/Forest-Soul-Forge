@@ -47,6 +47,24 @@ class DuplicateInstanceError(RegistryError):
     pass
 
 
+class IdempotencyMismatchError(RegistryError):
+    """Raised when a cached key is replayed with a different request body.
+
+    Per ADR-0007: an idempotency key represents a specific request, not an
+    endpoint. Reusing the key with a mutated body is almost always a client
+    bug (two different requests sharing a generated UUID) and must not
+    silently short-circuit to the cached response.
+    """
+
+    def __init__(self, key: str, endpoint: str) -> None:
+        super().__init__(
+            f"idempotency key {key!r} previously used on {endpoint} with a "
+            f"different request body"
+        )
+        self.key = key
+        self.endpoint = endpoint
+
+
 # ---------------------------------------------------------------------------
 # Result dataclasses
 # ---------------------------------------------------------------------------
@@ -67,6 +85,7 @@ class AgentRow:
     created_at: str
     status: str
     legacy_minted: bool
+    sibling_index: int = 1
 
 
 @dataclass(frozen=True)
@@ -122,8 +141,14 @@ class Registry:
 
         - If the file is new: apply full schema, insert initial metadata.
         - If the file exists and matches our schema version: no-op.
-        - If the file exists at a different schema version: raise
-          :class:`SchemaMismatchError`. Caller's choice to rebuild.
+        - If the file exists at an older schema version: apply the
+          registered forward migrations in order (see
+          ``schema.MIGRATIONS``) until it matches.
+        - If the file exists at a newer schema version: raise
+          :class:`SchemaMismatchError`. Refusing to downgrade is safer
+          than silently dropping columns the old code doesn't know about.
+        - If a forward migration is missing for the gap we're crossing,
+          raise :class:`SchemaMismatchError` rather than skip silently.
         """
         db_path.parent.mkdir(parents=True, exist_ok=True)
         is_new = not db_path.exists()
@@ -175,10 +200,49 @@ class Registry:
                 "registry_meta exists but has no schema_version row"
             )
         v = int(row["value"])
-        if v != schema.SCHEMA_VERSION:
+        if v == schema.SCHEMA_VERSION:
+            return
+        if v > schema.SCHEMA_VERSION:
+            # Downgrade: the DB was last touched by newer code than is
+            # running now. Refusing is safer than silently dropping
+            # tables or columns the old code doesn't know about.
             raise SchemaMismatchError(
-                f"registry schema version mismatch: file={v} code={schema.SCHEMA_VERSION}"
+                f"registry schema version is newer than this code: "
+                f"file={v} code={schema.SCHEMA_VERSION}. "
+                f"Update the code or rebuild the registry from artifacts."
             )
+        # Forward migration: apply each registered step in order.
+        Registry._migrate_forward(conn, v, schema.SCHEMA_VERSION)
+
+    @staticmethod
+    def _migrate_forward(
+        conn: sqlite3.Connection, from_v: int, to_v: int
+    ) -> None:
+        """Walk the version gap and apply each registered migration.
+
+        One transaction per version step. A partial failure rolls back
+        that step, leaving the DB at the previous version — which means
+        retrying a failed migration is safe (the whole step re-runs).
+
+        A gap with no registered migration is a hard error: we refuse to
+        jump a version silently because that risks masking a breaking
+        change someone forgot to flag.
+        """
+        for target in range(from_v + 1, to_v + 1):
+            steps = schema.MIGRATIONS.get(target)
+            if steps is None:
+                raise SchemaMismatchError(
+                    f"no forward migration registered for schema version "
+                    f"{target}. Either add schema.MIGRATIONS[{target}] or "
+                    f"rebuild the registry from artifacts."
+                )
+            with _transaction(conn):
+                for stmt in steps:
+                    conn.execute(stmt)
+                conn.execute(
+                    "UPDATE registry_meta SET value=? WHERE key='schema_version';",
+                    (str(target),),
+                )
 
     def close(self) -> None:
         try:
@@ -211,6 +275,7 @@ class Registry:
         audit_entry: Optional[ParsedAuditEntry] = None,
         instance_id: Optional[str] = None,
         status: str = "active",
+        sibling_index: Optional[int] = None,
     ) -> str:
         """Register an agent from a parsed soul artifact.
 
@@ -218,6 +283,12 @@ class Registry:
         constitution files and appended the audit-chain entry. This method
         only mirrors the result into the registry. That ordering (ADR-0006
         sync path) is what makes rebuild-from-artifacts coherent.
+
+        ``sibling_index`` disambiguates twins (same DNA, different births).
+        When omitted, falls back to ``soul.sibling_index`` (defaulting to 1
+        for legacy souls). Callers on the live write path should pass this
+        explicitly — the daemon computes it under its write lock via
+        :meth:`next_sibling_index`.
 
         Returns the instance_id used (newly minted UUID v4 if not supplied and
         not present on the soul).
@@ -227,10 +298,16 @@ class Registry:
             or soul.instance_id
             or str(uuid.uuid4())
         )
-        legacy = bool(instance_id is None and soul.instance_id is None and soul.lineage_depth == 0 and False)
-        # `legacy` above is intentionally False for register_birth — this is
-        # a live birth, not a rebuild. Rebuild path sets legacy_minted=1
-        # explicitly when synthesizing.
+        # sibling_index fallback chain: explicit arg → frontmatter → 1.
+        # 1 is the right default because most births ARE the first of their
+        # DNA line; twins are a minority case. Legacy / pre-v2 souls never
+        # carry a sibling_index at all and fall through to 1.
+        if sibling_index is not None:
+            resolved_sibling = sibling_index
+        elif soul.sibling_index is not None:
+            resolved_sibling = soul.sibling_index
+        else:
+            resolved_sibling = 1
 
         with _transaction(self._conn):
             self._insert_agent_row(
@@ -239,12 +316,36 @@ class Registry:
                 parent_instance=soul.parent_instance,
                 status=status,
                 legacy_minted=False,
+                sibling_index=resolved_sibling,
             )
             self._insert_ancestry_for(resolved_instance, soul.parent_instance)
             if audit_entry is not None:
                 self._insert_audit_row(audit_entry, instance_id=resolved_instance)
 
         return resolved_instance
+
+    def next_sibling_index(self, dna: str) -> int:
+        """Return the next sibling slot for this DNA (1-based, stable).
+
+        Twins (two births that land on the same trait profile) share a DNA.
+        The sibling_index makes their instance_ids unique and human-readable:
+        ``role_abc123abc123``, ``role_abc123abc123_2``, ``role_abc123abc123_3``.
+        Slots never get reused — archiving the original doesn't free the 1.
+
+        Callers must hold the daemon's write lock when combining this with
+        the subsequent insert — otherwise two concurrent births with the
+        same DNA would both read the same "next" index. Inside the lock,
+        read-then-write is safe.
+        """
+        # Short form (12-char) is the indexed column. Accept full form by
+        # truncating.
+        short = dna[:12]
+        row = self._conn.execute(
+            "SELECT MAX(sibling_index) AS max_idx FROM agents WHERE dna=?;",
+            (short,),
+        ).fetchone()
+        current = row["max_idx"] if row is not None else None
+        return (int(current) + 1) if current is not None else 1
 
     def register_audit_event(
         self,
@@ -326,6 +427,25 @@ class Registry:
         # fine in any order because self-edges are always depth 0.
         assigned.sort(key=lambda tup: (tup[0].lineage_depth, tup[0].created_at))
 
+        # Assign sibling_index per DNA in created_at order. Rebuild is
+        # deterministic: the Nth soul with DNA X (by wall-clock birth) gets
+        # sibling_index=N. If the soul's frontmatter already carries a
+        # sibling_index (live births write it there), we honor that instead
+        # of recomputing — keeps instance_ids stable across rebuilds even
+        # when births interleave.
+        sibling_by_dna: dict[str, int] = {}
+        rebuild_sibling: dict[int, int] = {}  # idx in `assigned` → sibling_index
+        for i, (s, _inst, _legacy) in enumerate(assigned):
+            if s.sibling_index and s.sibling_index > 0:
+                rebuild_sibling[i] = s.sibling_index
+                # Track so later soul-without-sibling-index picks up after.
+                cur = sibling_by_dna.get(s.dna, 0)
+                sibling_by_dna[s.dna] = max(cur, s.sibling_index)
+            else:
+                nxt = sibling_by_dna.get(s.dna, 0) + 1
+                sibling_by_dna[s.dna] = nxt
+                rebuild_sibling[i] = nxt
+
         orphans: list[str] = []
 
         with _transaction(self._conn):
@@ -334,7 +454,7 @@ class Registry:
                 self._conn.execute(f"DELETE FROM {table};")
 
             ancestry_edges = 0
-            for soul_rec, inst, is_legacy in assigned:
+            for i, (soul_rec, inst, is_legacy) in enumerate(assigned):
                 parent_inst = _resolve_parent_instance(soul_rec, assigned)
                 if soul_rec.parent_dna and parent_inst is None:
                     orphans.append(f"{inst} (parent_dna={soul_rec.parent_dna})")
@@ -344,6 +464,7 @@ class Registry:
                     parent_instance=parent_inst,
                     status="active",
                     legacy_minted=is_legacy,
+                    sibling_index=rebuild_sibling[i],
                 )
                 ancestry_edges += self._insert_ancestry_for(inst, parent_inst)
 
@@ -465,6 +586,60 @@ class Registry:
         ).fetchall()
         return [_row_to_audit(r) for r in rows]
 
+    # -------- idempotency cache ------------------------------------------
+    # ADR-0007: every mutating endpoint honors X-Idempotency-Key. We store
+    # (key, endpoint, request_hash) so a replay with the same key AND same
+    # body returns the cached response verbatim; a replay with the same key
+    # but a different body is rejected (409) instead of silently served from
+    # cache. The daemon calls these methods inside the write lock so the
+    # check-then-insert is atomic against concurrent identical submissions.
+    def lookup_idempotency_key(
+        self, key: str, endpoint: str, request_hash: str
+    ) -> tuple[int, str] | None:
+        """Return ``(status_code, response_json)`` for a cached key, or None.
+
+        Raises :class:`IdempotencyMismatchError` when the key exists for
+        this endpoint but with a different request hash — that's a client
+        bug, not a cache miss, and we want the caller to surface it as a
+        409 rather than re-execute.
+        """
+        row = self._conn.execute(
+            "SELECT endpoint, request_hash, status_code, response_json "
+            "FROM idempotency_keys WHERE key=?;",
+            (key,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["endpoint"] != endpoint or row["request_hash"] != request_hash:
+            raise IdempotencyMismatchError(key, endpoint)
+        return int(row["status_code"]), row["response_json"]
+
+    def store_idempotency_key(
+        self,
+        key: str,
+        endpoint: str,
+        request_hash: str,
+        status_code: int,
+        response_json: str,
+        created_at: str,
+    ) -> None:
+        """Cache a successful response for future replays of ``key``.
+
+        ``INSERT OR IGNORE`` is deliberate: if two concurrent requests with
+        the same key race past the lookup (shouldn't happen under the
+        daemon's write lock, but defensive), the first write wins and the
+        second is a no-op — both callers already computed the same
+        response, so the cache row is the same either way.
+        """
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO idempotency_keys (
+                key, endpoint, request_hash, status_code, response_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            (key, endpoint, request_hash, status_code, response_json, created_at),
+        )
+
     # -------- internal insert helpers ------------------------------------
     def _insert_agent_row(
         self,
@@ -474,6 +649,7 @@ class Registry:
         parent_instance: str | None,
         status: str,
         legacy_minted: bool,
+        sibling_index: int = 1,
     ) -> None:
         try:
             self._conn.execute(
@@ -482,8 +658,8 @@ class Registry:
                     instance_id, dna, dna_full, role, agent_name,
                     parent_instance, owner_id, model_name, model_version,
                     soul_path, constitution_path, constitution_hash,
-                    created_at, status, legacy_minted
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    created_at, status, legacy_minted, sibling_index
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     instance_id,
@@ -501,6 +677,7 @@ class Registry:
                     soul.created_at,
                     status,
                     1 if legacy_minted else 0,
+                    sibling_index,
                 ),
             )
         except sqlite3.IntegrityError as e:
@@ -627,6 +804,10 @@ def _resolve_parent_instance(
 
 
 def _row_to_agent(row: sqlite3.Row) -> AgentRow:
+    # sibling_index is v2+. Older DBs that somehow reach this path (shouldn't
+    # happen after bootstrap's version check, but defensive) get a default 1.
+    keys = row.keys() if hasattr(row, "keys") else []
+    sibling = int(row["sibling_index"]) if "sibling_index" in keys else 1
     return AgentRow(
         instance_id=row["instance_id"],
         dna=row["dna"],
@@ -643,6 +824,7 @@ def _row_to_agent(row: sqlite3.Row) -> AgentRow:
         created_at=row["created_at"],
         status=row["status"],
         legacy_minted=bool(row["legacy_minted"]),
+        sibling_index=sibling,
     )
 
 

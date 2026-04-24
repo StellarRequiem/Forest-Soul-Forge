@@ -127,7 +127,10 @@ class TestBootstrap:
     def test_fresh_db_creates_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 1
+            # Version bumped to 2 when sibling_index landed. The assertion
+            # is kept as a guard so any future version bump forces a
+            # matching update here — not a free-floating number.
+            assert r.schema_version() == 2
             assert r.list_agents() == []
             assert r.audit_tail() == []
         assert db.exists()
@@ -136,15 +139,27 @@ class TestBootstrap:
         db = tmp_path / "reg.sqlite"
         Registry.bootstrap(db).close()
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 1
+            # Version bumped to 2 when sibling_index landed. The assertion
+            # is kept as a guard so any future version bump forces a
+            # matching update here — not a free-floating number.
+            assert r.schema_version() == 2
 
     def test_empty_existing_file_gets_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
         db.touch()  # crashed bootstrap leaves a 0-byte file
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 1
+            # Version bumped to 2 when sibling_index landed. The assertion
+            # is kept as a guard so any future version bump forces a
+            # matching update here — not a free-floating number.
+            assert r.schema_version() == 2
 
-    def test_schema_mismatch_raises(self, tmp_path: Path):
+    def test_schema_downgrade_raises(self, tmp_path: Path):
+        """A file stamped at a version *newer* than the code refuses to open.
+
+        Dropping into an older binary is the dangerous direction — the new
+        code may have added columns or constraints the old code doesn't
+        know about. Refuse rather than silently corrupt.
+        """
         import sqlite3
         db = tmp_path / "reg.sqlite"
         conn = sqlite3.connect(str(db))
@@ -154,8 +169,140 @@ class TestBootstrap:
         )
         conn.commit()
         conn.close()
-        with pytest.raises(SchemaMismatchError):
+        with pytest.raises(SchemaMismatchError, match="newer than this code"):
             Registry.bootstrap(db)
+
+    def test_v1_to_v2_forward_migration_preserves_data(self, tmp_path: Path):
+        """Simulate an on-disk v1 DB and confirm bootstrap auto-migrates it.
+
+        v1 lacked ``agents.sibling_index`` and the ``idempotency_keys``
+        table. We hand-build a v1-shaped DB with a real agent row, reopen
+        it through ``bootstrap``, and assert:
+          - schema_version bumps to 2,
+          - the existing row survives with sibling_index defaulted to 1,
+          - the new idempotency_keys table is present and usable,
+          - the composite index the write path relies on exists.
+        """
+        import sqlite3
+        db = tmp_path / "reg.sqlite"
+        conn = sqlite3.connect(str(db))
+        # Minimal v1 agents schema (no sibling_index). Deliberately
+        # reproducing the shape so a future refactor can't hide a skew.
+        conn.executescript(
+            """
+            CREATE TABLE registry_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO registry_meta (key, value) VALUES ('schema_version', '1');
+            INSERT INTO registry_meta (key, value) VALUES ('canonical_contract', 'artifacts-authoritative');
+            CREATE TABLE agents (
+                instance_id      TEXT PRIMARY KEY,
+                dna              TEXT NOT NULL,
+                dna_full         TEXT NOT NULL,
+                role             TEXT NOT NULL,
+                agent_name       TEXT NOT NULL,
+                parent_instance  TEXT,
+                owner_id         TEXT,
+                model_name       TEXT,
+                model_version    TEXT,
+                soul_path        TEXT NOT NULL,
+                constitution_path TEXT NOT NULL,
+                constitution_hash TEXT NOT NULL,
+                created_at       TEXT NOT NULL,
+                status           TEXT NOT NULL DEFAULT 'active',
+                legacy_minted    INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE agent_ancestry (
+                instance_id  TEXT NOT NULL,
+                ancestor_id  TEXT NOT NULL,
+                depth        INTEGER NOT NULL,
+                PRIMARY KEY (instance_id, ancestor_id)
+            );
+            CREATE TABLE audit_events (
+                seq INTEGER PRIMARY KEY, timestamp TEXT NOT NULL,
+                agent_dna TEXT, instance_id TEXT,
+                event_type TEXT NOT NULL, event_json TEXT NOT NULL,
+                entry_hash TEXT NOT NULL
+            );
+            CREATE TABLE agent_capabilities (
+                instance_id TEXT NOT NULL, capability TEXT NOT NULL,
+                level INTEGER, acquired_at TEXT,
+                PRIMARY KEY (instance_id, capability)
+            );
+            CREATE TABLE tools (
+                tool_id TEXT PRIMARY KEY, instance_id TEXT NOT NULL,
+                name TEXT NOT NULL, description TEXT,
+                parameters_json TEXT, code_snippet TEXT,
+                created_at TEXT NOT NULL,
+                is_inherited INTEGER NOT NULL DEFAULT 0,
+                parent_tool_id TEXT
+            );
+            """
+        )
+        pre_existing = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO agents (instance_id, dna, dna_full, role, agent_name, "
+            "soul_path, constitution_path, constitution_hash, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            (pre_existing, "a" * 12, "a" * 64, "network_watcher", "Legacy",
+             "souls/legacy.md", "constitutions/legacy.yaml", "0" * 64,
+             "2026-04-20 00:00:00Z"),
+        )
+        conn.commit()
+        conn.close()
+
+        # Act: open through the real bootstrap path.
+        with Registry.bootstrap(db) as r:
+            assert r.schema_version() == 2
+
+            # Data survives.
+            row = r.get_agent(pre_existing)
+            assert row.agent_name == "Legacy"
+            assert row.sibling_index == 1  # DEFAULT 1 backfilled
+
+            # New table is present and writable (proves the migration ran,
+            # not just that the bootstrap was lenient).
+            import sqlite3 as _sqlite3
+            raw = _sqlite3.connect(str(db))
+            tables = {t[0] for t in raw.execute(
+                "SELECT name FROM sqlite_master WHERE type='table';"
+            )}
+            assert "idempotency_keys" in tables
+            indexes = {t[0] for t in raw.execute(
+                "SELECT name FROM sqlite_master WHERE type='index';"
+            )}
+            assert "idx_agents_dna_sibling" in indexes
+            assert "idx_idempotency_created" in indexes
+            raw.close()
+
+    def test_migration_missing_entry_raises(self, tmp_path: Path):
+        """A version gap with no registered migration is a hard error.
+
+        Guards against a future SCHEMA_VERSION bump landing without a
+        matching MIGRATIONS entry — we prefer a boot-time failure over
+        silently skipping an undefined migration step.
+        """
+        import sqlite3
+        from forest_soul_forge.registry import schema as _schema
+
+        db = tmp_path / "reg.sqlite"
+        # Build a clean v2 DB first.
+        Registry.bootstrap(db).close()
+        # Stamp it back to v0 (below our lowest registered migration key).
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "UPDATE registry_meta SET value='0' WHERE key='schema_version';"
+        )
+        conn.commit()
+        conn.close()
+        # Pretend the code expects v2 but MIGRATIONS[1] doesn't exist.
+        # Save/restore avoids depending on pytest's monkeypatch fixture so
+        # the stdlib test harness can run this too.
+        original = _schema.MIGRATIONS
+        _schema.MIGRATIONS = {2: original[2]}
+        try:
+            with pytest.raises(SchemaMismatchError, match="no forward migration"):
+                Registry.bootstrap(db)
+        finally:
+            _schema.MIGRATIONS = original
 
 
 # ---------------------------------------------------------------------------

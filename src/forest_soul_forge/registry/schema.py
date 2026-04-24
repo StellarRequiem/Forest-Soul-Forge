@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 1
+SCHEMA_VERSION: int = 2
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -43,6 +43,7 @@ DDL_STATEMENTS: tuple[str, ...] = (
         created_at       TEXT NOT NULL,
         status           TEXT NOT NULL DEFAULT 'active',
         legacy_minted    INTEGER NOT NULL DEFAULT 0,
+        sibling_index    INTEGER NOT NULL DEFAULT 1,
         FOREIGN KEY (parent_instance) REFERENCES agents(instance_id)
     );
     """,
@@ -50,6 +51,10 @@ DDL_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_agents_role   ON agents(role);",
     "CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);",
     "CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_instance);",
+    # Sibling-index lookup is hot on the birth write path — every birth does
+    # MAX(sibling_index) WHERE dna=? inside the write lock to pick the next
+    # free slot. Composite index keeps that O(log n) instead of O(n).
+    "CREATE INDEX IF NOT EXISTS idx_agents_dna_sibling ON agents(dna, sibling_index);",
     # --- ancestry closure table ------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS agent_ancestry (
@@ -105,6 +110,23 @@ DDL_STATEMENTS: tuple[str, ...] = (
         FOREIGN KEY (parent_tool_id) REFERENCES tools(tool_id)
     );
     """,
+    # --- idempotency cache -----------------------------------------------
+    # Per ADR-0007: every write endpoint honors ``X-Idempotency-Key``.
+    # The daemon hashes the request body alongside the key so a replay
+    # with a mutated body is rejected (409) instead of silently served
+    # from cache. Non-breaking addition — old DBs open fine; the
+    # CREATE IF NOT EXISTS is self-healing.
+    """
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+        key           TEXT PRIMARY KEY,
+        endpoint      TEXT NOT NULL,
+        request_hash  TEXT NOT NULL,
+        status_code   INTEGER NOT NULL,
+        response_json TEXT NOT NULL,
+        created_at    TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_keys(created_at);",
     # --- metadata --------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS registry_meta (
@@ -131,3 +153,46 @@ REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     "agent_capabilities",
     "agents",
 )
+
+# ---------------------------------------------------------------------------
+# Forward migrations
+#
+# Invariant: running ``MIGRATIONS[N]`` on a DB at version N-1 produces a DB
+# indistinguishable from a fresh install at version N. Everything here is
+# **additive only** — new tables, new columns with defaults, new indexes. A
+# breaking change (drop a column, tighten a constraint, rename) is NOT a
+# migration; the escape hatch for that is ``rebuild_from_artifacts`` because
+# the canonical source of truth is the artifact tree on disk.
+#
+# Each ``MIGRATIONS[N]`` tuple is executed inside one transaction together
+# with the ``schema_version`` metadata bump. Either the whole step lands or
+# none of it does.
+#
+# When bumping ``SCHEMA_VERSION``, add a ``MIGRATIONS[new_version]`` entry
+# covering the diff from the previous version. Missing entries are treated
+# as a hard error at bootstrap time, not a silent skip.
+# ---------------------------------------------------------------------------
+MIGRATIONS: dict[int, tuple[str, ...]] = {
+    # v1 → v2: add sibling_index to agents (+ composite index) and the
+    # idempotency_keys cache table. Both landed as part of the write path
+    # build-out (ADR-0007). Old DBs lack the column and the table; this
+    # migration adds them in place without touching row data.
+    2: (
+        # SQLite ALTER TABLE ADD COLUMN supports NOT NULL only when a
+        # DEFAULT is supplied — the default populates existing rows at
+        # add time.
+        "ALTER TABLE agents ADD COLUMN sibling_index INTEGER NOT NULL DEFAULT 1;",
+        "CREATE INDEX IF NOT EXISTS idx_agents_dna_sibling ON agents(dna, sibling_index);",
+        """
+        CREATE TABLE IF NOT EXISTS idempotency_keys (
+            key           TEXT PRIMARY KEY,
+            endpoint      TEXT NOT NULL,
+            request_hash  TEXT NOT NULL,
+            status_code   INTEGER NOT NULL,
+            response_json TEXT NOT NULL,
+            created_at    TEXT NOT NULL
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_keys(created_at);",
+    ),
+}

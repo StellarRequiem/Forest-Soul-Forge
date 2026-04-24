@@ -61,6 +61,9 @@ class ParsedSoul:
     owner_id: str | None = None
     model_name: str | None = None
     model_version: str | None = None
+    # Sibling index (1-based) for twin disambiguation — same DNA, different
+    # births. ``None`` means legacy/pre-v2 soul; rebuild will compute one.
+    sibling_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +140,22 @@ def parse_soul_file(path: Path) -> ParsedSoul:
         None if parent_instance_raw in (None, "", "null") else str(parent_instance_raw)
     )
 
+    # sibling_index is v2+. Absent on legacy souls; rebuild will assign one.
+    sibling_index_raw = frontmatter.get("sibling_index")
+    if sibling_index_raw in (None, "", "null"):
+        sibling_index: int | None = None
+    else:
+        try:
+            sibling_index = int(sibling_index_raw)
+        except (TypeError, ValueError) as e:
+            raise IngestError(
+                f"{path}: sibling_index not an int: {e!r}"
+            ) from e
+        if sibling_index < 1:
+            raise IngestError(
+                f"{path}: sibling_index must be >= 1, got {sibling_index}"
+            )
+
     constitution_path = path.parent / constitution_file
 
     return ParsedSoul(
@@ -157,6 +176,7 @@ def parse_soul_file(path: Path) -> ParsedSoul:
         owner_id=_optional_str(frontmatter.get("owner_id")),
         model_name=_optional_str(frontmatter.get("model_name")),
         model_version=_optional_str(frontmatter.get("model_version")),
+        sibling_index=sibling_index,
     )
 
 
