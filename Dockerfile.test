@@ -1,0 +1,48 @@
+# Test runner image — runs pytest against the repo mounted at /app.
+#
+# Design: deps-only image. No source is COPYed in; the repo is bind-mounted
+# at runtime (-v "$PWD":/app) so the iteration loop is "edit on host -> rerun
+# container" without a rebuild. The image only needs to be rebuilt when
+# pyproject.toml's dep lists change.
+#
+# This is deliberately separate from a production Dockerfile (that comes
+# under Task #8 for docker-compose daemon + frontend). Keeping concerns
+# split so test deps (pytest, mypy) don't bloat the runtime image.
+#
+# Python version: 3.12-slim. pyproject.toml declares support for 3.11/3.12
+# via classifiers; 3.12 is the sweet spot for wheel availability + stability.
+
+FROM python:3.12-slim
+
+# System deps: none needed for the current stack — everything we install is
+# pure-Python or has prebuilt wheels on linux/arm64 and linux/amd64.
+# Adding build-essential here would be premature until a dep demands it.
+
+WORKDIR /app
+
+# Install deps directly rather than `pip install .[dev,daemon]` so we don't
+# need to COPY the source tree into the image. The mount at runtime provides
+# the source; PYTHONPATH=/app/src makes it importable.
+#
+# Pins mirror pyproject.toml's [dev] and [daemon] optional-dependencies
+# groups. When you add a dep there, add it here too. (A future refactor
+# could generate this from pyproject.toml; not worth the complexity now.)
+RUN pip install --no-cache-dir \
+    "pyyaml>=6.0" \
+    "fastapi>=0.110" \
+    "uvicorn[standard]>=0.27" \
+    "pydantic>=2.5" \
+    "pydantic-settings>=2.1" \
+    "httpx>=0.26" \
+    "pytest>=8.0" \
+    "pytest-cov>=5.0"
+
+# The source is mounted here at runtime — image has no source of its own.
+# PYTHONPATH lets imports like `forest_soul_forge.daemon.app` resolve
+# without needing an editable install.
+ENV PYTHONPATH=/app/src
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Default command: run the full suite with short tracebacks. Override via:
+#   docker run --rm -v "$PWD":/app fsf-test pytest tests/unit/test_x.py -v
+CMD ["pytest", "tests/", "-x", "--tb=short"]

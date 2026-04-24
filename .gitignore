@@ -73,5 +73,8 @@ registry.sqlite-wal
 # Streamlit
 .streamlit/secrets.toml
 
+# Local-dev launcher runtime state (run.command writes logs + pidfiles here)
+.run/
+
 # Docker
 docker-compose.override.yml

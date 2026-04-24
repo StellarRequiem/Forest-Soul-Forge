@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Forest Soul Forge</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="top-bar">
+    <div class="top-bar__left">
+      <h1 class="brand">Forest Soul Forge</h1>
+      <span class="brand__tag">local-first agent foundry</span>
+    </div>
+    <div class="top-bar__right">
+      <div class="status-dot" id="provider-dot" data-status="unknown" title="Provider status">
+        <span class="dot"></span>
+        <span id="provider-label">provider…</span>
+      </div>
+      <button class="btn btn--ghost" id="provider-flip" type="button" title="Switch provider (local ⇄ frontier)">
+        switch
+      </button>
+      <button class="btn btn--ghost" id="auth-button" type="button" hidden>set token</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main class="app">
+    <nav class="tabs" role="tablist">
+      <button class="tab" data-tab="forge" role="tab" aria-selected="true">Forge</button>
+      <button class="tab" data-tab="agents" role="tab" aria-selected="false">Agents</button>
+      <button class="tab" data-tab="audit" role="tab" aria-selected="false">Audit</button>
+    </nav>
+
+    <!-- ========================================================== -->
+    <!-- Forge tab — birth / spawn / preview                         -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="forge" role="tabpanel">
+      <div class="forge-grid">
+        <div class="forge-col forge-col--sliders">
+          <div class="panel">
+            <div class="panel__header">
+              <h2 class="panel__title">Profile</h2>
+              <div class="panel__actions">
+                <label for="role-select" class="lbl">role</label>
+                <select id="role-select" class="inp inp--sm"></select>
+                <button class="btn btn--ghost btn--sm" id="reset-profile" type="button">reset</button>
+              </div>
+            </div>
+            <div class="panel__body">
+              <div id="sliders" class="sliders" aria-live="polite"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel__header">
+              <h2 class="panel__title">Identity</h2>
+            </div>
+            <div class="panel__body identity-form">
+              <div class="field">
+                <label for="agent-name" class="lbl">agent name</label>
+                <input type="text" id="agent-name" class="inp" placeholder="e.g. Huntmaster-01" />
+              </div>
+              <div class="field">
+                <label for="agent-version" class="lbl">version</label>
+                <input type="text" id="agent-version" class="inp" value="v1" />
+              </div>
+              <div class="field">
+                <label for="owner-id" class="lbl">owner id <span class="muted">(optional)</span></label>
+                <input type="text" id="owner-id" class="inp" />
+              </div>
+              <div class="field">
+                <label for="parent-select" class="lbl">parent <span class="muted">(for spawn)</span></label>
+                <select id="parent-select" class="inp">
+                  <option value="">— none (birth a root agent) —</option>
+                </select>
+              </div>
+              <div class="field field--wide">
+                <label for="constitution-override" class="lbl">constitution override <span class="muted">(YAML, optional)</span></label>
+                <textarea id="constitution-override" class="inp inp--code" rows="4" placeholder="# extra policy rules appended under the derived constitution"></textarea>
+              </div>
+              <div class="button-row">
+                <button class="btn btn--primary" id="btn-birth" type="button" disabled>Birth</button>
+                <button class="btn" id="btn-spawn" type="button" disabled>Spawn</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="forge-col forge-col--preview">
+          <div class="panel">
+            <div class="panel__header">
+              <h2 class="panel__title">Preview</h2>
+              <div class="panel__actions">
+                <span class="muted" id="preview-status">idle</span>
+              </div>
+            </div>
+            <div class="panel__body">
+              <div class="preview-grid">
+                <div class="kv"><div class="kv__k">DNA</div><div class="kv__v mono" id="pv-dna">—</div></div>
+                <div class="kv"><div class="kv__k">Role</div><div class="kv__v mono" id="pv-role">—</div></div>
+                <div class="kv"><div class="kv__k">Overall</div><div class="kv__v mono" id="pv-overall">—</div></div>
+                <div class="kv"><div class="kv__k">Dominant</div><div class="kv__v mono" id="pv-dominant">—</div></div>
+                <div class="kv kv--wide"><div class="kv__k">Constitution hash</div><div class="kv__v mono tiny" id="pv-chash">—</div></div>
+              </div>
+              <div class="radar-wrap">
+                <svg id="radar" viewBox="0 0 320 320" role="img" aria-label="Per-domain weighted score radar"></svg>
+              </div>
+              <div class="warnings" id="pv-warnings" hidden></div>
+              <div class="flagged" id="pv-flagged" hidden></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Agents tab — registry browse                                -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="agents" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Agents</h2>
+          <div class="panel__actions">
+            <label for="agents-role-filter" class="lbl">role</label>
+            <select id="agents-role-filter" class="inp inp--sm">
+              <option value="">all</option>
+            </select>
+            <label for="agents-status-filter" class="lbl">status</label>
+            <select id="agents-status-filter" class="inp inp--sm">
+              <option value="">all</option>
+              <option value="active">active</option>
+              <option value="archived">archived</option>
+            </select>
+            <button class="btn btn--ghost btn--sm" id="agents-refresh" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div class="agents-split">
+            <div class="agents-list" id="agents-list"></div>
+            <div class="agent-detail" id="agent-detail">
+              <div class="empty">Select an agent to see its soul, lineage, and archive controls.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Audit tab — chain tail                                      -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="audit" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Audit chain</h2>
+          <div class="panel__actions">
+            <label for="audit-limit" class="lbl">show last</label>
+            <input type="number" id="audit-limit" class="inp inp--sm" value="50" min="1" max="500" />
+            <button class="btn btn--ghost btn--sm" id="audit-refresh" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="audit-list" class="audit-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Session-mode placeholder — wired once ADR-0016 is Accepted and session endpoints exist. -->
+    <section id="session-mode" hidden>
+      <!-- TODO(ADR-0016): ephemeral | persistent-fork toggle, close-of-session diff modal -->
+    </section>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
