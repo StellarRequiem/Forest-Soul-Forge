@@ -133,6 +133,9 @@ class SoulGenerator:
         lineage: Lineage | None = None,
         constitution_hash: str | None = None,
         constitution_file: str | None = None,
+        instance_id: str | None = None,
+        parent_instance: str | None = None,
+        sibling_index: int | None = None,
     ) -> SoulDocument:
         """Generate a soul.md from a profile.
 
@@ -193,6 +196,9 @@ class SoulGenerator:
             lineage=lineage,
             constitution_hash=constitution_hash,
             constitution_file=constitution_file,
+            instance_id=instance_id,
+            parent_instance=parent_instance,
+            sibling_index=sibling_index,
         ))
 
         # ---- header ------------------------------------------------------
@@ -299,6 +305,9 @@ class SoulGenerator:
         lineage: Lineage,
         constitution_hash: str | None = None,
         constitution_file: str | None = None,
+        instance_id: str | None = None,
+        parent_instance: str | None = None,
+        sibling_index: int | None = None,
     ) -> list[str]:
         """Hand-rolled YAML emitter — avoids the pyyaml dep at generation-time
         and guarantees a stable, sorted trait_values block (which keeps
@@ -312,6 +321,17 @@ class SoulGenerator:
         out.append(f'agent_name: "{agent_name}"')
         out.append(f'agent_version: "{agent_version}"')
         out.append(f'generated_at: "{generated_at}"')
+
+        # Identity — registry-issued instance_id + sibling disambiguator.
+        # Written BEFORE trait_values so a human skimming the file sees the
+        # "who" before the "what". Omitted when not supplied (root-sourced
+        # generation from the CLI won't pass them; the daemon will).
+        if instance_id is not None:
+            out.append(f'instance_id: "{instance_id}"')
+        if parent_instance is not None:
+            out.append(f'parent_instance: "{parent_instance}"')
+        if sibling_index is not None:
+            out.append(f"sibling_index: {sibling_index}")
 
         # Constitution binding (optional — omitted when no constitution is attached).
         if constitution_hash is not None and constitution_file is not None:

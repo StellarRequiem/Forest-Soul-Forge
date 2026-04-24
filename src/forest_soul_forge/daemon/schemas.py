@@ -32,11 +32,82 @@ class AgentOut(BaseModel):
     created_at: str
     status: str
     legacy_minted: bool
+    sibling_index: int = 1
 
 
 class AgentListOut(BaseModel):
     count: int
     agents: list[AgentOut]
+
+
+# ---------------------------------------------------------------------------
+# Write payloads (Phase 3: /birth, /spawn, /archive)
+# ---------------------------------------------------------------------------
+class TraitProfileIn(BaseModel):
+    """Inbound trait profile — the DNA-determining input.
+
+    The daemon converts this into a real :class:`TraitProfile` via the
+    TraitEngine so validation (unknown traits, out-of-range values,
+    unknown role) is centralized there. Pydantic only sanity-checks the
+    shape.
+    """
+
+    role: str = Field(..., description="Role name, e.g. 'network_watcher'.")
+    trait_values: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Map of trait_name -> integer 0..100. Traits omitted here fall "
+            "back to the engine's role defaults."
+        ),
+    )
+    domain_weight_overrides: dict[str, float] = Field(
+        default_factory=dict,
+        description="Optional per-domain weight overrides (clamped by engine).",
+    )
+
+
+class BirthRequest(BaseModel):
+    """Create a brand-new (root) agent.
+
+    ``constitution_override`` is a layered backup per ADR-0004 / Path D:
+    if provided, it is treated as additional policy text that the daemon
+    hashes alongside the derived constitution. Absent means "use the
+    engine-derived constitution untouched".
+    """
+
+    profile: TraitProfileIn
+    agent_name: str = Field(..., min_length=1, max_length=80)
+    agent_version: str = Field(default="v1", max_length=16)
+    owner_id: str | None = Field(default=None, max_length=120)
+    constitution_override: str | None = Field(
+        default=None,
+        description=(
+            "Optional YAML snippet merged over the derived constitution. "
+            "When present, the combined hash is what ends up in the soul."
+        ),
+    )
+
+
+class SpawnRequest(BirthRequest):
+    """Spawn a child agent from an existing parent.
+
+    ``parent_instance_id`` identifies the parent; lineage is derived from
+    the parent's own lineage + DNA.
+    """
+
+    parent_instance_id: str = Field(..., min_length=1)
+
+
+class ArchiveRequest(BaseModel):
+    """Mark an agent as archived.
+
+    ``reason`` is free-text but required — an archive with no recorded
+    reason is a governance failure we refuse to log.
+    """
+
+    instance_id: str = Field(..., min_length=1)
+    reason: str = Field(..., min_length=1, max_length=500)
+    archived_by: str | None = Field(default=None, max_length=120)
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +146,15 @@ class HealthOut(BaseModel):
     canonical_contract: str
     active_provider: str
     provider: ProviderHealthOut
+    # Surfaced so the frontend knows whether to prompt for X-FSF-Token.
+    # True when the daemon has api_token configured; False when writes
+    # are open (dev default).
+    auth_required: bool = False
+    # True when allow_write_endpoints is on; False when the daemon is
+    # configured read-only. Lets the frontend disable the "Birth" /
+    # "Spawn" / "Archive" buttons with a clear reason rather than waiting
+    # for a 403 at submit time.
+    writes_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -89,3 +169,133 @@ class ProviderInfoOut(BaseModel):
 
 class SetProviderIn(BaseModel):
     provider: str = Field(..., description="Provider name to activate (e.g. 'local' or 'frontier').")
+
+
+# ---------------------------------------------------------------------------
+# Trait tree exposure (GET /traits)
+# ---------------------------------------------------------------------------
+class TraitOut(BaseModel):
+    """One trait in the tree.
+
+    Shape mirrors :class:`forest_soul_forge.core.trait_engine.Trait` plus
+    the computed ``tier_weight`` (clients use it to reason about impact
+    without having to know the tier-weight table).
+    """
+
+    name: str
+    domain: str
+    subdomain: str
+    tier: str
+    tier_weight: float
+    default: int
+    desc: str
+    scale_low: str
+    scale_mid: str
+    scale_high: str
+
+
+class SubdomainOut(BaseModel):
+    name: str
+    domain: str
+    description: str
+    traits: list[TraitOut]
+
+
+class DomainOut(BaseModel):
+    name: str
+    description: str
+    subdomains: list[SubdomainOut]
+
+
+class RoleOut(BaseModel):
+    name: str
+    description: str
+    domain_weights: dict[str, float]
+
+
+class FlaggedCombinationOut(BaseModel):
+    name: str
+    warning: str
+    # conditions is {trait_name: "op threshold"} in display form; clients
+    # parse the op/threshold half if they want to render live warnings.
+    conditions: dict[str, str]
+
+
+class TraitTreeOut(BaseModel):
+    """Full trait tree as served to the frontend.
+
+    One fetch powers the birth form: iterate ``domains -> subdomains ->
+    traits`` to render grouped sliders, pick a ``role`` to seed defaults,
+    and compare live profile against ``flagged_combinations`` locally for
+    instant feedback (with ``/preview`` as the authoritative check).
+    """
+
+    version: str
+    min_domain_weight: float
+    max_domain_weight: float
+    domains: list[DomainOut]
+    roles: list[RoleOut]
+    flagged_combinations: list[FlaggedCombinationOut]
+
+
+# ---------------------------------------------------------------------------
+# Preview (POST /preview) — zero-write slider feedback
+# ---------------------------------------------------------------------------
+class DomainGradeOut(BaseModel):
+    domain: str
+    intrinsic_score: float
+    role_weight: float
+    weighted_score: float
+    subdomain_scores: dict[str, float]
+    included_traits: int
+    skipped_traits: int
+
+
+class GradeReportOut(BaseModel):
+    profile_dna: str
+    role: str
+    overall_score: float
+    dominant_domain: str
+    per_domain: list[DomainGradeOut]
+    warnings: list[str]
+    schema_version: int
+
+
+class PreviewRequest(BaseModel):
+    """Same shape as the birth payload minus identity.
+
+    Preview is a pure function of the profile + optional override, so it
+    takes no agent_name and never touches the registry or the chain.
+    """
+
+    profile: TraitProfileIn
+    constitution_override: str | None = Field(
+        default=None,
+        description="Same semantics as BirthRequest.constitution_override.",
+    )
+
+
+class PreviewResponse(BaseModel):
+    dna: str
+    dna_full: str
+    role: str
+    constitution_hash_derived: str = Field(
+        ...,
+        description=(
+            "Hash of the derived constitution (no override folded in). "
+            "Equal across all agents with the same profile."
+        ),
+    )
+    constitution_hash_effective: str = Field(
+        ...,
+        description=(
+            "What the soul frontmatter would actually store. Equal to "
+            "constitution_hash_derived when no override is supplied; "
+            "SHA-256(derived || '\\noverride:\\n' || override) otherwise."
+        ),
+    )
+    grade: GradeReportOut
+    flagged_combinations: list[FlaggedCombinationOut]
+    # Echo the profile back so the frontend can sanity-check it against
+    # what it sent (useful when the engine clamps domain weights).
+    effective_profile: TraitProfileIn

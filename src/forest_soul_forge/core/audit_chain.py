@@ -44,6 +44,7 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "chain_created",
     "agent_created",
     "agent_spawned",
+    "agent_archived",
     "constitution_regenerated",
     "manual_override",
     "drift_detected",

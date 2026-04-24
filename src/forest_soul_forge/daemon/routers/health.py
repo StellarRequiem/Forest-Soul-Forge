@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from forest_soul_forge.daemon.deps import get_provider_registry, get_registry
+from forest_soul_forge.daemon.deps import (
+    get_provider_registry,
+    get_registry,
+    get_settings,
+)
 from forest_soul_forge.daemon.providers import ProviderRegistry
 from forest_soul_forge.daemon.schemas import HealthOut, ProviderHealthOut
 from forest_soul_forge.registry import Registry
@@ -20,6 +24,7 @@ router = APIRouter(tags=["health"])
 async def healthz(
     registry: Registry = Depends(get_registry),
     providers: ProviderRegistry = Depends(get_provider_registry),
+    settings=Depends(get_settings),
 ) -> HealthOut:
     active = providers.active()
     health = await active.healthcheck()
@@ -42,4 +47,6 @@ async def healthz(
             details=health.details,
             error=health.error,
         ),
+        auth_required=getattr(settings, "api_token", None) is not None,
+        writes_enabled=bool(getattr(settings, "allow_write_endpoints", False)),
     )

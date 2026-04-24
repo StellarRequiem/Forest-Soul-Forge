@@ -60,6 +60,48 @@ class DaemonSettings(BaseSettings):
     # Off by default to protect registries in production-ish use.
     allow_rebuild_endpoint: bool = Field(default=False)
 
+    # ----- write path (birth / spawn / archive) ---------------------------
+    # Trait tree and constitution template roots. When /birth or /spawn is
+    # called, the daemon loads these lazily on lifespan startup and holds
+    # them on app.state so each request reuses one engine instance.
+    trait_tree_path: Path = Field(
+        default=Path("config/trait_tree.yaml"),
+        description="TraitEngine YAML source (roles, domains, traits, flags).",
+    )
+    constitution_templates_path: Path = Field(
+        default=Path("config/constitution_templates.yaml"),
+        description="Constitution template YAML (single file, role-keyed).",
+    )
+    soul_output_dir: Path = Field(
+        default=Path("soul_generated"),
+        description=(
+            "Where the daemon writes newly generated soul.md and "
+            "constitution.yaml pairs. Distinct from artifacts_dir so "
+            "production output doesn't overwrite committed examples."
+        ),
+    )
+    # Allow the write endpoints. Off by default so a misconfigured instance
+    # can't accept birth requests. Ops flips this on once the artifact dir
+    # is writable and the trait tree is present.
+    allow_write_endpoints: bool = Field(default=True)
+
+    # ----- auth ------------------------------------------------------------
+    # Shared-secret bearer token. When None (default), auth is bypassed —
+    # preserves the frictionless local-dev experience. When set, every
+    # mutating endpoint requires the ``X-FSF-Token`` header to match.
+    # Reads stay open; rotating the secret only affects writes + provider
+    # switch. Threat model in ADR-0007: token protects an unattended
+    # Docker deployment from casual access on a shared LAN — it is NOT a
+    # substitute for TLS, and the daemon refuses to bind 0.0.0.0 by
+    # default for a reason.
+    api_token: str | None = Field(
+        default=None,
+        description=(
+            "Optional shared-secret token required on write endpoints "
+            "via the X-FSF-Token header. Unset = writes open (dev)."
+        ),
+    )
+
     # ----- active provider -------------------------------------------------
     # Default is "local" by mission (ADR-0008). Changing this default is a
     # policy decision, not a convenience tweak.

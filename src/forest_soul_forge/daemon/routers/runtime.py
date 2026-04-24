@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from forest_soul_forge.daemon.deps import get_provider_registry
+from forest_soul_forge.daemon.deps import (
+    get_provider_registry,
+    require_api_token,
+)
 from forest_soul_forge.daemon.providers import (
     ProviderRegistry,
     UnknownProviderError,
@@ -49,7 +52,11 @@ async def get_provider(
     return await _build_info(providers)
 
 
-@router.put("/provider", response_model=ProviderInfoOut)
+@router.put(
+    "/provider",
+    response_model=ProviderInfoOut,
+    dependencies=[Depends(require_api_token)],
+)
 async def set_provider(
     payload: SetProviderIn,
     providers: ProviderRegistry = Depends(get_provider_registry),

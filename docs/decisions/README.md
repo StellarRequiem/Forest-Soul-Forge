@@ -47,3 +47,5 @@ What else did we look at, and why not?
 - [ADR-0005 — Audit chain (tamper-evident, v0.1 threat model)](ADR-0005-audit-chain.md) — Accepted 2026-04-21
 - [ADR-0006 — SQLite registry as index over canonical artifacts](ADR-0006-registry-as-index.md) — Accepted 2026-04-23
 - [ADR-0007 — FastAPI daemon as frontend backend](ADR-0007-fastapi-daemon.md) — Accepted 2026-04-23
+- [ADR-0008 — Local-first model provider](ADR-0008-local-first-model-provider.md) — Accepted 2026-04-24
+- [ADR-0016 — Session modes + self-spawning cipher](ADR-0016-session-modes-and-self-spawning-cipher.md) — Proposed 2026-04-24
