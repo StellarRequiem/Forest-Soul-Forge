@@ -146,7 +146,14 @@ def _build_fixtures(mod: ModuleType, *, fresh_tmp_path: bool = False) -> dict[st
                 del remaining[name]
                 progress = True
         if not progress:
-            raise RuntimeError(f"Cannot resolve fixtures: {list(remaining)}")
+            # The stdlib harness doesn't simulate every pytest fixture
+            # (e.g. monkeypatch, TestClient lifecycle). Rather than crash
+            # the whole run, report the module as skipped — pytest will
+            # cover it when the [daemon] extra is installed.
+            raise _SkipModule(
+                "requires pytest fixtures the stdlib harness can't simulate: "
+                f"{sorted(remaining)}"
+            )
     return fixtures
 
 
@@ -189,9 +196,9 @@ def run_module(path: Path) -> tuple[int, int, list[str], str | None]:
     """Return ``(passed, failed, failure_names, skip_reason_or_None)``."""
     try:
         mod = _load_module(path)
+        fixtures = _build_fixtures(mod)
     except _SkipModule as e:
         return 0, 0, [], e.reason
-    fixtures = _build_fixtures(mod)
 
     passed = 0
     failed_names: list[str] = []
