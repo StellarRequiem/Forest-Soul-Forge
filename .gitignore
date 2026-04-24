@@ -78,3 +78,8 @@ registry.sqlite-wal
 
 # Docker
 docker-compose.override.yml
+
+# Compose runtime state — registry, audit, generated souls, ollama cache.
+# Keep the directory itself (via data/.gitkeep) but ignore everything in it.
+data/*
+!data/.gitkeep

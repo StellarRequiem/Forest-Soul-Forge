@@ -1,0 +1,141 @@
+# Forest Soul Forge — docker compose stack.
+#
+# Three services:
+#   daemon    — FastAPI control plane (always on)
+#   frontend  — nginx serving the vanilla-JS UI (always on)
+#   ollama    — local LLM backend, opt-in via --profile llm
+#
+# Quickstart:
+#   docker compose up              # daemon + frontend
+#   docker compose --profile llm up # + ollama
+#
+# The browser talks directly to both the daemon (7423) and frontend (5173)
+# on the host. This preserves the frontend's ?api=... contract and the
+# daemon's CORS allowlist, which already includes http://127.0.0.1:5173.
+#
+# Persistent state:
+#   ./data/ holds registry.sqlite, audit_chain.jsonl, and generated souls.
+#   Bind-mounted so you can `cat`, `git add`, and rotate by hand. This is
+#   in line with ADR-0006: the artifact tree is the source of truth;
+#   the SQLite DB is a rebuildable index.
+#
+# Local-first posture:
+#   Every port binding is explicitly 127.0.0.1 on the host side. Nothing
+#   here will accidentally expose the daemon to the LAN. To serve it
+#   outside the box, change the host side of the mapping deliberately AND
+#   set FSF_API_TOKEN in .env — do not do the former without the latter.
+
+services:
+  # --------------------------------------------------------------------
+  # Daemon — FastAPI control plane.
+  # --------------------------------------------------------------------
+  daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: forest-soul-forge/daemon:latest
+    container_name: fsf-daemon
+    restart: unless-stopped
+
+    # Host:container. Pin host side to loopback so the daemon never
+    # accidentally faces the network even if the host firewall is slack.
+    ports:
+      - "127.0.0.1:7423:7423"
+
+    # Persist registry + audit on the host so they survive container
+    # rebuilds and can be inspected / committed / rotated out-of-band.
+    volumes:
+      - ./data:/app/data
+
+    # Environment — everything the daemon accepts is prefixed FSF_.
+    # .env is loaded automatically by compose if present.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FSF_HOST: "0.0.0.0"
+      FSF_PORT: "7423"
+      FSF_REGISTRY_DB_PATH: /app/data/registry.sqlite
+      FSF_ARTIFACTS_DIR:    /app/data/artifacts
+      FSF_AUDIT_CHAIN_PATH: /app/data/audit_chain.jsonl
+      FSF_SOUL_OUTPUT_DIR:  /app/data/soul_generated
+      # When the ollama service is running (profile llm), it is reachable
+      # at http://ollama:11434 on the compose network. If you run Ollama
+      # on the host instead, override this in .env to
+      # http://host.docker.internal:11434 (macOS/Windows) or the host IP.
+      FSF_LOCAL_BASE_URL: http://ollama:11434
+      # CORS: the config.py default already covers the frontend's published
+      # origin (http://127.0.0.1:5173 + http://localhost:5173). Override
+      # in .env only if you serve the UI from somewhere else.
+
+    # Don't hard-depend on ollama — the daemon boots without it and the
+    # UI shows "local - degraded" until the backend is up. depends_on for
+    # ollama is declared on the llm profile via the service's `profiles`.
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7423/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  # --------------------------------------------------------------------
+  # Frontend — nginx static serve.
+  # --------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: forest-soul-forge/frontend:latest
+    container_name: fsf-frontend
+    restart: unless-stopped
+
+    # Host port 5173 → container port 80. 5173 matches the daemon's
+    # baked-in CORS allowlist so no config drift is needed.
+    ports:
+      - "127.0.0.1:5173:80"
+
+    # Frontend only comes up once the daemon is healthy — prevents the
+    # UI from flashing red banners during first boot.
+    depends_on:
+      daemon:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # --------------------------------------------------------------------
+  # Ollama — optional local LLM backend.
+  #
+  # Opt in with:  docker compose --profile llm up
+  # Skip by default to avoid a ~2GB image + model download on first run.
+  # Users on a frontier provider, or running Ollama on the host, never
+  # pay that cost.
+  # --------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: fsf-ollama
+    restart: unless-stopped
+    profiles: ["llm"]
+
+    # Bind to loopback — the daemon reaches it over the compose network
+    # at http://ollama:11434; we only expose the port on host for
+    # debugging / pulling models from the host side.
+    ports:
+      - "127.0.0.1:11434:11434"
+
+    # Models are large and slow to pull. Persist them.
+    volumes:
+      - ./data/ollama:/root/.ollama
+
+    healthcheck:
+      # Ollama answers /api/tags even with no models loaded.
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

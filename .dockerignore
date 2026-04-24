@@ -1,0 +1,39 @@
+# Docker build context exclusions.
+#
+# Applies to both the test image (Dockerfile.test) and the production
+# daemon image (Dockerfile). Neither needs the frontend tree — the
+# frontend has its own build context at ./frontend. Neither needs the
+# compose runtime state in ./data.
+
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Runtime artifacts — mounted in, not baked into the image.
+audit/
+soul_generated/
+registry.sqlite*
+*.log
+
+# Compose bind-mount target — mounted at runtime, never baked in.
+data/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+
+# Frontend has its own Dockerfile + build context; nothing here needs it.
+frontend/

@@ -1,0 +1,5 @@
+# Frontend image build context — lean by construction.
+# Only the files we actually COPY belong here.
+.DS_Store
+*.swp
+*.log

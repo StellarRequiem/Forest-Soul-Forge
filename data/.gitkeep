@@ -1,0 +1,16 @@
+# Runtime state directory for the docker compose stack.
+#
+# Populated at runtime:
+#   registry.sqlite           SQLite registry (rebuildable from artifacts/)
+#   registry.sqlite-wal       WAL sidecar
+#   registry.sqlite-shm       shared-memory sidecar
+#   audit_chain.jsonl         append-only audit log
+#   artifacts/                canonical soul + constitution tree
+#   soul_generated/           daemon-written new souls/constitutions
+#   ollama/                   (when using --profile llm) Ollama model cache
+#
+# On first boot of the daemon container, ./artifacts is seeded from the
+# /app/examples tree inside the image. Subsequent boots leave user data
+# alone — see scripts/docker-entrypoint.sh.
+#
+# All of these are .gitignore'd except this placeholder.
