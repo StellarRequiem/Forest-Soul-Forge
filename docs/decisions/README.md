@@ -54,3 +54,4 @@ What else did we look at, and why not?
 - [ADR-0020 — Agent character sheet](ADR-0020-agent-character-sheet.md) — Proposed 2026-04-25
 - [ADR-0021 — Role genres and agent taxonomy](ADR-0021-role-genres-agent-taxonomy.md) — Proposed 2026-04-25
 - [ADR-0022 — Memory subsystem](ADR-0022-memory-subsystem.md) — Proposed 2026-04-25
+- [ADR-0023 — Benchmark suite](ADR-0023-benchmark-suite.md) — Proposed 2026-04-25
