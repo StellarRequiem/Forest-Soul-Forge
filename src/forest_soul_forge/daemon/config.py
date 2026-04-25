@@ -72,6 +72,10 @@ class DaemonSettings(BaseSettings):
         default=Path("config/constitution_templates.yaml"),
         description="Constitution template YAML (single file, role-keyed).",
     )
+    tool_catalog_path: Path = Field(
+        default=Path("config/tool_catalog.yaml"),
+        description="Tool catalog YAML (ADR-0018) — declarative tool descriptors + per-archetype standard kits.",
+    )
     soul_output_dir: Path = Field(
         default=Path("soul_generated"),
         description=(

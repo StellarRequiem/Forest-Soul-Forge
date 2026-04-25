@@ -86,6 +86,21 @@ def get_trait_engine(request: Request) -> "TraitEngine":
     return engine
 
 
+def get_tool_catalog(request: Request):
+    """Return the loaded :class:`ToolCatalog` from app.state.
+
+    Always returns a catalog (possibly empty) — never raises 503 — so
+    /birth keeps working even when the catalog file is missing. The
+    empty-catalog case yields zero standard tools and rejects any
+    tools_add referencing unknown entries with a clear 400.
+    """
+    from forest_soul_forge.core.tool_catalog import empty_catalog
+    catalog = getattr(request.app.state, "tool_catalog", None)
+    if catalog is None:
+        return empty_catalog()
+    return catalog
+
+
 def get_audit_chain(request: Request) -> "AuditChain":
     chain = getattr(request.app.state, "audit_chain", None)
     if chain is None:

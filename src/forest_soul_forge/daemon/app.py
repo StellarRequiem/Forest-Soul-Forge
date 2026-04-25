@@ -92,6 +92,34 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         startup_diagnostics: list[dict] = []
         trait_engine: TraitEngine | None = None
         audit_chain: AuditChain | None = None
+        # Tool catalog (ADR-0018) — loaded best-effort. A missing or
+        # malformed catalog falls back to empty so /birth still works
+        # for callers who don't override tools.
+        from forest_soul_forge.core.tool_catalog import (
+            ToolCatalogError,
+            empty_catalog,
+            load_catalog,
+        )
+        try:
+            tool_catalog = load_catalog(settings.tool_catalog_path)
+            startup_diagnostics.append(
+                {"component": "tool_catalog", "status": "ok",
+                 "path": str(settings.tool_catalog_path), "error": None}
+            )
+        except ToolCatalogError as e:
+            tool_catalog = empty_catalog()
+            startup_diagnostics.append(
+                {"component": "tool_catalog", "status": "failed",
+                 "path": str(settings.tool_catalog_path),
+                 "error": f"{type(e).__name__}: {e}"}
+            )
+        except FileNotFoundError as e:
+            tool_catalog = empty_catalog()
+            startup_diagnostics.append(
+                {"component": "tool_catalog", "status": "failed",
+                 "path": str(settings.tool_catalog_path),
+                 "error": f"FileNotFoundError: {e}"}
+            )
         if settings.allow_write_endpoints:
             try:
                 trait_engine = TraitEngine(settings.trait_tree_path)
@@ -127,6 +155,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.providers = providers
         app.state.trait_engine = trait_engine
         app.state.audit_chain = audit_chain
+        app.state.tool_catalog = tool_catalog
         app.state.startup_diagnostics = startup_diagnostics
         # threading.Lock (not asyncio.Lock): sync route handlers run on the
         # FastAPI threadpool, so a thread-level lock is the right primitive.

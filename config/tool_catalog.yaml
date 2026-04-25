@@ -1,0 +1,278 @@
+# Forest Soul Forge — tool catalog (ADR-0018).
+#
+# Canonical source of MCP-style tool descriptors. Each tool is keyed by
+# {name}.{version}. Versions are pinned in soul.md frontmatter at birth
+# time so old agents stay reasonable-about even after newer versions of
+# a tool land in this file.
+#
+# When you add a new version of an existing tool:
+#   - DO add a new entry (e.g. packet_query.v2) alongside the old one.
+#   - DO update the relevant archetype's standard_tools list to point at
+#     the new version IF you want fresh births to pick it up by default.
+#   - DO NOT edit an existing v1 entry's schema. v1 is frozen — any
+#     committed agent that references it relies on its bytes being
+#     stable. The catalog-integrity check at daemon startup catches
+#     this and refuses to boot.
+#
+# When you add a new tool:
+#   - Pick a clear, verb-or-noun-phrase name (snake_case).
+#   - Always start at version "1".
+#   - Tag with archetype_tags so the resolver knows which archetype
+#     bundles can take it as a default.
+#   - side_effects must be one of: read_only, network, filesystem,
+#     external. The constitution constraint policy keys off this — a
+#     non-read_only tool gets requires_human_approval bumped per
+#     trait policy.
+
+version: "0.1"
+
+tools:
+  # ----- network_watcher kit ----------------------------------------------
+  packet_query.v1:
+    name: packet_query
+    version: "1"
+    description: |
+      Query the local pcap store for packets matching a BPF filter
+      within a time window. Returns up to `limit` packet records
+      (header + first 256 bytes of payload). Read-only.
+    input_schema:
+      type: object
+      required: [filter, start_ts, end_ts]
+      properties:
+        filter:
+          type: string
+          description: "BPF filter expression (e.g. 'tcp port 443')."
+        start_ts:
+          type: string
+          format: date-time
+          description: "Inclusive lower bound, ISO-8601 UTC."
+        end_ts:
+          type: string
+          format: date-time
+          description: "Exclusive upper bound, ISO-8601 UTC."
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 100
+    side_effects: read_only
+    archetype_tags: [network_watcher, anomaly_investigator]
+
+  flow_summary.v1:
+    name: flow_summary
+    version: "1"
+    description: |
+      Summarize netflow records by 5-tuple over a time window. Returns
+      counts, byte totals, and direction breakdown per flow. Read-only.
+    input_schema:
+      type: object
+      required: [start_ts, end_ts]
+      properties:
+        start_ts: { type: string, format: date-time }
+        end_ts: { type: string, format: date-time }
+        src_filter:
+          type: string
+          description: "Optional CIDR or IP — limits to flows originating from."
+        dst_filter:
+          type: string
+          description: "Optional CIDR or IP — limits to flows directed to."
+        top_n:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 50
+    side_effects: read_only
+    archetype_tags: [network_watcher, anomaly_investigator]
+
+  dns_lookup.v1:
+    name: dns_lookup
+    version: "1"
+    description: |
+      Forward or reverse DNS lookup for a hostname or IP. Issues a real
+      query against the configured resolver. Network side-effect (one
+      UDP request to the resolver, no other reach).
+    input_schema:
+      type: object
+      required: [target]
+      properties:
+        target:
+          type: string
+          description: "Hostname (forward) or IP (reverse)."
+        record_types:
+          type: array
+          items:
+            type: string
+            enum: [A, AAAA, MX, TXT, NS, PTR, CNAME]
+          default: [A, AAAA]
+    side_effects: network
+    archetype_tags: [network_watcher]
+
+  # ----- log_analyst kit --------------------------------------------------
+  log_grep.v1:
+    name: log_grep
+    version: "1"
+    description: |
+      Run a regex match against a configured log store within a time
+      window. Returns matching lines (capped at `limit`) with timestamps
+      and source identifiers. Read-only.
+    input_schema:
+      type: object
+      required: [pattern, start_ts, end_ts]
+      properties:
+        pattern:
+          type: string
+          description: "Python-flavor regex."
+        start_ts: { type: string, format: date-time }
+        end_ts: { type: string, format: date-time }
+        sources:
+          type: array
+          items: { type: string }
+          description: "Optional list of source identifiers (e.g. log group names)."
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 500
+    side_effects: read_only
+    archetype_tags: [log_analyst, anomaly_investigator]
+
+  log_aggregate.v1:
+    name: log_aggregate
+    version: "1"
+    description: |
+      Aggregate log events by a field over a time window. Returns a
+      bucketed count distribution. Useful for spotting spikes, finding
+      top sources, or detecting absence-of-signal. Read-only.
+    input_schema:
+      type: object
+      required: [group_by, start_ts, end_ts]
+      properties:
+        group_by:
+          type: string
+          description: "Field name to group by (e.g. 'source_ip', 'level')."
+        start_ts: { type: string, format: date-time }
+        end_ts: { type: string, format: date-time }
+        bucket_seconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          default: 60
+        filter:
+          type: string
+          description: "Optional regex to pre-filter events before grouping."
+        top_n:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    side_effects: read_only
+    archetype_tags: [log_analyst, anomaly_investigator]
+
+  timestamp_window.v1:
+    name: timestamp_window
+    version: "1"
+    description: |
+      Convert a relative time expression to absolute ISO-8601 UTC
+      timestamps. Examples: 'last 15 minutes' → (start, end), 'past 24h'
+      → (start, end). Pure helper, no I/O.
+    input_schema:
+      type: object
+      required: [expression]
+      properties:
+        expression:
+          type: string
+          description: "Natural-language relative window (e.g. 'last 15 minutes')."
+        anchor:
+          type: string
+          format: date-time
+          description: "Reference point. Defaults to current UTC if omitted."
+    side_effects: read_only
+    archetype_tags: [log_analyst, network_watcher, anomaly_investigator]
+
+  # ----- anomaly_investigator kit -----------------------------------------
+  baseline_compare.v1:
+    name: baseline_compare
+    version: "1"
+    description: |
+      Compare a metric series in the current window to a historical
+      baseline (configurable lookback period and aggregation). Returns
+      z-score and absolute delta per bucket. Read-only.
+    input_schema:
+      type: object
+      required: [metric, current_start, current_end]
+      properties:
+        metric:
+          type: string
+          description: "Metric identifier (e.g. 'flow_bytes', 'auth_failures')."
+        current_start: { type: string, format: date-time }
+        current_end: { type: string, format: date-time }
+        baseline_lookback_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+          default: 14
+        aggregation:
+          type: string
+          enum: [sum, avg, p50, p95, p99, max]
+          default: sum
+        bucket_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          default: 300
+    side_effects: read_only
+    archetype_tags: [anomaly_investigator]
+
+  correlation_window.v1:
+    name: correlation_window
+    version: "1"
+    description: |
+      Correlate events across two or more sources within a sliding time
+      window. Returns event-pair clusters where source A and source B
+      activity overlap inside the window. Useful for tying a network
+      anomaly to a corresponding log spike. Read-only.
+    input_schema:
+      type: object
+      required: [sources, start_ts, end_ts]
+      properties:
+        sources:
+          type: array
+          items: { type: string }
+          minItems: 2
+          description: "Two or more source identifiers to correlate."
+        start_ts: { type: string, format: date-time }
+        end_ts: { type: string, format: date-time }
+        window_seconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+          default: 60
+        min_overlap_count:
+          type: integer
+          minimum: 1
+          default: 2
+    side_effects: read_only
+    archetype_tags: [anomaly_investigator]
+
+# Per-archetype standard kits. Each role's kit is the default tool
+# surface for a freshly-birthed agent of that role; per-request
+# tools_add / tools_remove on /birth or /spawn override it.
+archetypes:
+  network_watcher:
+    standard_tools:
+      - packet_query.v1
+      - flow_summary.v1
+      - dns_lookup.v1
+      - timestamp_window.v1
+  log_analyst:
+    standard_tools:
+      - log_grep.v1
+      - log_aggregate.v1
+      - timestamp_window.v1
+  anomaly_investigator:
+    standard_tools:
+      - packet_query.v1
+      - log_grep.v1
+      - baseline_compare.v1
+      - correlation_window.v1
+      - timestamp_window.v1
