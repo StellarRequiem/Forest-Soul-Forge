@@ -5,7 +5,7 @@
 //   - traitTree        TraitTreeOut from GET /v1/traits
 //   - selectedRole     string — the role whose defaults seed the sliders
 //   - profile          { trait_values: {name -> 0..100}, domain_weight_overrides: {} }
-//   - preview          latest PreviewResponse or null
+//   - preview          latest PreviewResponse or null (now includes resolved_tools)
 //   - previewError     latest error message while previewing, or null
 //   - health           latest HealthOut or null
 //   - writesEnabled    bool — mirror of health.writes_enabled for convenience
@@ -13,6 +13,10 @@
 //   - agents           AgentListOut.agents or []
 //   - selectedAgentId  instance_id of the agent shown in the detail pane
 //   - agentDetail      AgentOut of the selected agent + lineage bits
+//   - toolCatalog      ToolCatalogOut from GET /tools/catalog (cached for session)
+//   - toolKit          ResolvedKitOut for the currently-selected role
+//   - toolOverrides    { tools_add: [{name, version}], tools_remove: [string] }
+//                      published by tools.js, consumed by preview.js + forms.js
 
 const subs = new Map(); // key -> Set<fn>
 const data = new Map(); // key -> value

@@ -51,6 +51,7 @@ from forest_soul_forge.daemon.schemas import (
     GradeReportOut,
     PreviewRequest,
     PreviewResponse,
+    ResolvedToolOut,
     TraitProfileIn,
 )
 
@@ -138,10 +139,29 @@ async def preview(
     except ToolCatalogError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    # Build two parallel lists:
+    #   - tool_constraints: dicts in the constitution.yaml shape, fed
+    #     into build_constitution so the hash matches what /birth would
+    #     produce. Order matches resolved_tools.
+    #   - resolved_tool_outs: ResolvedToolOut for the response, joined
+    #     with each ToolDef's description so the frontend has everything
+    #     it needs to render without a second /tools/catalog lookup.
     tool_constraints = []
+    resolved_tool_outs: list[ResolvedToolOut] = []
     for ref in resolved_tools:
         td = tool_catalog.get_tool(ref)
-        tool_constraints.append(resolve_constraints(profile, td).to_dict())
+        rc = resolve_constraints(profile, td)
+        tool_constraints.append(rc.to_dict())
+        resolved_tool_outs.append(
+            ResolvedToolOut(
+                name=rc.tool_name,
+                version=rc.tool_version,
+                description=td.description,
+                side_effects=rc.side_effects,
+                constraints=dict(rc.constraints),
+                applied_rules=list(rc.applied_rules),
+            )
+        )
 
     try:
         constitution = build_constitution(
@@ -186,4 +206,5 @@ async def preview(
         grade=_grade_to_out(report),
         flagged_combinations=flagged,
         effective_profile=effective_profile,
+        resolved_tools=resolved_tool_outs,
     )

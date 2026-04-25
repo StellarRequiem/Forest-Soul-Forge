@@ -53,6 +53,38 @@
             </div>
           </div>
 
+          <!-- Tools panel (ADR-0018 T4) — between Profile and Identity. -->
+          <!-- Empty until trait tree boots; tools.js subscribes to            -->
+          <!-- selectedRole and re-renders the kit when role changes.           -->
+          <div class="panel" id="tools-panel">
+            <div class="panel__header">
+              <h2 class="panel__title">Tools</h2>
+              <div class="panel__actions">
+                <span class="muted" id="tools-status">—</span>
+                <button class="btn btn--ghost btn--sm" id="tools-reset" type="button" title="Restore archetype default kit">reset</button>
+              </div>
+            </div>
+            <div class="panel__body">
+              <!-- Standard kit checklist. Each item is the archetype's       -->
+              <!-- default tool with a checkbox; unchecking sends the name to  -->
+              <!-- tools_remove on the next /preview and /birth calls.          -->
+              <div id="tools-default-kit" class="tools-kit"></div>
+
+              <!-- Add-extra picker — appears once the catalog is loaded.     -->
+              <div class="tools-add-row">
+                <label for="tools-add-select" class="lbl">add tool</label>
+                <select id="tools-add-select" class="inp inp--sm">
+                  <option value="">— pick from catalog —</option>
+                </select>
+                <button class="btn btn--ghost btn--sm" id="tools-add-btn" type="button" disabled>add</button>
+              </div>
+
+              <!-- Added tools (above-and-beyond the default kit). Removing   -->
+              <!-- one drops it from tools_add.                                -->
+              <div id="tools-added" class="tools-added"></div>
+            </div>
+          </div>
+
           <div class="panel">
             <div class="panel__header">
               <h2 class="panel__title">Identity</h2>

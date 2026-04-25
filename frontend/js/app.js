@@ -10,6 +10,7 @@ import * as forms from "./forms.js";
 import * as agentsPanel from "./agents.js";
 import * as auditPanel from "./audit.js";
 import * as providersPanel from "./providers.js";
+import * as toolsPanel from "./tools.js";
 import { toast } from "./toast.js";
 
 function wireTabs() {
@@ -51,6 +52,18 @@ async function boot() {
   }
 
   // With the tree loaded, everything else can wire up.
+  // Tools panel first — preview.js reads toolOverrides on every run, so
+  // tools.js must publish an initial value before preview subscribes.
+  // Errors here are non-fatal (catalog absent ⇒ kit is empty, default
+  // kit still works), so don't gate the rest of the app on it.
+  toolsPanel.start().catch((e) => {
+    toast({
+      title: "Tools panel degraded",
+      msg: e.message,
+      kind: "warn",
+      ttl: 8000,
+    });
+  });
   preview.start();
   forms.start();
   agentsPanel.start();

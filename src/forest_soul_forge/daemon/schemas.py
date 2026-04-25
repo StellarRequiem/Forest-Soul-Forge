@@ -357,6 +357,82 @@ class TraitTreeOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Tool catalog discovery (GET /tools/catalog, GET /tools/kit/{role})
+#
+# Defined BEFORE PreviewResponse because PreviewResponse embeds
+# ResolvedToolOut. Pydantic v2 handles forward refs as long as the
+# string-form annotation gets resolved by the time the model is used,
+# but keeping the definition order natural avoids an explicit
+# model_rebuild() call.
+# ---------------------------------------------------------------------------
+class ToolDefOut(BaseModel):
+    """One catalog entry as exposed to the frontend.
+
+    Mirrors :class:`forest_soul_forge.core.tool_catalog.ToolDef` minus
+    ``input_schema`` (heavy, only needed at execution time — the UI
+    works from the description and side_effects).
+    """
+
+    name: str
+    version: str
+    description: str
+    side_effects: str
+    archetype_tags: list[str] = Field(default_factory=list)
+
+
+class ArchetypeBundleOut(BaseModel):
+    """A role's standard kit. ``standard_tools`` are bare {name, version}
+    refs the frontend can compare against the resolved kit to identify
+    which entries are archetype-defaults vs. user-added."""
+
+    role: str
+    standard_tools: list[ToolRefIn]
+
+
+class ToolCatalogOut(BaseModel):
+    """Full catalog snapshot served at GET /tools/catalog.
+
+    Read-only; the catalog is loaded once at lifespan startup and held on
+    ``app.state``. ``version`` is the catalog file's version (advanced
+    when the YAML changes), distinct from each tool's own version.
+    """
+
+    version: str
+    tools: list[ToolDefOut]
+    archetypes: list[ArchetypeBundleOut]
+
+
+class ResolvedToolOut(BaseModel):
+    """One tool in a role's resolved kit, with policy constraints applied.
+
+    Served by GET /tools/kit/{role} and embedded in PreviewResponse.
+    Mirrors the per-tool record that ends up in constitution.yaml's
+    ``tools`` block — same name/version/side_effects, same constraint
+    dict, same applied_rules — plus the description joined from the
+    catalog so the UI doesn't need a second lookup.
+    """
+
+    name: str
+    version: str
+    description: str
+    side_effects: str
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    applied_rules: list[str] = Field(default_factory=list)
+
+
+class ResolvedKitOut(BaseModel):
+    """Response for GET /tools/kit/{role}.
+
+    Includes the role echo and the catalog version so the frontend can
+    invalidate cached kits when the underlying catalog changes.
+    """
+
+    role: str
+    catalog_version: str
+    tools: list[ResolvedToolOut]
+
+
+# ---------------------------------------------------------------------------
 # Preview (POST /preview) — zero-write slider feedback
 # ---------------------------------------------------------------------------
 class DomainGradeOut(BaseModel):
@@ -427,3 +503,17 @@ class PreviewResponse(BaseModel):
     # Echo the profile back so the frontend can sanity-check it against
     # what it sent (useful when the engine clamps domain weights).
     effective_profile: TraitProfileIn
+    # ADR-0018 T4: tool surface that would land in the constitution. Same
+    # records the daemon writes into constitution.yaml's `tools:` block —
+    # frontend uses this to show "what gets capped / approved" without
+    # parsing the YAML.
+    resolved_tools: list[ResolvedToolOut] = Field(
+        default_factory=list,
+        description=(
+            "Per-tool resolution results: name, version, side_effects, "
+            "the merged constraint set after applying tool_policy rules, "
+            "and the names of the rules that fired. Identical (in shape) "
+            "to what constitution.yaml's `tools:` block stores, plus the "
+            "joined description for UI convenience."
+        ),
+    )

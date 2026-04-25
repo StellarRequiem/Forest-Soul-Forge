@@ -134,7 +134,10 @@ class TestHealth:
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
-        assert body["schema_version"] == 1
+        # schema_version is 2 since the v1→v2 forward migration (task #17).
+        # The daemon reports the registry's actual schema_version; assertion
+        # was lagging at 1 from the pre-migration snapshot.
+        assert body["schema_version"] == 2
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"
@@ -404,3 +407,143 @@ class TestGenerate:
             )
             assert r3.status_code == 200
             assert r3.json()["response"] == "[stub] p"
+
+
+class TestToolsCatalog:
+    """ADR-0018 T4: read-only tool discovery endpoints.
+
+    The daemon_env fixture builds the daemon with the real tool_catalog.yaml
+    (config/tool_catalog.yaml is loaded at lifespan), so these tests
+    exercise the actual catalog the frontend will see in production.
+    """
+
+    def test_catalog_returns_tools_and_archetypes(self, daemon_env):
+        client, _, _ = daemon_env
+        resp = client.get("/tools/catalog")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "version" in body and body["version"]
+        # The starter catalog defines >= 1 tool and >= 1 archetype.
+        assert isinstance(body["tools"], list) and len(body["tools"]) >= 1
+        assert isinstance(body["archetypes"], list) and len(body["archetypes"]) >= 1
+
+        # Each tool entry has the documented shape.
+        for td in body["tools"]:
+            assert {"name", "version", "description", "side_effects",
+                    "archetype_tags"} <= set(td.keys())
+            assert td["side_effects"] in (
+                "read_only", "network", "filesystem", "external"
+            )
+
+        # Archetype refs all resolve in the tools list (load-time integrity
+        # check should guarantee this — surface it as a regression alarm).
+        tool_keys = {f"{t['name']}.v{t['version']}" for t in body["tools"]}
+        for arch in body["archetypes"]:
+            assert "role" in arch
+            for ref in arch["standard_tools"]:
+                assert f"{ref['name']}.v{ref['version']}" in tool_keys
+
+    def test_kit_returns_default_kit_for_known_role(self, daemon_env):
+        client, _, _ = daemon_env
+        resp = client.get("/tools/kit/network_watcher")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["role"] == "network_watcher"
+        assert "catalog_version" in body
+        # network_watcher has a non-empty default kit in the starter catalog.
+        assert isinstance(body["tools"], list) and len(body["tools"]) >= 1
+        for t in body["tools"]:
+            assert {"name", "version", "description", "side_effects",
+                    "constraints", "applied_rules"} <= set(t.keys())
+            # Pre-profile defaults: no rules fired, conservative defaults.
+            assert t["applied_rules"] == []
+            assert t["constraints"]["max_calls_per_session"] == 1000
+            assert t["constraints"]["requires_human_approval"] is False
+            assert t["constraints"]["audit_every_call"] is True
+
+    def test_kit_unknown_role_returns_empty_kit(self, daemon_env):
+        # Roles without a catalog archetype entry get an empty kit, not a
+        # 404 — the trait engine knows about more roles than the catalog
+        # may have shipped archetypes for, and the UI should render
+        # "no default tools" rather than break.
+        client, _, _ = daemon_env
+        resp = client.get("/tools/kit/no_such_archetype")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["role"] == "no_such_archetype"
+        assert body["tools"] == []
+
+    def test_preview_includes_resolved_tools(self, daemon_env):
+        # The /preview response now carries `resolved_tools` so the
+        # frontend can render policy-applied per-tool badges. The
+        # network_watcher kit includes dns_lookup (side_effects=network),
+        # which a high-caution + high-thoroughness profile flips to
+        # requires_human_approval=True with max_calls_per_session=50.
+        client, _, _ = daemon_env
+        resp = client.post(
+            "/preview",
+            json={
+                "profile": {
+                    "role": "network_watcher",
+                    "trait_values": {"caution": 90, "thoroughness": 90},
+                },
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "resolved_tools" in body
+        assert isinstance(body["resolved_tools"], list)
+        assert len(body["resolved_tools"]) >= 1
+
+        by_name = {t["name"]: t for t in body["resolved_tools"]}
+        # dns_lookup is a network_watcher default and is a side_effects=
+        # network tool — both rules should fire under this profile.
+        if "dns_lookup" in by_name:
+            t = by_name["dns_lookup"]
+            assert t["side_effects"] == "network"
+            assert t["constraints"]["requires_human_approval"] is True
+            assert t["constraints"]["max_calls_per_session"] == 50
+            assert "high_caution_approval_on_side_effects" in t["applied_rules"]
+            assert "high_thoroughness_caps_external_calls" in t["applied_rules"]
+
+    def test_preview_resolved_tools_respects_overrides(self, daemon_env):
+        # tools_remove drops a default; the response's resolved_tools
+        # block reflects that.
+        client, _, _ = daemon_env
+        # Baseline kit size.
+        base = client.post(
+            "/preview",
+            json={"profile": {"role": "network_watcher"}},
+        ).json()
+        base_count = len(base["resolved_tools"])
+        base_names = {t["name"] for t in base["resolved_tools"]}
+        # Pick any one to remove that's actually present.
+        if "packet_query" in base_names:
+            removed = "packet_query"
+        else:
+            removed = next(iter(base_names))
+
+        cut = client.post(
+            "/preview",
+            json={
+                "profile": {"role": "network_watcher"},
+                "tools_remove": [removed],
+            },
+        ).json()
+        assert len(cut["resolved_tools"]) == base_count - 1
+        assert removed not in {t["name"] for t in cut["resolved_tools"]}
+        # Removing a tool changes the constitution_hash (tools are part
+        # of canonical_body per ADR-0018).
+        assert cut["constitution_hash_derived"] != base["constitution_hash_derived"]
+
+    def test_preview_unknown_tools_remove_returns_400(self, daemon_env):
+        client, _, _ = daemon_env
+        resp = client.post(
+            "/preview",
+            json={
+                "profile": {"role": "network_watcher"},
+                "tools_remove": ["definitely_not_a_real_tool"],
+            },
+        )
+        assert resp.status_code == 400
+        assert "definitely_not_a_real_tool" in resp.json()["detail"]

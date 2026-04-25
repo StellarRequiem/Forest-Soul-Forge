@@ -36,6 +36,7 @@ from forest_soul_forge.daemon.routers import audit as audit_router
 from forest_soul_forge.daemon.routers import health as health_router
 from forest_soul_forge.daemon.routers import preview as preview_router
 from forest_soul_forge.daemon.routers import runtime as runtime_router
+from forest_soul_forge.daemon.routers import tools as tools_router
 from forest_soul_forge.daemon.routers import traits as traits_router
 from forest_soul_forge.daemon.routers import writes as writes_router
 from forest_soul_forge.registry import Registry
@@ -188,6 +189,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(audit_router.router)
     app.include_router(runtime_router.router)
     app.include_router(traits_router.router)
+    app.include_router(tools_router.router)
     app.include_router(preview_router.router)
     app.include_router(writes_router.router)
     return app

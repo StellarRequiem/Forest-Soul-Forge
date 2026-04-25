@@ -26,6 +26,13 @@ function identityPayload() {
   // birth gets a real narrative voice; uncheck for deterministic /
   // reproducible artifact runs (tests, byte-stable regression checks).
   const enrichEl = document.getElementById("enrich-narrative");
+
+  // Tool overrides published by tools.js. Empty defaults preserve the
+  // archetype's standard kit; populated lists feed the same shape
+  // /preview was just called with so the constitution hash matches
+  // (ADR-0018 §"Reproducibility").
+  const toolOv = state.get("toolOverrides") || { tools_add: [], tools_remove: [] };
+
   return {
     agent_name: document.getElementById("agent-name").value.trim(),
     agent_version: document.getElementById("agent-version").value.trim() || "v1",
@@ -33,6 +40,8 @@ function identityPayload() {
     constitution_override:
       document.getElementById("constitution-override").value.trim() || null,
     enrich_narrative: enrichEl ? enrichEl.checked : null,
+    tools_add: toolOv.tools_add || [],
+    tools_remove: toolOv.tools_remove || [],
   };
 }
 

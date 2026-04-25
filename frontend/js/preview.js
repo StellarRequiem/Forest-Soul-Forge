@@ -94,6 +94,11 @@ async function runPreview() {
   const override =
     document.getElementById("constitution-override")?.value?.trim() || null;
 
+  // Tool overrides published by tools.js. Empty defaults reproduce the
+  // archetype's standard kit; anything else feeds the same shape /birth
+  // expects so /preview-with-overrides predicts the eventual hash.
+  const overrides = state.get("toolOverrides") || { tools_add: [], tools_remove: [] };
+
   const payload = {
     profile: {
       role,
@@ -101,6 +106,8 @@ async function runPreview() {
       domain_weight_overrides: profile.domain_weight_overrides || {},
     },
     constitution_override: override || null,
+    tools_add: overrides.tools_add || [],
+    tools_remove: overrides.tools_remove || [],
   };
 
   const mySeq = ++seq;
@@ -135,6 +142,11 @@ export function start() {
   // Trigger on profile changes (slider drag) and role changes.
   state.subscribe("profile", schedule);
   state.subscribe("selectedRole", schedule);
+  // Re-preview when the user toggles tools — the constitution_hash
+  // depends on the resolved tool surface (ADR-0018), and the
+  // resolved_tools block in the response feeds the per-tool live
+  // constraint badges.
+  state.subscribe("toolOverrides", schedule);
 
   // Override textarea is not in state; wire it directly.
   const override = document.getElementById("constitution-override");
