@@ -5,18 +5,28 @@ Output anatomy:
                            schema version, full trait_values dict. Anyone can
                            re-hash the trait block and compare to `dna` to verify.
     2. Header & intro:     human-readable role + DNA short form.
-    3. Domain sections:    ordered by effective weight (dominant first).
-    4. Core rules:         non-negotiable constraints shared by all v0.1 agents.
-    5. Profile warnings:   flagged combinations, if any.
-    6. Lineage footer:     ancestor DNA chain when the agent was spawned by
+    3. Voice (optional):   LLM-generated paragraphs in the agent's voice
+                           (per ADR-0017). Emitted only when a ``voice``
+                           argument is supplied; absent on legacy callers.
+                           Templated fallback when the active provider was
+                           unavailable at birth — provenance recorded in
+                           the ``_template_voice`` block.
+    4. Domain sections:    ordered by effective weight (dominant first).
+    5. Core rules:         non-negotiable constraints shared by all v0.1 agents.
+    6. Profile warnings:   flagged combinations, if any.
+    7. Lineage footer:     ancestor DNA chain when the agent was spawned by
                            another agent. Absent for root agents.
 
-Nothing here calls an LLM. The output IS the prompt.
+Nothing here calls an LLM directly — when ``voice`` is supplied, the
+caller (typically the daemon's writes router) has already invoked the
+provider and produced a :class:`VoiceText`. Soul generation itself stays
+sync and deterministic given its inputs.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from forest_soul_forge.core.trait_engine import (
     Trait,
@@ -24,6 +34,9 @@ from forest_soul_forge.core.trait_engine import (
     TraitProfile,
 )
 from forest_soul_forge.core.dna import Lineage, dna_full, dna_short
+
+if TYPE_CHECKING:
+    from forest_soul_forge.soul.voice_renderer import VoiceText
 
 # Trait value bands. These label the qualitative intensity that shows up in prose.
 BANDS: list[tuple[int, str]] = [
@@ -136,6 +149,7 @@ class SoulGenerator:
         instance_id: str | None = None,
         parent_instance: str | None = None,
         sibling_index: int | None = None,
+        voice: "VoiceText | None" = None,
     ) -> SoulDocument:
         """Generate a soul.md from a profile.
 
@@ -199,6 +213,7 @@ class SoulGenerator:
             instance_id=instance_id,
             parent_instance=parent_instance,
             sibling_index=sibling_index,
+            voice=voice,
         ))
 
         # ---- header ------------------------------------------------------
@@ -215,6 +230,18 @@ class SoulGenerator:
         lines.append("structured trait profile. The profile values are not suggestions — they are")
         lines.append("your operating defaults. Deviation from them requires an explicit human override.")
         lines.append("")
+
+        # ---- voice (optional) -------------------------------------------
+        # Per ADR-0017: when a VoiceText is supplied, render the `## Voice`
+        # section between the intro and the structured domain sections.
+        # Caller decides whether to invoke a provider; SoulGenerator just
+        # places what it's given. No-op when ``voice`` is None — preserves
+        # the legacy templated path for callers that don't enrich.
+        if voice is not None:
+            lines.append("## Voice")
+            lines.append("")
+            lines.append(voice.markdown.rstrip())
+            lines.append("")
 
         # ---- domain sections --------------------------------------------
         for domain_name in domain_order:
@@ -308,6 +335,7 @@ class SoulGenerator:
         instance_id: str | None = None,
         parent_instance: str | None = None,
         sibling_index: int | None = None,
+        voice: "VoiceText | None" = None,
     ) -> list[str]:
         """Hand-rolled YAML emitter — avoids the pyyaml dep at generation-time
         and guarantees a stable, sorted trait_values block (which keeps
@@ -337,6 +365,14 @@ class SoulGenerator:
         if constitution_hash is not None and constitution_file is not None:
             out.append(f'constitution_hash: "{constitution_hash}"')
             out.append(f'constitution_file: "{constitution_file}"')
+
+        # Narrative provenance (ADR-0017) — purely informational, not in any
+        # hash. Records which provider+model wrote the Voice section, or
+        # "template" when the LLM call was bypassed / failed.
+        if voice is not None:
+            out.append(f'narrative_provider: "{voice.provider}"')
+            out.append(f'narrative_model: "{voice.model}"')
+            out.append(f'narrative_generated_at: "{voice.generated_at}"')
 
         # Lineage
         if lineage.is_root():

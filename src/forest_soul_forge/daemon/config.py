@@ -123,6 +123,28 @@ class DaemonSettings(BaseSettings):
     local_model_tool_use: str | None = None
     local_timeout_s: float = Field(default=60.0, gt=0)
 
+    # ----- narrative voice (ADR-0017) -------------------------------------
+    # Per-birth global default for whether to invoke the active provider to
+    # write the `## Voice` section in soul.md. BirthRequest.enrich_narrative
+    # overrides per-request; this is the fallback when the field is None.
+    enrich_narrative_default: bool = Field(default=True)
+    # task_kind passed to provider.complete() when rendering the Voice
+    # section. Operators routing narrative voice through their conversation-
+    # tuned model set this to "conversation" without code changes — the
+    # model behind each task_kind is independently configurable via
+    # FSF_LOCAL_MODEL_<KIND> / FSF_FRONTIER_MODEL_<KIND> already.
+    narrative_task_kind: str = Field(
+        default="generate",
+        description=(
+            "Task kind label for narrative generation. Must parse to a "
+            "TaskKind value (classify|generate|safety_check|conversation|tool_use)."
+        ),
+    )
+    narrative_max_tokens: int = Field(default=400, ge=1, le=8192)
+    # When set, passed through as temperature=... to provider.complete().
+    # Unset → provider default (Ollama or upstream-side decides).
+    narrative_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+
     # ----- frontier provider (opt-in) -------------------------------------
     frontier_enabled: bool = Field(default=False)
     frontier_base_url: str = Field(

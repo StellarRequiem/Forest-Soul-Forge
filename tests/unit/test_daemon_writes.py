@@ -33,10 +33,21 @@ CONST_TEMPLATES = REPO_ROOT / "config" / "constitution_templates.yaml"
 
 
 class _StubProvider:
+    """Provider that never touches the network. Mirrors the public surface
+    of LocalProvider/FrontierProvider closely enough that route handlers
+    and the voice_renderer can't tell the difference: ``name``,
+    ``complete``, ``healthcheck``, plus a ``models`` attribute keyed by
+    TaskKind for narrative-tag resolution.
+    """
+
     name = "local"
 
     def __init__(self) -> None:
         self._models = {k: "stub:latest" for k in TaskKind}
+
+    @property
+    def models(self) -> dict:
+        return dict(self._models)
 
     async def complete(self, prompt, *, task_kind=TaskKind.CONVERSATION, **_):
         return f"[stub] {prompt}"
@@ -79,6 +90,12 @@ def write_env(tmp_path: Path):
         default_provider="local",
         frontier_enabled=False,
         allow_write_endpoints=True,
+        # Keep existing tests deterministic — narrative enrichment
+        # (ADR-0017) defaults off in this fixture so soul.md contents
+        # stay byte-stable across runs. Tests that exercise enrichment
+        # opt in explicitly by passing enrich_narrative=True per request,
+        # or via the dedicated enrich_env fixture below.
+        enrich_narrative_default=False,
     )
     app = build_app(settings)
     with TestClient(app) as client:
@@ -539,3 +556,283 @@ class TestPreviewEndpoint:
             },
         )
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# ADR-0017 — LLM-enriched soul.md narrative
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def enrich_env(tmp_path: Path):
+    """Variant of write_env with ``enrich_narrative_default=True`` so the
+    settings-default fallback path is exercisable.
+
+    Tests that don't depend on the global default can use ``write_env``
+    and pass ``enrich_narrative=True`` per request instead.
+    """
+    if not TRAIT_TREE.exists() or not CONST_TEMPLATES.exists():
+        pytest.skip("fixtures missing")
+
+    db = tmp_path / "registry.sqlite"
+    audit = tmp_path / "audit.jsonl"
+    souls = tmp_path / "souls"
+
+    settings = DaemonSettings(
+        registry_db_path=db,
+        artifacts_dir=souls,
+        audit_chain_path=audit,
+        trait_tree_path=TRAIT_TREE,
+        constitution_templates_path=CONST_TEMPLATES,
+        soul_output_dir=souls,
+        default_provider="local",
+        frontier_enabled=False,
+        allow_write_endpoints=True,
+        enrich_narrative_default=True,
+    )
+    app = build_app(settings)
+    with TestClient(app) as client:
+        app.state.providers = ProviderRegistry(
+            providers={"local": _StubProvider(), "frontier": _StubProvider()},
+            default="local",
+        )
+        yield client, app, tmp_path
+
+
+def _read_soul(soul_path: str) -> str:
+    return Path(soul_path).read_text(encoding="utf-8")
+
+
+class TestEnrichNarrative:
+    """ADR-0017 — LLM-enriched soul.md `## Voice` section.
+
+    Confirms: enrich_narrative=True triggers a provider.complete() call
+    and inserts a Voice section + narrative_* frontmatter; False bypasses
+    it; the settings default applies when the field is absent; provider
+    failures fall back to the template; and the audit chain captures the
+    narrative provenance.
+    """
+
+    def test_enrich_true_inserts_voice_section(self, write_env):
+        client, _, _ = write_env
+        body = _sample_birth_body(agent_name="VoiceWatcher")
+        body["enrich_narrative"] = True
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 201, resp.text
+        soul_text = _read_soul(resp.json()["soul_path"])
+        assert "## Voice" in soul_text
+        # Stub provider returns "[stub] {prompt}" so the rendered voice
+        # body starts with that prefix.
+        assert "[stub]" in soul_text
+        # Frontmatter records provenance.
+        assert 'narrative_provider: "local"' in soul_text
+        assert 'narrative_model: "stub:latest"' in soul_text
+        assert "narrative_generated_at:" in soul_text
+
+    def test_enrich_false_no_voice_section(self, write_env):
+        client, _, _ = write_env
+        body = _sample_birth_body(agent_name="QuietWatcher")
+        body["enrich_narrative"] = False
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 201, resp.text
+        soul_text = _read_soul(resp.json()["soul_path"])
+        assert "## Voice" not in soul_text
+        assert "narrative_provider" not in soul_text
+        assert "narrative_model" not in soul_text
+
+    def test_enrich_default_settings_path(self, enrich_env):
+        """When request omits the field, FSF_ENRICH_NARRATIVE_DEFAULT applies."""
+        client, _, _ = enrich_env
+        body = _sample_birth_body(agent_name="DefaultWatcher")
+        # No enrich_narrative key → falls through to settings (which is
+        # True in this fixture).
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 201, resp.text
+        soul_text = _read_soul(resp.json()["soul_path"])
+        assert "## Voice" in soul_text
+        assert 'narrative_provider: "local"' in soul_text
+
+    def test_provider_unavailable_falls_back_to_template(
+        self, write_env, monkeypatch
+    ):
+        """When provider.complete raises, voice_renderer returns a templated
+        VoiceText with provider="template". Soul still has the section,
+        frontmatter records the fallback, /birth still succeeds.
+        """
+        from forest_soul_forge.daemon.providers import ProviderUnavailable
+
+        client, app, _ = write_env
+
+        async def raise_unavailable(*_a, **_k):
+            raise ProviderUnavailable("ollama unreachable at http://stub")
+
+        monkeypatch.setattr(
+            app.state.providers.active(), "complete", raise_unavailable, raising=False
+        )
+
+        body = _sample_birth_body(agent_name="FallbackWatcher")
+        body["enrich_narrative"] = True
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 201, resp.text
+        soul_text = _read_soul(resp.json()["soul_path"])
+        assert "## Voice" in soul_text
+        assert 'narrative_provider: "template"' in soul_text
+        assert 'narrative_model: "template"' in soul_text
+        # Templated body marks itself with the italic provenance line.
+        assert "_(template fallback —" in soul_text
+
+    def test_audit_event_carries_narrative_fields(self, write_env):
+        """The agent_created audit event_data records narrative_*."""
+        client, _, _ = write_env
+        body = _sample_birth_body(agent_name="AuditedVoice")
+        body["enrich_narrative"] = True
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 201, resp.text
+        instance_id = resp.json()["instance_id"]
+
+        # Pull the audit tail and find the agent_created event for this
+        # instance — its event_json should contain the narrative_* fields.
+        tail = client.get("/audit/tail", params={"n": 50}).json()
+        created = [
+            e
+            for e in tail["events"]
+            if e["event_type"] == "agent_created"
+            and e["instance_id"] == instance_id
+        ]
+        assert len(created) == 1, f"expected one agent_created event, got {created}"
+        import json as _json
+        ev = _json.loads(created[0]["event_json"])
+        assert ev.get("narrative_provider") == "local"
+        assert ev.get("narrative_model") == "stub:latest"
+        assert "narrative_generated_at" in ev
+
+    def test_spawn_with_enrich_true_inserts_voice(self, write_env):
+        """Spawn path mirrors birth — voice renderer is invoked, child
+        soul.md gets the Voice section + narrative_* frontmatter."""
+        client, _, _ = write_env
+        # Birth a parent first (deterministic, no voice).
+        parent_body = _sample_birth_body(agent_name="Parent")
+        parent_body["enrich_narrative"] = False
+        parent = client.post("/birth", json=parent_body).json()
+        # Now spawn a child WITH enrichment.
+        child_body = _sample_birth_body(agent_name="Child")
+        child_body["enrich_narrative"] = True
+        child_body["parent_instance_id"] = parent["instance_id"]
+        resp = client.post("/spawn", json=child_body)
+        assert resp.status_code == 201, resp.text
+        soul_text = _read_soul(resp.json()["soul_path"])
+        assert "## Voice" in soul_text
+        assert 'narrative_provider: "local"' in soul_text
+
+
+class TestVoiceRendererUnit:
+    """Direct unit tests for forest_soul_forge.soul.voice_renderer.render_voice.
+
+    These bypass the daemon entirely and exercise the renderer's
+    error-handling contract: provider exceptions become templated
+    VoiceText, the system prompt is delivered to the provider's
+    complete() call, and the model tag is resolved from .models.
+    """
+
+    def _profile_and_engine(self):
+        """Build a real profile against the real trait engine."""
+        if not TRAIT_TREE.exists():
+            pytest.skip(f"trait tree missing at {TRAIT_TREE}")
+        from forest_soul_forge.core.trait_engine import TraitEngine
+        engine = TraitEngine(TRAIT_TREE)
+        profile = engine.build_profile(role="network_watcher")
+        return profile, engine
+
+    def test_happy_path_returns_provider_text(self):
+        from forest_soul_forge.core.dna import Lineage
+        from forest_soul_forge.soul.voice_renderer import render_voice
+        import asyncio
+
+        profile, engine = self._profile_and_engine()
+        provider = _StubProvider()
+        settings = DaemonSettings(
+            registry_db_path=Path("/tmp/x.sqlite"),
+            artifacts_dir=Path("/tmp/x"),
+            audit_chain_path=Path("/tmp/x.jsonl"),
+            trait_tree_path=TRAIT_TREE,
+            constitution_templates_path=CONST_TEMPLATES,
+        )
+        role = engine.get_role(profile.role)
+        result = asyncio.run(
+            render_voice(
+                provider,
+                profile=profile,
+                role=role,
+                engine=engine,
+                lineage=Lineage.root(),
+                settings=settings,
+            )
+        )
+        assert result.provider == "local"
+        assert result.model == "stub:latest"
+        assert result.markdown.startswith("[stub]")
+        assert result.generated_at  # non-empty timestamp
+
+    def test_provider_unavailable_returns_template(self):
+        from forest_soul_forge.core.dna import Lineage
+        from forest_soul_forge.daemon.providers import ProviderUnavailable
+        from forest_soul_forge.soul.voice_renderer import render_voice
+        import asyncio
+
+        profile, engine = self._profile_and_engine()
+
+        class _BadProvider(_StubProvider):
+            async def complete(self, *_a, **_k):
+                raise ProviderUnavailable("simulated outage")
+
+        provider = _BadProvider()
+        settings = DaemonSettings(
+            registry_db_path=Path("/tmp/x.sqlite"),
+            artifacts_dir=Path("/tmp/x"),
+            audit_chain_path=Path("/tmp/x.jsonl"),
+            trait_tree_path=TRAIT_TREE,
+            constitution_templates_path=CONST_TEMPLATES,
+        )
+        role = engine.get_role(profile.role)
+        result = asyncio.run(
+            render_voice(
+                provider,
+                profile=profile,
+                role=role,
+                engine=engine,
+                lineage=Lineage.root(),
+                settings=settings,
+            )
+        )
+        assert result.provider == "template"
+        assert result.model == "template"
+        assert "_(template fallback —" in result.markdown
+
+    def test_invalid_task_kind_returns_template_with_note(self):
+        """A misconfigured FSF_NARRATIVE_TASK_KIND falls back to template
+        with a diagnostic note, rather than raising at birth time."""
+        from forest_soul_forge.core.dna import Lineage
+        from forest_soul_forge.soul.voice_renderer import render_voice
+        import asyncio
+
+        profile, engine = self._profile_and_engine()
+        provider = _StubProvider()
+        settings = DaemonSettings(
+            registry_db_path=Path("/tmp/x.sqlite"),
+            artifacts_dir=Path("/tmp/x"),
+            audit_chain_path=Path("/tmp/x.jsonl"),
+            trait_tree_path=TRAIT_TREE,
+            constitution_templates_path=CONST_TEMPLATES,
+            narrative_task_kind="not_a_real_kind",
+        )
+        role = engine.get_role(profile.role)
+        result = asyncio.run(
+            render_voice(
+                provider,
+                profile=profile,
+                role=role,
+                engine=engine,
+                lineage=Lineage.root(),
+                settings=settings,
+            )
+        )
+        assert result.provider == "template"
+        assert "invalid FSF_NARRATIVE_TASK_KIND" in result.markdown

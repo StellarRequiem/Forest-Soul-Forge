@@ -17,9 +17,20 @@ Serialization: every handler runs under ``app.state.write_lock`` (a
 ``threading.Lock``). FastAPI dispatches sync routes on a threadpool, so
 a thread-level lock is the right primitive. This also guards the
 ``next_sibling_index`` → ``INSERT`` race on twin births.
+
+Phase 4 (ADR-0017): when ``enrich_narrative`` resolves true, the LLM-
+backed Voice renderer is called *outside* the write lock. Holding a
+threading lock across a 1-4s network call would serialize unrelated
+births for no benefit — the renderer's only side effect is the returned
+``VoiceText``, not registry state. We bridge async-to-sync via
+``asyncio.run()`` because the handlers are sync (FastAPI threadpool
+dispatch). Provider failures at the renderer level are caught inside
+the renderer and produce a templated fallback; ``/birth`` never fails
+because Ollama is down.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import threading
@@ -42,6 +53,7 @@ from forest_soul_forge.core.trait_engine import (
 from forest_soul_forge.daemon.config import DaemonSettings
 from forest_soul_forge.daemon.deps import (
     get_audit_chain,
+    get_provider_registry,
     get_registry,
     get_settings,
     get_trait_engine,
@@ -53,6 +65,7 @@ from forest_soul_forge.daemon.idempotency import (
     compute_request_hash,
     get_idempotency_key,
 )
+from forest_soul_forge.daemon.providers import ProviderRegistry
 from forest_soul_forge.daemon.schemas import (
     AgentOut,
     ArchiveRequest,
@@ -68,6 +81,7 @@ from forest_soul_forge.registry.registry import (
     UnknownAgentError,
 )
 from forest_soul_forge.soul.generator import SoulGenerator
+from forest_soul_forge.soul.voice_renderer import VoiceText, render_voice
 
 
 router = APIRouter(
@@ -258,6 +272,61 @@ def _cache_response(
     )
 
 
+def _resolve_enrich(req_value: bool | None, settings: DaemonSettings) -> bool:
+    """Three-state precedence: explicit request value > settings default."""
+    return req_value if req_value is not None else settings.enrich_narrative_default
+
+
+def _maybe_render_voice(
+    *,
+    enrich: bool,
+    providers: ProviderRegistry,
+    profile,
+    engine: TraitEngine,
+    lineage: Lineage,
+    settings: DaemonSettings,
+) -> VoiceText | None:
+    """Render the Voice section sync-callably.
+
+    Returns ``None`` when enrich is False — caller must distinguish "no
+    Voice section" from "templated fallback because provider was down"
+    (the renderer handles the latter internally and returns a VoiceText
+    with provider="template").
+
+    Bridges the renderer's async API into the sync writes handler via
+    ``asyncio.run()``. New event loop per call, torn down after — fine
+    in a threadpool worker, no conflict with FastAPI's main loop.
+    """
+    if not enrich:
+        return None
+    role = engine.get_role(profile.role)
+    return asyncio.run(
+        render_voice(
+            providers.active(),
+            profile=profile,
+            role=role,
+            engine=engine,
+            lineage=lineage,
+            settings=settings,
+        )
+    )
+
+
+def _voice_event_fields(voice: VoiceText | None) -> dict:
+    """Optional narrative_* fields for audit event_data.
+
+    Returns an empty dict when voice is None so callers can ``**spread``
+    into the event payload without conditionals.
+    """
+    if voice is None:
+        return {}
+    return {
+        "narrative_provider": voice.provider,
+        "narrative_model": voice.model,
+        "narrative_generated_at": voice.generated_at,
+    }
+
+
 def _chain_entry_to_parsed(entry: ChainEntry) -> ParsedAuditEntry:
     """Lift a :class:`ChainEntry` into a :class:`ParsedAuditEntry`.
 
@@ -288,6 +357,7 @@ def birth(
     audit: AuditChain = Depends(get_audit_chain),
     lock: threading.Lock = Depends(get_write_lock),
     settings: DaemonSettings = Depends(get_settings),
+    providers: ProviderRegistry = Depends(get_provider_registry),
 ):
     idempotency_key = get_idempotency_key(request)
     request_hash = compute_request_hash("/birth", req.model_dump(mode="json"))
@@ -310,6 +380,19 @@ def birth(
 
     effective_hash = _derive_constitution_hash(
         constitution.constitution_hash, req.constitution_override
+    )
+
+    # Phase 4 (ADR-0017): render the Voice section before the lock.
+    # Provider errors are caught inside the renderer and converted to a
+    # templated VoiceText, so this never raises.
+    enrich = _resolve_enrich(req.enrich_narrative, settings)
+    voice = _maybe_render_voice(
+        enrich=enrich,
+        providers=providers,
+        profile=profile,
+        engine=engine,
+        lineage=lineage,
+        settings=settings,
     )
 
     with lock:
@@ -338,6 +421,7 @@ def birth(
             constitution_file=const_path.name,
             instance_id=instance_id,
             sibling_index=sibling_index,
+            voice=voice,
         )
         constitution_yaml = constitution.to_yaml(generated_at=soul_doc.generated_at)
         if req.constitution_override:
@@ -367,6 +451,7 @@ def birth(
             "soul_path": str(soul_path),
             "constitution_path": str(const_path),
             "owner_id": req.owner_id,
+            **_voice_event_fields(voice),
         }
         try:
             entry = audit.append("agent_created", event_data, agent_dna=dna_s)
@@ -407,6 +492,7 @@ def spawn(
     audit: AuditChain = Depends(get_audit_chain),
     lock: threading.Lock = Depends(get_write_lock),
     settings: DaemonSettings = Depends(get_settings),
+    providers: ProviderRegistry = Depends(get_provider_registry),
 ):
     idempotency_key = get_idempotency_key(request)
     request_hash = compute_request_hash("/spawn", req.model_dump(mode="json"))
@@ -441,6 +527,16 @@ def spawn(
         constitution.constitution_hash, req.constitution_override
     )
 
+    enrich = _resolve_enrich(req.enrich_narrative, settings)
+    voice = _maybe_render_voice(
+        enrich=enrich,
+        providers=providers,
+        profile=profile,
+        engine=engine,
+        lineage=child_lineage,
+        settings=settings,
+    )
+
     with lock:
         cached = _maybe_replay_cached(
             registry, idempotency_key, "/spawn", request_hash
@@ -465,6 +561,7 @@ def spawn(
             instance_id=instance_id,
             parent_instance=parent_row.instance_id,
             sibling_index=sibling_index,
+            voice=voice,
         )
         constitution_yaml = constitution.to_yaml(generated_at=soul_doc.generated_at)
         if req.constitution_override:
@@ -497,6 +594,7 @@ def spawn(
             "soul_path": str(soul_path),
             "constitution_path": str(const_path),
             "owner_id": req.owner_id,
+            **_voice_event_fields(voice),
         }
         try:
             entry = audit.append("agent_spawned", event_data, agent_dna=dna_s)

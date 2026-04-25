@@ -73,6 +73,12 @@ class BirthRequest(BaseModel):
     if provided, it is treated as additional policy text that the daemon
     hashes alongside the derived constitution. Absent means "use the
     engine-derived constitution untouched".
+
+    ``enrich_narrative`` is the per-request opt-out introduced by
+    ADR-0017. ``None`` (default) means "use the daemon's
+    ``enrich_narrative_default`` setting"; explicit ``True`` / ``False``
+    overrides for this birth only. False bypasses the LLM call entirely
+    — useful for tests and reproducible benchmarks.
     """
 
     profile: TraitProfileIn
@@ -84,6 +90,14 @@ class BirthRequest(BaseModel):
         description=(
             "Optional YAML snippet merged over the derived constitution. "
             "When present, the combined hash is what ends up in the soul."
+        ),
+    )
+    enrich_narrative: bool | None = Field(
+        default=None,
+        description=(
+            "When true, the daemon invokes the active provider to write the "
+            "soul.md `## Voice` section (ADR-0017). When false, always use "
+            "the templated fallback. None defers to FSF_ENRICH_NARRATIVE_DEFAULT."
         ),
     )
 
