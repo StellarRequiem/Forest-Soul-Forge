@@ -81,7 +81,11 @@ from forest_soul_forge.registry.registry import (
     UnknownAgentError,
 )
 from forest_soul_forge.soul.generator import SoulGenerator
-from forest_soul_forge.soul.voice_renderer import VoiceText, render_voice
+from forest_soul_forge.soul.voice_renderer import (
+    VoiceText,
+    render_voice,
+    update_soul_voice,
+)
 
 
 router = APIRouter(
@@ -621,6 +625,159 @@ def spawn(
             out,
         )
         return out
+
+
+# ---------------------------------------------------------------------------
+# /agents/{instance_id}/regenerate-voice — re-run the LLM voice renderer
+# ---------------------------------------------------------------------------
+@router.post("/agents/{instance_id}/regenerate-voice", response_model=AgentOut)
+def regenerate_voice(
+    instance_id: str,
+    request: Request,
+    registry: Registry = Depends(get_registry),
+    engine: TraitEngine = Depends(get_trait_engine),
+    audit: AuditChain = Depends(get_audit_chain),
+    lock: threading.Lock = Depends(get_write_lock),
+    settings: DaemonSettings = Depends(get_settings),
+    providers: ProviderRegistry = Depends(get_provider_registry),
+):
+    """Re-run the Voice renderer for an existing agent (ADR-0017 follow-up).
+
+    The agent's identity (dna, instance_id, constitution_hash) is
+    unchanged. Only the soul.md ``## Voice`` body and the three
+    narrative_* frontmatter fields are rewritten in-place. An audit
+    event ``voice_regenerated`` records the before/after provider+model
+    so the chain captures the prompt-iteration history.
+
+    Useful for tuning prompts or comparing output across providers
+    without spinning up new agents and polluting the registry.
+    """
+    try:
+        row = registry.get_agent(instance_id)
+    except UnknownAgentError as e:
+        raise HTTPException(status_code=404, detail=f"unknown agent: {e}") from e
+
+    soul_path = Path(row.soul_path)
+    if not soul_path.exists():
+        # Disk drift — registry has the row but the file is gone. Refuse
+        # to regenerate; rebuild-from-artifacts is the right repair path.
+        raise HTTPException(
+            status_code=409,
+            detail=f"soul file missing on disk: {soul_path}",
+        )
+
+    # Reconstruct the trait profile from the existing soul.md frontmatter.
+    # Pulls trait_values + role + domain_weight_overrides directly so we
+    # don't need them on the registry row.
+    parsed_text = soul_path.read_text(encoding="utf-8")
+    fm_match = _ingest._FRONTMATTER_RE.match(parsed_text)
+    if fm_match is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"soul file has no parseable frontmatter: {soul_path}",
+        )
+    frontmatter = _ingest._parse_frontmatter_block(fm_match.group(1))
+    # The tolerant frontmatter parser returns scalars for inline `{}`
+    # placeholders (e.g. SoulGenerator emits `domain_weight_overrides: {}`
+    # literally). Coerce non-dict values to empty maps so build_profile
+    # gets the shape it expects.
+    trait_values = frontmatter.get("trait_values")
+    if not isinstance(trait_values, dict):
+        trait_values = {}
+    domain_weight_overrides = frontmatter.get("domain_weight_overrides")
+    if not isinstance(domain_weight_overrides, dict):
+        domain_weight_overrides = {}
+
+    try:
+        profile = engine.build_profile(
+            role=row.role,
+            overrides={k: int(v) for k, v in trait_values.items()},
+            domain_weight_overrides={
+                k: float(v) for k, v in domain_weight_overrides.items()
+            },
+        )
+    except (UnknownRoleError, UnknownTraitError, InvalidTraitValueError, TraitSchemaError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"could not reconstruct profile from soul.md: {e}",
+        ) from e
+
+    # Reconstruct lineage from registry — same shape /spawn uses.
+    if row.parent_instance:
+        try:
+            parent_row = registry.get_agent(row.parent_instance)
+            ancestors_rows = registry.get_ancestors(row.parent_instance)
+            root_first = list(reversed(ancestors_rows))
+            parent_lineage_ancestors = tuple(r.dna for r in root_first)
+            parent_lineage = Lineage(
+                parent_dna=parent_row.dna,
+                ancestors=parent_lineage_ancestors,
+                spawned_by=parent_row.agent_name,
+            )
+            lineage = Lineage.from_parent(
+                parent_dna=parent_row.dna,
+                parent_lineage=parent_lineage,
+                parent_agent_name=parent_row.agent_name,
+            )
+        except UnknownAgentError:
+            lineage = Lineage.root()
+    else:
+        lineage = Lineage.root()
+
+    # Render the new voice. Renderer catches provider errors internally
+    # and returns a templated VoiceText, so this never raises — same
+    # contract as /birth.
+    new_voice = _maybe_render_voice(
+        enrich=True,
+        providers=providers,
+        profile=profile,
+        engine=engine,
+        lineage=lineage,
+        settings=settings,
+    )
+    if new_voice is None:
+        # _maybe_render_voice only returns None when enrich=False, which
+        # we never pass here. Defensive guard.
+        raise HTTPException(status_code=500, detail="voice renderer returned None")
+
+    with lock:
+        # Patch the soul.md in place. Audit event records before/after.
+        prev_provider = frontmatter.get("narrative_provider")
+        prev_model = frontmatter.get("narrative_model")
+        try:
+            update_soul_voice(soul_path, new_voice)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"soul.md voice update failed: {e}",
+            ) from e
+
+        event_data = {
+            "instance_id": instance_id,
+            "agent_name": row.agent_name,
+            "role": row.role,
+            "previous_provider": prev_provider,
+            "previous_model": prev_model,
+            "narrative_provider": new_voice.provider,
+            "narrative_model": new_voice.model,
+            "narrative_generated_at": new_voice.generated_at,
+            "soul_path": str(soul_path),
+        }
+        try:
+            entry = audit.append("voice_regenerated", event_data, agent_dna=row.dna)
+        except Exception as e:
+            # Soul.md was updated but the audit append failed. Don't try
+            # to roll back the file — auditors can detect the drift via
+            # rebuild-from-artifacts if needed. Surface the error.
+            raise HTTPException(
+                status_code=500,
+                detail=f"audit append failed: {e}",
+            ) from e
+        registry.register_audit_event(
+            _chain_entry_to_parsed(entry), instance_id=instance_id
+        )
+
+    return _to_agent_out(registry.get_agent(instance_id))
 
 
 # ---------------------------------------------------------------------------

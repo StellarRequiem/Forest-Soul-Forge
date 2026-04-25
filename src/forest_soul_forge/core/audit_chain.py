@@ -46,6 +46,11 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "agent_spawned",
     "agent_archived",
     "constitution_regenerated",
+    # Per ADR-0017: re-running the soul.md `## Voice` renderer against
+    # an existing agent. The agent's identity (dna, instance_id,
+    # constitution_hash) is unchanged; only the Voice section and the
+    # narrative_* frontmatter fields are rewritten.
+    "voice_regenerated",
     "manual_override",
     "drift_detected",
     "finding_emitted",

@@ -723,6 +723,116 @@ class TestEnrichNarrative:
         assert 'narrative_provider: "local"' in soul_text
 
 
+class TestRegenerateVoice:
+    """POST /agents/{id}/regenerate-voice — re-runs the renderer in place.
+
+    Verifies the soul.md is patched (not rewritten end-to-end), the
+    audit chain captures a voice_regenerated event with before/after
+    provider+model, and the agent's identity (dna, constitution_hash)
+    is unchanged.
+    """
+
+    def _birth_unenriched(self, client, name="RegenSubject"):
+        body = _sample_birth_body(agent_name=name)
+        body["enrich_narrative"] = False
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    def test_regenerate_voice_inserts_section_when_missing(self, write_env):
+        client, _, _ = write_env
+        agent = self._birth_unenriched(client, "RegenA")
+        soul_text_before = Path(agent["soul_path"]).read_text(encoding="utf-8")
+        assert "## Voice" not in soul_text_before
+        assert "narrative_provider" not in soul_text_before
+
+        resp = client.post(
+            f"/agents/{agent['instance_id']}/regenerate-voice"
+        )
+        assert resp.status_code == 200, resp.text
+
+        soul_text_after = Path(agent["soul_path"]).read_text(encoding="utf-8")
+        assert "## Voice" in soul_text_after
+        assert 'narrative_provider: "local"' in soul_text_after
+        assert 'narrative_model: "stub:latest"' in soul_text_after
+        # Identity invariants unchanged.
+        assert f'dna: {agent["dna"]}' in soul_text_after
+        assert f'constitution_hash: "{agent["constitution_hash"]}"' in soul_text_after
+
+    def test_regenerate_voice_replaces_existing_section(self, write_env, monkeypatch):
+        """When soul already has a Voice section + narrative_* fields,
+        regenerate replaces both with the new values."""
+        client, app, _ = write_env
+
+        # First birth — enriched, gives us a Voice section + narrative_* lines.
+        body = _sample_birth_body(agent_name="RegenB")
+        body["enrich_narrative"] = True
+        agent = client.post("/birth", json=body).json()
+        text_v1 = Path(agent["soul_path"]).read_text(encoding="utf-8")
+        assert text_v1.count("## Voice") == 1
+        assert text_v1.count("narrative_provider:") == 1
+
+        # Swap the stub provider's complete to return DIFFERENT content
+        # so we can detect that the regenerate actually pulled new text.
+        async def custom_complete(prompt, *, task_kind, **_):
+            return "REGENERATED_VOICE_CONTENT_MARKER"
+
+        monkeypatch.setattr(
+            app.state.providers.active(), "complete", custom_complete, raising=False
+        )
+
+        resp = client.post(f"/agents/{agent['instance_id']}/regenerate-voice")
+        assert resp.status_code == 200, resp.text
+
+        text_v2 = Path(agent["soul_path"]).read_text(encoding="utf-8")
+        # Still exactly ONE Voice section and ONE narrative_provider line —
+        # the regenerate replaced, didn't duplicate.
+        assert text_v2.count("## Voice") == 1
+        assert text_v2.count("narrative_provider:") == 1
+        # New content is in the file.
+        assert "REGENERATED_VOICE_CONTENT_MARKER" in text_v2
+        # Old stub content is gone.
+        assert "[stub] " not in text_v2.split("## Voice")[1].split("## ")[0]
+
+    def test_regenerate_voice_unknown_agent_404(self, write_env):
+        client, _, _ = write_env
+        resp = client.post("/agents/not-a-real-id/regenerate-voice")
+        assert resp.status_code == 404
+
+    def test_regenerate_voice_missing_soul_file_409(self, write_env):
+        client, _, _ = write_env
+        agent = self._birth_unenriched(client, "RegenC")
+        # Simulate file drift — soul.md gone but registry row still there.
+        Path(agent["soul_path"]).unlink()
+
+        resp = client.post(f"/agents/{agent['instance_id']}/regenerate-voice")
+        assert resp.status_code == 409
+        assert "soul file missing" in resp.json()["detail"]
+
+    def test_regenerate_voice_audits_event(self, write_env):
+        client, _, _ = write_env
+        agent = self._birth_unenriched(client, "RegenD")
+
+        resp = client.post(f"/agents/{agent['instance_id']}/regenerate-voice")
+        assert resp.status_code == 200
+
+        tail = client.get("/audit/tail", params={"n": 50}).json()
+        regens = [
+            e for e in tail["events"]
+            if e["event_type"] == "voice_regenerated"
+            and e["instance_id"] == agent["instance_id"]
+        ]
+        assert len(regens) == 1
+        import json as _json
+        ev = _json.loads(regens[0]["event_json"])
+        # prev_provider/model are None (was unenriched birth).
+        assert ev.get("previous_provider") is None
+        assert ev.get("previous_model") is None
+        assert ev.get("narrative_provider") == "local"
+        assert ev.get("narrative_model") == "stub:latest"
+        assert "narrative_generated_at" in ev
+
+
 class TestVoiceRendererUnit:
     """Direct unit tests for forest_soul_forge.soul.voice_renderer.render_voice.
 

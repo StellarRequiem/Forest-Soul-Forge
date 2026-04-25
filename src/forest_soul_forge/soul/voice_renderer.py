@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+import re
+
 from forest_soul_forge.core.dna import Lineage
 from forest_soul_forge.daemon.providers import (
     ProviderDisabled,
@@ -256,6 +258,128 @@ def _build_user_prompt(
         f"{lineage_note}\n\n"
         "Write the Voice section per the rules in the system prompt."
     )
+
+
+# ---------------------------------------------------------------------------
+# Surgical update of an existing soul.md (used by /agents/{id}/regenerate-voice)
+# ---------------------------------------------------------------------------
+_FRONTMATTER_RE = re.compile(r"\A(---\s*\n)(.*?)(\n---\s*(?:\n|$))", re.DOTALL)
+_NARRATIVE_LINE_RE = re.compile(
+    r"^narrative_(provider|model|generated_at):.*$", re.MULTILINE
+)
+
+
+def update_soul_voice(soul_path, voice: VoiceText) -> None:
+    """Rewrite soul.md with a new ``## Voice`` section + narrative_* fields.
+
+    Used by the regenerate-voice endpoint. Preserves all other content
+    byte-for-byte: identity frontmatter (dna, constitution_hash, lineage,
+    trait_values), the templated trait readout, core rules, lineage
+    footer. Only the three narrative_* lines and the body of the
+    ``## Voice`` section change.
+
+    If the soul was birthed without enrichment (no Voice section, no
+    narrative_* fields), this function inserts both for the first time.
+    """
+    from pathlib import Path
+    p = Path(soul_path)
+    text = p.read_text(encoding="utf-8")
+
+    text = _replace_or_insert_narrative_fields(text, voice)
+    text = _replace_or_insert_voice_section(text, voice.markdown)
+
+    p.write_text(text, encoding="utf-8")
+
+
+def _replace_or_insert_narrative_fields(text: str, voice: VoiceText) -> str:
+    """Update the three narrative_* lines in the YAML frontmatter.
+
+    If the lines exist, replace them. Otherwise insert them right after
+    ``constitution_file:`` (matches the position SoulGenerator emits).
+    """
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        # Soul has no frontmatter — leave untouched. Caller-side validation
+        # should have caught this; the daemon never produces such files.
+        return text
+    open_, body, close_ = m.group(1), m.group(2), m.group(3)
+
+    new_lines = [
+        f'narrative_provider: "{voice.provider}"',
+        f'narrative_model: "{voice.model}"',
+        f'narrative_generated_at: "{voice.generated_at}"',
+    ]
+    new_block = "\n".join(new_lines)
+
+    if _NARRATIVE_LINE_RE.search(body):
+        # Replace each existing line. Order in the original file is
+        # preserved by replacing them individually.
+        body = re.sub(
+            r"^narrative_provider:.*$",
+            new_lines[0],
+            body,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        body = re.sub(
+            r"^narrative_model:.*$",
+            new_lines[1],
+            body,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        body = re.sub(
+            r"^narrative_generated_at:.*$",
+            new_lines[2],
+            body,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    else:
+        # Insert after the constitution_file line. If that's missing
+        # (legacy), append before the closing fence — the parser only
+        # cares about presence, not position.
+        cf_re = re.compile(r"^(constitution_file:.*)$", re.MULTILINE)
+        if cf_re.search(body):
+            body = cf_re.sub(r"\1\n" + new_block, body, count=1)
+        else:
+            body = body.rstrip() + "\n" + new_block
+
+    return open_ + body + close_ + text[m.end():]
+
+
+def _replace_or_insert_voice_section(text: str, voice_markdown: str) -> str:
+    """Replace or insert the body's ``## Voice`` section.
+
+    Section boundary: from ``## Voice`` heading line through (but not
+    including) the next ``## `` heading or end-of-file. If absent,
+    inserted just before the first ``## `` heading after the closing
+    frontmatter fence — that's the position SoulGenerator uses.
+    """
+    voice_block = f"## Voice\n\n{voice_markdown.rstrip()}\n\n"
+
+    # Detect existing section.
+    voice_re = re.compile(
+        r"(^## Voice\s*\n)"  # the heading itself
+        r".*?"                # the section body
+        r"(?=^## |\Z)",       # up to next ## heading or EOF
+        re.DOTALL | re.MULTILINE,
+    )
+    if voice_re.search(text):
+        return voice_re.sub(voice_block, text, count=1)
+
+    # Insert before the FIRST ## heading that appears AFTER the closing
+    # frontmatter fence — that's where domain sections start. SoulGenerator
+    # places Voice right above them.
+    fm_close = text.find("\n---\n", 0)
+    search_from = fm_close + 5 if fm_close != -1 else 0
+    rest = text[search_from:]
+    first_h2 = re.search(r"^## ", rest, re.MULTILINE)
+    if first_h2 is None:
+        # No domain sections — just append.
+        return text.rstrip() + "\n\n" + voice_block
+    insert_at = search_from + first_h2.start()
+    return text[:insert_at] + voice_block + text[insert_at:]
 
 
 def _template_voice(
