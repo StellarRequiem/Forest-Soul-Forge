@@ -6,6 +6,14 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
+### Phase 4 — file ADR-0018 (Agent tool catalog) as Proposed — 2026-04-25
+
+- **`docs/decisions/ADR-0018-agent-tool-catalog.md`**, status Proposed. Captures the decision shape for giving agents concrete tool surfaces (e.g. `packet_query`, `log_grep`, `baseline_compare`) bundled by archetype and overridable per birth. Hybrid declaration model: `config/tool_catalog.yaml` is the canonical source of MCP-style tool descriptors keyed by `{name}.{version}`, soul.md frontmatter carries name+version refs (not the full schemas), constitution.yaml carries per-agent constraints derived from the trait profile (e.g. high-caution agent gets `requires_human_approval: true` on any tool whose `side_effects != "read_only"`).
+- **Rationale captured in the ADR** for the hybrid choice over inline-schema and pure-name-reference alternatives. Version pinning preserves the audit trail across catalog evolution — an agent birthed under catalog v0.1 can be reasoned about even after the catalog reaches v0.5 because v1 tools aren't deleted, only superseded as defaults.
+- **Reproducibility preserved.** `dna` continues to hash only the trait profile (ADR-0002). `constitution_hash` now also covers the resolved tool list + per-tool constraints, so two agents with the same profile but different `tools_add` overrides will have different constitution hashes — correct behavior, since their effective surface differs. /preview must pass the same overrides as the eventual /birth to get hash parity (already true for constitution_override).
+- **Implementation deliberately not in this commit.** Tranches captured in the ADR (T1 catalog loader → T2 resolver → T3 schema+tests → T4 frontend → T5 runtime in a separate ADR). T5 is the bigger half — tool invocation, MCP transport, sandbox boundary — and gets its own design pass.
+- **Out of scope** (deferred to follow-ups): execution / runtime, federation across catalogs, hot-reload, frontend catalog editor, per-session enforcement of constraint fields.
+
 ### Phase 4 — live-fire ADR-0017 against real Ollama + Dockerfile permission fix — 2026-04-25
 
 - **`live-fire-voice.command`** (new permanent dev-experience helper). Rebuilds the daemon container with the latest source, brings up the full `--profile llm` stack including ollama, waits for daemon health, hits `/runtime/provider` to confirm provider chain, then `POST /birth` with `enrich_narrative=true`, then dumps the resulting soul.md's `narrative_*` frontmatter and the `## Voice` section. Auto-writes a minimal `.env` pointing the daemon at `llama3.2:1b` (the model that fits in default Docker container memory) when no `.env` exists. Uses `set -uo pipefail` (no `-e`) so a failing curl still surfaces diagnostic output instead of bailing the script.
