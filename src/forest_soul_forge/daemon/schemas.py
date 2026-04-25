@@ -66,6 +66,19 @@ class TraitProfileIn(BaseModel):
     )
 
 
+class ToolRefIn(BaseModel):
+    """A reference to a specific catalog tool by name + version.
+
+    Used in BirthRequest.tools_add (per ADR-0018). The daemon validates
+    the (name, version) pair against the loaded catalog and rejects
+    unknown refs at the request boundary, before any artifact is
+    produced.
+    """
+
+    name: str = Field(..., min_length=1, max_length=80)
+    version: str = Field(..., min_length=1, max_length=16)
+
+
 class BirthRequest(BaseModel):
     """Create a brand-new (root) agent.
 
@@ -79,6 +92,11 @@ class BirthRequest(BaseModel):
     ``enrich_narrative_default`` setting"; explicit ``True`` / ``False``
     overrides for this birth only. False bypasses the LLM call entirely
     — useful for tests and reproducible benchmarks.
+
+    ``tools_add`` and ``tools_remove`` (ADR-0018 T2) override the
+    archetype's standard tool kit. ``tools_remove`` drops by name (any
+    version match); ``tools_add`` introduces specific (name, version)
+    refs. Empty defaults preserve the archetype-default behavior.
     """
 
     profile: TraitProfileIn
@@ -98,6 +116,23 @@ class BirthRequest(BaseModel):
             "When true, the daemon invokes the active provider to write the "
             "soul.md `## Voice` section (ADR-0017). When false, always use "
             "the templated fallback. None defers to FSF_ENRICH_NARRATIVE_DEFAULT."
+        ),
+    )
+    tools_add: list[ToolRefIn] = Field(
+        default_factory=list,
+        description=(
+            "Per-request tool additions on top of the archetype's standard "
+            "kit. Each (name, version) must resolve in the daemon's loaded "
+            "tool catalog (ADR-0018) — unknown refs return 400."
+        ),
+    )
+    tools_remove: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Per-request tool removals. Matches by NAME (any version), so "
+            "'tools_remove: [\"packet_query\"]' drops both packet_query.v1 "
+            "and packet_query.v2 if either is in the standard kit. Unknown "
+            "names return 400."
         ),
     )
 

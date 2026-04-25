@@ -50,12 +50,18 @@ from forest_soul_forge.core.trait_engine import (
     UnknownRoleError,
     UnknownTraitError,
 )
+from forest_soul_forge.core.tool_catalog import (
+    ToolCatalog,
+    ToolCatalogError,
+    ToolRef as CoreToolRef,
+)
 from forest_soul_forge.daemon.config import DaemonSettings
 from forest_soul_forge.daemon.deps import (
     get_audit_chain,
     get_provider_registry,
     get_registry,
     get_settings,
+    get_tool_catalog,
     get_trait_engine,
     get_write_lock,
     require_api_token,
@@ -276,6 +282,29 @@ def _cache_response(
     )
 
 
+def _resolve_tool_kit(
+    catalog: ToolCatalog,
+    role: str,
+    tools_add_in: list,
+    tools_remove_in: list[str],
+):
+    """Apply ADR-0018 kit resolution. Surfaces unknown-tool errors as 400.
+
+    Returns a tuple of CoreToolRef in the order resolve_kit produces.
+    """
+    add_refs = [
+        CoreToolRef(name=t.name, version=t.version) for t in (tools_add_in or [])
+    ]
+    try:
+        return catalog.resolve_kit(
+            role,
+            tools_add=add_refs,
+            tools_remove=list(tools_remove_in or []),
+        )
+    except ToolCatalogError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 def _resolve_enrich(req_value: bool | None, settings: DaemonSettings) -> bool:
     """Three-state precedence: explicit request value > settings default."""
     return req_value if req_value is not None else settings.enrich_narrative_default
@@ -362,6 +391,7 @@ def birth(
     lock: threading.Lock = Depends(get_write_lock),
     settings: DaemonSettings = Depends(get_settings),
     providers: ProviderRegistry = Depends(get_provider_registry),
+    tool_catalog: ToolCatalog = Depends(get_tool_catalog),
 ):
     idempotency_key = get_idempotency_key(request)
     request_hash = compute_request_hash("/birth", req.model_dump(mode="json"))
@@ -370,6 +400,12 @@ def birth(
     dna_hex = dna_full(profile)
     dna_s = dna_short(profile)
     lineage = Lineage.root()
+
+    # Resolve the tool kit BEFORE the lock — pure function, surfaces
+    # unknown-tool errors as 400 before any artifact is touched.
+    resolved_tools = _resolve_tool_kit(
+        tool_catalog, profile.role, req.tools_add, req.tools_remove
+    )
 
     # Build constitution outside the lock — pure function, any schema
     # error surfaces as a 400 before we touch the write path.
@@ -426,6 +462,8 @@ def birth(
             instance_id=instance_id,
             sibling_index=sibling_index,
             voice=voice,
+            tools=resolved_tools,
+            tool_catalog_version=tool_catalog.version,
         )
         constitution_yaml = constitution.to_yaml(generated_at=soul_doc.generated_at)
         if req.constitution_override:
@@ -455,6 +493,8 @@ def birth(
             "soul_path": str(soul_path),
             "constitution_path": str(const_path),
             "owner_id": req.owner_id,
+            "tools": [r.to_dict() for r in resolved_tools],
+            "tool_catalog_version": tool_catalog.version,
             **_voice_event_fields(voice),
         }
         try:
@@ -497,12 +537,18 @@ def spawn(
     lock: threading.Lock = Depends(get_write_lock),
     settings: DaemonSettings = Depends(get_settings),
     providers: ProviderRegistry = Depends(get_provider_registry),
+    tool_catalog: ToolCatalog = Depends(get_tool_catalog),
 ):
     idempotency_key = get_idempotency_key(request)
     request_hash = compute_request_hash("/spawn", req.model_dump(mode="json"))
     profile = _build_trait_profile(engine, req.profile)
     parent_row, parent_ancestors = _parent_lineage_from_registry(
         registry, req.parent_instance_id
+    )
+
+    # Resolve tool kit before lock — same pattern as /birth.
+    resolved_tools = _resolve_tool_kit(
+        tool_catalog, profile.role, req.tools_add, req.tools_remove
     )
 
     dna_hex = dna_full(profile)
@@ -566,6 +612,8 @@ def spawn(
             parent_instance=parent_row.instance_id,
             sibling_index=sibling_index,
             voice=voice,
+            tools=resolved_tools,
+            tool_catalog_version=tool_catalog.version,
         )
         constitution_yaml = constitution.to_yaml(generated_at=soul_doc.generated_at)
         if req.constitution_override:
@@ -598,6 +646,8 @@ def spawn(
             "soul_path": str(soul_path),
             "constitution_path": str(const_path),
             "owner_id": req.owner_id,
+            "tools": [r.to_dict() for r in resolved_tools],
+            "tool_catalog_version": tool_catalog.version,
             **_voice_event_fields(voice),
         }
         try:

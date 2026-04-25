@@ -150,6 +150,8 @@ class SoulGenerator:
         parent_instance: str | None = None,
         sibling_index: int | None = None,
         voice: "VoiceText | None" = None,
+        tools: tuple = (),
+        tool_catalog_version: str | None = None,
     ) -> SoulDocument:
         """Generate a soul.md from a profile.
 
@@ -214,6 +216,8 @@ class SoulGenerator:
             parent_instance=parent_instance,
             sibling_index=sibling_index,
             voice=voice,
+            tools=tools,
+            tool_catalog_version=tool_catalog_version,
         ))
 
         # ---- header ------------------------------------------------------
@@ -336,6 +340,8 @@ class SoulGenerator:
         parent_instance: str | None = None,
         sibling_index: int | None = None,
         voice: "VoiceText | None" = None,
+        tools: tuple = (),
+        tool_catalog_version: str | None = None,
     ) -> list[str]:
         """Hand-rolled YAML emitter — avoids the pyyaml dep at generation-time
         and guarantees a stable, sorted trait_values block (which keeps
@@ -373,6 +379,21 @@ class SoulGenerator:
             out.append(f'narrative_provider: "{voice.provider}"')
             out.append(f'narrative_model: "{voice.model}"')
             out.append(f'narrative_generated_at: "{voice.generated_at}"')
+
+        # Tool surface (ADR-0018) — list of (name, version) refs, plus the
+        # catalog version pinned at birth. Empty list when the agent has
+        # no tool surface (legacy births, or an agent in a role that has
+        # no archetype kit). Order is the order resolve_kit returned —
+        # archetype-default order first, then per-request additions.
+        if tools:
+            out.append("tools:")
+            for ref in tools:
+                # ref is a ToolRef-shaped object with .name and .version.
+                out.append(f'  - {{ name: {ref.name}, version: "{ref.version}" }}')
+        else:
+            out.append("tools: []")
+        if tool_catalog_version is not None:
+            out.append(f'tool_catalog_version: "{tool_catalog_version}"')
 
         # Lineage
         if lineage.is_root():
