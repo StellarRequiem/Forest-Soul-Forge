@@ -51,3 +51,4 @@ What else did we look at, and why not?
 - [ADR-0016 — Session modes + self-spawning cipher](ADR-0016-session-modes-and-self-spawning-cipher.md) — Proposed 2026-04-24
 - [ADR-0017 — LLM-enriched soul.md narrative](ADR-0017-llm-enriched-soul-narrative.md) — Proposed 2026-04-25
 - [ADR-0018 — Agent tool catalog and per-archetype standard tools](ADR-0018-agent-tool-catalog.md) — Proposed 2026-04-25
+- [ADR-0020 — Agent character sheet](ADR-0020-agent-character-sheet.md) — Proposed 2026-04-25

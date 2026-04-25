@@ -6,6 +6,17 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
+### Phase 4 — file ADR-0020 (Agent Character Sheet) as Proposed — 2026-04-25
+
+- **`docs/decisions/ADR-0020-agent-character-sheet.md`**, status Proposed. Designs the descriptor that consolidates an agent's identity, personality, loadout, capabilities, stats, memory, benchmarks, and provenance into a single served view. Frames the Forge as character creation in a TTRPG sense — operators play characters; the character sheet is what the operator gets back when they ask "what is this thing."
+- **Decision: derived JSON view, not a new canonical artifact.** Per ADR-0006, files-on-disk are authoritative; adding `character_sheet.yaml` would duplicate information from soul.md and constitution.yaml and create a sync burden. The character sheet is composed on demand from the canonical artifacts plus measured stats stored in the audit chain and (future) registry. Three rendering layers: a JSON endpoint at `GET /agents/{instance_id}/character-sheet`, a frontend page, and a markdown export at `?format=md` for git-able snapshots / postmortems.
+- **Eight sections** in the schema, each with documented source authority: `identity` (registry + soul.md), `personality` (traits + voice), `loadout` (constitution.yaml `tools:` per ADR-0018 T2.5), `capabilities` (role + future genre per ADR-0021), `stats` (future ADR-0022/0023 measurements), `memory` (future ADR-0022), `benchmarks` (future ADR-0023), `provenance` (constitution_hash + tool_catalog_version + last audit entry hash + paths to canonical artifacts).
+- **Forward-compatible by design.** Sections for measurements, memory, and benchmarks exist with `null` / `not_yet_*` flags today; the data fills in as ADR-0022 and ADR-0023 implement without consumer rewrites. Adding fields is additive; removing or renaming requires a `schema_version` bump.
+- **Out of scope (deliberately):** real-time / streaming character sheet, multi-agent comparison view, structured diff endpoint, PDF rendering (markdown export covers it; pandoc is a downstream step). Editing API also out — character sheets are read-only; mutation happens at the source layer (re-birth, tools_add/remove, regenerate-voice).
+- **Implementation tranches captured** (T1–T6): T1 endpoint + 5 minimum-viable sections, T2 markdown export, T3 frontend view, T4–T6 wire genre / memory / benchmarks as their ADRs ship. T1+T2+T3 is the "sheet exists" milestone; T4–T6 are pure consumer adds.
+- **Open questions captured in the ADR** (5 items) — last_audit_entry_hash anchoring choice, markdown layout, embedded role description, voice regeneration provenance hook, treatment of archived agents (yes — postmortems are the most useful inspection target).
+- **Implementation deliberately not in this commit** — the ADR captures the design space so subsequent tranches can pick it up cleanly. The next ADR draft (ADR-0021 Role Genres) builds on the character sheet's `capabilities.genre` field.
+
 ### Phase 4 — ADR-0018 T2.5 — declarative tool constraint policy — 2026-04-25
 
 - **`src/forest_soul_forge/core/tool_policy.py`** — small declarative engine that derives per-tool constraints from the trait profile. Rules are hardcoded as a tuple of `_Rule` dataclasses for v1 (operators today are this project's developers; the YAML-driven version lands when a second editor shows up). Four baked rules:
