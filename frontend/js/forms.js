@@ -20,12 +20,19 @@ function currentProfilePayload() {
 }
 
 function identityPayload() {
+  // Per ADR-0017: enrich_narrative true → daemon invokes the active
+  // provider to write the soul.md ## Voice section; false → templated
+  // body only. Frontend checkbox defaults to checked so the typical
+  // birth gets a real narrative voice; uncheck for deterministic /
+  // reproducible artifact runs (tests, byte-stable regression checks).
+  const enrichEl = document.getElementById("enrich-narrative");
   return {
     agent_name: document.getElementById("agent-name").value.trim(),
     agent_version: document.getElementById("agent-version").value.trim() || "v1",
     owner_id: document.getElementById("owner-id").value.trim() || null,
     constitution_override:
       document.getElementById("constitution-override").value.trim() || null,
+    enrich_narrative: enrichEl ? enrichEl.checked : null,
   };
 }
 

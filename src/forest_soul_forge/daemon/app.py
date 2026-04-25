@@ -80,25 +80,54 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         # process; the audit chain holds a head pointer that must not be
         # shared across ad-hoc instances; the write lock serializes all
         # mutating endpoints (single-writer SQLite discipline, ADR-0007).
+        #
+        # Each load attempt is recorded into ``startup_diagnostics`` so
+        # /healthz can surface the actual exception type + message when a
+        # write endpoint later 503s. Without this, a load failure shows
+        # up as the misleading "trait engine not available (check
+        # FSF_TRAIT_TREE_PATH)" message and the operator chases a path
+        # issue when the real cause was (for example) a permission bit.
+        # Caught one of these on 2026-04-25 — chmod-on-COPY race in the
+        # Dockerfile — that wasted ~30 minutes diagnosing.
+        startup_diagnostics: list[dict] = []
         trait_engine: TraitEngine | None = None
         audit_chain: AuditChain | None = None
         if settings.allow_write_endpoints:
             try:
                 trait_engine = TraitEngine(settings.trait_tree_path)
-            except Exception:
+                startup_diagnostics.append(
+                    {"component": "trait_engine", "status": "ok",
+                     "path": str(settings.trait_tree_path), "error": None}
+                )
+            except Exception as e:
                 # Tolerate missing trait tree at startup — endpoints that
                 # need it will 503. Read-only endpoints still work.
                 trait_engine = None
+                startup_diagnostics.append(
+                    {"component": "trait_engine", "status": "failed",
+                     "path": str(settings.trait_tree_path),
+                     "error": f"{type(e).__name__}: {e}"}
+                )
             try:
                 audit_chain = AuditChain(settings.audit_chain_path)
-            except Exception:
+                startup_diagnostics.append(
+                    {"component": "audit_chain", "status": "ok",
+                     "path": str(settings.audit_chain_path), "error": None}
+                )
+            except Exception as e:
                 audit_chain = None
+                startup_diagnostics.append(
+                    {"component": "audit_chain", "status": "failed",
+                     "path": str(settings.audit_chain_path),
+                     "error": f"{type(e).__name__}: {e}"}
+                )
 
         app.state.settings = settings
         app.state.registry = registry
         app.state.providers = providers
         app.state.trait_engine = trait_engine
         app.state.audit_chain = audit_chain
+        app.state.startup_diagnostics = startup_diagnostics
         # threading.Lock (not asyncio.Lock): sync route handlers run on the
         # FastAPI threadpool, so a thread-level lock is the right primitive.
         app.state.write_lock = threading.Lock()

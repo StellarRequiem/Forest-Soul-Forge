@@ -8,13 +8,19 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from fastapi import Request
+
 from forest_soul_forge.daemon.deps import (
     get_provider_registry,
     get_registry,
     get_settings,
 )
 from forest_soul_forge.daemon.providers import ProviderRegistry
-from forest_soul_forge.daemon.schemas import HealthOut, ProviderHealthOut
+from forest_soul_forge.daemon.schemas import (
+    HealthOut,
+    ProviderHealthOut,
+    StartupDiagnostic,
+)
 from forest_soul_forge.registry import Registry
 
 router = APIRouter(tags=["health"])
@@ -22,6 +28,7 @@ router = APIRouter(tags=["health"])
 
 @router.get("/healthz", response_model=HealthOut)
 async def healthz(
+    request: Request,
     registry: Registry = Depends(get_registry),
     providers: ProviderRegistry = Depends(get_provider_registry),
     settings=Depends(get_settings),
@@ -34,6 +41,8 @@ async def healthz(
         "SELECT value FROM registry_meta WHERE key='canonical_contract';"
     ).fetchone()
     canonical_contract = row["value"] if row is not None else ""
+    diags_raw = getattr(request.app.state, "startup_diagnostics", []) or []
+    diags = [StartupDiagnostic(**d) for d in diags_raw]
     return HealthOut(
         ok=True,
         schema_version=registry.schema_version(),
@@ -49,4 +58,5 @@ async def healthz(
         ),
         auth_required=getattr(settings, "api_token", None) is not None,
         writes_enabled=bool(getattr(settings, "allow_write_endpoints", False)),
+        startup_diagnostics=diags,
     )

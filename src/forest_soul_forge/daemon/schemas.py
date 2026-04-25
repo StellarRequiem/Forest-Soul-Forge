@@ -154,6 +154,22 @@ class ProviderHealthOut(BaseModel):
     error: str | None = None
 
 
+class StartupDiagnostic(BaseModel):
+    """One lifespan-load attempt's outcome.
+
+    Surfaced on /healthz so an operator can tell — at a glance — which
+    write-path components actually loaded vs. silently fell to None and
+    will 503 their dependent endpoints. Without this, a load failure
+    looks like a misleading "trait engine not available" message
+    further down the request flow.
+    """
+
+    component: str
+    status: str  # "ok" | "failed"
+    path: str | None = None
+    error: str | None = None
+
+
 class HealthOut(BaseModel):
     ok: bool
     schema_version: int
@@ -169,6 +185,9 @@ class HealthOut(BaseModel):
     # "Spawn" / "Archive" buttons with a clear reason rather than waiting
     # for a 403 at submit time.
     writes_enabled: bool = True
+    # Per-component lifespan diagnostics. Empty when allow_write_endpoints
+    # is False (no load attempts made).
+    startup_diagnostics: list[StartupDiagnostic] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

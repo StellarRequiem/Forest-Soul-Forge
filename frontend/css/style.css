@@ -215,6 +215,22 @@ body {
 
 .field { display: flex; flex-direction: column; gap: var(--sp-1); }
 .field--wide { grid-column: 1 / -1; }
+.field--checkbox { flex-direction: row; align-items: center; }
+
+/* Inline label for checkbox + adjacent text — flex row aligned with the
+   checkbox so the muted hint sits right after the label without a line
+   break. ADR-0017 added one such control (#enrich-narrative). */
+.lbl--inline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  user-select: none;
+}
+.lbl--inline input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
 
 .identity-form {
   display: grid;

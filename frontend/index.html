@@ -80,6 +80,13 @@
                 <label for="constitution-override" class="lbl">constitution override <span class="muted">(YAML, optional)</span></label>
                 <textarea id="constitution-override" class="inp inp--code" rows="4" placeholder="# extra policy rules appended under the derived constitution"></textarea>
               </div>
+              <div class="field field--wide field--checkbox">
+                <label class="lbl lbl--inline">
+                  <input type="checkbox" id="enrich-narrative" checked />
+                  enrich narrative voice via LLM
+                  <span class="muted">— uncheck for deterministic templated body</span>
+                </label>
+              </div>
               <div class="button-row">
                 <button class="btn btn--primary" id="btn-birth" type="button" disabled>Birth</button>
                 <button class="btn" id="btn-spawn" type="button" disabled>Spawn</button>
