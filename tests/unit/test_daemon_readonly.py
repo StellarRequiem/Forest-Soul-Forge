@@ -28,12 +28,23 @@ from forest_soul_forge.daemon.providers import (
 
 
 class _StubProvider:
-    """Provider that never touches the network. Used to exercise the routes."""
+    """Provider that never touches the network. Used to exercise the routes.
+
+    Mirrors the public surface of LocalProvider/FrontierProvider closely
+    enough that route handlers can't tell the difference: ``name``,
+    ``complete``, ``healthcheck``, and a ``models`` attribute keyed by
+    TaskKind. The ``models`` attribute is what /runtime/provider/generate
+    reads to resolve the model tag in its response.
+    """
 
     name = "local"
 
     def __init__(self) -> None:
         self._models = {k: "stub:latest" for k in TaskKind}
+
+    @property
+    def models(self) -> dict:
+        return dict(self._models)
 
     async def complete(self, prompt, *, task_kind=TaskKind.CONVERSATION, **_):
         return f"[stub] {prompt}"
@@ -203,3 +214,193 @@ class TestRuntime:
         client, _, _ = daemon_env
         resp = client.put("/runtime/provider", json={"provider": "nonexistent"})
         assert resp.status_code == 400
+
+
+class TestGenerate:
+    """POST /runtime/provider/generate — Phase 4 first slice.
+
+    Exercises the route's mapping from request → provider.complete kwargs
+    → response, plus the error-status mapping for the three Provider*
+    exception types.
+    """
+
+    def test_generate_happy_path(self, daemon_env):
+        client, _, _ = daemon_env
+        resp = client.post(
+            "/runtime/provider/generate",
+            json={"prompt": "ping"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        # _StubProvider.complete returns f"[stub] {prompt}"
+        assert body["response"] == "[stub] ping"
+        assert body["provider"] == "local"
+        assert body["task_kind"] == "conversation"
+        # Stub exposes a models dict with "stub:latest" for every TaskKind.
+        assert body["model"] == "stub:latest"
+
+    def test_generate_passes_options_to_provider(self, daemon_env, monkeypatch):
+        """system / max_tokens / temperature / task_kind reach .complete()."""
+        client, app, _ = daemon_env
+        captured: dict = {}
+
+        async def capturing_complete(prompt, *, task_kind, system=None, max_tokens=None, **kwargs):
+            captured["prompt"] = prompt
+            captured["task_kind"] = task_kind
+            captured["system"] = system
+            captured["max_tokens"] = max_tokens
+            captured["kwargs"] = kwargs
+            return "ok"
+
+        provider = app.state.providers.active()
+        monkeypatch.setattr(provider, "complete", capturing_complete, raising=False)
+
+        resp = client.post(
+            "/runtime/provider/generate",
+            json={
+                "prompt": "hi",
+                "system": "be terse",
+                "task_kind": "classify",
+                "max_tokens": 64,
+                "temperature": 0.2,
+            },
+        )
+        assert resp.status_code == 200
+        assert captured["prompt"] == "hi"
+        assert captured["system"] == "be terse"
+        assert captured["max_tokens"] == 64
+        # TaskKind is an enum; stringly compare via .value to avoid import
+        # juggling at the test layer.
+        assert captured["task_kind"].value == "classify"
+        assert captured["kwargs"].get("temperature") == 0.2
+
+    def test_generate_empty_prompt_422(self, daemon_env):
+        client, _, _ = daemon_env
+        resp = client.post("/runtime/provider/generate", json={"prompt": ""})
+        # Pydantic min_length=1 → 422
+        assert resp.status_code == 422
+
+    def test_generate_unavailable_maps_to_503(self, daemon_env, monkeypatch):
+        """ProviderUnavailable → 503 with a clear detail string."""
+        from forest_soul_forge.daemon.providers import ProviderUnavailable
+
+        client, app, _ = daemon_env
+
+        async def boom(*_a, **_k):
+            raise ProviderUnavailable("ollama unreachable at http://stub")
+
+        monkeypatch.setattr(app.state.providers.active(), "complete", boom, raising=False)
+
+        resp = client.post("/runtime/provider/generate", json={"prompt": "p"})
+        assert resp.status_code == 503
+        assert "unavailable" in resp.json()["detail"].lower()
+
+    def test_generate_disabled_maps_to_503(self, daemon_env, monkeypatch):
+        """ProviderDisabled → 503 with a different detail wording."""
+        from forest_soul_forge.daemon.providers import ProviderDisabled
+
+        client, app, _ = daemon_env
+
+        async def disabled(*_a, **_k):
+            raise ProviderDisabled("frontier_enabled=False")
+
+        monkeypatch.setattr(app.state.providers.active(), "complete", disabled, raising=False)
+
+        resp = client.post("/runtime/provider/generate", json={"prompt": "p"})
+        assert resp.status_code == 503
+        assert "disabled" in resp.json()["detail"].lower()
+
+    def test_generate_provider_error_maps_to_502(self, daemon_env, monkeypatch):
+        """Generic ProviderError (e.g. upstream non-2xx) → 502 bad gateway."""
+        from forest_soul_forge.daemon.providers import ProviderError
+
+        client, app, _ = daemon_env
+
+        async def upstream_500(*_a, **_k):
+            raise ProviderError("local model returned 500: out of memory")
+
+        monkeypatch.setattr(app.state.providers.active(), "complete", upstream_500, raising=False)
+
+        resp = client.post("/runtime/provider/generate", json={"prompt": "p"})
+        assert resp.status_code == 502
+        assert "provider error" in resp.json()["detail"].lower()
+
+    def test_generate_requires_token_when_configured(self, tmp_path: Path):
+        """When FSF_API_TOKEN is set, the endpoint demands the header.
+
+        Builds a fresh app with api_token configured because the shared
+        daemon_env fixture deliberately runs token-less to keep the
+        common case unblocked.
+        """
+        # Minimal seeded artifacts (mirrors daemon_env shape, smaller).
+        soul = tmp_path / "a.soul.md"
+        const_file = tmp_path / "a.constitution.yaml"
+        const_file.write_text("# placeholder\n", encoding="utf-8")
+        soul.write_text(
+            "---\n"
+            "schema_version: 1\n"
+            "dna: aaaaaaaaaaaa\n"
+            'dna_full: "' + ("a" * 64) + '"\n'
+            "role: network_watcher\n"
+            'agent_name: "StubWatcher"\n'
+            'agent_version: "v1"\n'
+            'generated_at: "2026-04-23 12:00:00Z"\n'
+            'constitution_hash: "' + ("0" * 64) + '"\n'
+            'constitution_file: "a.constitution.yaml"\n'
+            "parent_dna: null\n"
+            "spawned_by: null\n"
+            "lineage: []\n"
+            "lineage_depth: 0\n"
+            "---\n"
+            "\n# body\n",
+            encoding="utf-8",
+        )
+        audit = tmp_path / "audit.jsonl"
+        audit.write_text(
+            json.dumps({
+                "seq": 0,
+                "timestamp": "2026-04-23T12:00:00Z",
+                "prev_hash": "GENESIS",
+                "entry_hash": "h0",
+                "agent_dna": None,
+                "event_type": "chain_created",
+                "event_data": {},
+            }) + "\n",
+            encoding="utf-8",
+        )
+
+        settings = DaemonSettings(
+            registry_db_path=tmp_path / "r.sqlite",
+            artifacts_dir=tmp_path,
+            audit_chain_path=audit,
+            default_provider="local",
+            frontier_enabled=False,
+            api_token="t0p_s3cr3t",  # auth ON
+        )
+        app = build_app(settings)
+        with TestClient(app) as client:
+            app.state.providers = ProviderRegistry(
+                providers={"local": _StubProvider(), "frontier": _StubProvider()},
+                default="local",
+            )
+
+            # No header → 401.
+            r1 = client.post("/runtime/provider/generate", json={"prompt": "p"})
+            assert r1.status_code == 401
+
+            # Wrong header → 401.
+            r2 = client.post(
+                "/runtime/provider/generate",
+                json={"prompt": "p"},
+                headers={"X-FSF-Token": "wrong"},
+            )
+            assert r2.status_code == 401
+
+            # Correct header → 200.
+            r3 = client.post(
+                "/runtime/provider/generate",
+                json={"prompt": "p"},
+                headers={"X-FSF-Token": "t0p_s3cr3t"},
+            )
+            assert r3.status_code == 200
+            assert r3.json()["response"] == "[stub] p"

@@ -172,6 +172,56 @@ class SetProviderIn(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Generation (POST /runtime/provider/generate)
+# ---------------------------------------------------------------------------
+class GenerateRequest(BaseModel):
+    """Inbound payload for an arbitrary completion call against the active provider.
+
+    Phase 4 first-slice surface — exists primarily so external integrations
+    (Telegram bots, scripted experiments, future audit-chain enrichment
+    hooks) can route completions through the daemon's provider stack
+    instead of calling the API SDKs directly. Internally it's still
+    ``providers.active().complete(...)``; this is purely the HTTP wrapper.
+
+    Bounds on ``max_tokens`` and ``temperature`` are conservative caps,
+    not provider-faithful limits — every backend has its own ceiling. The
+    point is to fail loudly at the daemon edge rather than push a wildly
+    large request to a frontier provider and wear an unexpected token bill.
+    """
+
+    prompt: str = Field(..., min_length=1, description="User prompt sent to the model.")
+    system: str | None = Field(
+        default=None,
+        description="Optional system prompt prepended by the provider (Ollama wraps it as 'system'; OpenAI-compat wraps it as a system-role message).",
+    )
+    task_kind: TaskKind = Field(
+        default=TaskKind.CONVERSATION,
+        description="Routing hint — providers map this to a model tag (see ADR-0008 + DaemonSettings).",
+    )
+    max_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        le=8192,
+        description="Cap on response tokens. Provider-specific (Ollama: num_predict; OpenAI: max_tokens).",
+    )
+    temperature: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature. Passed through to provider as 'temperature'.",
+    )
+
+
+class GenerateResponse(BaseModel):
+    """Reply payload — the raw model text plus enough metadata to debug routing."""
+
+    response: str = Field(..., description="The model's reply, untouched.")
+    provider: str = Field(..., description="Active provider name when the call ran (e.g. 'local').")
+    model: str = Field(..., description="Resolved model tag for the requested task_kind. May be 'unknown' if the provider doesn't expose its model map.")
+    task_kind: TaskKind
+
+
+# ---------------------------------------------------------------------------
 # Trait tree exposure (GET /traits)
 # ---------------------------------------------------------------------------
 class TraitOut(BaseModel):
