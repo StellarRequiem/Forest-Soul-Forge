@@ -10,6 +10,9 @@ bar() { printf '\n=== %s ===\n' "$1"; }
 bar "ADR-0018 T1 tests — tool catalog loader"
 bash scripts/docker_test.sh -v tests/unit/test_tool_catalog.py
 
+bar "ADR-0018 T2.5 tests — tool constraint policy"
+bash scripts/docker_test.sh -v tests/unit/test_tool_policy.py
+
 bar "running ADR-0017 tests (LLM-enriched soul.md narrative)"
 bash scripts/docker_test.sh -v \
     tests/unit/test_daemon_writes.py::TestEnrichNarrative \

@@ -111,8 +111,14 @@ class Constitution:
 
     The ``constitution_hash`` is a function of ``policies`` +
     ``risk_thresholds`` + ``out_of_scope`` + ``operator_duties`` +
-    ``drift_monitoring``. It intentionally excludes ``generated_at`` and
-    agent identity — two agents with identical rulebooks share a hash.
+    ``drift_monitoring`` + ``tools`` (per ADR-0018 T2.5). It
+    intentionally excludes ``generated_at`` and agent identity — two
+    agents with identical rulebooks share a hash.
+
+    ``tools`` is the per-tool resolved policy (kit + per-tool
+    constraints). Two agents with the same trait profile but different
+    tool overrides will have different constitution hashes, which is
+    correct: their effective surface differs.
     """
 
     schema_version: int
@@ -125,6 +131,11 @@ class Constitution:
     out_of_scope: tuple[str, ...]
     operator_duties: tuple[str, ...]
     drift_monitoring: DriftMonitoring
+    # Per-tool resolved constraints (ADR-0018 T2.5). Empty tuple when the
+    # agent has no tool surface (legacy birth, role with no archetype
+    # kit). Each entry is a frozen dict so two equivalent constitutions
+    # produce byte-identical hashes.
+    tools: tuple[dict[str, Any], ...] = ()
 
     # ---- hashing --------------------------------------------------------
     def canonical_body(self) -> dict[str, Any]:
@@ -143,6 +154,7 @@ class Constitution:
                 "max_profile_deviation": self.drift_monitoring.max_profile_deviation,
                 "on_drift": self.drift_monitoring.on_drift,
             },
+            "tools": [dict(sorted(t.items())) for t in self.tools],
         }
 
     @property
@@ -182,6 +194,10 @@ class Constitution:
         doc["out_of_scope"] = list(self.out_of_scope)
         doc["operator_duties"] = list(self.operator_duties)
         doc["drift_monitoring"] = self.canonical_body()["drift_monitoring"]
+        # Per-tool resolved constraints (ADR-0018 T2.5). Always emit the
+        # key — readers can rely on its presence. Empty list when the
+        # agent has no tool surface.
+        doc["tools"] = [dict(sorted(t.items())) for t in self.tools]
 
         # sort_keys=False keeps our intentional top-level ordering. The body
         # itself is already sorted by construction.
@@ -197,6 +213,7 @@ def build(
     *,
     agent_name: str,
     templates_path: Path | str | None = None,
+    tools: tuple[dict[str, Any], ...] = (),
 ) -> Constitution:
     """Derive a :class:`Constitution` from a profile.
 
@@ -263,6 +280,7 @@ def build(
         out_of_scope=tuple(out_of_scope),
         operator_duties=tuple(operator_duties),
         drift_monitoring=drift,
+        tools=tuple(tools),
     )
 
 

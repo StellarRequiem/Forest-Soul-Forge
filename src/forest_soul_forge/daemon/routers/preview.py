@@ -38,7 +38,13 @@ from forest_soul_forge.core.trait_engine import (
     UnknownRoleError,
     UnknownTraitError,
 )
-from forest_soul_forge.daemon.deps import get_trait_engine
+from forest_soul_forge.core.tool_catalog import (
+    ToolCatalog,
+    ToolCatalogError,
+    ToolRef as CoreToolRef,
+)
+from forest_soul_forge.core.tool_policy import resolve_constraints
+from forest_soul_forge.daemon.deps import get_tool_catalog, get_trait_engine
 from forest_soul_forge.daemon.schemas import (
     DomainGradeOut,
     FlaggedCombinationOut,
@@ -92,6 +98,7 @@ def _grade_to_out(report) -> GradeReportOut:  # noqa: ANN001
 async def preview(
     req: PreviewRequest,
     engine: TraitEngine = Depends(get_trait_engine),
+    tool_catalog: ToolCatalog = Depends(get_tool_catalog),
 ) -> PreviewResponse:
     # Build the profile — same validation path as /birth, but failures
     # surface as 400 without ever touching the registry.
@@ -114,8 +121,33 @@ async def preview(
     dna_hex = dna_full(profile)
     report = grade_profile(profile, engine)
 
+    # ADR-0018 T2.5: resolve the same tool surface /birth would produce
+    # so the constitution_hash matches. /preview-with-defaults predicts
+    # /birth-with-defaults; /preview-with-tools_add predicts the
+    # corresponding /birth-with-tools_add. Pass-through must be exact.
     try:
-        constitution = build_constitution(profile, engine, agent_name="preview")
+        add_refs = [
+            CoreToolRef(name=t.name, version=t.version)
+            for t in (req.tools_add or [])
+        ]
+        resolved_tools = tool_catalog.resolve_kit(
+            profile.role,
+            tools_add=add_refs,
+            tools_remove=list(req.tools_remove or []),
+        )
+    except ToolCatalogError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    tool_constraints = []
+    for ref in resolved_tools:
+        td = tool_catalog.get_tool(ref)
+        tool_constraints.append(resolve_constraints(profile, td).to_dict())
+
+    try:
+        constitution = build_constitution(
+            profile, engine, agent_name="preview",
+            tools=tuple(tool_constraints),
+        )
     except Exception as e:
         raise HTTPException(
             status_code=400, detail=f"constitution build failed: {e}"

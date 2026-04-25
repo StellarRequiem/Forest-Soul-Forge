@@ -6,6 +6,28 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
+### Phase 4 — ADR-0018 T2.5 — declarative tool constraint policy — 2026-04-25
+
+- **`src/forest_soul_forge/core/tool_policy.py`** — small declarative engine that derives per-tool constraints from the trait profile. Rules are hardcoded as a tuple of `_Rule` dataclasses for v1 (operators today are this project's developers; the YAML-driven version lands when a second editor shows up). Four baked rules:
+  1. `caution >= 80` → `requires_human_approval = true` on any tool whose `side_effects != "read_only"`.
+  2. `thoroughness >= 80` → `max_calls_per_session = 50` on `network` and `external` tools.
+  3. **Always:** `filesystem` tools require human approval. No trait override bypasses this.
+  4. **Always:** `external` tools require human approval. Same.
+  Defaults: `max_calls_per_session=1000`, `requires_human_approval=false`, `audit_every_call=true`. Each rule layers — a high-caution + high-thoroughness agent on a network tool gets BOTH the approval gate AND the call cap.
+- **`ResolvedConstraints`** dataclass carries the resolved values + a tuple of every rule that matched, in declaration order. The matched-rule names ride along into both constitution.yaml and the audit chain so an auditor can answer "why is this constraint set what it is" without re-deriving — the trail is in the artifact.
+- **`Constitution`** dataclass gains a `tools: tuple[dict, ...]` field, included in `canonical_body()` so `constitution_hash` covers it. Per ADR-0018's reproducibility section: two agents with identical trait profiles but different tool surfaces produce different constitution hashes — correct, since their effective policy differs. Same DNA, different rulebook.
+- **`/preview` updated** to accept `tools_add` / `tools_remove` and resolve them through the same kit + policy path /birth uses. Existing `test_preview_matches_birth_hash` continues to pass — /preview-with-defaults still matches /birth-with-defaults because the resolved tool surface is identical on both sides. Predictive parity preserved as ADR-0018 §"Reproducibility" requires.
+- **Audit chain**: `agent_created` and `agent_spawned` `event_data.tools` is now the full per-tool resolved structure (`{name, version, side_effects, constraints, applied_rules}`) rather than just `{name, version}`. Operator can read constraints + rule trace without opening the constitution.yaml file. `tool_catalog_version` continues to pin which catalog the agent was birthed against.
+- **Tests added** (`tests/unit/test_tool_policy.py`, 15 cases):
+  - **TestDefaults** (3): low-caution read-only uses defaults; default audit_every_call is true; default max_calls_per_session is generous.
+  - **TestTraitRules** (5): high-caution requires approval on network; high-caution does NOT affect read-only; high-thoroughness caps network calls; high-thoroughness does NOT cap read-only; high-caution + high-thoroughness layer correctly on network.
+  - **TestSafetyFloor** (3): filesystem always-rule fires even on low-caution agents; external always-rule same; external + high-thoroughness layers (approval + call cap together).
+  - **TestEdgeCases** (4): missing trait in profile doesn't crash (rule reports non-match); resolved constraints dict is sorted-keys (byte-stable); rule_names() returns all four; resolve_kit_constraints preserves order.
+- **Test stub for tool_policy unit tests** (`_StubProfile`) is intentionally minimal — only carries `trait_values`. Avoids dragging the full TraitEngine into pure-policy tests.
+- **Pre-existing tests unchanged.** `test_preview_matches_birth_hash` continues to pass because both endpoints now resolve tool surfaces identically. Tool override tests in `TestToolKit` continue to pass because the audit `tools` field shape grew from `{name, version}` to `{name, version, side_effects, constraints, applied_rules}` — the names check still uses `name` field. 108 tests total across the focused harness, all green.
+- **Forward compat baked in deliberately** — the constitution `tools[]` entry shape carries `constraints` today, with room for future fields (`memory_budget`, `benchmark_targets`, `capability_pins`) without breaking parsers. Per the "thorough and robust not tight corners" directive.
+- **Future ADRs queued (Proposed status, not yet drafted):** ADR-0020 Agent Character Sheet, ADR-0021 Role Genres / Agent Taxonomy, ADR-0022 Memory Subsystem, ADR-0023 Benchmark Suite. Each captures a piece of the broader vision (genres of agentic roles, memory budgets, benchmarks, comprehensive descriptors) without committing implementation. Tasks #30–#33 track them; pick one to draft when ready.
+
 ### Phase 4 — file ADR-0018 (Agent tool catalog) as Proposed — 2026-04-25
 
 - **`docs/decisions/ADR-0018-agent-tool-catalog.md`**, status Proposed. Captures the decision shape for giving agents concrete tool surfaces (e.g. `packet_query`, `log_grep`, `baseline_compare`) bundled by archetype and overridable per birth. Hybrid declaration model: `config/tool_catalog.yaml` is the canonical source of MCP-style tool descriptors keyed by `{name}.{version}`, soul.md frontmatter carries name+version refs (not the full schemas), constitution.yaml carries per-agent constraints derived from the trait profile (e.g. high-caution agent gets `requires_human_approval: true` on any tool whose `side_effects != "read_only"`).

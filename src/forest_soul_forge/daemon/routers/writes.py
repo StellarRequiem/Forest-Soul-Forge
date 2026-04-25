@@ -55,6 +55,7 @@ from forest_soul_forge.core.tool_catalog import (
     ToolCatalogError,
     ToolRef as CoreToolRef,
 )
+from forest_soul_forge.core.tool_policy import resolve_constraints
 from forest_soul_forge.daemon.config import DaemonSettings
 from forest_soul_forge.daemon.deps import (
     get_audit_chain,
@@ -305,6 +306,26 @@ def _resolve_tool_kit(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _resolve_tool_constraints(
+    catalog: ToolCatalog,
+    profile,
+    resolved_tools,
+) -> tuple[dict, ...]:
+    """For each resolved tool, compute per-tool constraints via the
+    tool_policy module (ADR-0018 T2.5). Returns a tuple of dicts ready
+    for constitution.build(tools=...) and audit event_data emission.
+
+    Each dict shape:
+      { name, version, side_effects, constraints, applied_rules }
+    """
+    out: list[dict] = []
+    for ref in resolved_tools:
+        tool_def = catalog.get_tool(ref)
+        rc = resolve_constraints(profile, tool_def)
+        out.append(rc.to_dict())
+    return tuple(out)
+
+
 def _resolve_enrich(req_value: bool | None, settings: DaemonSettings) -> bool:
     """Three-state precedence: explicit request value > settings default."""
     return req_value if req_value is not None else settings.enrich_narrative_default
@@ -406,12 +427,21 @@ def birth(
     resolved_tools = _resolve_tool_kit(
         tool_catalog, profile.role, req.tools_add, req.tools_remove
     )
+    # Per-tool constraints from the trait profile (ADR-0018 T2.5).
+    # constitution.build() ingests these so they're part of the
+    # constitution_hash — agents with the same profile but different
+    # tool surfaces or different constraint resolutions get different
+    # hashes, which is correct.
+    tool_constraints = _resolve_tool_constraints(
+        tool_catalog, profile, resolved_tools
+    )
 
     # Build constitution outside the lock — pure function, any schema
     # error surfaces as a 400 before we touch the write path.
     try:
         constitution = build_constitution(
-            profile, engine, agent_name=req.agent_name
+            profile, engine, agent_name=req.agent_name,
+            tools=tool_constraints,
         )
     except Exception as e:
         raise HTTPException(
@@ -493,7 +523,7 @@ def birth(
             "soul_path": str(soul_path),
             "constitution_path": str(const_path),
             "owner_id": req.owner_id,
-            "tools": [r.to_dict() for r in resolved_tools],
+            "tools": list(tool_constraints),
             "tool_catalog_version": tool_catalog.version,
             **_voice_event_fields(voice),
         }
@@ -550,6 +580,9 @@ def spawn(
     resolved_tools = _resolve_tool_kit(
         tool_catalog, profile.role, req.tools_add, req.tools_remove
     )
+    tool_constraints = _resolve_tool_constraints(
+        tool_catalog, profile, resolved_tools
+    )
 
     dna_hex = dna_full(profile)
     dna_s = dna_short(profile)
@@ -566,7 +599,8 @@ def spawn(
 
     try:
         constitution = build_constitution(
-            profile, engine, agent_name=req.agent_name
+            profile, engine, agent_name=req.agent_name,
+            tools=tool_constraints,
         )
     except Exception as e:
         raise HTTPException(
@@ -646,7 +680,7 @@ def spawn(
             "soul_path": str(soul_path),
             "constitution_path": str(const_path),
             "owner_id": req.owner_id,
-            "tools": [r.to_dict() for r in resolved_tools],
+            "tools": list(tool_constraints),
             "tool_catalog_version": tool_catalog.version,
             **_voice_event_fields(voice),
         }

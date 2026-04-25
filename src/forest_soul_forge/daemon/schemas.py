@@ -382,8 +382,16 @@ class GradeReportOut(BaseModel):
 class PreviewRequest(BaseModel):
     """Same shape as the birth payload minus identity.
 
-    Preview is a pure function of the profile + optional override, so it
-    takes no agent_name and never touches the registry or the chain.
+    Preview is a pure function of the profile + optional override + tool
+    surface, so it takes no agent_name and never touches the registry
+    or the chain.
+
+    ``tools_add`` and ``tools_remove`` MUST match what the eventual
+    /birth call will pass — per ADR-0018 §"Reproducibility", the
+    constitution hash now covers the resolved tool surface, so
+    different overrides → different hash. /preview-with-defaults
+    won't match a /birth-with-tools_add — pass the same overrides on
+    both calls to get hash parity.
     """
 
     profile: TraitProfileIn
@@ -391,6 +399,8 @@ class PreviewRequest(BaseModel):
         default=None,
         description="Same semantics as BirthRequest.constitution_override.",
     )
+    tools_add: list[ToolRefIn] = Field(default_factory=list)
+    tools_remove: list[str] = Field(default_factory=list)
 
 
 class PreviewResponse(BaseModel):
