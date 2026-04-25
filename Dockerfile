@@ -49,6 +49,14 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 COPY config ./config
 
+# Normalize permissions so the non-root `fsf` user can read the image's
+# baked configs regardless of host umask. Without this, a host file
+# created under umask 077 lands in the image as mode 600 and the trait
+# engine 503s every write endpoint with the misleading "FSF_TRAIT_TREE_PATH"
+# message. See live-fire-voice diagnostic 2026-04-25 that caught this.
+# `a+rX` — read for all on every file, execute for directories only.
+RUN chmod -R a+rX /app/src /app/config
+
 RUN pip install --no-cache-dir ".[daemon]"
 
 # Artifacts dir — the examples tree is the out-of-the-box canonical data.
@@ -56,6 +64,7 @@ RUN pip install --no-cache-dir ".[daemon]"
 # the bind-mount is empty, so a fresh `docker compose up` has something
 # to index without clobbering user data on subsequent starts.
 COPY examples ./examples
+RUN chmod -R a+rX /app/examples
 
 # Entrypoint script: ensure /app/data subdirs exist and seed from examples
 # on first boot. See scripts/docker-entrypoint.sh for the full rationale.
