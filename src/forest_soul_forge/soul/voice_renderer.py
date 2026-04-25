@@ -68,12 +68,26 @@ SYSTEM_PROMPT = (
     "You are writing a short '## Voice' section for an agent's soul.md "
     "document. The section captures how this specific agent speaks, "
     "decides, and handles uncertainty — given its trait profile and "
-    "role. Write in second person addressed to the agent itself ('you "
-    "speak with...', 'when you are uncertain...'). Produce 2 to 4 short "
-    "paragraphs. No headers, no bullet points, no closing sign-off. Do "
-    "not restate the trait values numerically — translate them into "
-    "voice and decision-making cadence. Keep it grounded; avoid mystical "
-    "or grandiose language."
+    "role.\n\n"
+    "Write in second person addressed to the agent itself: 'you speak "
+    "with...', 'when you are uncertain you...', 'you ask for...'. "
+    "Produce 2 to 3 short paragraphs of plain declarative prose. No "
+    "headers, no bullet points, no closing sign-off, no list of trait "
+    "values.\n\n"
+    "Voice rules — strict:\n"
+    "1. Describe concrete behaviors. Each sentence should say what the "
+    "agent does, not how impressive it is. 'You log every step before "
+    "acting.' Yes. 'Your attention to detail is unparalleled.' No.\n"
+    "2. No marketing adjectives or superlatives. Avoid 'meticulous', "
+    "'laser-sharp', 'unparalleled', 'exceptional', 'remarkable', "
+    "'borders on', 'precision', 'unwavering', 'steadfast'.\n"
+    "3. No mystical or grandiose framing. The agent is a tool, not a "
+    "hero.\n"
+    "4. Translate the trait profile into decisions and outputs, not "
+    "into adjectival praise. A high-caution agent doesn't have "
+    "'remarkable caution' — it 'asks for confirmation before any "
+    "action with external impact'.\n"
+    "5. State, don't celebrate. Plain sentences beat dramatic ones."
 )
 
 
@@ -254,9 +268,12 @@ def _template_voice(
 ) -> VoiceText:
     """Templated fallback used when the provider is unavailable / errored.
 
-    Produces a single short paragraph derived from the dominant domain
-    and any very-high trait. Marked with an italic provenance line so a
-    reader doesn't mistake it for LLM-authored voice.
+    Renders 2–3 paragraphs derived from the actual profile so a fallback
+    soul.md doesn't read sparser than an enriched one. Same shape as a
+    valid LLM voice (plain declarative second-person prose), built
+    deterministically from the trait values rather than via an LLM call.
+    Marked with an italic provenance line at the end so a reader can
+    always tell which is which.
     """
     domain_order = sorted(
         engine.domains.keys(),
@@ -265,28 +282,91 @@ def _template_voice(
             list(engine.domains.keys()).index(d),
         ),
     )
-    dominant = domain_order[0] if domain_order else "balanced"
-    dominant_h = dominant.replace("_", " ")
+    dominant = domain_order[0].replace("_", " ") if domain_order else "balanced"
+    second = (domain_order[1].replace("_", " ")
+              if len(domain_order) > 1 else None)
 
-    very_high = sorted(
+    sorted_traits = sorted(
         profile.trait_values.items(), key=lambda kv: -kv[1]
     )
-    very_high_named = [t for t, v in very_high if v >= 80][:2]
+    very_high = [(t, v) for t, v in sorted_traits if v >= 80]
+    fairly_high = [(t, v) for t, v in sorted_traits if 60 <= v < 80]
+    very_low = [(t, v) for t, v in sorted_traits if v < 30]
 
-    if very_high_named:
-        strengths = ", ".join(t.replace("_", " ") for t in very_high_named)
-        body = (
-            f"You operate from a base of **{dominant_h}**, with pronounced "
-            f"strengths in {strengths}. Your decisions weight that emphasis; "
-            f"deviations require explicit override."
+    paragraphs: list[str] = []
+
+    # Paragraph 1: orientation. Dominant domain + role context.
+    role_desc = role.description.rstrip(".") if getattr(role, "description", None) else ""
+    if role_desc:
+        paragraphs.append(
+            f"You operate as a **{role.name.replace('_', ' ')}**: {role_desc}. "
+            f"Your dominant orientation is **{dominant}**"
+            + (f", with **{second}** as a secondary emphasis." if second else ".")
         )
     else:
-        body = (
-            f"You operate from a base of **{dominant_h}**. Your decisions "
-            f"reflect that emphasis without overcommitting to any single "
-            f"trait."
+        paragraphs.append(
+            f"Your dominant orientation is **{dominant}**"
+            + (f", with **{second}** as a secondary emphasis." if second else ".")
         )
 
+    # Paragraph 2: concrete behaviors derived from very-high traits.
+    if very_high:
+        # Cap to top 4 to keep the paragraph tight.
+        named = [t for t, _ in very_high[:4]]
+        behaviors = []
+        # Map a handful of common high-value traits to concrete behaviors.
+        # Generic fallback handles anything not in the map.
+        BEHAVIOR_MAP = {
+            "caution": "ask for confirmation before any action with external impact",
+            "double_checking": "re-derive each conclusion from its inputs before stating it",
+            "evidence_demand": "require independent corroboration before asserting a finding",
+            "technical_accuracy": "verify every technical claim against its source",
+            "thoroughness": "log reasoning, alternatives considered, and inputs examined",
+            "research_thoroughness": "pull from multiple angles before concluding",
+            "transparency": "name your gaps and assumptions out loud",
+            "vigilance": "keep scanning even during low-signal periods",
+            "suspicion": "treat every outlier as potentially significant until shown otherwise",
+            "risk_aversion": "default to the lower-impact option when in doubt",
+            "composure": "hold output quality steady under pressure",
+            "patience": "welcome backtracking and repeated clarification",
+            "directness": "make flat unhedged claims when the evidence is in",
+            "empathy": "acknowledge what the user is feeling before offering an answer",
+        }
+        for t in named:
+            phrase = BEHAVIOR_MAP.get(t)
+            if phrase:
+                behaviors.append(f"You {phrase}.")
+            else:
+                # Generic phrasing for traits we haven't mapped yet.
+                behaviors.append(
+                    f"You weight {t.replace('_', ' ')} above the median in your decisions."
+                )
+        # Combine into one paragraph rather than separate sentences-per-trait
+        # so the prose reads as a continuous voice.
+        paragraphs.append(" ".join(behaviors))
+
+    # Paragraph 3: shaped by very-low and fairly-high. How you handle
+    # uncertainty and where you avoid overcommitting.
+    closer_bits: list[str] = []
+    if very_low:
+        low_named = [t.replace("_", " ") for t, _ in very_low[:2]]
+        closer_bits.append(
+            f"You do not lean on {', '.join(low_named)} — those are deprioritized in your output."
+        )
+    if fairly_high:
+        # Pick one fairly-high trait that suggests how to handle uncertainty
+        # if available, otherwise just acknowledge calibration.
+        anchor = fairly_high[0][0].replace("_", " ")
+        closer_bits.append(
+            f"In uncertain cases you fall back on {anchor} rather than guessing."
+        )
+    if not closer_bits:
+        closer_bits.append(
+            "When uncertain you say so plainly rather than synthesizing confidence."
+        )
+    paragraphs.append(" ".join(closer_bits))
+
+    body = "\n\n".join(paragraphs)
     suffix = note or "model provider was unavailable at birth"
     body += f"\n\n_(template fallback — {suffix})_"
 
