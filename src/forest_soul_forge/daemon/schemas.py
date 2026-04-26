@@ -453,6 +453,45 @@ class ResolvedKitOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Genre engine read-only exposure (GET /genres) — ADR-0021 T2.
+# ---------------------------------------------------------------------------
+class GenreRiskProfileOut(BaseModel):
+    """The hash-affecting + structural floor of a genre's risk surface."""
+
+    max_side_effects: str
+    provider_constraint: str | None = None
+
+
+class GenreOut(BaseModel):
+    """One genre as enumerated by GET /genres.
+
+    Mirrors :class:`forest_soul_forge.core.genre_engine.GenreDef` field
+    by field. The frontend's genre selector consumes this to populate
+    its dropdown and to filter the role list when a genre is selected.
+    """
+
+    name: str
+    description: str
+    risk_profile: GenreRiskProfileOut
+    default_kit_pattern: list[str] = Field(default_factory=list)
+    trait_emphasis: list[str] = Field(default_factory=list)
+    memory_pattern: str
+    spawn_compatibility: list[str] = Field(default_factory=list)
+    roles: list[str] = Field(default_factory=list)
+
+
+class GenresOut(BaseModel):
+    """Response for GET /genres.
+
+    ``version`` matches the ``version`` field in ``genres.yaml`` so the
+    frontend can detect when the loaded engine has changed under it.
+    """
+
+    version: str
+    genres: list[GenreOut]
+
+
+# ---------------------------------------------------------------------------
 # Preview (POST /preview) — zero-write slider feedback
 # ---------------------------------------------------------------------------
 class DomainGradeOut(BaseModel):

@@ -43,6 +43,13 @@
             <div class="panel__header">
               <h2 class="panel__title">Profile</h2>
               <div class="panel__actions">
+                <!-- ADR-0021 T8: genre selector filters the role dropdown. -->
+                <!-- "all" is the default (empty value) — back-compat with the   -->
+                <!-- pre-T8 form where everyone saw every role.                  -->
+                <label for="genre-select" class="lbl">genre</label>
+                <select id="genre-select" class="inp inp--sm">
+                  <option value="">all</option>
+                </select>
                 <label for="role-select" class="lbl">role</label>
                 <select id="role-select" class="inp inp--sm"></select>
                 <button class="btn btn--ghost btn--sm" id="reset-profile" type="button">reset</button>

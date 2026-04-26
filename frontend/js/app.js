@@ -11,6 +11,7 @@ import * as agentsPanel from "./agents.js";
 import * as auditPanel from "./audit.js";
 import * as providersPanel from "./providers.js";
 import * as toolsPanel from "./tools.js";
+import * as genresPanel from "./genres.js";
 import { toast } from "./toast.js";
 
 function wireTabs() {
@@ -63,6 +64,13 @@ async function boot() {
       kind: "warn",
       ttl: 8000,
     });
+  });
+  // Genres panel (ADR-0021 T8) — loads /genres + wires the genre dropdown
+  // that filters the role list. Same non-fatal posture as tools — when
+  // the genre engine isn't loaded, the dropdown stays at "all" and the
+  // form behaves as it did pre-T8.
+  genresPanel.start().catch((e) => {
+    console.warn("[genres] start failed:", e);
   });
   preview.start();
   forms.start();

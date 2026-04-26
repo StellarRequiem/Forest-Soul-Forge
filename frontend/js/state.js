@@ -17,6 +17,8 @@
 //   - toolKit          ResolvedKitOut for the currently-selected role
 //   - toolOverrides    { tools_add: [{name, version}], tools_remove: [string] }
 //                      published by tools.js, consumed by preview.js + forms.js
+//   - genres           GenresOut from GET /genres (cached for session)
+//   - selectedGenre    string — current genre filter ("" = all genres)
 
 const subs = new Map(); // key -> Set<fn>
 const data = new Map(); // key -> value
