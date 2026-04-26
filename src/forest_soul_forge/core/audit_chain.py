@@ -55,6 +55,19 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "drift_detected",
     "finding_emitted",
     "policy_violation_detected",
+    # ADR-0019 T2 — tool dispatch lifecycle. Five entries (rather than
+    # one) so the chain itself records the moment between "we said yes"
+    # and "the tool returned": a crash mid-execute leaves a `dispatched`
+    # without a matching `succeeded`/`failed`, which is diagnostically
+    # useful.
+    "tool_call_dispatched",
+    "tool_call_succeeded",
+    "tool_call_refused",
+    "tool_call_failed",
+    "tool_call_pending_approval",
+    # ADR-0021 T6 — operator override on spawn-compat. Recorded so the
+    # operator can later answer "why did we spawn this combination?".
+    "spawn_genre_override",
 })
 
 

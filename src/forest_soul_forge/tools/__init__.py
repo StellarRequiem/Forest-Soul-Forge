@@ -17,6 +17,13 @@ from forest_soul_forge.tools.base import (
     ToolResult,
     ToolValidationError,
 )
+from forest_soul_forge.tools.dispatcher import (
+    DispatchFailed,
+    DispatchPendingApproval,
+    DispatchRefused,
+    DispatchSucceeded,
+    ToolDispatcher,
+)
 
 __all__ = [
     "Tool",
@@ -25,4 +32,9 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "ToolValidationError",
+    "ToolDispatcher",
+    "DispatchSucceeded",
+    "DispatchRefused",
+    "DispatchPendingApproval",
+    "DispatchFailed",
 ]

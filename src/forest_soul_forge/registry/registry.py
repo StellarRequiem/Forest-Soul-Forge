@@ -640,6 +640,47 @@ class Registry:
             (key, endpoint, request_hash, status_code, response_json, created_at),
         )
 
+    # -------- tool-call counters (ADR-0019 T2) ---------------------------
+    # Per-session call budget for max_calls_per_session enforcement. The
+    # dispatcher reads, decides, then increments — all under the daemon's
+    # write lock so the read-then-write window is atomic against
+    # concurrent invocations of the same (instance_id, session_id).
+    def get_tool_call_count(self, instance_id: str, session_id: str) -> int:
+        """Return the current per-session call count, or 0 if no row yet."""
+        row = self._conn.execute(
+            "SELECT calls FROM tool_call_counters WHERE instance_id=? AND session_id=?;",
+            (instance_id, session_id),
+        ).fetchone()
+        return int(row["calls"]) if row is not None else 0
+
+    def increment_tool_call_count(
+        self, instance_id: str, session_id: str, when_iso: str
+    ) -> int:
+        """Increment the counter and return the post-increment value.
+
+        Uses INSERT ... ON CONFLICT to fold the create-or-update into a
+        single statement — no read-then-write window. Caller still holds
+        the daemon write lock for the broader dispatch transaction so
+        the new value can be reasoned about consistently with audit
+        emission. Returns the post-increment count.
+        """
+        with _transaction(self._conn):
+            self._conn.execute(
+                """
+                INSERT INTO tool_call_counters (instance_id, session_id, calls, last_call_at)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(instance_id, session_id) DO UPDATE SET
+                    calls = calls + 1,
+                    last_call_at = excluded.last_call_at;
+                """,
+                (instance_id, session_id, when_iso),
+            )
+            row = self._conn.execute(
+                "SELECT calls FROM tool_call_counters WHERE instance_id=? AND session_id=?;",
+                (instance_id, session_id),
+            ).fetchone()
+        return int(row["calls"])
+
     # -------- internal insert helpers ------------------------------------
     def _insert_agent_row(
         self,

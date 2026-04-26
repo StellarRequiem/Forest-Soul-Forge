@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 2
+SCHEMA_VERSION: int = 3
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -127,6 +127,23 @@ DDL_STATEMENTS: tuple[str, ...] = (
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_keys(created_at);",
+    # --- tool-call counters (ADR-0019 T2) --------------------------------
+    # One row per (instance_id, session_id). The dispatcher increments
+    # ``calls`` after a successful enforce-and-execute pass; the row is
+    # created on first call and persists for the life of the registry.
+    # ``last_call_at`` is informational (helps the operator spot stalled
+    # sessions). The composite primary key keeps the lookup index-only.
+    """
+    CREATE TABLE IF NOT EXISTS tool_call_counters (
+        instance_id   TEXT NOT NULL,
+        session_id    TEXT NOT NULL,
+        calls         INTEGER NOT NULL DEFAULT 0,
+        last_call_at  TEXT,
+        PRIMARY KEY (instance_id, session_id),
+        FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_tool_call_counters_instance ON tool_call_counters(instance_id);",
     # --- metadata --------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS registry_meta (
@@ -146,9 +163,16 @@ INITIAL_METADATA: tuple[tuple[str, str], ...] = (
 
 # Tables the rebuild path clears before repopulating. Order matters because of
 # foreign keys — children before parents.
+#
+# ``tool_call_counters`` is included so a rebuild-from-artifacts wipes the
+# per-session call budgets — they're runtime state, not artifact state, and
+# leaving stale rows around would let an attacker who tampered with the
+# artifact tree carry forward partial budgets from a prior life. Rebuild
+# resets every counter to zero on the first call after rebuild.
 REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     "audit_events",
     "agent_ancestry",
+    "tool_call_counters",
     "tools",
     "agent_capabilities",
     "agents",
@@ -194,5 +218,24 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         );
         """,
         "CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_keys(created_at);",
+    ),
+    # v2 → v3: add tool_call_counters (ADR-0019 T2). One row per
+    # (instance_id, session_id) for max_calls_per_session enforcement.
+    # Pure addition — old DBs gain the table without touching any
+    # existing data. CREATE IF NOT EXISTS is self-healing if a partial
+    # migration ran (the transaction wrapper makes that impossible in
+    # practice, but defensive).
+    3: (
+        """
+        CREATE TABLE IF NOT EXISTS tool_call_counters (
+            instance_id   TEXT NOT NULL,
+            session_id    TEXT NOT NULL,
+            calls         INTEGER NOT NULL DEFAULT 0,
+            last_call_at  TEXT,
+            PRIMARY KEY (instance_id, session_id),
+            FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_tool_call_counters_instance ON tool_call_counters(instance_id);",
     ),
 }
