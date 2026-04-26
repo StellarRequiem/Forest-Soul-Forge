@@ -1,0 +1,167 @@
+# Forest Soul Forge — role genres (ADR-0021).
+#
+# Seven flat genres in v1. Each role belongs to exactly one genre. Loading
+# enforces:
+#   1. Each role name appears under exactly one genre.
+#   2. Every role known to the TraitEngine is claimed by some genre. (Reverse
+#      direction is allowed — genres.yaml may list aspirational roles that
+#      the trait engine hasn't declared yet.)
+#   3. spawn_compatibility entries reference real genres in this file.
+#
+# Cross-references:
+# - ADR-0008 — Companion's local_only provider_constraint comes from here.
+# - ADR-0017 — voice renderer reads `trait_emphasis` to weight the prompt.
+# - ADR-0018 — tool catalog's `genre_default_tools` (T4) keys off genre name.
+
+version: "0.1"
+
+genres:
+
+  observer:
+    description: |
+      Passive watching, read-only orientation. Reports findings; does not
+      act on them. The default genre for any "watch X and tell me when Y"
+      ask. Should not be its own action-taker — route through a Communicator
+      that the operator can gate.
+    risk_profile:
+      max_side_effects: read_only
+    default_kit_pattern:
+      - passive_observation
+      - timestamp_helpers
+    trait_emphasis: [vigilance, suspicion, thoroughness, double_checking]
+    memory_pattern: short_retention
+    spawn_compatibility: [observer, investigator]
+    roles:
+      - network_watcher
+      - log_analyst
+      # Aspirational (declared here so when the trait engine adds them they
+      # already have a home). Loader does NOT require these to exist in the
+      # trait engine.
+      - signal_listener
+      - dashboard_watcher
+
+  investigator:
+    description: |
+      Active correlation across observation surfaces. Mostly read-only but
+      with controlled network reach (DNS lookups, threat-intel queries,
+      baseline comparisons). Can spawn back to Observer for deeper passive
+      watching, or forward to Communicator to report findings.
+    risk_profile:
+      max_side_effects: network
+    default_kit_pattern:
+      - passive_observation
+      - cross_source_correlation
+      - baseline_comparison
+    trait_emphasis: [evidence_demand, double_checking, lateral_thinking, technical_accuracy]
+    memory_pattern: episodic_long
+    spawn_compatibility: [observer, investigator, communicator]
+    roles:
+      - anomaly_investigator
+      - incident_correlator
+      - threat_hunter
+
+  communicator:
+    description: |
+      Wraps other agents' findings into messages, briefs, summaries, or
+      translations. Sends output to humans or external systems. Every
+      outbound action is human-approval-gated by default; the operator must
+      acknowledge each delivery. The proper "spokesperson" of a multi-agent
+      lineage.
+    risk_profile:
+      max_side_effects: network
+    default_kit_pattern:
+      - summarization
+      - external_messaging
+      - translation_helpers
+    trait_emphasis: [transparency, formality, directness, empathy]
+    memory_pattern: short_retention
+    spawn_compatibility: [communicator]
+    roles:
+      - notifier
+      - briefer
+      - status_reporter
+      - translator
+
+  actuator:
+    description: |
+      Performs durable external actions: creates tickets, deploys
+      configurations, sends commands. The most heavily gated genre — every
+      non-read-only action requires human approval regardless of trait
+      values. Spawn compatibility deliberately tight to prevent silent
+      action chains.
+    risk_profile:
+      max_side_effects: external
+    default_kit_pattern:
+      - external_actions
+      - approval_workflows
+    trait_emphasis: [caution, evidence_demand, transparency, formality]
+    memory_pattern: episodic_long
+    spawn_compatibility: [actuator]
+    roles:
+      - ticket_creator
+      - deploy_runner
+      - alert_dispatcher
+
+  guardian:
+    description: |
+      Safety check, second opinion, refusal arbiter, content review. Reads
+      another agent's output and either blesses or blocks it. Strict
+      read-only kit; high evidence_demand and double_checking by trait
+      emphasis. The "no" agent in a multi-agent flow.
+    risk_profile:
+      max_side_effects: read_only
+    default_kit_pattern:
+      - content_review
+      - policy_check
+      - audit_inspection
+    trait_emphasis: [evidence_demand, double_checking, caution, transparency]
+    memory_pattern: short_retention
+    spawn_compatibility: [guardian]
+    roles:
+      - safety_check
+      - content_review
+      - refusal_arbiter
+
+  researcher:
+    description: |
+      Literature scan, data synthesis, knowledge consolidation. Reads
+      broadly with allowlisted network reach (catalog browse, web fetch
+      against allowlists), emits structured summaries. Long-running by
+      nature. Distinct from Investigator by breadth: an Investigator
+      drills into a specific anomaly; a Researcher surveys a topic.
+    risk_profile:
+      max_side_effects: network
+    default_kit_pattern:
+      - web_research
+      - corpus_synthesis
+      - citation_management
+    trait_emphasis: [thoroughness, research_thoroughness, lateral_thinking, transparency]
+    memory_pattern: episodic_long
+    spawn_compatibility: [researcher, communicator]
+    roles:
+      - paper_summarizer
+      - vendor_research
+      - knowledge_consolidator
+
+  companion:
+    description: |
+      Therapy-adjacent, accessibility runtime, interactive presence. The
+      Phase 5 path from ADR-0008. Distinct from every other genre by
+      audio/video runtime, persistent memory, and emotional-affect-aware
+      policies. Highest privacy floor: local-only providers required for
+      any session involving user state. NEVER spawns out-of-genre.
+    risk_profile:
+      max_side_effects: network
+      provider_constraint: local_only
+    default_kit_pattern:
+      - interactive_session
+      - memory_recall
+      - schedule_aware
+    trait_emphasis: [empathy, patience, warmth, composure, transparency]
+    memory_pattern: long_consolidated
+    spawn_compatibility: [companion]
+    roles:
+      - therapist
+      - accessibility_runtime
+      - day_companion
+      - learning_partner

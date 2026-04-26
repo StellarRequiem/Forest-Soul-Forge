@@ -1,0 +1,329 @@
+"""Role genres and agent taxonomy — see ADR-0021.
+
+Reads ``config/genres.yaml`` once at daemon startup and exposes:
+
+* ``genre_for(role)`` — the GenreDef that claims a role (raises if unclaimed).
+* ``roles_for(genre)`` — the tuple of roles in a genre.
+* ``all_genres()`` — every loaded GenreDef.
+* ``can_spawn(parent_genre, child_genre)`` — spawn-compatibility check.
+
+Same load-time discipline as ``tool_catalog.py``:
+
+* Each role appears in EXACTLY ONE genre. Duplicate-claim is fatal.
+* Every genre named in any ``spawn_compatibility`` list resolves to a real
+  loaded genre. A typo here would silently allow / forbid the wrong pair.
+* Returns ``empty_engine()`` when the YAML is missing or malformed —
+  daemon lifespan logs the failure and degrades gracefully (genre-aware
+  surfaces show "no genre" rather than 503'ing).
+
+The "every TraitEngine role must be claimed by some genre" check (ADR-0021
+constraint) lives in a SEPARATE function (``validate_against_trait_engine``)
+because it requires the loaded TraitEngine — that's a daemon-lifespan
+concern, not a YAML-only concern. Keeping that separation makes the loader
+testable without spinning up the trait tree.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+# Mirrors tool_catalog.SIDE_EFFECT_VALUES — keeping the same vocabulary so
+# a genre's max_side_effects compares cleanly against a tool's side_effects.
+_SIDE_EFFECT_TIERS = ("read_only", "network", "filesystem", "external")
+# For a genre's risk_profile.provider_constraint. Only "local_only" today
+# (Companion's Phase 5 floor). Extensible to "frontier_only" / "any" later.
+_PROVIDER_CONSTRAINTS = frozenset({"local_only"})
+
+
+class GenreEngineError(Exception):
+    """Raised when ``genres.yaml`` is malformed or violates an integrity rule."""
+
+
+@dataclass(frozen=True)
+class RiskProfile:
+    """A genre's risk floor.
+
+    ``max_side_effects`` is the strictest side_effects tier the genre's
+    standard kit defaults to (and beyond which tools require explicit
+    operator override at birth time per ADR-0021 T5).
+
+    ``provider_constraint`` is None for most genres; ``"local_only"`` for
+    Companion (ADR-0008 Phase 5 floor — therapy / accessibility agents
+    must run on local providers, no frontier).
+    """
+
+    max_side_effects: str
+    provider_constraint: str | None = None
+
+
+@dataclass(frozen=True)
+class GenreDef:
+    """One genre entry from ``genres.yaml``."""
+
+    name: str
+    description: str
+    risk_profile: RiskProfile
+    default_kit_pattern: tuple[str, ...]
+    trait_emphasis: tuple[str, ...]
+    memory_pattern: str
+    spawn_compatibility: tuple[str, ...]
+    roles: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GenreEngine:
+    """The loaded genre catalog. Held on ``app.state.genre_engine`` post-T2."""
+
+    version: str
+    genres: dict[str, GenreDef]   # keyed by genre name
+    role_to_genre: dict[str, str]   # inverse index, role -> genre name
+    source_path: Path | None = None
+
+    # ----- public API -----
+
+    def genre_for(self, role: str) -> GenreDef:
+        """Look up the genre that claims ``role``.
+
+        Raises :class:`GenreEngineError` if no genre claims this role —
+        callers that want the "unclaimed → None" semantic should catch.
+        """
+        gname = self.role_to_genre.get(role)
+        if gname is None:
+            raise GenreEngineError(
+                f"role {role!r} is not claimed by any genre "
+                f"(known roles: {sorted(self.role_to_genre.keys())})"
+            )
+        return self.genres[gname]
+
+    def roles_for(self, genre: str) -> tuple[str, ...]:
+        """Return roles in a genre. Raises if genre is unknown."""
+        gd = self.genres.get(genre)
+        if gd is None:
+            raise GenreEngineError(
+                f"unknown genre: {genre!r} "
+                f"(known: {sorted(self.genres.keys())})"
+            )
+        return gd.roles
+
+    def all_genres(self) -> tuple[GenreDef, ...]:
+        """Every loaded GenreDef in declaration order."""
+        return tuple(self.genres.values())
+
+    def can_spawn(self, parent_genre: str, child_genre: str) -> bool:
+        """True iff a parent of ``parent_genre`` is allowed to spawn a child
+        of ``child_genre`` per the parent's ``spawn_compatibility``.
+
+        Unknown parent_genre raises (caller bug — pick a real genre). Unknown
+        child_genre returns False (defensive — an unrecognized child is
+        never compatible).
+        """
+        parent = self.genres.get(parent_genre)
+        if parent is None:
+            raise GenreEngineError(
+                f"unknown parent genre: {parent_genre!r}"
+            )
+        if child_genre not in self.genres:
+            return False
+        return child_genre in parent.spawn_compatibility
+
+
+# ---------------------------------------------------------------------------
+# Loading
+# ---------------------------------------------------------------------------
+def load_genres(path: Path | str) -> GenreEngine:
+    """Read + validate ``genres.yaml``. Raises :class:`GenreEngineError`
+    on any integrity violation.
+
+    Daemon lifespan should wrap this in try/except and call
+    :func:`empty_engine` on failure so the rest of the system stays up.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise GenreEngineError(f"genres file not found at {p}")
+    try:
+        raw = yaml.safe_load(p.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        raise GenreEngineError(f"genres.yaml YAML parse error: {e}") from e
+
+    if not isinstance(raw, dict):
+        raise GenreEngineError(
+            f"genres.yaml root must be a mapping, got {type(raw).__name__}"
+        )
+
+    version_raw = raw.get("version")
+    if version_raw is None:
+        raise GenreEngineError("genres.yaml 'version' is required")
+    version = str(version_raw).strip()
+    if not version:
+        raise GenreEngineError("genres.yaml 'version' must not be empty")
+
+    genres_raw = raw.get("genres") or {}
+    if not isinstance(genres_raw, dict):
+        raise GenreEngineError("'genres' must be a mapping of genre name -> entry")
+    if not genres_raw:
+        raise GenreEngineError("'genres' must contain at least one genre")
+
+    genres: dict[str, GenreDef] = {}
+    role_to_genre: dict[str, str] = {}
+
+    for gname, body in genres_raw.items():
+        gd = _parse_genre_entry(str(gname), body)
+        if gd.name in genres:
+            raise GenreEngineError(f"duplicate genre name: {gd.name!r}")
+        genres[gd.name] = gd
+        for role in gd.roles:
+            if role in role_to_genre:
+                raise GenreEngineError(
+                    f"role {role!r} is claimed by both {role_to_genre[role]!r} "
+                    f"and {gd.name!r}; each role must belong to exactly one genre"
+                )
+            role_to_genre[role] = gd.name
+
+    # Validate spawn_compatibility entries against the loaded genre set.
+    # Doing this AFTER all genres are parsed so forward references work
+    # (a genre can list another genre that's declared later in the file).
+    for gd in genres.values():
+        for target in gd.spawn_compatibility:
+            if target not in genres:
+                raise GenreEngineError(
+                    f"genre {gd.name!r}.spawn_compatibility references "
+                    f"unknown genre {target!r} "
+                    f"(known: {sorted(genres.keys())})"
+                )
+
+    return GenreEngine(
+        version=version,
+        genres=genres,
+        role_to_genre=role_to_genre,
+        source_path=p,
+    )
+
+
+def _parse_genre_entry(name: str, entry: Any) -> GenreDef:
+    """Parse + validate one genre body."""
+    if not isinstance(entry, dict):
+        raise GenreEngineError(f"genre {name!r} must be a mapping")
+
+    def _require(field_name: str) -> Any:
+        if field_name not in entry:
+            raise GenreEngineError(
+                f"genre {name!r} missing required field {field_name!r}"
+            )
+        return entry[field_name]
+
+    description = str(_require("description")).strip()
+    if not description:
+        raise GenreEngineError(f"genre {name!r}.description is empty")
+
+    risk_raw = _require("risk_profile")
+    if not isinstance(risk_raw, dict):
+        raise GenreEngineError(f"genre {name!r}.risk_profile must be a mapping")
+    max_side_effects = str(risk_raw.get("max_side_effects", "")).strip()
+    if max_side_effects not in _SIDE_EFFECT_TIERS:
+        raise GenreEngineError(
+            f"genre {name!r}.risk_profile.max_side_effects must be one of "
+            f"{list(_SIDE_EFFECT_TIERS)}; got {max_side_effects!r}"
+        )
+    provider_constraint_raw = risk_raw.get("provider_constraint")
+    provider_constraint: str | None
+    if provider_constraint_raw is None:
+        provider_constraint = None
+    else:
+        provider_constraint = str(provider_constraint_raw).strip()
+        if provider_constraint not in _PROVIDER_CONSTRAINTS:
+            raise GenreEngineError(
+                f"genre {name!r}.risk_profile.provider_constraint must be one "
+                f"of {sorted(_PROVIDER_CONSTRAINTS)} or omitted; got "
+                f"{provider_constraint!r}"
+            )
+
+    risk_profile = RiskProfile(
+        max_side_effects=max_side_effects,
+        provider_constraint=provider_constraint,
+    )
+
+    default_kit_pattern = _require_str_list(entry, name, "default_kit_pattern")
+    trait_emphasis = _require_str_list(entry, name, "trait_emphasis")
+    spawn_compatibility = _require_str_list(entry, name, "spawn_compatibility")
+    roles = _require_str_list(entry, name, "roles")
+
+    if not roles:
+        raise GenreEngineError(
+            f"genre {name!r}.roles must contain at least one role "
+            "(empty genres are not useful and likely a typo)"
+        )
+    if not spawn_compatibility:
+        raise GenreEngineError(
+            f"genre {name!r}.spawn_compatibility must contain at least one "
+            "genre (a genre that can't spawn anything — including itself — "
+            "is almost certainly a typo; list the genre's own name to allow "
+            "self-spawning)"
+        )
+
+    memory_pattern = str(_require("memory_pattern")).strip()
+    if not memory_pattern:
+        raise GenreEngineError(
+            f"genre {name!r}.memory_pattern is empty (use a placeholder like "
+            "'short_retention' if ADR-0022 hasn't refined the values yet)"
+        )
+
+    return GenreDef(
+        name=name,
+        description=description,
+        risk_profile=risk_profile,
+        default_kit_pattern=tuple(default_kit_pattern),
+        trait_emphasis=tuple(trait_emphasis),
+        memory_pattern=memory_pattern,
+        spawn_compatibility=tuple(spawn_compatibility),
+        roles=tuple(roles),
+    )
+
+
+def _require_str_list(entry: dict, genre_name: str, field_name: str) -> list[str]:
+    """Read a required list-of-strings field from a genre body."""
+    if field_name not in entry:
+        raise GenreEngineError(
+            f"genre {genre_name!r} missing required field {field_name!r}"
+        )
+    raw = entry[field_name]
+    if not isinstance(raw, list):
+        raise GenreEngineError(
+            f"genre {genre_name!r}.{field_name} must be a list, got "
+            f"{type(raw).__name__}"
+        )
+    out: list[str] = []
+    for item in raw:
+        s = str(item).strip()
+        if not s:
+            raise GenreEngineError(
+                f"genre {genre_name!r}.{field_name} contains an empty string"
+            )
+        out.append(s)
+    return out
+
+
+def empty_engine() -> GenreEngine:
+    """Genre engine with no genres. Used as the lifespan fallback when
+    ``genres.yaml`` is absent or malformed — keeps daemon endpoints up
+    (genre-aware surfaces just report "no genres loaded")."""
+    return GenreEngine(version="0", genres={}, role_to_genre={}, source_path=None)
+
+
+def validate_against_trait_engine(
+    genres_engine: "GenreEngine",
+    trait_engine_roles: list[str],
+) -> list[str]:
+    """ADR-0021 invariant: every TraitEngine role is claimed by some genre.
+
+    Returns a list of unclaimed role names. Empty list = compliant.
+
+    Separate from :func:`load_genres` because the trait engine is a
+    daemon-lifespan concern; the loader can be tested standalone. Daemon
+    lifespan calls this AFTER both engines are loaded and surfaces any
+    findings on /healthz's startup_diagnostics.
+    """
+    return [r for r in trait_engine_roles if r not in genres_engine.role_to_genre]
