@@ -30,6 +30,13 @@ COPY css /usr/share/nginx/html/css
 COPY js  /usr/share/nginx/html/js
 COPY index.html /usr/share/nginx/html/index.html
 
+# Make assets world-readable (a+rX = read for files, read+execute for dirs).
+# COPY preserves host file modes, and on macOS the home dir tree often has
+# mode 600/700, which leaves nginx (running as the unprivileged nginx user)
+# unable to open the files — symptom is a 403 with `Permission denied`
+# in nginx's error log. Same chmod we apply on the daemon image.
+RUN chmod -R a+rX /usr/share/nginx/html
+
 # nginx:alpine already exposes 80 and runs as non-root via the nginx user.
 # We expose 5173 conceptually via the compose port mapping; inside the
 # container nginx still listens on 80. Keeping this layer minimal.
