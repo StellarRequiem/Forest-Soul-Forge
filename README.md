@@ -180,6 +180,7 @@ Every non-trivial design choice has its own ADR. Files live in [docs/decisions/]
 | 0016  | Session modes + self-spawning cipher                      | Proposed |
 | 0017  | LLM-enriched soul.md narrative                            | Proposed |
 | 0018  | Agent tool catalog                                        | Proposed |
+| 0019  | Tool execution runtime                                    | Proposed |
 | 0020  | Agent character sheet                                     | Proposed |
 | 0021  | Role genres / agent taxonomy                              | Proposed |
 | 0022  | Memory subsystem                                          | Proposed |
@@ -208,7 +209,7 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 | Item | Status |
 |------|--------|
 | Character sheet endpoint (ADR-0020 implementation) | next up |
-| Tool execution runtime (ADR-0019 — drafting) | designing |
+| Tool execution runtime (ADR-0019) — make agents *do work* | designed, T1 next up |
 | Memory subsystem (ADR-0022 implementation) | queued |
 | Benchmark suite per-genre fixtures (ADR-0023 implementation) | queued |
 | Companion-tier real-time A/V interaction | planned |
