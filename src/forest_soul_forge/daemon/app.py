@@ -181,6 +181,56 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                      "error": f"{type(e).__name__}: {e}"}
                 )
 
+        # ADR-0019 T1: tool runtime registry. Loads built-in tools
+        # at lifespan; future T5 (.fsf plugins) extends this with
+        # operator-installed tools. Failure to register a built-in
+        # is fatal — it means a catalog/runtime mismatch the operator
+        # needs to know about. We surface it on /healthz rather than
+        # 503'ing the whole daemon (read-only endpoints stay up).
+        from forest_soul_forge.tools.base import ToolError, empty_registry
+        from forest_soul_forge.tools.builtin import register_builtins
+        try:
+            from forest_soul_forge.tools import ToolRegistry
+            tool_registry = ToolRegistry()
+            register_builtins(tool_registry)
+            # Cross-check: every registered tool's (name, version) +
+            # side_effects must match a real catalog entry. Catches the
+            # "registered v1 but catalog only has v2" class of mistake
+            # at boot, not at first dispatch.
+            mismatches: list[str] = []
+            for key, tool in tool_registry.tools.items():
+                td = tool_catalog.tools.get(key)
+                if td is None:
+                    # Tool registered but not in catalog. Tolerable in
+                    # principle (operator could ship a plugin not yet
+                    # in the catalog YAML), but worth flagging.
+                    mismatches.append(
+                        f"{key}: not in tool_catalog.yaml (catalog has {sorted(tool_catalog.tools.keys())})"
+                    )
+                    continue
+                if td.side_effects != tool.side_effects:
+                    mismatches.append(
+                        f"{key}: side_effects mismatch — registry={tool.side_effects} catalog={td.side_effects}"
+                    )
+            if mismatches:
+                startup_diagnostics.append(
+                    {"component": "tool_runtime", "status": "failed",
+                     "path": None,
+                     "error": "tool registry / catalog mismatch: " + "; ".join(mismatches)}
+                )
+            else:
+                startup_diagnostics.append(
+                    {"component": "tool_runtime", "status": "ok",
+                     "path": None, "error": None}
+                )
+        except (ToolError, Exception) as e:
+            tool_registry = empty_registry()
+            startup_diagnostics.append(
+                {"component": "tool_runtime", "status": "failed",
+                 "path": None,
+                 "error": f"{type(e).__name__}: {e}"}
+            )
+
         # ADR-0021 invariant: every TraitEngine role must be claimed by
         # some genre. Skip when either engine failed to load — running
         # the check in that case would just produce noise on top of the
@@ -218,6 +268,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.audit_chain = audit_chain
         app.state.tool_catalog = tool_catalog
         app.state.genre_engine = genre_engine
+        app.state.tool_registry = tool_registry
         app.state.startup_diagnostics = startup_diagnostics
         # threading.Lock (not asyncio.Lock): sync route handlers run on the
         # FastAPI threadpool, so a thread-level lock is the right primitive.
