@@ -81,6 +81,10 @@ genres:
       - briefer
       - status_reporter
       - translator
+      # Claimed when the trait_engine added the role — wraps incident
+      # findings into briefings / pages / Slack threads. Same risk floor
+      # as briefer (network, all outbound human-approval-gated).
+      - incident_communicator
 
   actuator:
     description: |
@@ -165,3 +169,8 @@ genres:
       - accessibility_runtime
       - day_companion
       - learning_partner
+      # Claimed when the trait_engine added the role — operator-side
+      # assistive presence (think: copilot for the human running the
+      # forge, not the agents being spawned). Inherits Companion's
+      # local-only provider floor automatically.
+      - operator_companion
