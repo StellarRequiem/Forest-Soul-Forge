@@ -43,8 +43,13 @@ from forest_soul_forge.core.tool_catalog import (
     ToolCatalogError,
     ToolRef as CoreToolRef,
 )
+from forest_soul_forge.core.genre_engine import GenreEngine, GenreEngineError
 from forest_soul_forge.core.tool_policy import resolve_constraints
-from forest_soul_forge.daemon.deps import get_tool_catalog, get_trait_engine
+from forest_soul_forge.daemon.deps import (
+    get_genre_engine,
+    get_tool_catalog,
+    get_trait_engine,
+)
 from forest_soul_forge.daemon.schemas import (
     DomainGradeOut,
     FlaggedCombinationOut,
@@ -100,6 +105,7 @@ async def preview(
     req: PreviewRequest,
     engine: TraitEngine = Depends(get_trait_engine),
     tool_catalog: ToolCatalog = Depends(get_tool_catalog),
+    genre_engine: GenreEngine = Depends(get_genre_engine),
 ) -> PreviewResponse:
     # Build the profile — same validation path as /birth, but failures
     # surface as 400 without ever touching the registry.
@@ -163,10 +169,24 @@ async def preview(
             )
         )
 
+    # ADR-0021 T3: same genre derivation /birth uses, so the predicted
+    # constitution_hash equals what /birth would write. Unclaimed-role
+    # path returns (None, None) and the canonical body uses the
+    # empty-string sentinel — still hash-stable across calls.
+    try:
+        gd = genre_engine.genre_for(profile.role)
+        genre_name: str | None = gd.name
+        genre_description: str | None = gd.description
+    except GenreEngineError:
+        genre_name = None
+        genre_description = None
+
     try:
         constitution = build_constitution(
             profile, engine, agent_name="preview",
             tools=tuple(tool_constraints),
+            genre=genre_name,
+            genre_description=genre_description,
         )
     except Exception as e:
         raise HTTPException(

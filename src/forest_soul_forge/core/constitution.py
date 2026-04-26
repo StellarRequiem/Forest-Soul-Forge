@@ -111,14 +111,28 @@ class Constitution:
 
     The ``constitution_hash`` is a function of ``policies`` +
     ``risk_thresholds`` + ``out_of_scope`` + ``operator_duties`` +
-    ``drift_monitoring`` + ``tools`` (per ADR-0018 T2.5). It
-    intentionally excludes ``generated_at`` and agent identity — two
-    agents with identical rulebooks share a hash.
+    ``drift_monitoring`` + ``tools`` (per ADR-0018 T2.5) + ``genre``
+    (per ADR-0021 T3). It intentionally excludes ``generated_at`` and
+    agent identity — two agents with identical rulebooks share a hash.
 
     ``tools`` is the per-tool resolved policy (kit + per-tool
     constraints). Two agents with the same trait profile but different
     tool overrides will have different constitution hashes, which is
     correct: their effective surface differs.
+
+    ``genre`` is the role's claimed genre per ADR-0021. It's a property
+    of the agent's policy floor (Companion → local-only provider,
+    Observer → no non-read_only side effects, etc.), so it's part of
+    the rulebook and therefore the hash. ``None`` is the legacy /
+    unclaimed-role path: agents whose role isn't claimed by any genre
+    in the loaded ``genres.yaml`` get ``None`` and the canonical body
+    serializes the field as the empty string ``""`` so old artifacts
+    (which never carried a genre) re-derive to a stable hash.
+
+    ``genre_description`` is the operator-facing prose. NOT in the
+    hash — descriptions are documentation, not policy. Stored on the
+    constitution for ``to_yaml()`` round-trip but excluded from
+    ``canonical_body()`` deliberately.
     """
 
     schema_version: int
@@ -136,10 +150,21 @@ class Constitution:
     # kit). Each entry is a frozen dict so two equivalent constitutions
     # produce byte-identical hashes.
     tools: tuple[dict[str, Any], ...] = ()
+    # Role's genre (ADR-0021 T3). None when the role is unclaimed by any
+    # loaded genre OR the genre engine wasn't available at build time.
+    # Hashed; description is not.
+    genre: str | None = None
+    genre_description: str | None = None
 
     # ---- hashing --------------------------------------------------------
     def canonical_body(self) -> dict[str, Any]:
-        """Return the rulebook as a sort-stable dict, ready to JSON-canonicalize."""
+        """Return the rulebook as a sort-stable dict, ready to JSON-canonicalize.
+
+        ``genre`` is included unconditionally with ``""`` as the
+        unclaimed-role sentinel so old constitutions (which never
+        carried genre) re-derive to a stable hash. ``genre_description``
+        is intentionally excluded — it's documentation, not policy.
+        """
         return {
             "policies": [_policy_to_dict(p) for p in self.policies],
             "risk_thresholds": {
@@ -155,6 +180,7 @@ class Constitution:
                 "on_drift": self.drift_monitoring.on_drift,
             },
             "tools": [dict(sorted(t.items())) for t in self.tools],
+            "genre": self.genre or "",
         }
 
     @property
@@ -181,12 +207,22 @@ class Constitution:
         }
         if generated_at is not None:
             doc["generated_at"] = generated_at
-        doc["agent"] = {
+        agent_block: dict[str, Any] = {
             "dna": self.agent_dna,
             "dna_full": self.agent_dna_full,
             "role": self.role,
             "agent_name": self.agent_name,
         }
+        # Genre is part of agent identity at the YAML level, even though
+        # it's policy at the hash level. Operators reading the file see
+        # role and genre side-by-side. Omit when None for back-compat
+        # with constitutions written before ADR-0021 T3 — those parse
+        # cleanly because consumers tolerate missing genre.
+        if self.genre is not None:
+            agent_block["genre"] = self.genre
+        if self.genre_description is not None:
+            agent_block["genre_description"] = self.genre_description
+        doc["agent"] = agent_block
         # Body fields come after identity so readers see the rules front-and-
         # center rather than buried beneath metadata.
         doc["policies"] = [_policy_to_dict(p) for p in self.policies]
@@ -214,10 +250,19 @@ def build(
     agent_name: str,
     templates_path: Path | str | None = None,
     tools: tuple[dict[str, Any], ...] = (),
+    genre: str | None = None,
+    genre_description: str | None = None,
 ) -> Constitution:
     """Derive a :class:`Constitution` from a profile.
 
     Pure function modulo the YAML file read. Same inputs → same output.
+
+    ``genre`` and ``genre_description`` are populated from the genre
+    engine at the daemon edge (ADR-0021 T3). Pass ``None`` for both
+    when there's no genre engine loaded, or when the role isn't
+    claimed by any genre — the constitution still builds, just without
+    a genre policy floor. The hash uses ``""`` as the no-genre
+    sentinel so old artifacts re-derive to a stable hash.
     """
     tpath = Path(templates_path) if templates_path else DEFAULT_TEMPLATES_PATH
     templates = _load_templates(tpath)
@@ -281,6 +326,8 @@ def build(
         operator_duties=tuple(operator_duties),
         drift_monitoring=drift,
         tools=tuple(tools),
+        genre=genre,
+        genre_description=genre_description,
     )
 
 

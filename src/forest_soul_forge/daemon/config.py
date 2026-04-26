@@ -76,6 +76,16 @@ class DaemonSettings(BaseSettings):
         default=Path("config/tool_catalog.yaml"),
         description="Tool catalog YAML (ADR-0018) — declarative tool descriptors + per-archetype standard kits.",
     )
+    genres_path: Path = Field(
+        default=Path("config/genres.yaml"),
+        description=(
+            "Role genres YAML (ADR-0021) — claims each role for a genre and "
+            "carries the genre's risk floor, trait emphasis, memory pattern, "
+            "and spawn-compatibility table. Loaded best-effort at lifespan; "
+            "missing or malformed file degrades to empty engine and the "
+            "daemon stays up (births get genre=None)."
+        ),
+    )
     soul_output_dir: Path = Field(
         default=Path("soul_generated"),
         description=(

@@ -55,10 +55,12 @@ from forest_soul_forge.core.tool_catalog import (
     ToolCatalogError,
     ToolRef as CoreToolRef,
 )
+from forest_soul_forge.core.genre_engine import GenreEngine, GenreEngineError
 from forest_soul_forge.core.tool_policy import resolve_constraints
 from forest_soul_forge.daemon.config import DaemonSettings
 from forest_soul_forge.daemon.deps import (
     get_audit_chain,
+    get_genre_engine,
     get_provider_registry,
     get_registry,
     get_settings,
@@ -331,6 +333,28 @@ def _resolve_enrich(req_value: bool | None, settings: DaemonSettings) -> bool:
     return req_value if req_value is not None else settings.enrich_narrative_default
 
 
+def _resolve_genre(
+    genre_engine: GenreEngine, role: str
+) -> tuple[str | None, str | None]:
+    """ADR-0021 T3: derive (genre, genre_description) from the role.
+
+    Returns ``(None, None)`` when the role isn't claimed (empty engine
+    or unclaimed role). Birth/spawn proceed with no genre — the
+    constitution still builds; consumers see the empty-string sentinel
+    in the hash body and a missing ``genre:`` line in the soul / yaml.
+
+    Per ADR-0021 open question 1: genre is implicit (always derived
+    from role), not a per-request override. The override mechanism
+    for spawn-compatibility violations is a separate concern handled
+    in T6, not here.
+    """
+    try:
+        gd = genre_engine.genre_for(role)
+    except GenreEngineError:
+        return None, None
+    return gd.name, gd.description
+
+
 def _maybe_render_voice(
     *,
     enrich: bool,
@@ -413,6 +437,7 @@ def birth(
     settings: DaemonSettings = Depends(get_settings),
     providers: ProviderRegistry = Depends(get_provider_registry),
     tool_catalog: ToolCatalog = Depends(get_tool_catalog),
+    genre_engine: GenreEngine = Depends(get_genre_engine),
 ):
     idempotency_key = get_idempotency_key(request)
     request_hash = compute_request_hash("/birth", req.model_dump(mode="json"))
@@ -436,12 +461,20 @@ def birth(
         tool_catalog, profile, resolved_tools
     )
 
+    # ADR-0021 T3: derive genre from role. None when the role isn't
+    # claimed; constitution.build() handles None by writing the
+    # empty-string sentinel into canonical_body so the hash stays
+    # stable for unclaimed-role agents and old artifacts.
+    genre, genre_description = _resolve_genre(genre_engine, profile.role)
+
     # Build constitution outside the lock — pure function, any schema
     # error surfaces as a 400 before we touch the write path.
     try:
         constitution = build_constitution(
             profile, engine, agent_name=req.agent_name,
             tools=tool_constraints,
+            genre=genre,
+            genre_description=genre_description,
         )
     except Exception as e:
         raise HTTPException(
@@ -494,6 +527,8 @@ def birth(
             voice=voice,
             tools=resolved_tools,
             tool_catalog_version=tool_catalog.version,
+            genre=genre,
+            genre_description=genre_description,
         )
         constitution_yaml = constitution.to_yaml(generated_at=soul_doc.generated_at)
         if req.constitution_override:
@@ -525,6 +560,7 @@ def birth(
             "owner_id": req.owner_id,
             "tools": list(tool_constraints),
             "tool_catalog_version": tool_catalog.version,
+            "genre": genre,
             **_voice_event_fields(voice),
         }
         try:
@@ -568,6 +604,7 @@ def spawn(
     settings: DaemonSettings = Depends(get_settings),
     providers: ProviderRegistry = Depends(get_provider_registry),
     tool_catalog: ToolCatalog = Depends(get_tool_catalog),
+    genre_engine: GenreEngine = Depends(get_genre_engine),
 ):
     idempotency_key = get_idempotency_key(request)
     request_hash = compute_request_hash("/spawn", req.model_dump(mode="json"))
@@ -583,6 +620,9 @@ def spawn(
     tool_constraints = _resolve_tool_constraints(
         tool_catalog, profile, resolved_tools
     )
+
+    # ADR-0021 T3: same genre derivation as /birth.
+    genre, genre_description = _resolve_genre(genre_engine, profile.role)
 
     dna_hex = dna_full(profile)
     dna_s = dna_short(profile)
@@ -601,6 +641,8 @@ def spawn(
         constitution = build_constitution(
             profile, engine, agent_name=req.agent_name,
             tools=tool_constraints,
+            genre=genre,
+            genre_description=genre_description,
         )
     except Exception as e:
         raise HTTPException(
@@ -648,6 +690,8 @@ def spawn(
             voice=voice,
             tools=resolved_tools,
             tool_catalog_version=tool_catalog.version,
+            genre=genre,
+            genre_description=genre_description,
         )
         constitution_yaml = constitution.to_yaml(generated_at=soul_doc.generated_at)
         if req.constitution_override:
@@ -682,6 +726,7 @@ def spawn(
             "owner_id": req.owner_id,
             "tools": list(tool_constraints),
             "tool_catalog_version": tool_catalog.version,
+            "genre": genre,
             **_voice_event_fields(voice),
         }
         try:

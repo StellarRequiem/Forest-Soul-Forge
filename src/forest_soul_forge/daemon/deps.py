@@ -101,6 +101,22 @@ def get_tool_catalog(request: Request):
     return catalog
 
 
+def get_genre_engine(request: Request):
+    """Return the loaded :class:`GenreEngine` from app.state.
+
+    Always returns an engine (possibly empty) — never raises 503 — so
+    /birth keeps working when ``genres.yaml`` is missing or malformed.
+    Empty engine means no role is claimed by any genre, so birth and
+    spawn proceed with ``genre=None`` and the resulting constitution
+    has the empty-string sentinel in its hash body.
+    """
+    from forest_soul_forge.core.genre_engine import empty_engine
+    engine = getattr(request.app.state, "genre_engine", None)
+    if engine is None:
+        return empty_engine()
+    return engine
+
+
 def get_audit_chain(request: Request) -> "AuditChain":
     chain = getattr(request.app.state, "audit_chain", None)
     if chain is None:

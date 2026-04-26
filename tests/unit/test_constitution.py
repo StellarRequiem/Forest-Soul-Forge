@@ -345,3 +345,75 @@ class TestSoulBinding:
             gen.generate(profile, agent_name="Watcher", constitution_hash="abcd")
         with pytest.raises(ValueError):
             gen.generate(profile, agent_name="Watcher", constitution_file="x.yaml")
+
+
+# ============================================================================
+# ADR-0021 T3 — genre in canonical body and YAML output.
+# ============================================================================
+class TestGenre:
+    """Genre is part of the rulebook (hashed); description is not."""
+
+    def test_no_genre_default(self, engine: TraitEngine) -> None:
+        c = build(engine.build_profile("network_watcher"),
+                  engine, agent_name="A", templates_path=TEMPLATES_PATH)
+        assert c.genre is None
+        assert c.genre_description is None
+
+    def test_canonical_body_has_genre_field_with_empty_sentinel(
+        self, engine: TraitEngine
+    ) -> None:
+        # Even when genre is None, canonical_body must include the field
+        # (with "") so the hash shape is stable across legacy and modern
+        # constitutions. This is the explicit ADR-0021 T3 contract.
+        c = build(engine.build_profile("network_watcher"),
+                  engine, agent_name="A", templates_path=TEMPLATES_PATH)
+        body = c.canonical_body()
+        assert "genre" in body
+        assert body["genre"] == ""
+
+    def test_hash_changes_when_genre_changes(self, engine: TraitEngine) -> None:
+        # Two agents with identical profile + tools but different genre
+        # must hash differently. Genre is policy.
+        profile = engine.build_profile("network_watcher")
+        c_obs = build(profile, engine, agent_name="A",
+                      templates_path=TEMPLATES_PATH, genre="observer")
+        c_inv = build(profile, engine, agent_name="A",
+                      templates_path=TEMPLATES_PATH, genre="investigator")
+        c_none = build(profile, engine, agent_name="A",
+                       templates_path=TEMPLATES_PATH)
+        assert c_obs.constitution_hash != c_inv.constitution_hash
+        assert c_obs.constitution_hash != c_none.constitution_hash
+        assert c_inv.constitution_hash != c_none.constitution_hash
+
+    def test_hash_excludes_genre_description(self, engine: TraitEngine) -> None:
+        # Description is documentation, not policy. Two agents in the
+        # same genre but with different description text (won't happen
+        # in practice but enforced by the data model) must hash equally.
+        profile = engine.build_profile("network_watcher")
+        a = build(profile, engine, agent_name="A",
+                  templates_path=TEMPLATES_PATH,
+                  genre="observer", genre_description="version 1 prose")
+        b = build(profile, engine, agent_name="A",
+                  templates_path=TEMPLATES_PATH,
+                  genre="observer", genre_description="version 2 prose, edited")
+        assert a.constitution_hash == b.constitution_hash
+
+    def test_to_yaml_emits_genre_block_when_present(self, engine: TraitEngine) -> None:
+        profile = engine.build_profile("network_watcher")
+        c = build(profile, engine, agent_name="A",
+                  templates_path=TEMPLATES_PATH,
+                  genre="observer",
+                  genre_description="Passive watching, read-only orientation.")
+        y = c.to_yaml(generated_at="2026-04-26 00:00:00Z")
+        assert "genre: observer" in y
+        assert "Passive watching" in y
+
+    def test_to_yaml_omits_genre_when_none(self, engine: TraitEngine) -> None:
+        # Back-compat: pre-T3 constitutions had no genre line. Same shape
+        # post-T3 when genre is None.
+        c = build(engine.build_profile("network_watcher"),
+                  engine, agent_name="A", templates_path=TEMPLATES_PATH)
+        y = c.to_yaml(generated_at="2026-04-26 00:00:00Z")
+        assert "genre:" not in y
+        assert "genre_description:" not in y
+

@@ -152,6 +152,8 @@ class SoulGenerator:
         voice: "VoiceText | None" = None,
         tools: tuple = (),
         tool_catalog_version: str | None = None,
+        genre: str | None = None,
+        genre_description: str | None = None,
     ) -> SoulDocument:
         """Generate a soul.md from a profile.
 
@@ -218,6 +220,8 @@ class SoulGenerator:
             voice=voice,
             tools=tools,
             tool_catalog_version=tool_catalog_version,
+            genre=genre,
+            genre_description=genre_description,
         ))
 
         # ---- header ------------------------------------------------------
@@ -342,6 +346,8 @@ class SoulGenerator:
         voice: "VoiceText | None" = None,
         tools: tuple = (),
         tool_catalog_version: str | None = None,
+        genre: str | None = None,
+        genre_description: str | None = None,
     ) -> list[str]:
         """Hand-rolled YAML emitter — avoids the pyyaml dep at generation-time
         and guarantees a stable, sorted trait_values block (which keeps
@@ -352,6 +358,19 @@ class SoulGenerator:
         out.append(f"dna: {dna}")
         out.append(f'dna_full: "{dna_full_hex}"')
         out.append(f"role: {profile.role}")
+        # Genre (ADR-0021 T3) sits next to role — readers see the family
+        # alongside the specific kind. Omitted entirely when None for
+        # back-compat with the pre-T3 format; consumers should treat
+        # missing genre as "unknown / no genre-level rules apply."
+        if genre is not None:
+            out.append(f"genre: {genre}")
+        if genre_description is not None:
+            # Description can be multi-line — emit as a YAML literal block
+            # scalar so existing newlines round-trip exactly. Indent each
+            # body line by two spaces (the conventional YAML inset).
+            out.append("genre_description: |")
+            for ln in genre_description.rstrip("\n").splitlines():
+                out.append(f"  {ln}")
         out.append(f'agent_name: "{agent_name}"')
         out.append(f'agent_version: "{agent_version}"')
         out.append(f'generated_at: "{generated_at}"')

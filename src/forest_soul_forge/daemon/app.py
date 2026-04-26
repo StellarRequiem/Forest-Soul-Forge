@@ -121,6 +121,34 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                  "path": str(settings.tool_catalog_path),
                  "error": f"FileNotFoundError: {e}"}
             )
+
+        # Genre engine (ADR-0021) — same load discipline as tool_catalog:
+        # missing or malformed file degrades to empty engine so /birth
+        # keeps working (agents just get genre=None). After load, run
+        # validate_against_trait_engine to catch the common case where
+        # a new role is added to trait_tree.yaml but not yet claimed
+        # by any genre — surface as a startup diagnostic, not a hard
+        # failure. Operators see the lag in /healthz and can fix it
+        # without restarting if they accept the warning.
+        from forest_soul_forge.core.genre_engine import (
+            GenreEngineError,
+            empty_engine as empty_genre_engine,
+            load_genres,
+            validate_against_trait_engine,
+        )
+        try:
+            genre_engine = load_genres(settings.genres_path)
+            startup_diagnostics.append(
+                {"component": "genre_engine", "status": "ok",
+                 "path": str(settings.genres_path), "error": None}
+            )
+        except (GenreEngineError, FileNotFoundError) as e:
+            genre_engine = empty_genre_engine()
+            startup_diagnostics.append(
+                {"component": "genre_engine", "status": "failed",
+                 "path": str(settings.genres_path),
+                 "error": f"{type(e).__name__}: {e}"}
+            )
         if settings.allow_write_endpoints:
             try:
                 trait_engine = TraitEngine(settings.trait_tree_path)
@@ -151,12 +179,43 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                      "error": f"{type(e).__name__}: {e}"}
                 )
 
+        # ADR-0021 invariant: every TraitEngine role must be claimed by
+        # some genre. Skip when either engine failed to load — running
+        # the check in that case would just produce noise on top of the
+        # actual load failure. We surface unclaimed roles as a separate
+        # startup_diagnostic entry rather than failing hard, because a
+        # new role added to trait_tree.yaml without a matching genre
+        # claim is an authoring lag, not an unrecoverable error.
+        if trait_engine is not None and genre_engine.genres:
+            unclaimed = validate_against_trait_engine(
+                genre_engine,
+                list(trait_engine.roles.keys()),
+            )
+            if unclaimed:
+                startup_diagnostics.append(
+                    {"component": "genre_engine_invariant",
+                     "status": "failed",
+                     "path": str(settings.genres_path),
+                     "error": (
+                         f"ADR-0021 invariant violated: roles in trait_tree "
+                         f"unclaimed by any genre: {unclaimed}. Births of "
+                         f"these roles will produce genre=None."
+                     )}
+                )
+            else:
+                startup_diagnostics.append(
+                    {"component": "genre_engine_invariant",
+                     "status": "ok",
+                     "path": str(settings.genres_path), "error": None}
+                )
+
         app.state.settings = settings
         app.state.registry = registry
         app.state.providers = providers
         app.state.trait_engine = trait_engine
         app.state.audit_chain = audit_chain
         app.state.tool_catalog = tool_catalog
+        app.state.genre_engine = genre_engine
         app.state.startup_diagnostics = startup_diagnostics
         # threading.Lock (not asyncio.Lock): sync route handlers run on the
         # FastAPI threadpool, so a thread-level lock is the right primitive.
