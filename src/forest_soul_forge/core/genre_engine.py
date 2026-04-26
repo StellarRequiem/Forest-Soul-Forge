@@ -327,3 +327,50 @@ def validate_against_trait_engine(
     findings on /healthz's startup_diagnostics.
     """
     return [r for r in trait_engine_roles if r not in genres_engine.role_to_genre]
+
+
+# ---------------------------------------------------------------------------
+# T5 — kit-tier compatibility check
+# ---------------------------------------------------------------------------
+# Tier order matches tool_catalog.SIDE_EFFECT_VALUES. Index = strictness;
+# higher index = "more side-effect-y." A tool whose tier index exceeds the
+# genre's max_side_effects index violates the genre's risk profile.
+_SIDE_EFFECTS_TIER_ORDER: tuple[str, ...] = (
+    "read_only",
+    "network",
+    "filesystem",
+    "external",
+)
+
+
+def _tier_index(side_effects: str) -> int:
+    """Return the strictness index of a side_effects tier. Unknown tiers
+    fall back to the strictest (external) so an unrecognized value never
+    sneaks past a tier comparison."""
+    try:
+        return _SIDE_EFFECTS_TIER_ORDER.index(side_effects)
+    except ValueError:
+        return len(_SIDE_EFFECTS_TIER_ORDER) - 1
+
+
+def kit_violations_for_genre(
+    genre_def: GenreDef,
+    tool_side_effects: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """ADR-0021 T5: return (tool_name, side_effects) pairs that exceed
+    the genre's ``risk_profile.max_side_effects`` ceiling.
+
+    Caller passes ``tool_side_effects`` as a list of ``(name, side_effects)``
+    pairs (one per resolved tool). Returns an empty list when the kit is
+    compatible. /birth and /spawn raise 400 when this returns anything.
+
+    The check is intentionally one-direction: a tool MORE permissive than
+    the genre's max is a violation; a tool LESS permissive (read_only on
+    a network-tier genre) is fine. The genre's max is a ceiling.
+    """
+    ceiling = _tier_index(genre_def.risk_profile.max_side_effects)
+    violations: list[tuple[str, str]] = []
+    for name, se in tool_side_effects:
+        if _tier_index(se) > ceiling:
+            violations.append((name, se))
+    return violations

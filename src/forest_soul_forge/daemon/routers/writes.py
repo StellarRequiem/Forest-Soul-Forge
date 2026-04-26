@@ -55,7 +55,11 @@ from forest_soul_forge.core.tool_catalog import (
     ToolCatalogError,
     ToolRef as CoreToolRef,
 )
-from forest_soul_forge.core.genre_engine import GenreEngine, GenreEngineError
+from forest_soul_forge.core.genre_engine import (
+    GenreEngine,
+    GenreEngineError,
+    kit_violations_for_genre,
+)
 from forest_soul_forge.core.tool_policy import resolve_constraints
 from forest_soul_forge.daemon.config import DaemonSettings
 from forest_soul_forge.daemon.deps import (
@@ -333,6 +337,50 @@ def _resolve_enrich(req_value: bool | None, settings: DaemonSettings) -> bool:
     return req_value if req_value is not None else settings.enrich_narrative_default
 
 
+def _enforce_genre_kit_tier(
+    genre_engine: GenreEngine,
+    catalog: ToolCatalog,
+    role: str,
+    resolved_tools,
+) -> None:
+    """ADR-0021 T5: refuse a kit whose tools exceed the genre's
+    ``max_side_effects`` ceiling.
+
+    No-op when the role is unclaimed (no genre to enforce against) or
+    when the resolved kit is empty. Raises HTTPException(400) with a
+    detail naming the offending tool(s) and the genre's ceiling. The
+    daemon refuses the birth/spawn before any artifact is written, so
+    the audit chain stays clean of would-be-illegal agents.
+    """
+    if not resolved_tools:
+        return
+    try:
+        gd = genre_engine.genre_for(role)
+    except GenreEngineError:
+        return  # unclaimed role → no genre check
+    pairs: list[tuple[str, str]] = []
+    for ref in resolved_tools:
+        td = catalog.tools.get(ref.key)
+        if td is None:
+            continue
+        pairs.append((td.name, td.side_effects))
+    violations = kit_violations_for_genre(gd, pairs)
+    if violations:
+        offenders = ", ".join(
+            f"{name} ({se})" for name, se in violations
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"genre kit-tier violation: {role!r} is in genre "
+                f"{gd.name!r} (max_side_effects={gd.risk_profile.max_side_effects}); "
+                f"the resolved kit contains tools that exceed that ceiling: "
+                f"{offenders}. Drop the offending tools via tools_remove "
+                f"or change the role to one whose genre allows them."
+            ),
+        )
+
+
 def _resolve_genre(
     genre_engine: GenreEngine, role: str
 ) -> tuple[str | None, str | None]:
@@ -469,6 +517,11 @@ def birth(
     resolved_tools = _resolve_tool_kit(
         tool_catalog, profile.role, req.tools_add, req.tools_remove
     )
+    # ADR-0021 T5: kit must respect the genre's max_side_effects ceiling.
+    # No-op when the role is unclaimed; raises 400 with offending names
+    # otherwise. Done BEFORE constraint resolution so a violating birth
+    # rejects fast.
+    _enforce_genre_kit_tier(genre_engine, tool_catalog, profile.role, resolved_tools)
     # Per-tool constraints from the trait profile (ADR-0018 T2.5).
     # constitution.build() ingests these so they're part of the
     # constitution_hash — agents with the same profile but different
@@ -635,6 +688,8 @@ def spawn(
     resolved_tools = _resolve_tool_kit(
         tool_catalog, profile.role, req.tools_add, req.tools_remove
     )
+    # ADR-0021 T5: kit-tier enforcement, same as /birth.
+    _enforce_genre_kit_tier(genre_engine, tool_catalog, profile.role, resolved_tools)
     tool_constraints = _resolve_tool_constraints(
         tool_catalog, profile, resolved_tools
     )
