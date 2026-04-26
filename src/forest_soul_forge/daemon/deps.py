@@ -117,6 +117,58 @@ def get_genre_engine(request: Request):
     return engine
 
 
+def get_tool_registry(request: Request):
+    """Return the loaded :class:`ToolRegistry` from app.state.
+
+    Like the catalog/genre engines, this is best-effort: a load failure
+    at lifespan degrades to an empty registry so read-only endpoints
+    keep working. Callers that depend on actual tools being present
+    (the dispatcher endpoint) check ``has(...)`` before dispatching
+    and 503 if the registry is empty AND a non-empty catalog was
+    expected.
+    """
+    from forest_soul_forge.tools.base import empty_registry
+    reg = getattr(request.app.state, "tool_registry", None)
+    if reg is None:
+        return empty_registry()
+    return reg
+
+
+def get_tool_dispatcher(request: Request):
+    """Return the shared :class:`ToolDispatcher` or 503 if unavailable.
+
+    The dispatcher is built lazily on first request and cached on
+    ``app.state.tool_dispatcher`` so the registry, audit chain, and
+    counter callbacks are wired up exactly once. Tests can pre-stash
+    a fake on app.state to bypass the lazy build.
+    """
+    cached = getattr(request.app.state, "tool_dispatcher", None)
+    if cached is not None:
+        return cached
+
+    registry = getattr(request.app.state, "tool_registry", None)
+    audit = getattr(request.app.state, "audit_chain", None)
+    fsf_registry = getattr(request.app.state, "registry", None)
+    if registry is None or audit is None or fsf_registry is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "tool dispatcher unavailable — one of "
+                "tool_registry/audit_chain/registry failed to load at "
+                "startup. Check /healthz for the underlying error."
+            ),
+        )
+    from forest_soul_forge.tools.dispatcher import ToolDispatcher
+    dispatcher = ToolDispatcher(
+        registry=registry,
+        audit=audit,
+        counter_get=fsf_registry.get_tool_call_count,
+        counter_inc=fsf_registry.increment_tool_call_count,
+    )
+    request.app.state.tool_dispatcher = dispatcher
+    return dispatcher
+
+
 def get_audit_chain(request: Request) -> "AuditChain":
     chain = getattr(request.app.state, "audit_chain", None)
     if chain is None:

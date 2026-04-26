@@ -711,3 +711,82 @@ class PreviewResponse(BaseModel):
             "joined description for UI convenience."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Tool dispatch (ADR-0019 T2 — POST /agents/{id}/tools/call)
+# ---------------------------------------------------------------------------
+class ToolCallRequest(BaseModel):
+    """Request body for ``POST /agents/{instance_id}/tools/call``.
+
+    ``session_id`` is operator-supplied. Two reasons:
+    * The runtime per-session counter keys on it.
+    * Operators batching multiple calls under one logical session want
+      stable counter semantics — a single UUID per session, not a
+      per-request UUID.
+
+    ``args`` is the tool's input. Validation is the tool's job; the
+    daemon refuses to inspect it beyond JSON-decoding.
+    """
+
+    tool_name: str = Field(..., min_length=1, max_length=80)
+    tool_version: str = Field(..., min_length=1, max_length=16)
+    session_id: str = Field(..., min_length=1, max_length=80)
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolCallResultOut(BaseModel):
+    """The agent-facing result of a successful dispatch."""
+
+    output: Any = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    tokens_used: int | None = None
+    cost_usd: float | None = None
+    side_effect_summary: str | None = None
+    result_digest: str = Field(
+        ...,
+        description=(
+            "SHA-256 over canonical (output, metadata). Mirrors the "
+            "audit chain entry's result_digest so callers can verify "
+            "result integrity without re-fetching the chain."
+        ),
+    )
+
+
+class ToolCallResponse(BaseModel):
+    """Response shape for ``POST /agents/{id}/tools/call``.
+
+    Exactly one of ``result`` / ``ticket_id`` / ``failure`` is set,
+    discriminated by ``status``:
+    * ``succeeded`` — ``result`` populated, HTTP 200.
+    * ``pending_approval`` — ``ticket_id`` set, HTTP 202.
+    * ``failed`` — tool started but raised; ``failure`` set, HTTP 200
+      (the API call succeeded — the tool didn't). Distinguishes from
+      a ``refused`` outcome which uses HTTP 4xx.
+
+    Refusals don't reach this schema; they're returned as HTTP 400/403/404
+    via FastAPI's HTTPException machinery so clients get the standard
+    error shape.
+    """
+
+    status: str = Field(
+        ..., description="One of: succeeded, pending_approval, failed."
+    )
+    tool_key: str = Field(
+        ..., description="The dispatched tool's name.vversion."
+    )
+    audit_seq: int = Field(
+        ..., description="Audit-chain seq of the terminating event."
+    )
+    call_count_after: int | None = Field(
+        default=None,
+        description=(
+            "Per-session call count after this dispatch (succeeded only). "
+            "None for pending_approval and failed since the counter is "
+            "incremented BEFORE execute and the failure path still "
+            "returns it via the audit chain."
+        ),
+    )
+    result: ToolCallResultOut | None = None
+    ticket_id: str | None = None
+    failure_exception_type: str | None = None
