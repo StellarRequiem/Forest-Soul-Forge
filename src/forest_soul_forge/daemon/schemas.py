@@ -492,6 +492,141 @@ class GenresOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Character sheet (ADR-0020) — derived view, not a canonical artifact.
+# Composed on demand from registry + soul.md frontmatter + constitution.yaml +
+# genre engine. Schema slots for stats/memory/benchmarks are scaffolded now
+# (with not_yet_measured: true) so consumers don't need to be rewritten when
+# ADR-0022 / ADR-0023 ship.
+# ---------------------------------------------------------------------------
+class CharacterIdentity(BaseModel):
+    instance_id: str
+    dna: str
+    dna_full: str
+    sibling_index: int = 1
+    agent_name: str
+    agent_version: str
+    role: str
+    genre: str | None = None
+    parent_instance: str | None = None
+    lineage: list[str] = Field(default_factory=list)
+    lineage_depth: int = 0
+    created_at: str
+    status: str
+    owner_id: str | None = None
+
+
+class CharacterPersonality(BaseModel):
+    trait_values: dict[str, int] = Field(default_factory=dict)
+    domain_weight_overrides: dict[str, float] = Field(default_factory=dict)
+    voice_text: str | None = None
+    narrative_provider: str | None = None
+    narrative_model: str | None = None
+    narrative_generated_at: str | None = None
+
+
+class CharacterLoadoutTool(BaseModel):
+    name: str
+    version: str
+    side_effects: str | None = None
+    description: str | None = None
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    applied_rules: list[str] = Field(default_factory=list)
+
+
+class CharacterLoadout(BaseModel):
+    tools: list[CharacterLoadoutTool] = Field(default_factory=list)
+    tool_catalog_version: str | None = None
+
+
+class CharacterCapabilities(BaseModel):
+    """Genre + risk floor + provider constraint. Source for "what kind of
+    agent is this allowed to be" decisions in the UI."""
+
+    genre: str | None = None
+    genre_description: str | None = None
+    max_side_effects: str | None = None
+    provider_constraint: str | None = None
+    trait_emphasis: list[str] = Field(default_factory=list)
+    spawn_compatibility: list[str] = Field(default_factory=list)
+
+
+class CharacterPolicySummary(BaseModel):
+    """Summary of the constitution. Doesn't duplicate every policy
+    verbatim (the constitution.yaml is on disk for that) — a count by
+    rule type plus the risk thresholds + drift settings the operator
+    actually wants on the page at a glance."""
+
+    constitution_hash: str | None = None
+    policy_count: int = 0
+    policy_count_by_rule: dict[str, int] = Field(default_factory=dict)
+    risk_thresholds: dict[str, float] = Field(default_factory=dict)
+    drift_monitoring: dict[str, Any] = Field(default_factory=dict)
+    out_of_scope: list[str] = Field(default_factory=list)
+    operator_duties: list[str] = Field(default_factory=list)
+
+
+class CharacterStats(BaseModel):
+    """Operational stats. Empty until ADR-0019 (tool runtime) emits
+    per-call records to the audit chain. ``not_yet_measured`` lets the
+    UI render an explicit placeholder rather than a zero that looks
+    real."""
+
+    not_yet_measured: bool = True
+    total_invocations: int = 0
+    failed_invocations: int = 0
+    last_active_at: str | None = None
+
+
+class CharacterMemory(BaseModel):
+    """Memory subsystem state. Scaffolded for ADR-0022; empty today."""
+
+    not_yet_measured: bool = True
+    layers: dict[str, Any] = Field(default_factory=dict)
+    consolidation_run_count: int = 0
+
+
+class CharacterBenchmarks(BaseModel):
+    """Benchmark scores. Scaffolded for ADR-0023; empty today."""
+
+    not_yet_measured: bool = True
+    suite_results: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CharacterProvenance(BaseModel):
+    """Audit-chain pointers. Lets the operator click through from the
+    sheet to the chain entries that birthed / spawned / archived the
+    agent."""
+
+    soul_path: str
+    constitution_path: str
+    audit_event_count: int = 0
+    audit_chain_entry_hash: str | None = None
+
+
+class CharacterSheetOut(BaseModel):
+    """ADR-0020. Single-page descriptor of an agent.
+
+    The eight-section shape is permanent (consumers can rely on every
+    field always being present). Sections whose underlying subsystem
+    hasn't shipped show ``not_yet_measured: true`` rather than being
+    omitted, so the UI never has to handle "field present today, gone
+    tomorrow."
+    """
+
+    schema_version: int = 1
+    rendered_at: str
+    identity: CharacterIdentity
+    personality: CharacterPersonality
+    loadout: CharacterLoadout
+    capabilities: CharacterCapabilities
+    policies: CharacterPolicySummary
+    stats: CharacterStats
+    memory: CharacterMemory
+    benchmarks: CharacterBenchmarks
+    provenance: CharacterProvenance
+
+
+# ---------------------------------------------------------------------------
 # Preview (POST /preview) — zero-write slider feedback
 # ---------------------------------------------------------------------------
 class DomainGradeOut(BaseModel):
