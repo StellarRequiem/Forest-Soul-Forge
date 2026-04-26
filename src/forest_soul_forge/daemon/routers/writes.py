@@ -642,6 +642,35 @@ def spawn(
     # ADR-0021 T3: same genre derivation as /birth.
     genre, genre_description = _resolve_genre(genre_engine, profile.role)
 
+    # ADR-0021 T6: spawn-compatibility check. Resolve the parent's genre
+    # and compare against the child's. The forbidden case returns 400
+    # unless the operator explicitly sets override_genre_spawn_rule;
+    # in the override path we record `spawn_genre_override` in the
+    # audit chain alongside the regular `agent_spawned` event so the
+    # violation is auditable after the fact. Forgiving behavior on
+    # missing genre data: if EITHER side is unclaimed by any genre
+    # (legacy artifacts, new role not yet in genres.yaml), skip the
+    # check entirely — the genre engine isn't authoritative for those
+    # roles and a hard refusal would be a false negative.
+    parent_genre, _ = _resolve_genre(genre_engine, parent_row.role)
+    spawn_override_used = False
+    if parent_genre is not None and genre is not None:
+        # Both sides have a claim; can_spawn never raises here because
+        # we just confirmed parent_genre exists in the engine.
+        if not genre_engine.can_spawn(parent_genre, genre):
+            if not req.override_genre_spawn_rule:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"genre spawn-rule violation: parent genre "
+                        f"{parent_genre!r} does not allow spawning child "
+                        f"genre {genre!r}. Set override_genre_spawn_rule "
+                        f"to true to bypass (the override emits a "
+                        f"spawn_genre_override audit event)."
+                    ),
+                )
+            spawn_override_used = True
+
     dna_hex = dna_full(profile)
     dna_s = dna_short(profile)
     parent_lineage = Lineage(
@@ -755,6 +784,35 @@ def spawn(
             raise HTTPException(
                 status_code=500, detail=f"audit append failed: {e}"
             ) from e
+
+        # ADR-0021 T6: emit a separate `spawn_genre_override` event when
+        # the operator bypassed a genre spawn-rule. Logged AFTER
+        # `agent_spawned` so the agent's first event is still the canonical
+        # birth/spawn record; the override is a follow-on observation that
+        # readers can correlate by agent_dna + parent_instance. Failure of
+        # this append doesn't roll back the spawn — the agent is real and
+        # the chain will be rebuilt-resilient because `agent_spawned`
+        # already landed.
+        if spawn_override_used:
+            try:
+                audit.append(
+                    "spawn_genre_override",
+                    {
+                        "instance_id": instance_id,
+                        "parent_instance": parent_row.instance_id,
+                        "parent_genre": parent_genre,
+                        "child_genre": genre,
+                        "rationale": (
+                            "operator set override_genre_spawn_rule=true"
+                        ),
+                    },
+                    agent_dna=dna_s,
+                )
+            except Exception:
+                # Override audit failure is non-fatal — the spawn itself
+                # is already on the chain; the missing override entry
+                # will show up as a chain-integrity gap on next verify.
+                pass
 
         parsed = _ingest.parse_soul_file(soul_path)
         registry.register_birth(

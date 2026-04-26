@@ -142,9 +142,29 @@ class SpawnRequest(BirthRequest):
 
     ``parent_instance_id`` identifies the parent; lineage is derived from
     the parent's own lineage + DNA.
+
+    ``override_genre_spawn_rule`` is the explicit escape hatch for
+    cross-genre spawns that the genre engine would otherwise refuse
+    (ADR-0021 T6). Default False means the daemon enforces the
+    parent-genre's ``spawn_compatibility`` list. Set True for the
+    one-off case where a specific incident genuinely calls for the
+    forbidden combination — the daemon allows the spawn and appends
+    a dedicated ``spawn_genre_override`` audit event so the
+    violation is visible after the fact. Operators who set this to
+    True without a real need are leaving an obvious trail in the
+    chain. Unclaimed-role spawns ignore this flag entirely (no genre,
+    no rule to override).
     """
 
     parent_instance_id: str = Field(..., min_length=1)
+    override_genre_spawn_rule: bool = Field(
+        default=False,
+        description=(
+            "ADR-0021 T6 — when True, allow a spawn that violates the "
+            "parent genre's spawn_compatibility list. The daemon appends "
+            "a spawn_genre_override audit event recording both genres."
+        ),
+    )
 
 
 class ArchiveRequest(BaseModel):
