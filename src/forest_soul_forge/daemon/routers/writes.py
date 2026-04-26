@@ -363,6 +363,7 @@ def _maybe_render_voice(
     engine: TraitEngine,
     lineage: Lineage,
     settings: DaemonSettings,
+    genre_engine: GenreEngine | None = None,
 ) -> VoiceText | None:
     """Render the Voice section sync-callably.
 
@@ -374,10 +375,24 @@ def _maybe_render_voice(
     Bridges the renderer's async API into the sync writes handler via
     ``asyncio.run()``. New event loop per call, torn down after — fine
     in a threadpool worker, no conflict with FastAPI's main loop.
+
+    ``genre_engine`` (ADR-0021 T7) is optional. When supplied AND the
+    role is claimed, the renderer receives the genre name + trait
+    emphasis. When unsupplied or the role is unclaimed, the renderer
+    behaves bit-identically to the pre-T7 path.
     """
     if not enrich:
         return None
     role = engine.get_role(profile.role)
+    genre_name: str | None = None
+    genre_trait_emphasis: tuple[str, ...] = ()
+    if genre_engine is not None:
+        try:
+            gd = genre_engine.genre_for(profile.role)
+            genre_name = gd.name
+            genre_trait_emphasis = gd.trait_emphasis
+        except GenreEngineError:
+            pass  # unclaimed role → no genre context, that's fine
     return asyncio.run(
         render_voice(
             providers.active(),
@@ -386,6 +401,8 @@ def _maybe_render_voice(
             engine=engine,
             lineage=lineage,
             settings=settings,
+            genre_name=genre_name,
+            genre_trait_emphasis=genre_trait_emphasis,
         )
     )
 
@@ -496,6 +513,7 @@ def birth(
         engine=engine,
         lineage=lineage,
         settings=settings,
+        genre_engine=genre_engine,
     )
 
     with lock:
@@ -661,6 +679,7 @@ def spawn(
         engine=engine,
         lineage=child_lineage,
         settings=settings,
+        genre_engine=genre_engine,
     )
 
     with lock:
@@ -769,6 +788,7 @@ def regenerate_voice(
     lock: threading.Lock = Depends(get_write_lock),
     settings: DaemonSettings = Depends(get_settings),
     providers: ProviderRegistry = Depends(get_provider_registry),
+    genre_engine: GenreEngine = Depends(get_genre_engine),
 ):
     """Re-run the Voice renderer for an existing agent (ADR-0017 follow-up).
 
@@ -863,6 +883,7 @@ def regenerate_voice(
         engine=engine,
         lineage=lineage,
         settings=settings,
+        genre_engine=genre_engine,
     )
     if new_voice is None:
         # _maybe_render_voice only returns None when enrich=False, which

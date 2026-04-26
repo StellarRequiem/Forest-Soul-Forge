@@ -104,6 +104,8 @@ async def render_voice(
     engine: "TraitEngine",
     lineage: Lineage,
     settings: "DaemonSettings",
+    genre_name: str | None = None,
+    genre_trait_emphasis: tuple[str, ...] = (),
 ) -> VoiceText:
     """Render the Voice section, falling back to a template on any error.
 
@@ -111,6 +113,15 @@ async def render_voice(
     tests vary task_kind / max_tokens / temperature without monkey-
     patching, and matches how the rest of the daemon takes settings as
     an explicit dependency.
+
+    ``genre_name`` and ``genre_trait_emphasis`` (ADR-0021 T7) let the
+    user prompt anchor the LLM on the genre's signature traits regardless
+    of whether those traits hit the very-high / very-low cutoffs. A
+    Companion's voice should foreground empathy and warmth even at
+    middling values; an Actuator should foreground caution and evidence
+    demand. Both default to "no genre context" so callers without a
+    genre engine (legacy births, unclaimed roles) keep the pre-T7
+    behavior bit-for-bit.
     """
     # Validate task_kind early — bad config should fail loudly during
     # startup, not silently fall back to template on every birth.
@@ -129,7 +140,9 @@ async def render_voice(
         )
 
     user_prompt = _build_user_prompt(
-        profile=profile, role=role, engine=engine, lineage=lineage
+        profile=profile, role=role, engine=engine, lineage=lineage,
+        genre_name=genre_name,
+        genre_trait_emphasis=genre_trait_emphasis,
     )
     extra_kwargs: dict = {}
     if settings.narrative_temperature is not None:
@@ -199,6 +212,8 @@ def _build_user_prompt(
     role: "Role",
     engine: "TraitEngine",
     lineage: Lineage,
+    genre_name: str | None = None,
+    genre_trait_emphasis: tuple[str, ...] = (),
 ) -> str:
     """Compose the user-message body for the LLM.
 
@@ -207,6 +222,14 @@ def _build_user_prompt(
     and the highest- / lowest-band traits with their qualitative band
     label (not the raw 0-100 number — the system prompt asks for voice,
     not a numeric readout).
+
+    When a genre is provided (ADR-0021 T7), the prompt also includes the
+    genre name and the traits the genre emphasizes regardless of whether
+    those traits hit the very-high cutoff. This is the lever that makes
+    a Companion voice sound different from an Actuator voice even at
+    middling trait values — the genre tells the model which dimensions
+    matter most for *this kind of agent* before the trait values nudge
+    them.
     """
     # Domain ordering by effective weight (dominant first). This is the
     # same ordering SoulGenerator uses for its templated body.
@@ -250,11 +273,33 @@ def _build_user_prompt(
             f"making it the focus."
         )
 
+    # Genre context (ADR-0021 T7). Include the genre name and a
+    # trait-emphasis line listing the genre's signature traits with
+    # their actual values from the profile — gives the LLM concrete
+    # numbers for the dimensions the genre cares most about, even
+    # when those dimensions don't appear in very_high / very_low.
+    genre_block = ""
+    if genre_name:
+        emphasis_lines: list[str] = []
+        for trait in genre_trait_emphasis:
+            if trait in profile.trait_values:
+                emphasis_lines.append(
+                    f"{trait.replace('_', ' ')} = {profile.trait_values[trait]}"
+                )
+        emphasis_phrase = "; ".join(emphasis_lines) if emphasis_lines else "none"
+        genre_block = (
+            f"\n\nGenre: {genre_name}. The voice should foreground the "
+            f"traits this genre cares most about: {emphasis_phrase}. "
+            f"Lean on these dimensions even when their numeric values are "
+            f"middling — they define what kind of agent this is."
+        )
+
     return (
         f"Role: {role.name} — {role.description}\n\n"
         f"Effective emphasis (top domains): {domain_phrase}.\n\n"
         f"Pronounced strengths (very high traits): {high_phrase}.\n"
         f"Pronounced muted areas (very low traits): {low_phrase}."
+        f"{genre_block}"
         f"{lineage_note}\n\n"
         "Write the Voice section per the rules in the system prompt."
     )
