@@ -128,10 +128,21 @@ async def preview(
     dna_hex = dna_full(profile)
     report = grade_profile(profile, engine)
 
-    # ADR-0018 T2.5: resolve the same tool surface /birth would produce
-    # so the constitution_hash matches. /preview-with-defaults predicts
-    # /birth-with-defaults; /preview-with-tools_add predicts the
-    # corresponding /birth-with-tools_add. Pass-through must be exact.
+    # ADR-0021 T3: resolve genre BEFORE kit so the T4 fallback fires
+    # for unclaimed-archetype roles. Same logic as /birth.
+    try:
+        gd = genre_engine.genre_for(profile.role)
+        genre_name: str | None = gd.name
+        genre_description: str | None = gd.description
+    except GenreEngineError:
+        genre_name = None
+        genre_description = None
+
+    # ADR-0018 T2.5 + ADR-0021 T4: resolve the same tool surface /birth
+    # would produce so the constitution_hash matches. /preview-with-
+    # defaults predicts /birth-with-defaults; /preview-with-tools_add
+    # predicts the corresponding /birth-with-tools_add. Pass-through
+    # must be exact, including the genre arg for T4 fallback.
     try:
         add_refs = [
             CoreToolRef(name=t.name, version=t.version)
@@ -141,6 +152,7 @@ async def preview(
             profile.role,
             tools_add=add_refs,
             tools_remove=list(req.tools_remove or []),
+            genre=genre_name,
         )
     except ToolCatalogError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

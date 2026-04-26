@@ -276,3 +276,44 @@ archetypes:
       - baseline_compare.v1
       - correlation_window.v1
       - timestamp_window.v1
+
+# Per-genre fallback kits (ADR-0021 T4). Used by the kit resolver as
+# the LAST step in the chain when a role has no archetype-specific
+# standard_tools entry above. Lets a freshly-declared role inherit a
+# sensible default just by being claimed by a genre — operators don't
+# have to copy-paste the same standard_tools into every new role.
+#
+# Resolution order (per ADR-0018 + T4):
+#   1. tools_remove (per-request)
+#   2. tools_add    (per-request)
+#   3. archetypes[role].standard_tools  (per-role)
+#   4. genre_default_tools[genre]       (per-genre fallback)
+#
+# Existing roles with an archetype kit are unchanged — the genre
+# fallback only fires when (3) is empty. That preserves byte-for-byte
+# behavior for every agent already born.
+#
+# Each list must reference a real tool key from the `tools:` mapping
+# above; the loader rejects unknowns at startup.
+genre_default_tools:
+  observer:
+    - packet_query.v1
+    - flow_summary.v1
+    - timestamp_window.v1
+  investigator:
+    - packet_query.v1
+    - log_grep.v1
+    - baseline_compare.v1
+    - correlation_window.v1
+    - timestamp_window.v1
+  communicator:
+    - timestamp_window.v1
+  guardian:
+    - timestamp_window.v1
+  researcher:
+    - timestamp_window.v1
+  # actuator and companion intentionally have NO genre defaults — those
+  # genres have outsized risk profiles, and silently giving them tools
+  # by genre claim alone would short-circuit the operator's intent.
+  # Operators MUST declare standard_tools per-role for these genres or
+  # supply tools_add explicitly on each request.

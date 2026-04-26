@@ -294,8 +294,14 @@ def _resolve_tool_kit(
     role: str,
     tools_add_in: list,
     tools_remove_in: list[str],
+    genre: str | None = None,
 ):
     """Apply ADR-0018 kit resolution. Surfaces unknown-tool errors as 400.
+
+    ``genre`` (ADR-0021 T4) is the OPTIONAL hint that lets the resolver
+    fall back to the genre's default_tools when the role has no
+    archetype-specific kit. Pass None for legacy / unclaimed roles —
+    the resolver behaves bit-for-bit as it did pre-T4.
 
     Returns a tuple of CoreToolRef in the order resolve_kit produces.
     """
@@ -307,6 +313,7 @@ def _resolve_tool_kit(
             role,
             tools_add=add_refs,
             tools_remove=list(tools_remove_in or []),
+            genre=genre,
         )
     except ToolCatalogError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -512,10 +519,19 @@ def birth(
     dna_s = dna_short(profile)
     lineage = Lineage.root()
 
+    # ADR-0021 T3: derive genre BEFORE kit resolution so the T4 fallback
+    # has a chance to fire for unclaimed-archetype roles. None when the
+    # role isn't claimed; the resolver and the kit-tier guard treat None
+    # as "no genre rules apply" (back-compat).
+    genre, genre_description = _resolve_genre(genre_engine, profile.role)
+
     # Resolve the tool kit BEFORE the lock — pure function, surfaces
-    # unknown-tool errors as 400 before any artifact is touched.
+    # unknown-tool errors as 400 before any artifact is touched. Genre
+    # is passed so the T4 fallback can supply a default kit for roles
+    # whose archetype entry is empty.
     resolved_tools = _resolve_tool_kit(
-        tool_catalog, profile.role, req.tools_add, req.tools_remove
+        tool_catalog, profile.role, req.tools_add, req.tools_remove,
+        genre=genre,
     )
     # ADR-0021 T5: kit must respect the genre's max_side_effects ceiling.
     # No-op when the role is unclaimed; raises 400 with offending names
@@ -531,11 +547,9 @@ def birth(
         tool_catalog, profile, resolved_tools
     )
 
-    # ADR-0021 T3: derive genre from role. None when the role isn't
-    # claimed; constitution.build() handles None by writing the
-    # empty-string sentinel into canonical_body so the hash stays
-    # stable for unclaimed-role agents and old artifacts.
-    genre, genre_description = _resolve_genre(genre_engine, profile.role)
+    # genre + genre_description were resolved above (T3 + T4). Re-using
+    # the same values means /preview, /birth, and the audit event all
+    # see one consistent genre claim per request.
 
     # Build constitution outside the lock — pure function, any schema
     # error surfaces as a 400 before we touch the write path.
@@ -684,18 +698,21 @@ def spawn(
         registry, req.parent_instance_id
     )
 
+    # ADR-0021 T3 + T4: same hoisting as /birth — genre is derived first
+    # so the kit resolver's T4 fallback can fire when the role has no
+    # archetype kit.
+    genre, genre_description = _resolve_genre(genre_engine, profile.role)
+
     # Resolve tool kit before lock — same pattern as /birth.
     resolved_tools = _resolve_tool_kit(
-        tool_catalog, profile.role, req.tools_add, req.tools_remove
+        tool_catalog, profile.role, req.tools_add, req.tools_remove,
+        genre=genre,
     )
     # ADR-0021 T5: kit-tier enforcement, same as /birth.
     _enforce_genre_kit_tier(genre_engine, tool_catalog, profile.role, resolved_tools)
     tool_constraints = _resolve_tool_constraints(
         tool_catalog, profile, resolved_tools
     )
-
-    # ADR-0021 T3: same genre derivation as /birth.
-    genre, genre_description = _resolve_genre(genre_engine, profile.role)
 
     # ADR-0021 T6: spawn-compatibility check. Resolve the parent's genre
     # and compare against the child's. The forbidden case returns 400

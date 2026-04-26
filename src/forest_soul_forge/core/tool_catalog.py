@@ -108,11 +108,19 @@ class ArchetypeBundle:
 
 @dataclass(frozen=True)
 class ToolCatalog:
-    """The whole catalog after load + integrity check. Held on app.state."""
+    """The whole catalog after load + integrity check. Held on app.state.
+
+    ``genre_default_tools`` (ADR-0021 T4) is the per-genre fallback kit:
+    a mapping from genre name to a tuple of ToolRefs. Resolved as the
+    LAST layer in :meth:`resolve_kit` when a role has no archetype
+    standard_tools entry. Empty when the catalog has no genre fallback
+    section — preserves pre-T4 behavior bit-for-bit.
+    """
 
     version: str
     tools: dict[str, ToolDef]   # keyed by ToolDef.key
     archetypes: dict[str, ArchetypeBundle]   # keyed by role name
+    genre_default_tools: dict[str, tuple[ToolRef, ...]] = field(default_factory=dict)
     source_path: Path | None = None
 
     def get_tool(self, ref: ToolRef) -> ToolDef:
@@ -135,13 +143,16 @@ class ToolCatalog:
         *,
         tools_add: list[ToolRef] | None = None,
         tools_remove: list[str] | None = None,
+        genre: str | None = None,
     ) -> tuple[ToolRef, ...]:
         """Compose the final tool kit for an agent of `role` at birth.
 
-        Algorithm (per ADR-0018):
+        Algorithm (per ADR-0018 + ADR-0021 T4):
 
-        1. Start with the archetype's standard_tools (or empty if the role
-           has no entry — non-fatal; some roles have no default kit).
+        1. Start with the archetype's standard_tools (or, if the role
+           has no archetype entry, fall back to the genre's
+           ``genre_default_tools`` when the optional ``genre`` arg is
+           supplied — T4 fallback).
         2. Drop any whose name is in ``tools_remove`` (any version match).
         3. Append the ``tools_add`` entries.
         4. Validate every entry resolves to a real catalog tool.
@@ -152,6 +163,13 @@ class ToolCatalog:
         Returns a tuple (frozen) of ToolRefs in deterministic order:
         kept-standard-tools first, then added tools in the order
         supplied.
+
+        ``genre`` is OPTIONAL and defaults to None for back-compat — the
+        existing /birth and /spawn paths that pass tools_add /
+        tools_remove without a genre still work the same way they did
+        pre-T4.  When supplied, the genre's fallback kit is ONLY used
+        when the role has no archetype entry. Roles with an archetype
+        kit are unchanged.
         """
         tools_add = tools_add or []
         tools_remove = tools_remove or []
@@ -177,6 +195,14 @@ class ToolCatalog:
         kept: list[ToolRef] = []
         if bundle is not None:
             for ref in bundle.standard_tools:
+                if ref.name in remove_names:
+                    continue
+                kept.append(ref)
+        elif genre is not None:
+            # Per-genre fallback (ADR-0021 T4). Only fires when the role
+            # has no archetype entry — preserves byte-for-byte behavior
+            # for agents whose role IS in `archetypes`.
+            for ref in self.genre_default_tools.get(genre, ()):
                 if ref.name in remove_names:
                     continue
                 kept.append(ref)
@@ -278,10 +304,37 @@ def load_catalog(path: Path | str) -> ToolCatalog:
             standard_tools=tuple(refs),
         )
 
+    # Per-genre fallback kits (ADR-0021 T4). Optional block — pre-T4
+    # catalogs lack it entirely, in which case the empty dict preserves
+    # the legacy "no archetype kit → empty kit" behavior. When present,
+    # every tool ref must resolve to a real catalog entry.
+    genre_default_tools_raw = raw.get("genre_default_tools") or {}
+    if not isinstance(genre_default_tools_raw, dict):
+        raise ToolCatalogError(
+            "'genre_default_tools' must be a mapping of genre name -> list"
+        )
+    genre_default_tools: dict[str, tuple[ToolRef, ...]] = {}
+    for genre_name, items in genre_default_tools_raw.items():
+        if not isinstance(items, list):
+            raise ToolCatalogError(
+                f"genre_default_tools[{genre_name!r}] must be a list of tool refs"
+            )
+        refs: list[ToolRef] = []
+        for raw_ref in items:
+            ref = ToolRef.from_key(str(raw_ref))
+            if ref.key not in tools:
+                raise ToolCatalogError(
+                    f"genre_default_tools[{genre_name!r}] references "
+                    f"unknown tool: {ref.key}"
+                )
+            refs.append(ref)
+        genre_default_tools[str(genre_name)] = tuple(refs)
+
     return ToolCatalog(
         version=version,
         tools=tools,
         archetypes=archetypes,
+        genre_default_tools=genre_default_tools,
         source_path=p,
     )
 
