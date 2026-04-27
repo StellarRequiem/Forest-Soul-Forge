@@ -826,6 +826,37 @@ class RejectRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
 
 
+class SkillStepSummaryOut(BaseModel):
+    """One step's summary for the GET /skills response. Compact —
+    full step shape is available by reading the manifest file."""
+
+    id: str
+    kind: str  # "tool" | "for_each" | "unknown"
+    tool: str | None = None
+    inner_count: int | None = None
+
+
+class SkillSummaryOut(BaseModel):
+    """One skill in the catalog. Frontend renders this card-by-card."""
+
+    name: str
+    version: str
+    description: str
+    requires: list[str] = Field(default_factory=list)
+    inputs_schema: dict[str, Any] = Field(default_factory=dict)
+    output_keys: list[str] = Field(default_factory=list)
+    steps: list[SkillStepSummaryOut] = Field(default_factory=list)
+    skill_hash: str
+    forged_at: str | None = None
+    forged_by: str | None = None
+    forge_provider: str | None = None
+
+
+class SkillCatalogOut(BaseModel):
+    count: int
+    skills: list[SkillSummaryOut]
+
+
 class SkillRunRequest(BaseModel):
     """Request body for ``POST /agents/{instance_id}/skills/run``.
 

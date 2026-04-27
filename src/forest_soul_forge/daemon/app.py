@@ -39,6 +39,7 @@ from forest_soul_forge.daemon.routers import genres as genres_router
 from forest_soul_forge.daemon.routers import pending_calls as pending_calls_router
 from forest_soul_forge.daemon.routers import preview as preview_router
 from forest_soul_forge.daemon.routers import runtime as runtime_router
+from forest_soul_forge.daemon.routers import skills_catalog as skills_catalog_router
 from forest_soul_forge.daemon.routers import skills_run as skills_run_router
 from forest_soul_forge.daemon.routers import tool_dispatch as tool_dispatch_router
 from forest_soul_forge.daemon.routers import tools as tools_router
@@ -154,6 +155,37 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                  "path": str(settings.genres_path),
                  "error": f"{type(e).__name__}: {e}"}
             )
+        # Skill catalog (ADR-0031 T5) — same load discipline as the
+        # tool catalog: missing dir or malformed manifests degrade to
+        # an empty catalog, errors surface as a diagnostic.
+        from forest_soul_forge.core.skill_catalog import (
+            empty_catalog as empty_skill_catalog,
+            load_catalog as load_skill_catalog,
+        )
+        try:
+            skill_catalog, skill_errors = load_skill_catalog(
+                settings.skill_install_dir,
+            )
+            if skill_errors:
+                startup_diagnostics.append(
+                    {"component": "skill_catalog", "status": "degraded",
+                     "path": str(settings.skill_install_dir),
+                     "error": "; ".join(skill_errors)}
+                )
+            else:
+                startup_diagnostics.append(
+                    {"component": "skill_catalog", "status": "ok",
+                     "path": str(settings.skill_install_dir),
+                     "error": None}
+                )
+        except Exception as e:
+            skill_catalog = empty_skill_catalog()
+            startup_diagnostics.append(
+                {"component": "skill_catalog", "status": "failed",
+                 "path": str(settings.skill_install_dir),
+                 "error": f"{type(e).__name__}: {e}"}
+            )
+
         if settings.allow_write_endpoints:
             try:
                 trait_engine = TraitEngine(settings.trait_tree_path)
@@ -272,6 +304,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.tool_catalog = tool_catalog
         app.state.genre_engine = genre_engine
         app.state.tool_registry = tool_registry
+        app.state.skill_catalog = skill_catalog
         app.state.startup_diagnostics = startup_diagnostics
         # threading.Lock (not asyncio.Lock): sync route handlers run on the
         # FastAPI threadpool, so a thread-level lock is the right primitive.
@@ -308,6 +341,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(tool_dispatch_router.router)
     app.include_router(pending_calls_router.router)
     app.include_router(skills_run_router.router)
+    app.include_router(skills_catalog_router.router)
     app.include_router(genres_router.router)
     app.include_router(character_sheet_router.router)
     app.include_router(preview_router.router)
