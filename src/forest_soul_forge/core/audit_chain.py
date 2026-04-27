@@ -94,6 +94,19 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "forge_tool_installed",
     "forge_skill_proposed",
     "forge_skill_installed",
+    # ADR-0022 v0.1 + ADR-0027 — memory lifecycle. memory_read is
+    # only emitted for cross-agent reads (per-agent self-reads are
+    # too noisy and the data is already in scope). bulk operations
+    # decompose to per-entry events so an attacker can't hide a
+    # thousand disclosures in a single audit line.
+    "memory_written",
+    "memory_read",
+    "memory_disclosed",
+    "memory_consent_granted",
+    "memory_consent_revoked",
+    "memory_deleted",
+    "memory_purged",
+    "memory_scope_override",
 })
 
 

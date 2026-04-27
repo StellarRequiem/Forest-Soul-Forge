@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 5
+SCHEMA_VERSION: int = 6
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -200,6 +200,38 @@ DDL_STATEMENTS: tuple[str, ...] = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_pending_approvals_instance ON tool_call_pending_approvals(instance_id);",
     "CREATE INDEX IF NOT EXISTS idx_pending_approvals_status ON tool_call_pending_approvals(status);",
+    # --- memory subsystem v0.1 (ADR-0022 + ADR-0027) ---------------------
+    # One row per memory entry. Scope is one of private | lineage |
+    # realm | consented (only `private` is reachable in v0.1; the
+    # others are designed in but unused until ADR-0027's per-event
+    # consent + multi-agent disclosure tranches land).
+    #
+    # ``layer`` is the memory layer (episodic | semantic | procedural).
+    # ``content_digest`` is SHA-256 over canonical content; lets
+    # tamper detection notice if the row's content was edited
+    # outside the API. ``deleted_at`` is the tombstone marker —
+    # soft delete keeps the row visible to audit but excluded from
+    # default reads. Hard delete (purge) removes the row entirely
+    # and emits memory_purged in the chain.
+    """
+    CREATE TABLE IF NOT EXISTS memory_entries (
+        entry_id        TEXT PRIMARY KEY,
+        instance_id     TEXT NOT NULL,
+        agent_dna       TEXT NOT NULL,
+        layer           TEXT NOT NULL,
+        scope           TEXT NOT NULL DEFAULT 'private',
+        content         TEXT NOT NULL,
+        content_digest  TEXT NOT NULL,
+        tags_json       TEXT NOT NULL DEFAULT '[]',
+        consented_to_json TEXT NOT NULL DEFAULT '[]',
+        created_at      TEXT NOT NULL,
+        deleted_at      TEXT,
+        FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_memory_instance ON memory_entries(instance_id);",
+    "CREATE INDEX IF NOT EXISTS idx_memory_layer ON memory_entries(layer);",
+    "CREATE INDEX IF NOT EXISTS idx_memory_created ON memory_entries(created_at);",
     # --- metadata --------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS registry_meta (
@@ -231,6 +263,7 @@ REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     "tool_call_pending_approvals",
     "tool_calls",
     "tool_call_counters",
+    "memory_entries",
     "tools",
     "agent_capabilities",
     "agents",
@@ -341,5 +374,29 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         """,
         "CREATE INDEX IF NOT EXISTS idx_pending_approvals_instance ON tool_call_pending_approvals(instance_id);",
         "CREATE INDEX IF NOT EXISTS idx_pending_approvals_status ON tool_call_pending_approvals(status);",
+    ),
+    # v5 → v6: memory subsystem v0.1 (ADR-0022 + ADR-0027). Per-agent
+    # private-scope memory only. Other scopes are designed in but
+    # unused pre per-event-consent + multi-agent disclosure.
+    6: (
+        """
+        CREATE TABLE IF NOT EXISTS memory_entries (
+            entry_id        TEXT PRIMARY KEY,
+            instance_id     TEXT NOT NULL,
+            agent_dna       TEXT NOT NULL,
+            layer           TEXT NOT NULL,
+            scope           TEXT NOT NULL DEFAULT 'private',
+            content         TEXT NOT NULL,
+            content_digest  TEXT NOT NULL,
+            tags_json       TEXT NOT NULL DEFAULT '[]',
+            consented_to_json TEXT NOT NULL DEFAULT '[]',
+            created_at      TEXT NOT NULL,
+            deleted_at      TEXT,
+            FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_memory_instance ON memory_entries(instance_id);",
+        "CREATE INDEX IF NOT EXISTS idx_memory_layer ON memory_entries(layer);",
+        "CREATE INDEX IF NOT EXISTS idx_memory_created ON memory_entries(created_at);",
     ),
 }
