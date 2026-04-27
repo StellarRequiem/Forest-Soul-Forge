@@ -63,6 +63,14 @@ EVENT_SUCCEEDED = "tool_call_succeeded"
 EVENT_REFUSED = "tool_call_refused"
 EVENT_FAILED = "tool_call_failed"
 EVENT_PENDING_APPROVAL = "tool_call_pending_approval"
+# ADR-0019 T3 — operator decision events. Emitted by the resume path
+# (approve) and the reject path; the underlying tool dispatch then
+# re-uses EVENT_DISPATCHED + EVENT_SUCCEEDED/EVENT_FAILED for the
+# replay so an auditor can trace the full lifecycle:
+#   pending_approval → approved → dispatched → succeeded
+#   pending_approval → rejected   (no replay; tool never ran)
+EVENT_APPROVED = "tool_call_approved"
+EVENT_REJECTED = "tool_call_rejected"
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +216,12 @@ class ToolDispatcher:
     # skips the registry mirror and only emits to the audit chain.
     # Tests use ``None`` to keep the in-memory fakes simple.
     record_call: Any = None  # callable (kwargs) -> None | None
+    # ADR-0019 T3: approval-queue persistence. Takes the same fields
+    # as Registry.record_pending_approval. When None, the dispatcher
+    # mints the ticket_id but does not persist — the approval queue
+    # endpoints will see no rows. Tests use ``None`` for in-memory
+    # flows; the daemon wires the real registry method.
+    pending_writer: Any = None  # callable (kwargs) -> None | None
 
     async def dispatch(
         self,
@@ -292,7 +306,10 @@ class ToolDispatcher:
         # ---- 5. approval gate -------------------------------------------
         if bool(resolved.constraints.get("requires_human_approval", False)):
             return self._pending_approval(
-                key, side_effects=resolved.side_effects or tool.side_effects,
+                key,
+                tool_name=tool_name, tool_version=tool_version,
+                args=args,
+                side_effects=resolved.side_effects or tool.side_effects,
                 instance_id=instance_id, agent_dna=agent_dna,
                 session_id=session_id,
             )
@@ -479,13 +496,22 @@ class ToolDispatcher:
         self,
         key: str,
         *,
+        tool_name: str,
+        tool_version: str,
+        args: dict[str, Any],
         side_effects: str,
         instance_id: str,
         agent_dna: str,
         session_id: str,
     ) -> DispatchPendingApproval:
-        # Stub ticket id derived from instance_id + session_id + audit
-        # seq. T3 replaces this with a registry-backed queue row.
+        """Emit pending_approval event + persist a queue row.
+
+        T2 minted a stub ticket_id with no registry row behind it. T3
+        keeps the same id format (operators who already saw a ticket
+        from a pre-T3 daemon can still look it up after upgrade) but
+        now writes the row so the approval-queue endpoints can list
+        and decide it.
+        """
         entry = self.audit.append(
             EVENT_PENDING_APPROVAL,
             {
@@ -497,10 +523,280 @@ class ToolDispatcher:
             agent_dna=agent_dna,
         )
         ticket_id = f"pending-{instance_id}-{session_id}-{entry.seq}"
+
+        # T3: persist the queue row. The dispatcher mints the ticket
+        # id from the audit seq, so a missing pending_writer (test
+        # fakes) still produces a usable ticket — the row just isn't
+        # in any registry. The daemon path always wires a real writer.
+        if self.pending_writer is not None:
+            try:
+                self.pending_writer(
+                    ticket_id=ticket_id,
+                    instance_id=instance_id,
+                    session_id=session_id,
+                    tool_key=key,
+                    args_json=_canonical_json(args),
+                    side_effects=side_effects,
+                    pending_audit_seq=entry.seq,
+                    created_at=entry.timestamp,
+                )
+            except Exception:
+                # Defensive — same posture as record_call. Write
+                # failure shouldn't break the dispatch outcome the
+                # operator already observed in the chain.
+                pass
+
         return DispatchPendingApproval(
             tool_key=key, ticket_id=ticket_id, side_effects=side_effects,
             audit_seq=entry.seq,
         )
+
+    # -------- T3 resume / reject paths -----------------------------------
+    async def resume_approved(
+        self,
+        *,
+        ticket_id: str,
+        operator_id: str,
+        instance_id: str,
+        agent_dna: str,
+        role: str,
+        genre: str | None,
+        session_id: str,
+        constitution_path: Path,
+        tool_name: str,
+        tool_version: str,
+        args: dict[str, Any],
+        provider: Any = None,
+    ) -> DispatchSucceeded | DispatchFailed | DispatchRefused:
+        """Replay a previously-gated tool call after operator approval.
+
+        Caller is the approval endpoint — it has already validated the
+        ticket exists and is still pending, marked it approved in the
+        registry, and emitted the ``tool_call_approved`` audit event.
+        This method then runs the tool exactly like a fast-path
+        dispatch *minus the approval gate*: counter check + execute +
+        audit + accounting.
+
+        Returning DispatchRefused here means the resume itself was
+        refused (tool unregistered between queue + approve, args
+        re-validated and failed, max_calls hit) — the endpoint surfaces
+        that as a 4xx the same way it does for a fresh dispatch.
+        """
+        key = _tool_key(tool_name, tool_version)
+
+        # Re-lookup the tool. Plugins might have been hot-reloaded
+        # since the queue entry was written; re-fail cleanly if the
+        # tool no longer exists.
+        tool = self.registry.get(tool_name, tool_version)
+        if tool is None:
+            return self._refuse(
+                key, "unknown_tool",
+                f"tool {key} no longer registered at resume time",
+                instance_id=instance_id, agent_dna=agent_dna,
+                session_id=session_id,
+            )
+
+        # Re-validate args. Constitutions may have changed; if a tool's
+        # validate() rejects what was OK at queue time, we refuse.
+        try:
+            tool.validate(args)
+        except (ToolValidationError, ToolError) as e:
+            return self._refuse(
+                key, "bad_args", str(e),
+                instance_id=instance_id, agent_dna=agent_dna,
+                session_id=session_id,
+            )
+
+        # Counter pre-check — same rule as fast path. An approval that
+        # arrives after the session burned its budget is refused.
+        resolved = _load_resolved_constraints(
+            constitution_path, tool_name, tool_version
+        )
+        if resolved is not None:
+            max_calls = int(resolved.constraints.get("max_calls_per_session", 0) or 0)
+            current = int(self.counter_get(instance_id, session_id))
+            if max_calls and current >= max_calls:
+                return self._refuse(
+                    key, "max_calls_exceeded",
+                    f"session {session_id} has {current}/{max_calls} calls "
+                    f"used; further dispatches blocked until session reset",
+                    instance_id=instance_id, agent_dna=agent_dna,
+                    session_id=session_id,
+                )
+
+        when = _now_iso()
+        post_count = int(self.counter_inc(instance_id, session_id, when))
+        dispatched_entry = self.audit.append(
+            EVENT_DISPATCHED,
+            {
+                "tool_key": key,
+                "instance_id": instance_id,
+                "session_id": session_id,
+                "args_digest": _digest(args),
+                "call_count": post_count,
+                "side_effects": (resolved.side_effects if resolved else tool.side_effects),
+                "resumed_from_ticket": ticket_id,
+                "approved_by": operator_id,
+            },
+            agent_dna=agent_dna,
+        )
+
+        ctx = ToolContext(
+            instance_id=instance_id,
+            agent_dna=agent_dna,
+            role=role,
+            genre=genre,
+            session_id=session_id,
+            constraints=dict(resolved.constraints) if resolved else {},
+            provider=provider,
+        )
+        try:
+            result = await tool.execute(args, ctx)
+        except ToolError as e:
+            failed_entry = self.audit.append(
+                EVENT_FAILED,
+                {
+                    "tool_key": key,
+                    "instance_id": instance_id,
+                    "session_id": session_id,
+                    "dispatched_seq": dispatched_entry.seq,
+                    "exception_type": type(e).__name__,
+                    "exception_message": str(e),
+                    "resumed_from_ticket": ticket_id,
+                },
+                agent_dna=agent_dna,
+            )
+            self._record_call_safe(
+                audit_seq=failed_entry.seq,
+                instance_id=instance_id, session_id=session_id,
+                tool_key=key, status="failed",
+                tokens_used=None, cost_usd=None,
+                side_effect_summary=None,
+                finished_at=failed_entry.timestamp,
+            )
+            return DispatchFailed(
+                tool_key=key, exception_type=type(e).__name__,
+                audit_seq=failed_entry.seq,
+            )
+        except Exception as e:
+            failed_entry = self.audit.append(
+                EVENT_FAILED,
+                {
+                    "tool_key": key,
+                    "instance_id": instance_id,
+                    "session_id": session_id,
+                    "dispatched_seq": dispatched_entry.seq,
+                    "exception_type": type(e).__name__,
+                    "exception_message": str(e),
+                    "unexpected": True,
+                    "resumed_from_ticket": ticket_id,
+                },
+                agent_dna=agent_dna,
+            )
+            self._record_call_safe(
+                audit_seq=failed_entry.seq,
+                instance_id=instance_id, session_id=session_id,
+                tool_key=key, status="failed",
+                tokens_used=None, cost_usd=None,
+                side_effect_summary=None,
+                finished_at=failed_entry.timestamp,
+            )
+            return DispatchFailed(
+                tool_key=key, exception_type=type(e).__name__,
+                audit_seq=failed_entry.seq,
+            )
+
+        succeeded_entry = self.audit.append(
+            EVENT_SUCCEEDED,
+            {
+                "tool_key": key,
+                "instance_id": instance_id,
+                "session_id": session_id,
+                "dispatched_seq": dispatched_entry.seq,
+                "result_digest": result.result_digest(),
+                "tokens_used": result.tokens_used,
+                "cost_usd": result.cost_usd,
+                "side_effect_summary": result.side_effect_summary,
+                "resumed_from_ticket": ticket_id,
+            },
+            agent_dna=agent_dna,
+        )
+        self._record_call_safe(
+            audit_seq=succeeded_entry.seq,
+            instance_id=instance_id, session_id=session_id,
+            tool_key=key, status="succeeded",
+            tokens_used=result.tokens_used,
+            cost_usd=result.cost_usd,
+            side_effect_summary=result.side_effect_summary,
+            finished_at=succeeded_entry.timestamp,
+        )
+        return DispatchSucceeded(
+            tool_key=key, result=result,
+            call_count_after=post_count,
+            audit_seq=succeeded_entry.seq,
+        )
+
+    def emit_approved_event(
+        self,
+        *,
+        ticket_id: str,
+        instance_id: str,
+        agent_dna: str,
+        session_id: str,
+        tool_key: str,
+        operator_id: str,
+    ) -> int:
+        """Append a ``tool_call_approved`` entry. Returns the new seq.
+
+        Endpoint calls this BEFORE marking the registry row decided so
+        the audit chain has the operator decision linked to the
+        original pending-approval entry. Then the endpoint calls
+        :meth:`resume_approved` to actually run the tool.
+        """
+        entry = self.audit.append(
+            EVENT_APPROVED,
+            {
+                "ticket_id": ticket_id,
+                "instance_id": instance_id,
+                "session_id": session_id,
+                "tool_key": tool_key,
+                "operator_id": operator_id,
+            },
+            agent_dna=agent_dna,
+        )
+        return entry.seq
+
+    def emit_rejected_event(
+        self,
+        *,
+        ticket_id: str,
+        instance_id: str,
+        agent_dna: str,
+        session_id: str,
+        tool_key: str,
+        operator_id: str,
+        reason: str,
+    ) -> int:
+        """Append a ``tool_call_rejected`` entry. Returns the new seq.
+
+        Symmetrical to :meth:`emit_approved_event`. After this returns,
+        the endpoint marks the registry row rejected. The tool never
+        runs; the operator's decision is the chain's final word on
+        this ticket.
+        """
+        entry = self.audit.append(
+            EVENT_REJECTED,
+            {
+                "ticket_id": ticket_id,
+                "instance_id": instance_id,
+                "session_id": session_id,
+                "tool_key": tool_key,
+                "operator_id": operator_id,
+                "reason": reason,
+            },
+            agent_dna=agent_dna,
+        )
+        return entry.seq
 
 
 # ---------------------------------------------------------------------------
@@ -514,3 +810,10 @@ def _digest(obj: Any) -> str:
     import json
     encoded = json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _canonical_json(obj: Any) -> str:
+    """Canonical JSON encoding for ``args_json`` storage. Sort-keys so a
+    re-loaded dict round-trips byte-for-byte."""
+    import json
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)

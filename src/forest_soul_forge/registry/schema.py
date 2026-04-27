@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 4
+SCHEMA_VERSION: int = 5
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -169,6 +169,37 @@ DDL_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_tool_calls_instance ON tool_calls(instance_id);",
     "CREATE INDEX IF NOT EXISTS idx_tool_calls_tool ON tool_calls(tool_key);",
     "CREATE INDEX IF NOT EXISTS idx_tool_calls_finished ON tool_calls(finished_at);",
+    # --- approval queue (ADR-0019 T3) ------------------------------------
+    # Tracks tool calls that hit ``requires_human_approval=True`` and are
+    # waiting for an operator decision. ``ticket_id`` is the same string
+    # the dispatcher minted in T2 (``pending-{instance}-{session}-{seq}``)
+    # so an in-flight ticket from before this table existed can still
+    # be looked up by clients that already saw it. ``args_json`` holds
+    # the original args so the resume path doesn't have to re-fetch
+    # them from the chain. ``decided_audit_seq`` points at the
+    # tool_call_approved or tool_call_rejected entry the operator's
+    # decision produced — provides the cross-link the chain doesn't
+    # carry directly.
+    """
+    CREATE TABLE IF NOT EXISTS tool_call_pending_approvals (
+        ticket_id          TEXT PRIMARY KEY,
+        instance_id        TEXT NOT NULL,
+        session_id         TEXT NOT NULL,
+        tool_key           TEXT NOT NULL,
+        args_json          TEXT NOT NULL,
+        side_effects       TEXT NOT NULL,
+        status             TEXT NOT NULL DEFAULT 'pending',
+        pending_audit_seq  INTEGER NOT NULL,
+        decided_audit_seq  INTEGER,
+        decided_by         TEXT,
+        decision_reason    TEXT,
+        created_at         TEXT NOT NULL,
+        decided_at         TEXT,
+        FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_pending_approvals_instance ON tool_call_pending_approvals(instance_id);",
+    "CREATE INDEX IF NOT EXISTS idx_pending_approvals_status ON tool_call_pending_approvals(status);",
     # --- metadata --------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS registry_meta (
@@ -197,6 +228,7 @@ INITIAL_METADATA: tuple[tuple[str, str], ...] = (
 REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     "audit_events",
     "agent_ancestry",
+    "tool_call_pending_approvals",
     "tool_calls",
     "tool_call_counters",
     "tools",
@@ -285,5 +317,29 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX IF NOT EXISTS idx_tool_calls_instance ON tool_calls(instance_id);",
         "CREATE INDEX IF NOT EXISTS idx_tool_calls_tool ON tool_calls(tool_key);",
         "CREATE INDEX IF NOT EXISTS idx_tool_calls_finished ON tool_calls(finished_at);",
+    ),
+    # v4 → v5: add tool_call_pending_approvals (ADR-0019 T3). Tracks
+    # gated calls awaiting operator decision. Pure addition.
+    5: (
+        """
+        CREATE TABLE IF NOT EXISTS tool_call_pending_approvals (
+            ticket_id          TEXT PRIMARY KEY,
+            instance_id        TEXT NOT NULL,
+            session_id         TEXT NOT NULL,
+            tool_key           TEXT NOT NULL,
+            args_json          TEXT NOT NULL,
+            side_effects       TEXT NOT NULL,
+            status             TEXT NOT NULL DEFAULT 'pending',
+            pending_audit_seq  INTEGER NOT NULL,
+            decided_audit_seq  INTEGER,
+            decided_by         TEXT,
+            decision_reason    TEXT,
+            created_at         TEXT NOT NULL,
+            decided_at         TEXT,
+            FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_pending_approvals_instance ON tool_call_pending_approvals(instance_id);",
+        "CREATE INDEX IF NOT EXISTS idx_pending_approvals_status ON tool_call_pending_approvals(status);",
     ),
 }

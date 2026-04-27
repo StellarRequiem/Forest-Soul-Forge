@@ -134,11 +134,11 @@ class TestHealth:
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
-        # schema_version is 4 since the v3→v4 forward migration
-        # (ADR-0019 T4, tool_calls accounting). The daemon reports the
+        # schema_version is 5 since the v4→v5 forward migration
+        # (ADR-0019 T3, approval queue). The daemon reports the
         # registry's actual schema_version; assertion tracks the live
         # value rather than a stale literal.
-        assert body["schema_version"] == 4
+        assert body["schema_version"] == 5
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"

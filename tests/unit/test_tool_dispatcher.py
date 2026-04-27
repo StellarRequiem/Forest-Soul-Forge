@@ -27,10 +27,12 @@ from forest_soul_forge.tools.base import (
 )
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
 from forest_soul_forge.tools.dispatcher import (
+    EVENT_APPROVED,
     EVENT_DISPATCHED,
     EVENT_FAILED,
     EVENT_PENDING_APPROVAL,
     EVENT_REFUSED,
+    EVENT_REJECTED,
     EVENT_SUCCEEDED,
     DispatchFailed,
     DispatchPendingApproval,
@@ -608,3 +610,213 @@ class TestDispatcherRecording:
             args={"expression": "last 1 minutes"},
         ))
         assert isinstance(outcome, DispatchSucceeded)
+
+
+# ---------------------------------------------------------------------------
+# T3 — approval queue persistence + resume path
+# ---------------------------------------------------------------------------
+class TestPendingPersistence:
+    """The dispatcher persists a pending row when the approval gate fires."""
+
+    def test_pending_writer_called_on_gate(self, dispatcher_env):
+        written: list[dict] = []
+        dispatcher_env["dispatcher"].pending_writer = lambda **kw: written.append(kw)
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution, requires_approval=True)
+
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchPendingApproval)
+        assert len(written) == 1
+        row = written[0]
+        assert row["ticket_id"] == outcome.ticket_id
+        assert row["instance_id"] == "i1"
+        assert row["session_id"] == "s1"
+        assert row["tool_key"] == "timestamp_window.v1"
+        # args_json round-trips: stored canonical so it can be replayed.
+        import json
+        assert json.loads(row["args_json"]) == {"expression": "last 1 minutes"}
+
+    def test_pending_writer_none_does_not_break_gate(self, dispatcher_env):
+        """pending_writer=None still mints ticket_id, just doesn't persist."""
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution, requires_approval=True)
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchPendingApproval)
+        assert outcome.ticket_id
+
+
+class TestResumeApproved:
+    """resume_approved replays a gated tool with the approval bypass."""
+
+    def test_resume_succeeds_and_increments_counter(self, dispatcher_env):
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution, requires_approval=True)
+        # Initial dispatch — gates.
+        gated = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(gated, DispatchPendingApproval)
+        assert dispatcher_env["counters"].get(("i1", "s1"), 0) == 0  # not burned
+
+        # Resume — runs the tool past the approval gate.
+        resumed = _run(dispatcher_env["dispatcher"].resume_approved(
+            ticket_id=gated.ticket_id,
+            operator_id="alex",
+            instance_id="i1", agent_dna="d" * 12,
+            role="network_watcher", genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(resumed, DispatchSucceeded)
+        # Counter increments now.
+        assert dispatcher_env["counters"][("i1", "s1")] == 1
+
+    def test_resume_emits_dispatched_with_resumed_from_ticket(self, dispatcher_env):
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution, requires_approval=True)
+        gated = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        _run(dispatcher_env["dispatcher"].resume_approved(
+            ticket_id=gated.ticket_id, operator_id="alex",
+            instance_id="i1", agent_dna="d" * 12,
+            role="network_watcher", genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        dispatched = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_DISPATCHED
+        ][-1]
+        assert dispatched.event_data["resumed_from_ticket"] == gated.ticket_id
+        assert dispatched.event_data["approved_by"] == "alex"
+
+    def test_resume_unknown_tool_refuses(self, dispatcher_env):
+        # Persist a pending row for a tool name that doesn't exist in
+        # the registry (simulates the tool getting hot-unloaded between
+        # queue and approve).
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution, requires_approval=True)
+        outcome = _run(dispatcher_env["dispatcher"].resume_approved(
+            ticket_id="pending-i1-s1-99",
+            operator_id="alex",
+            instance_id="i1", agent_dna="d" * 12,
+            role="network_watcher", genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="ghost_tool", tool_version="1",
+            args={},
+        ))
+        assert isinstance(outcome, DispatchRefused)
+        assert outcome.reason == "unknown_tool"
+
+
+class TestApprovalEvents:
+    def test_emit_approved_appends_chain_entry(self, dispatcher_env):
+        seq = dispatcher_env["dispatcher"].emit_approved_event(
+            ticket_id="pending-x",
+            instance_id="i1", agent_dna="d" * 12, session_id="s1",
+            tool_key="timestamp_window.v1", operator_id="alex",
+        )
+        assert isinstance(seq, int)
+        approved = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_APPROVED
+        ]
+        assert len(approved) == 1
+        assert approved[0].event_data["ticket_id"] == "pending-x"
+        assert approved[0].event_data["operator_id"] == "alex"
+
+    def test_emit_rejected_appends_chain_entry_with_reason(self, dispatcher_env):
+        dispatcher_env["dispatcher"].emit_rejected_event(
+            ticket_id="pending-x",
+            instance_id="i1", agent_dna="d" * 12, session_id="s1",
+            tool_key="timestamp_window.v1", operator_id="alex",
+            reason="not now",
+        )
+        rejected = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_REJECTED
+        ]
+        assert len(rejected) == 1
+        assert rejected[0].event_data["reason"] == "not now"
+
+
+class TestRegistryApprovalQueue:
+    def test_record_and_get(self, tmp_path):
+        with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            r.record_pending_approval(
+                ticket_id="t1", instance_id="i1", session_id="s1",
+                tool_key="timestamp_window.v1",
+                args_json='{"expression":"last 1 minutes"}',
+                side_effects="read_only",
+                pending_audit_seq=42,
+                created_at="2026-04-27T00:00:00Z",
+            )
+            row = r.get_pending_approval("t1")
+            assert row is not None
+            assert row["status"] == "pending"
+            assert row["instance_id"] == "i1"
+
+    def test_list_filters_by_status(self, tmp_path):
+        with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            r.record_pending_approval(
+                ticket_id="t1", instance_id="i1", session_id="s1",
+                tool_key="t.v1", args_json="{}", side_effects="read_only",
+                pending_audit_seq=1, created_at="2026-04-27T00:00:00Z",
+            )
+            r.record_pending_approval(
+                ticket_id="t2", instance_id="i1", session_id="s1",
+                tool_key="t.v1", args_json="{}", side_effects="read_only",
+                pending_audit_seq=2, created_at="2026-04-27T00:00:01Z",
+            )
+            r.mark_approval_decided(
+                "t1", status="approved", decided_audit_seq=99,
+                decided_by="alex", decision_reason=None,
+                decided_at="2026-04-27T00:01:00Z",
+            )
+            pending = r.list_pending_approvals("i1", status="pending")
+            assert [p["ticket_id"] for p in pending] == ["t2"]
+            full = r.list_pending_approvals("i1", status=None)
+            assert [p["ticket_id"] for p in full] == ["t1", "t2"]
+
+    def test_double_decide_returns_false(self, tmp_path):
+        with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            r.record_pending_approval(
+                ticket_id="t1", instance_id="i1", session_id="s1",
+                tool_key="t.v1", args_json="{}", side_effects="read_only",
+                pending_audit_seq=1, created_at="2026-04-27T00:00:00Z",
+            )
+            ok1 = r.mark_approval_decided(
+                "t1", status="approved", decided_audit_seq=99,
+                decided_by="alex", decision_reason=None,
+                decided_at="2026-04-27T00:01:00Z",
+            )
+            ok2 = r.mark_approval_decided(
+                "t1", status="rejected", decided_audit_seq=100,
+                decided_by="alex", decision_reason="changed mind",
+                decided_at="2026-04-27T00:02:00Z",
+            )
+            assert ok1 is True
+            assert ok2 is False  # already decided

@@ -65,6 +65,12 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "tool_call_refused",
     "tool_call_failed",
     "tool_call_pending_approval",
+    # ADR-0019 T3 — approval queue lifecycle. Distinct from
+    # `tool_call_refused` (the runtime auto-rejected) so an auditor can
+    # tell "the runtime said no" from "the operator said no" without
+    # parsing the reason field.
+    "tool_call_approved",
+    "tool_call_rejected",
     # ADR-0021 T6 — operator override on spawn-compat. Recorded so the
     # operator can later answer "why did we spawn this combination?".
     "spawn_genre_override",
