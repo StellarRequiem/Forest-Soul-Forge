@@ -233,6 +233,39 @@ def _build_provenance(
     )
 
 
+def _build_memory(registry: Registry, instance_id: str) -> CharacterMemory:
+    """Aggregate per-layer memory counts (ADR-0022 v0.1).
+
+    Empty agent → not_yet_measured=True. Walking the registry
+    connection directly (rather than via the Memory class) keeps
+    the character-sheet endpoint a pure read — no Memory instance
+    leakage to a read-only path."""
+    layers = {"episodic": 0, "semantic": 0, "procedural": 0}
+    total = 0
+    rows = registry._conn.execute(  # noqa: SLF001 — internal access by design
+        """
+        SELECT layer, COUNT(*) AS n
+        FROM memory_entries
+        WHERE instance_id=? AND deleted_at IS NULL
+        GROUP BY layer;
+        """,
+        (instance_id,),
+    ).fetchall()
+    for row in rows:
+        layer = str(row["layer"])
+        n = int(row["n"])
+        if layer in layers:
+            layers[layer] = n
+        total += n
+    if total == 0:
+        return CharacterMemory()
+    return CharacterMemory(
+        not_yet_measured=False,
+        total_entries=total,
+        layers=layers,
+    )
+
+
 def _build_stats(registry: Registry, instance_id: str) -> CharacterStats:
     """Aggregate the registry's ``tool_calls`` table into character-sheet
     stats (ADR-0019 T4). Empty agent → ``not_yet_measured=True``."""
@@ -346,6 +379,7 @@ async def get_character_sheet(
     policies = _summarize_policies(constitution)
     provenance = _build_provenance(soul_path, constitution_path, audit, row.dna)
     stats = _build_stats(registry, instance_id)
+    memory_summary = _build_memory(registry, instance_id)
 
     return CharacterSheetOut(
         schema_version=1,
@@ -356,7 +390,7 @@ async def get_character_sheet(
         capabilities=capabilities,
         policies=policies,
         stats=stats,
-        memory=CharacterMemory(),
+        memory=memory_summary,
         benchmarks=CharacterBenchmarks(),
         provenance=provenance,
     )

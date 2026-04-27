@@ -604,10 +604,24 @@ class CharacterStats(BaseModel):
 
 
 class CharacterMemory(BaseModel):
-    """Memory subsystem state. Scaffolded for ADR-0022; empty today."""
+    """Memory subsystem state. Populated from Memory.count() per
+    ADR-0022 v0.1.
+
+    ``not_yet_measured`` flips False the moment the agent has any
+    memory entry — distinguishes "freshly born, no memory yet" from
+    "actively used."
+
+    ``layers`` is a dict ``{episodic: count, semantic: count,
+    procedural: count}``. Tombstoned entries are excluded.
+
+    ``consolidation_run_count`` stays at 0 in v0.1 — consolidation
+    (rolling episodic into semantic / extracting procedural patterns)
+    is a v0.2+ feature.
+    """
 
     not_yet_measured: bool = True
-    layers: dict[str, Any] = Field(default_factory=dict)
+    total_entries: int = 0
+    layers: dict[str, int] = Field(default_factory=dict)
     consolidation_run_count: int = 0
 
 
