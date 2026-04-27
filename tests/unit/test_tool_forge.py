@@ -234,6 +234,7 @@ class TestGreet:
             out_dir=tmp_path,
             forged_by="alex",
             proposed_only=True,
+            run_tests=False,
         ))
         assert result.proposed_only is True
         assert result.spec.name == "greet"
@@ -253,6 +254,7 @@ class TestGreet:
             provider=provider,
             out_dir=tmp_path,
             forged_by="alex",
+            run_tests=False,
         ))
         assert result.proposed_only is False
         assert result.spec.name == "greet"
@@ -273,6 +275,7 @@ class TestGreet:
             out_dir=tmp_path,
             forged_by="alex",
             name_override="custom_name",
+            run_tests=False,
         ))
         assert result.spec.name == "custom_name"
         assert result.staged_dir.name.startswith("custom_name")
@@ -287,6 +290,7 @@ class TestGreet:
             out_dir=tmp_path,
             forged_by="alex",
             version="2",
+            run_tests=False,
         ))
         assert result.spec.version == "2"
         assert result.staged_dir.name.endswith(".v2")
@@ -300,6 +304,7 @@ class TestGreet:
             provider=provider,
             out_dir=tmp_path,
             forged_by="alex",
+            run_tests=False,
         ))
         log = result.log_path.read_text()
         assert "PROPOSE" in log
@@ -351,6 +356,7 @@ class GreetTool:
             provider=provider,
             out_dir=tmp_path,
             forged_by="alex",
+            run_tests=False,
         ))
         assert result.analysis is not None
         assert result.analysis.flags == ()
@@ -363,6 +369,7 @@ class GreetTool:
             provider=provider,
             out_dir=tmp_path,
             forged_by="alex",
+            run_tests=False,
         ))
         assert result.analysis is not None
         rules = [f.rule for f in result.analysis.flags]
@@ -381,6 +388,7 @@ class GreetTool:
             provider=provider,
             out_dir=tmp_path,
             forged_by="alex",
+            run_tests=False,
         ))
         log = result.log_path.read_text()
         assert "STATIC ANALYSIS" in log
@@ -403,6 +411,7 @@ class TestForgeTestGen:
             provider=provider,
             out_dir=tmp_path,
             forged_by="alex",
+            run_tests=False,
         ))
         assert result.test_path is not None
         assert result.test_path.exists()
@@ -419,6 +428,7 @@ class TestForgeTestGen:
             provider=provider,
             out_dir=tmp_path,
             forged_by="alex",
+            run_tests=False,
         ))
         assert result.tool_path is not None
         assert result.test_path is None
@@ -434,6 +444,7 @@ class TestForgeTestGen:
             out_dir=tmp_path,
             forged_by="alex",
             proposed_only=True,
+            run_tests=False,
         ))
         assert result.test_path is None
         assert result.tool_path is None

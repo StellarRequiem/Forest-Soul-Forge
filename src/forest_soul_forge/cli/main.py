@@ -90,10 +90,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true",
         help=(
             "Stage the forged tool even if static analysis raised hard "
-            "flags. The folder still gets a REJECTED.md alongside; the "
-            "operator is on the hook for review. Useful during forge "
-            "iteration when you know the LLM nearly got it right."
+            "flags or generated tests failed. The folder still gets a "
+            "REJECTED.md alongside; the operator is on the hook for "
+            "review. Useful during forge iteration when you know the "
+            "LLM nearly got it right."
         ),
+    )
+    forge_tool.add_argument(
+        "--no-prove", action="store_true",
+        help=(
+            "Skip the sandboxed test run (ADR-0030 T3b). The test file "
+            "is still generated and staged; it just isn't executed. "
+            "Useful when running forge in environments without pytest."
+        ),
+    )
+    forge_tool.add_argument(
+        "--test-timeout", type=float, default=30.0,
+        help="Per-test-run timeout in seconds (default: 30).",
     )
     forge_tool.set_defaults(_run=_run_forge_tool)
 

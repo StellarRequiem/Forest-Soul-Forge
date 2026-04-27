@@ -39,6 +39,8 @@ def run(args: argparse.Namespace) -> int:
             name_override=args.name,
             version=args.version,
             proposed_only=args.dry_run,
+            run_tests=not args.no_prove,
+            test_timeout_s=args.test_timeout,
         )
     except SpecParseError as e:
         print(f"[Tool Forge] propose stage failed: {e}", file=sys.stderr)
@@ -94,6 +96,22 @@ def run(args: argparse.Namespace) -> int:
     elif analysis is not None:
         print()
         print("[Tool Forge] static analysis: clean (0 hard, 0 soft)")
+
+    # Sandboxed test run report (ADR-0030 T3b).
+    if result.tests_run:
+        print()
+        if result.tests_passed:
+            print(f"[Tool Forge] tests: PASS — {result.tests_summary}")
+        else:
+            print(f"[Tool Forge] tests: FAIL — {result.tests_summary}")
+    elif result.test_path is not None and not args.no_prove:
+        # Test file was generated but the run was skipped (e.g. pytest
+        # missing). Surface so the operator knows.
+        print()
+        print(
+            "[Tool Forge] tests: not executed — see forge.log for the "
+            "skip reason."
+        )
 
     if result.staging_blocked and not args.force:
         print(

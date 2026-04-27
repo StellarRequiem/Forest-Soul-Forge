@@ -405,6 +405,8 @@ async def forge_tool(
     name_override: str | None = None,
     version: str = "1",
     proposed_only: bool = False,
+    run_tests: bool = True,
+    test_timeout_s: float = 30.0,
 ) -> ForgeResult:
     """Run the forge pipeline.
 
@@ -551,6 +553,57 @@ async def forge_tool(
         _build_catalog_diff(spec), encoding="utf-8",
     )
 
+    # Stage 4 — TEST RUN (ADR-0030 T3b)
+    # Skipped when:
+    #   - testgen produced no test file (test_path is None)
+    #   - hard analysis flags fired (don't waste time running tests
+    #     against code we already know is broken)
+    #   - caller passed run_tests=False
+    tests_run = False
+    tests_passed: bool | None = None
+    tests_summary: str | None = None
+    if run_tests and test_path is not None and not staging_blocked:
+        from forest_soul_forge.forge.sandbox import (
+            prepare_test_environment,
+            run_staged_tests,
+        )
+        prepare_test_environment(staged_dir)
+        log.append("\n=== TEST RUN ===")
+        run_result = run_staged_tests(
+            staged_dir=staged_dir,
+            test_path=test_path,
+            timeout_s=test_timeout_s,
+        )
+        tests_run = run_result.ran
+        tests_passed = run_result.passed
+        tests_summary = run_result.summary
+        log.append(f"  ran:     {tests_run}")
+        log.append(f"  passed:  {tests_passed}")
+        log.append(f"  summary: {tests_summary}")
+        if run_result.stdout:
+            log.append("--- stdout (last 40 lines) ---")
+            log.extend(run_result.stdout.splitlines()[-40:])
+        if run_result.stderr:
+            log.append("--- stderr (last 20 lines) ---")
+            log.extend(run_result.stderr.splitlines()[-20:])
+        if tests_run and tests_passed is False:
+            # Tests ran and at least one failed — block staging the
+            # same way hard static-analysis flags do. The .py is
+            # still on disk; operator can re-forge or hand-fix.
+            staging_blocked = True
+            (staged_dir / "REJECTED.md").write_text(
+                "# REJECTED — generated tests failed\n\n"
+                "The Tool Forge ran the codegen-generated tests against "
+                "the codegen-generated implementation in a sandbox. At "
+                "least one test failed.\n\n"
+                f"Summary: {tests_summary}\n\n"
+                "See forge.log for full pytest output. Re-forge with a "
+                "clearer description, fix tool.py by hand, or pass "
+                "--no-prove to skip tests.\n",
+                encoding="utf-8",
+            )
+            log.append("=== TESTS FAILED — install blocked. ===")
+
     log_path.write_text("\n".join(log) + "\n", encoding="utf-8")
     return ForgeResult(
         spec=spec, spec_path=spec_path, tool_path=tool_path,
@@ -560,6 +613,9 @@ async def forge_tool(
         analysis=analysis,
         staging_blocked=staging_blocked,
         test_path=test_path,
+        tests_run=tests_run,
+        tests_passed=tests_passed,
+        tests_summary=tests_summary,
     )
 
 
