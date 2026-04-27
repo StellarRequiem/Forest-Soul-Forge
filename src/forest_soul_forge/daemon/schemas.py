@@ -826,6 +826,59 @@ class RejectRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
 
 
+class SkillRunRequest(BaseModel):
+    """Request body for ``POST /agents/{instance_id}/skills/run``.
+
+    The skill is identified by ``skill_name`` + ``skill_version``; the
+    ad-hoc loader (pre-ADR-0031 T5) reads the manifest from
+    ``data/forge/skills/installed/<name>.v<version>.yaml``. T5 will
+    introduce a registry-backed catalog.
+
+    ``inputs`` is the skill's args block — validated by the manifest's
+    ``inputs`` schema before the runtime walks the DAG.
+    """
+
+    skill_name: str = Field(..., min_length=1, max_length=80)
+    skill_version: str = Field(..., min_length=1, max_length=16)
+    session_id: str = Field(..., min_length=1, max_length=80)
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "Recorded in skill_invoked event. ADR-0031 T6 will wire a "
+            "real dry-run mode that uses stub providers; T2 just plumbs "
+            "the flag for forward-compat."
+        ),
+    )
+
+
+class SkillRunResponse(BaseModel):
+    """Response shape for skill run.
+
+    Exactly one of ``output`` / ``failure_step_id`` is set, discriminated
+    by ``status``:
+      ``succeeded`` — output populated, HTTP 200.
+      ``failed``   — failure_step_id + failure_reason set, HTTP 200
+                     (the API call worked; the skill didn't).
+    Refusals (unknown skill, unknown agent) come as HTTPException, not
+    this schema.
+    """
+
+    status: str
+    skill_name: str
+    skill_version: str
+    skill_hash: str
+    invoked_seq: int
+    completed_seq: int
+    output: dict[str, Any] | None = None
+    steps_executed: int = 0
+    steps_skipped: int = 0
+    failed_step_id: str | None = None
+    failure_reason: str | None = None
+    failure_detail: str | None = None
+    bindings_at_failure: dict[str, Any] | None = None
+
+
 class ToolCallResponse(BaseModel):
     """Response shape for ``POST /agents/{id}/tools/call``.
 

@@ -94,6 +94,16 @@ class DaemonSettings(BaseSettings):
             "production output doesn't overwrite committed examples."
         ),
     )
+    skill_install_dir: Path = Field(
+        default=Path("data/forge/skills/installed"),
+        description=(
+            "Where the skills/run endpoint looks for installed skill "
+            "manifests (ADR-0031 T2b ad-hoc loader; T5 introduces a "
+            "registry-backed catalog). One YAML per skill named "
+            "<name>.v<version>.yaml. Operators move staged manifests "
+            "from data/forge/skills/staged/ into here once reviewed."
+        ),
+    )
     # Allow the write endpoints. Off by default so a misconfigured instance
     # can't accept birth requests. Ops flips this on once the artifact dir
     # is writable and the trait tree is present.
