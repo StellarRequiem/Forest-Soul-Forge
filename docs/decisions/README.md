@@ -59,7 +59,7 @@ What else did we look at, and why not?
 - [ADR-0024 — Project horizons and long-term direction](ADR-0024-project-horizons.md) — Proposed (vision) 2026-04-27
 - [ADR-0025 — Threat model v2 (adversarial operators / federation)](ADR-0025-threat-model-v2.md) — Placeholder 2026-04-27
 - [ADR-0026 — Provider economics (frontier LLM cost model)](ADR-0026-provider-economics.md) — Placeholder 2026-04-27
-- [ADR-0027 — Memory privacy contract (information flow control)](ADR-0027-memory-privacy-contract.md) — Placeholder 2026-04-27
+- [ADR-0027 — Memory privacy contract (information flow control)](ADR-0027-memory-privacy-contract.md) — Proposed 2026-04-27
 - [ADR-0028 — Data portability spec (export / leave guarantee)](ADR-0028-data-portability.md) — Placeholder 2026-04-27
 - [ADR-0029 — Regulatory map (EU AI Act / COPPA / CSAM)](ADR-0029-regulatory-map.md) — Placeholder 2026-04-27
 - [ADR-0030 — Tool Forge](ADR-0030-tool-forge.md) — Proposed 2026-04-27
