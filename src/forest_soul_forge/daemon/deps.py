@@ -164,6 +164,11 @@ def get_tool_dispatcher(request: Request):
         audit=audit,
         counter_get=fsf_registry.get_tool_call_count,
         counter_inc=fsf_registry.increment_tool_call_count,
+        # ADR-0019 T4: per-call accounting writer. Mirrors each
+        # terminating dispatch event into the registry's tool_calls
+        # table for queryable character-sheet roll-ups. The audit
+        # chain is the source of truth; this is the indexed view.
+        record_call=fsf_registry.record_tool_call,
     )
     request.app.state.tool_dispatcher = dispatcher
     return dispatcher

@@ -203,6 +203,11 @@ class ToolDispatcher:
     audit: AuditChain
     counter_get: Any  # callable: (instance_id, session_id) -> int
     counter_inc: Any  # callable: (instance_id, session_id, when_iso) -> int
+    # ADR-0019 T4: per-call accounting writer. Takes the same fields
+    # as Registry.record_tool_call. Optional — when None, the dispatcher
+    # skips the registry mirror and only emits to the audit chain.
+    # Tests use ``None`` to keep the in-memory fakes simple.
+    record_call: Any = None  # callable (kwargs) -> None | None
 
     async def dispatch(
         self,
@@ -340,6 +345,17 @@ class ToolDispatcher:
                 },
                 agent_dna=agent_dna,
             )
+            self._record_call_safe(
+                audit_seq=failed_entry.seq,
+                instance_id=instance_id,
+                session_id=session_id,
+                tool_key=key,
+                status="failed",
+                tokens_used=None,
+                cost_usd=None,
+                side_effect_summary=None,
+                finished_at=failed_entry.timestamp,
+            )
             return DispatchFailed(
                 tool_key=key,
                 exception_type=type(e).__name__,
@@ -363,6 +379,17 @@ class ToolDispatcher:
                 },
                 agent_dna=agent_dna,
             )
+            self._record_call_safe(
+                audit_seq=failed_entry.seq,
+                instance_id=instance_id,
+                session_id=session_id,
+                tool_key=key,
+                status="failed",
+                tokens_used=None,
+                cost_usd=None,
+                side_effect_summary=None,
+                finished_at=failed_entry.timestamp,
+            )
             return DispatchFailed(
                 tool_key=key,
                 exception_type=type(e).__name__,
@@ -384,6 +411,20 @@ class ToolDispatcher:
             },
             agent_dna=agent_dna,
         )
+        # T4: mirror into registry tool_calls for queryable roll-ups.
+        # Same write-lock window as the audit append above so a crash
+        # leaves the chain and the table mutually consistent.
+        self._record_call_safe(
+            audit_seq=succeeded_entry.seq,
+            instance_id=instance_id,
+            session_id=session_id,
+            tool_key=key,
+            status="succeeded",
+            tokens_used=result.tokens_used,
+            cost_usd=result.cost_usd,
+            side_effect_summary=result.side_effect_summary,
+            finished_at=succeeded_entry.timestamp,
+        )
         return DispatchSucceeded(
             tool_key=key,
             result=result,
@@ -392,6 +433,22 @@ class ToolDispatcher:
         )
 
     # ---- helpers -----------------------------------------------------
+    def _record_call_safe(self, **kwargs) -> None:
+        """Best-effort write to tool_calls. ``record_call=None`` skips
+        the mirror entirely (used by tests with in-memory fakes).
+        Any exception is swallowed and would surface in the next chain
+        verification — the audit chain remains the source of truth.
+        """
+        if self.record_call is None:
+            return
+        try:
+            self.record_call(**kwargs)
+        except Exception:
+            # Defensive — a registry write failure shouldn't break the
+            # dispatch outcome the caller already observed in the chain.
+            # Verify-on-boot will surface the mismatch.
+            pass
+
     def _refuse(
         self,
         key: str,

@@ -127,11 +127,11 @@ class TestBootstrap:
     def test_fresh_db_creates_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
         with Registry.bootstrap(db) as r:
-            # Version bumped to 3 when tool_call_counters landed (ADR-0019
-            # T2). The assertion is kept as a guard so any future version
-            # bump forces a matching update here — not a free-floating
-            # number.
-            assert r.schema_version() == 3
+            # Version bumped to 4 when tool_calls landed (ADR-0019 T4 —
+            # per-call accounting). The assertion is kept as a guard so
+            # any future version bump forces a matching update here —
+            # not a free-floating number.
+            assert r.schema_version() == 4
             assert r.list_agents() == []
             assert r.audit_tail() == []
         assert db.exists()
@@ -140,21 +140,21 @@ class TestBootstrap:
         db = tmp_path / "reg.sqlite"
         Registry.bootstrap(db).close()
         with Registry.bootstrap(db) as r:
-            # Version bumped to 3 when tool_call_counters landed (ADR-0019
-            # T2). The assertion is kept as a guard so any future version
-            # bump forces a matching update here — not a free-floating
-            # number.
-            assert r.schema_version() == 3
+            # Version bumped to 4 when tool_calls landed (ADR-0019 T4 —
+            # per-call accounting). The assertion is kept as a guard so
+            # any future version bump forces a matching update here —
+            # not a free-floating number.
+            assert r.schema_version() == 4
 
     def test_empty_existing_file_gets_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
         db.touch()  # crashed bootstrap leaves a 0-byte file
         with Registry.bootstrap(db) as r:
-            # Version bumped to 3 when tool_call_counters landed (ADR-0019
-            # T2). The assertion is kept as a guard so any future version
-            # bump forces a matching update here — not a free-floating
-            # number.
-            assert r.schema_version() == 3
+            # Version bumped to 4 when tool_calls landed (ADR-0019 T4 —
+            # per-call accounting). The assertion is kept as a guard so
+            # any future version bump forces a matching update here —
+            # not a free-floating number.
+            assert r.schema_version() == 4
 
     def test_schema_downgrade_raises(self, tmp_path: Path):
         """A file stamped at a version *newer* than the code refuses to open.
@@ -254,19 +254,18 @@ class TestBootstrap:
 
         # Act: open through the real bootstrap path. The bootstrap walks
         # every registered migration step in order, so a v1 file ends up
-        # at the current SCHEMA_VERSION (3 after T2). The assertion still
-        # tests that the v2-specific changes landed; it just also tests
-        # the v3 step was applied on the same pass.
+        # at the current SCHEMA_VERSION (4 after T4). The assertion
+        # tests that all migration steps landed on the same pass.
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 3
+            assert r.schema_version() == 4
 
             # Data survives.
             row = r.get_agent(pre_existing)
             assert row.agent_name == "Legacy"
             assert row.sibling_index == 1  # DEFAULT 1 backfilled
 
-            # New tables are present and writable (proves both the v2 and
-            # v3 migrations ran, not just that the bootstrap was lenient).
+            # New tables are present and writable (proves the v2, v3, and
+            # v4 migrations all ran, not just that the bootstrap was lenient).
             import sqlite3 as _sqlite3
             raw = _sqlite3.connect(str(db))
             tables = {t[0] for t in raw.execute(
@@ -274,12 +273,14 @@ class TestBootstrap:
             )}
             assert "idempotency_keys" in tables
             assert "tool_call_counters" in tables
+            assert "tool_calls" in tables
             indexes = {t[0] for t in raw.execute(
                 "SELECT name FROM sqlite_master WHERE type='index';"
             )}
             assert "idx_agents_dna_sibling" in indexes
             assert "idx_idempotency_created" in indexes
             assert "idx_tool_call_counters_instance" in indexes
+            assert "idx_tool_calls_instance" in indexes
             raw.close()
 
     def test_migration_missing_entry_raises(self, tmp_path: Path):

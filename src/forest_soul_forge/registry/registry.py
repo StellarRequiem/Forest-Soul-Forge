@@ -681,6 +681,100 @@ class Registry:
             ).fetchone()
         return int(row["calls"])
 
+    # -------- tool-call accounting (ADR-0019 T4) -------------------------
+    # Per-call denormalized view over the audit chain. Dispatcher writes
+    # one row per terminating event (succeeded/failed) under the daemon
+    # write lock, alongside the chain entry. Reads are aggregations for
+    # the character-sheet stats endpoint.
+    def record_tool_call(
+        self,
+        *,
+        audit_seq: int,
+        instance_id: str,
+        session_id: str,
+        tool_key: str,
+        status: str,
+        tokens_used: int | None,
+        cost_usd: float | None,
+        side_effect_summary: str | None,
+        finished_at: str,
+    ) -> None:
+        """Insert one tool_calls row.
+
+        ``audit_seq`` is the primary key — it points at the
+        succeeded/failed audit-chain entry. INSERT OR IGNORE so a
+        dispatcher retry that lands the same chain entry twice (which
+        shouldn't happen under the write lock, but defensive) is a
+        no-op rather than an integrity error.
+        """
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO tool_calls (
+                audit_seq, instance_id, session_id, tool_key, status,
+                tokens_used, cost_usd, side_effect_summary, finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                audit_seq, instance_id, session_id, tool_key, status,
+                tokens_used, cost_usd, side_effect_summary, finished_at,
+            ),
+        )
+
+    def aggregate_tool_calls(self, instance_id: str) -> dict[str, Any]:
+        """Roll up tool_calls for one agent into character-sheet stats.
+
+        Returns a dict with: total_invocations, failed_invocations,
+        total_tokens_used (None when no calls used tokens),
+        total_cost_usd (None when no calls had cost),
+        last_active_at (None when no calls), per_tool list of
+        (tool_key, count, tokens, cost).
+
+        None totals (vs. zero) distinguish "no LLM-wrapping tool ever
+        ran" from "LLM-wrapping tools ran but reported zero" — the UI
+        can render the difference.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT status, tokens_used, cost_usd, finished_at, tool_key
+            FROM tool_calls WHERE instance_id=?;
+            """,
+            (instance_id,),
+        ).fetchall()
+
+        total = len(rows)
+        failed = sum(1 for r in rows if r["status"] == "failed")
+        total_tokens: int | None = None
+        total_cost: float | None = None
+        last_active: str | None = None
+        per_tool: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            if r["tokens_used"] is not None:
+                total_tokens = (total_tokens or 0) + int(r["tokens_used"])
+            if r["cost_usd"] is not None:
+                total_cost = (total_cost or 0.0) + float(r["cost_usd"])
+            if r["finished_at"] and (last_active is None or r["finished_at"] > last_active):
+                last_active = r["finished_at"]
+            slot = per_tool.setdefault(
+                r["tool_key"],
+                {"count": 0, "tokens": None, "cost": None},
+            )
+            slot["count"] += 1
+            if r["tokens_used"] is not None:
+                slot["tokens"] = (slot["tokens"] or 0) + int(r["tokens_used"])
+            if r["cost_usd"] is not None:
+                slot["cost"] = (slot["cost"] or 0.0) + float(r["cost_usd"])
+        per_tool_list = [
+            {"tool_key": k, **v} for k, v in sorted(per_tool.items())
+        ]
+        return {
+            "total_invocations": total,
+            "failed_invocations": failed,
+            "total_tokens_used": total_tokens,
+            "total_cost_usd": total_cost,
+            "last_active_at": last_active,
+            "per_tool": per_tool_list,
+        }
+
     # -------- internal insert helpers ------------------------------------
     def _insert_agent_row(
         self,

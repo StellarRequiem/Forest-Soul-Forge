@@ -43,6 +43,7 @@ from forest_soul_forge.daemon.schemas import (
     CharacterProvenance,
     CharacterSheetOut,
     CharacterStats,
+    CharacterStatsPerTool,
 )
 from forest_soul_forge.registry import Registry
 from forest_soul_forge.registry.ingest import _parse_frontmatter_block, _FRONTMATTER_RE
@@ -232,6 +233,33 @@ def _build_provenance(
     )
 
 
+def _build_stats(registry: Registry, instance_id: str) -> CharacterStats:
+    """Aggregate the registry's ``tool_calls`` table into character-sheet
+    stats (ADR-0019 T4). Empty agent → ``not_yet_measured=True``."""
+    agg = registry.aggregate_tool_calls(instance_id)
+    total = int(agg.get("total_invocations") or 0)
+    if total == 0:
+        return CharacterStats()
+    per_tool = [
+        CharacterStatsPerTool(
+            tool_key=str(item["tool_key"]),
+            count=int(item.get("count") or 0),
+            tokens=item.get("tokens"),
+            cost=item.get("cost"),
+        )
+        for item in (agg.get("per_tool") or [])
+    ]
+    return CharacterStats(
+        not_yet_measured=False,
+        total_invocations=total,
+        failed_invocations=int(agg.get("failed_invocations") or 0),
+        total_tokens_used=agg.get("total_tokens_used"),
+        total_cost_usd=agg.get("total_cost_usd"),
+        last_active_at=agg.get("last_active_at"),
+        per_tool=per_tool,
+    )
+
+
 @router.get(
     "/agents/{instance_id}/character-sheet",
     response_model=CharacterSheetOut,
@@ -317,6 +345,7 @@ async def get_character_sheet(
     capabilities = _build_capabilities(genre_name, genre_engine, constitution)
     policies = _summarize_policies(constitution)
     provenance = _build_provenance(soul_path, constitution_path, audit, row.dna)
+    stats = _build_stats(registry, instance_id)
 
     return CharacterSheetOut(
         schema_version=1,
@@ -326,7 +355,7 @@ async def get_character_sheet(
         loadout=loadout,
         capabilities=capabilities,
         policies=policies,
-        stats=CharacterStats(),
+        stats=stats,
         memory=CharacterMemory(),
         benchmarks=CharacterBenchmarks(),
         provenance=provenance,

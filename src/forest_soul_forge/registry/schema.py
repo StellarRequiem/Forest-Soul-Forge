@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 3
+SCHEMA_VERSION: int = 4
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -144,6 +144,31 @@ DDL_STATEMENTS: tuple[str, ...] = (
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_tool_call_counters_instance ON tool_call_counters(instance_id);",
+    # --- tool-call accounting (ADR-0019 T4) ------------------------------
+    # One row per terminating dispatch event (succeeded or failed). The
+    # audit chain has the integrity proof; this table has the queryable
+    # view. Both must agree — the dispatcher writes them under the same
+    # write-lock-held transaction so a process crash between them is
+    # caught by audit-chain verification on next boot. ``audit_seq``
+    # joins back to the chain for full detail; the per-call cost +
+    # token columns are denormalized for fast character-sheet roll-ups.
+    """
+    CREATE TABLE IF NOT EXISTS tool_calls (
+        audit_seq        INTEGER PRIMARY KEY,
+        instance_id      TEXT NOT NULL,
+        session_id       TEXT NOT NULL,
+        tool_key         TEXT NOT NULL,
+        status           TEXT NOT NULL,
+        tokens_used      INTEGER,
+        cost_usd         REAL,
+        side_effect_summary TEXT,
+        finished_at      TEXT NOT NULL,
+        FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_tool_calls_instance ON tool_calls(instance_id);",
+    "CREATE INDEX IF NOT EXISTS idx_tool_calls_tool ON tool_calls(tool_key);",
+    "CREATE INDEX IF NOT EXISTS idx_tool_calls_finished ON tool_calls(finished_at);",
     # --- metadata --------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS registry_meta (
@@ -172,6 +197,7 @@ INITIAL_METADATA: tuple[tuple[str, str], ...] = (
 REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     "audit_events",
     "agent_ancestry",
+    "tool_calls",
     "tool_call_counters",
     "tools",
     "agent_capabilities",
@@ -237,5 +263,27 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         );
         """,
         "CREATE INDEX IF NOT EXISTS idx_tool_call_counters_instance ON tool_call_counters(instance_id);",
+    ),
+    # v3 → v4: add tool_calls (ADR-0019 T4). One row per terminating
+    # dispatch event; audit chain has the integrity proof, this table
+    # has the queryable view. Pure addition.
+    4: (
+        """
+        CREATE TABLE IF NOT EXISTS tool_calls (
+            audit_seq        INTEGER PRIMARY KEY,
+            instance_id      TEXT NOT NULL,
+            session_id       TEXT NOT NULL,
+            tool_key         TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            tokens_used      INTEGER,
+            cost_usd         REAL,
+            side_effect_summary TEXT,
+            finished_at      TEXT NOT NULL,
+            FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_tool_calls_instance ON tool_calls(instance_id);",
+        "CREATE INDEX IF NOT EXISTS idx_tool_calls_tool ON tool_calls(tool_key);",
+        "CREATE INDEX IF NOT EXISTS idx_tool_calls_finished ON tool_calls(finished_at);",
     ),
 }

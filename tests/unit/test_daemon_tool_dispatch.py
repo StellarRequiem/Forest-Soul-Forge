@@ -183,3 +183,45 @@ class TestDispatchEndpoint:
             )
             assert resp.status_code == 200, resp.text
             assert resp.json()["call_count_after"] == n
+
+
+class TestCharacterSheetStats:
+    """ADR-0019 T4 — character sheet pulls live stats from tool_calls."""
+
+    def test_fresh_agent_has_not_yet_measured(self, dispatch_env):
+        client, _, instance_id = dispatch_env
+        resp = client.get(f"/agents/{instance_id}/character-sheet")
+        assert resp.status_code == 200, resp.text
+        stats = resp.json()["stats"]
+        assert stats["not_yet_measured"] is True
+        assert stats["total_invocations"] == 0
+        assert stats["per_tool"] == []
+
+    def test_dispatch_populates_stats(self, dispatch_env):
+        client, _, instance_id = dispatch_env
+        # Dispatch twice — both succeed, both should show up on the sheet.
+        for _ in range(2):
+            resp = client.post(
+                f"/agents/{instance_id}/tools/call",
+                json={
+                    "tool_name": "timestamp_window",
+                    "tool_version": "1",
+                    "session_id": "sess-1",
+                    "args": {"expression": "last 1 minutes"},
+                },
+            )
+            assert resp.status_code == 200
+
+        sheet = client.get(f"/agents/{instance_id}/character-sheet").json()
+        stats = sheet["stats"]
+        assert stats["not_yet_measured"] is False
+        assert stats["total_invocations"] == 2
+        assert stats["failed_invocations"] == 0
+        # timestamp_window is pure — no tokens / cost.
+        assert stats["total_tokens_used"] is None
+        assert stats["total_cost_usd"] is None
+        # Per-tool breakdown shows the one tool used twice.
+        per_tool = stats["per_tool"]
+        assert len(per_tool) == 1
+        assert per_tool[0]["tool_key"] == "timestamp_window.v1"
+        assert per_tool[0]["count"] == 2

@@ -461,3 +461,150 @@ class TestRegistryCounter:
             r.increment_tool_call_count("i1", "s2", "2026-04-26T00:00:02Z")
             assert r.get_tool_call_count("i1", "s1") == 2
             assert r.get_tool_call_count("i1", "s2") == 1
+
+
+# ---------------------------------------------------------------------------
+# T4 — per-call accounting (tool_calls table + dispatcher mirror)
+# ---------------------------------------------------------------------------
+class TestRegistryToolCalls:
+    def test_record_persists_row(self, tmp_path):
+        with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            r.record_tool_call(
+                audit_seq=42, instance_id="i1", session_id="s1",
+                tool_key="timestamp_window.v1", status="succeeded",
+                tokens_used=None, cost_usd=None,
+                side_effect_summary=None,
+                finished_at="2026-04-27T00:00:00Z",
+            )
+            agg = r.aggregate_tool_calls("i1")
+            assert agg["total_invocations"] == 1
+            assert agg["failed_invocations"] == 0
+            assert agg["total_tokens_used"] is None
+            assert agg["total_cost_usd"] is None
+            assert agg["last_active_at"] == "2026-04-27T00:00:00Z"
+
+    def test_aggregate_sums_tokens_and_cost(self, tmp_path):
+        with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            r.record_tool_call(
+                audit_seq=1, instance_id="i1", session_id="s1",
+                tool_key="summarize.v1", status="succeeded",
+                tokens_used=500, cost_usd=0.005,
+                side_effect_summary=None,
+                finished_at="2026-04-27T00:00:00Z",
+            )
+            r.record_tool_call(
+                audit_seq=2, instance_id="i1", session_id="s1",
+                tool_key="summarize.v1", status="succeeded",
+                tokens_used=1500, cost_usd=0.015,
+                side_effect_summary=None,
+                finished_at="2026-04-27T00:00:01Z",
+            )
+            agg = r.aggregate_tool_calls("i1")
+            assert agg["total_tokens_used"] == 2000
+            assert abs(agg["total_cost_usd"] - 0.020) < 1e-9
+
+    def test_aggregate_distinguishes_none_from_zero(self, tmp_path):
+        """None totals (no LLM-wrapping tool ever ran) must not collapse
+        to 0, which would look like 'ran with zero tokens'."""
+        with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            # Pure-function tool: no tokens, no cost.
+            r.record_tool_call(
+                audit_seq=1, instance_id="i1", session_id="s1",
+                tool_key="timestamp_window.v1", status="succeeded",
+                tokens_used=None, cost_usd=None,
+                side_effect_summary=None,
+                finished_at="2026-04-27T00:00:00Z",
+            )
+            agg = r.aggregate_tool_calls("i1")
+            assert agg["total_tokens_used"] is None
+            assert agg["total_cost_usd"] is None
+
+    def test_aggregate_is_per_instance(self, tmp_path):
+        with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            r.record_tool_call(
+                audit_seq=1, instance_id="i1", session_id="s1",
+                tool_key="t.v1", status="succeeded",
+                tokens_used=None, cost_usd=None,
+                side_effect_summary=None,
+                finished_at="2026-04-27T00:00:00Z",
+            )
+            r.record_tool_call(
+                audit_seq=2, instance_id="i2", session_id="s1",
+                tool_key="t.v1", status="succeeded",
+                tokens_used=None, cost_usd=None,
+                side_effect_summary=None,
+                finished_at="2026-04-27T00:00:00Z",
+            )
+            assert r.aggregate_tool_calls("i1")["total_invocations"] == 1
+            assert r.aggregate_tool_calls("i2")["total_invocations"] == 1
+
+
+class TestDispatcherRecording:
+    """Dispatcher writes one tool_calls row per terminating event."""
+
+    def test_succeeded_call_recorded(self, dispatcher_env):
+        recorded: list[dict] = []
+        dispatcher_env["dispatcher"].record_call = lambda **kw: recorded.append(kw)
+
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+        _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert len(recorded) == 1
+        assert recorded[0]["status"] == "succeeded"
+        assert recorded[0]["tool_key"] == "timestamp_window.v1"
+        # Pure-function tool reports None tokens/cost.
+        assert recorded[0]["tokens_used"] is None
+        assert recorded[0]["cost_usd"] is None
+
+    def test_failed_call_recorded(self, dispatcher_env):
+        recorded: list[dict] = []
+        dispatcher_env["dispatcher"].record_call = lambda **kw: recorded.append(kw)
+        dispatcher_env["registry"].register(_RaisingTool())
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution, tool_name="raises")
+        _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="raises", tool_version="1",
+            args={},
+        ))
+        assert len(recorded) == 1
+        assert recorded[0]["status"] == "failed"
+
+    def test_refusal_not_recorded(self, dispatcher_env):
+        """Refusals never reach execute, so they don't get a tool_calls
+        row — only the audit chain. Otherwise a typo from an LLM would
+        inflate the call count visible on the character sheet."""
+        recorded: list[dict] = []
+        dispatcher_env["dispatcher"].record_call = lambda **kw: recorded.append(kw)
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+        _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="not_real", tool_version="1",
+            args={},
+        ))
+        assert recorded == []
+
+    def test_record_call_none_does_not_break_dispatch(self, dispatcher_env):
+        """The default fixture sets record_call=None; succeeded dispatch
+        should still complete cleanly."""
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchSucceeded)

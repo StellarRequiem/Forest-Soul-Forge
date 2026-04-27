@@ -565,16 +565,42 @@ class CharacterPolicySummary(BaseModel):
     operator_duties: list[str] = Field(default_factory=list)
 
 
+class CharacterStatsPerTool(BaseModel):
+    """Per-tool roll-up inside ``CharacterStats.per_tool``.
+
+    ``tokens`` and ``cost`` are nullable: ``None`` means no calls of
+    this tool ever reported accounting numbers (e.g., a pure-function
+    tool like timestamp_window will always be None). ``0`` would mean
+    "ran but reported zero tokens" — different signal.
+    """
+
+    tool_key: str
+    count: int = 0
+    tokens: int | None = None
+    cost: float | None = None
+
+
 class CharacterStats(BaseModel):
-    """Operational stats. Empty until ADR-0019 (tool runtime) emits
-    per-call records to the audit chain. ``not_yet_measured`` lets the
-    UI render an explicit placeholder rather than a zero that looks
-    real."""
+    """Operational stats sourced from ADR-0019 T4 ``tool_calls`` table.
+
+    ``not_yet_measured`` is True when the agent has zero recorded
+    calls — distinguishes "freshly born, no usage yet" from "actively
+    used but quiet today." UI renders the difference (placeholder
+    panel vs. live numbers).
+
+    Tokens and cost are nullable so a UI can distinguish "no
+    LLM-wrapping tool ever ran for this agent" (None) from "ran but
+    used zero tokens" (0). Pure-function tools (timestamp_window,
+    summarize when fed a cached result) report None.
+    """
 
     not_yet_measured: bool = True
     total_invocations: int = 0
     failed_invocations: int = 0
+    total_tokens_used: int | None = None
+    total_cost_usd: float | None = None
     last_active_at: str | None = None
+    per_tool: list[CharacterStatsPerTool] = Field(default_factory=list)
 
 
 class CharacterMemory(BaseModel):
