@@ -259,11 +259,23 @@ tools:
     name: memory_recall
     version: "1"
     description: |
-      Read entries from the calling agent's own memory store.
-      Filter by layer (episodic / semantic / procedural) or
-      substring query. ADR-0022 v0.1 — same-agent self-reads only;
-      cross-agent disclosure lands in v0.2 alongside the consent
-      machinery from ADR-0027.
+      Read memory the calling agent can see, scoped by `mode`.
+      ADR-0022 v0.1+v0.2 + ADR-0027 §1 + ADR-0033.
+
+      mode='private' (default) — owner-only, scope='private'.
+      mode='lineage'           — own private+lineage rows + lineage
+                                  chain peers' lineage rows. The
+                                  chain is auto-computed from
+                                  agent_ancestry (ancestors+descendants);
+                                  caller can override via lineage_chain.
+      mode='consented'         — lineage's set + scope='consented' rows
+                                  the reader has an active grant for.
+      mode='realm'             — refused; reserved for H3 federation.
+
+      Cross-agent reads (modes other than 'private') count as
+      information-flow boundary crossings; the runtime emits
+      memory_read on the audit chain when the result includes rows
+      owned by an instance other than the caller.
     input_schema:
       type: object
       properties:
@@ -276,8 +288,18 @@ tools:
           minimum: 1
           maximum: 200
           default: 20
+        mode:
+          type: string
+          enum: [private, lineage, consented]
+          default: private
+        lineage_chain:
+          type: array
+          items: {type: string}
+          description: |
+            Optional override. When omitted in lineage/consented mode,
+            the tool walks agent_ancestry to compute the chain.
     side_effects: read_only
-    archetype_tags: [companion, researcher, investigator, communicator]
+    archetype_tags: [companion, researcher, investigator, communicator, security_low, security_mid, security_high]
 
   memory_write.v1:
     name: memory_write
