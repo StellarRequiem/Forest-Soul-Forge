@@ -277,6 +277,34 @@ tools:
     side_effects: read_only
     archetype_tags: [companion, researcher, investigator, communicator]
 
+  - name: memory_write
+    version: "1"
+    description: |
+      Append an entry to the calling agent's own memory store.
+      Same-agent self-writes only — cross-agent disclosure is a
+      separate tool (memory_disclose.v1, future). The genre's
+      privacy ceiling caps the scope: a Companion-genre agent
+      cannot write past `private`. side_effects=read_only because
+      the write is local-only (registry SQLite) — no network, no
+      host filesystem outside the registry, no external service.
+    input_schema:
+      type: object
+      required: [content, layer]
+      properties:
+        content: {type: string}
+        layer:
+          type: string
+          enum: [episodic, semantic, procedural]
+        scope:
+          type: string
+          enum: [private, lineage, realm, consented]
+          default: private
+        tags:
+          type: array
+          items: {type: string}
+    side_effects: read_only
+    archetype_tags: [companion, researcher, investigator, communicator]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
