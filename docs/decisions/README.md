@@ -62,3 +62,5 @@ What else did we look at, and why not?
 - [ADR-0027 — Memory privacy contract (information flow control)](ADR-0027-memory-privacy-contract.md) — Placeholder 2026-04-27
 - [ADR-0028 — Data portability spec (export / leave guarantee)](ADR-0028-data-portability.md) — Placeholder 2026-04-27
 - [ADR-0029 — Regulatory map (EU AI Act / COPPA / CSAM)](ADR-0029-regulatory-map.md) — Placeholder 2026-04-27
+- [ADR-0030 — Tool Forge](ADR-0030-tool-forge.md) — Proposed 2026-04-27
+- [ADR-0031 — Skill Forge](ADR-0031-skill-forge.md) — Proposed 2026-04-27
