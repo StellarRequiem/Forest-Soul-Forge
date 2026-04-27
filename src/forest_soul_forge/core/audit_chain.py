@@ -107,6 +107,11 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "memory_deleted",
     "memory_purged",
     "memory_scope_override",
+    # ADR-0033 — Security Swarm cross-agent invocation. delegate.v1
+    # emits this when one agent invokes another agent's skill; the
+    # event records caller, target, skill ref, and a one-line reason
+    # so the chain captures every tier-crossing in the swarm.
+    "agent_delegated",
 })
 
 

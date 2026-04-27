@@ -75,6 +75,15 @@ class ToolContext:
     # tests can pass via ``constraints["memory"]`` for in-memory
     # exercises that don't construct a full Memory.
     memory: Any = None
+    # ADR-0033 A3 — pre-bound delegate callable for cross-agent skill
+    # invocation. The dispatcher builds this per-call via a
+    # delegator_factory that captures registry/audit/settings; the
+    # callable already has the caller's identity baked in, so the
+    # delegate.v1 tool only needs to pass target + skill + inputs +
+    # reason. None when the daemon didn't wire delegation (test
+    # contexts that don't need cross-agent calls); the tool refuses
+    # cleanly in that case rather than crashing.
+    delegate: Any = None
 
 
 @dataclass(frozen=True)

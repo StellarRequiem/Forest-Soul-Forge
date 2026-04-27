@@ -193,6 +193,28 @@ def get_tool_dispatcher(request: Request):
         # threads this instance through every ToolContext.
         memory=memory,
     )
+    # ADR-0033 A3: build the cross-agent delegator factory now that
+    # the dispatcher exists, then mutate the dispatcher to hold a
+    # reference. Late binding because the factory captures the
+    # dispatcher itself (so nested tool calls inside a delegated
+    # skill go through the same dispatcher) — the chicken-and-egg
+    # is resolved by constructing the dispatcher first and patching
+    # the factory in. Same instance, no need for a setter on the
+    # frozen dataclass: ToolDispatcher is `@dataclass` (mutable).
+    settings = getattr(request.app.state, "settings", None)
+    write_lock = getattr(request.app.state, "write_lock", None)
+    if settings is not None and write_lock is not None:
+        from forest_soul_forge.tools.delegator import build_delegator_factory
+        dispatcher.delegator_factory = build_delegator_factory(
+            registry=fsf_registry,
+            audit_chain=audit,
+            dispatcher=dispatcher,
+            skill_install_dir=settings.skill_install_dir,
+            write_lock=write_lock,
+            provider_resolver=lambda: getattr(
+                request.app.state, "active_provider", None,
+            ),
+        )
     request.app.state.tool_dispatcher = dispatcher
     return dispatcher
 

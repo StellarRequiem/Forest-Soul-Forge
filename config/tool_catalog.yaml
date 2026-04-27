@@ -354,6 +354,37 @@ tools:
     side_effects: read_only
     archetype_tags: [investigator, communicator, security_low, security_mid, security_high]
 
+  delegate.v1:
+    name: delegate
+    version: "1"
+    description: |
+      Invoke another agent's skill. ADR-0033 A3 — the swarm
+      escalation primitive. Routes the request through the
+      pre-bound ctx.delegate callable which loads the target's
+      skill manifest, runs it under the target's identity, and
+      returns the outcome. Refuses if the target is missing, equals
+      the caller, or is not in the caller's lineage chain (unless
+      allow_out_of_lineage=true is set, which records the override
+      in the audit chain). Each successful delegation appends one
+      agent_delegated audit event BEFORE the target's skill runs,
+      so a crash mid-skill still leaves the delegation visible.
+      side_effects=read_only for the dispatch itself; the target's
+      skill may include privileged steps that go through the
+      approval queue under the target's own constraints.
+    input_schema:
+      type: object
+      required: [target_instance_id, skill_name, skill_version, reason]
+      properties:
+        target_instance_id:   {type: string}
+        skill_name:           {type: string}
+        skill_version:        {type: string}
+        inputs:               {type: object}
+        reason:               {type: string}
+        session_id:           {type: string}
+        allow_out_of_lineage: {type: boolean, default: false}
+    side_effects: read_only
+    archetype_tags: [investigator, communicator, security_low, security_mid, security_high]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.

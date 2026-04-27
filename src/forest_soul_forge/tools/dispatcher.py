@@ -239,6 +239,16 @@ class ToolDispatcher:
     # Same instance shared across dispatches — single-writer SQLite
     # discipline preserved by the daemon's write lock.
     memory: Any = None
+    # ADR-0033 A3: optional factory that the dispatcher invokes once
+    # per dispatch to build a per-call delegate callable bound to the
+    # caller's identity. Signature: ``factory(caller_instance_id,
+    # caller_dna) -> Callable``. The returned callable lands on
+    # ``ToolContext.delegate`` so tools (notably ``delegate.v1``)
+    # invoke another agent's skill without reaching back into daemon
+    # state. None when delegation isn't wired (test contexts that
+    # don't exercise cross-agent calls); ``delegate.v1`` refuses
+    # cleanly in that case rather than crashing.
+    delegator_factory: Any = None
 
     async def dispatch(
         self,
@@ -374,6 +384,13 @@ class ToolDispatcher:
         )
 
         # ---- 7. execute -------------------------------------------------
+        # ADR-0033 A3: per-dispatch delegate baked with caller identity.
+        # Built once per call so the delegate.v1 tool gets the correct
+        # caller_instance_id baked in even across concurrent dispatches.
+        delegate_fn = (
+            self.delegator_factory(instance_id, agent_dna)
+            if self.delegator_factory else None
+        )
         ctx = ToolContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
@@ -383,6 +400,7 @@ class ToolDispatcher:
             constraints=dict(resolved.constraints),
             provider=provider,
             memory=self.memory,
+            delegate=delegate_fn,
         )
         try:
             result = await tool.execute(args, ctx)
@@ -703,6 +721,10 @@ class ToolDispatcher:
             agent_dna=agent_dna,
         )
 
+        delegate_fn = (
+            self.delegator_factory(instance_id, agent_dna)
+            if self.delegator_factory else None
+        )
         ctx = ToolContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
@@ -712,6 +734,7 @@ class ToolDispatcher:
             constraints=dict(resolved.constraints) if resolved else {},
             provider=provider,
             memory=self.memory,
+            delegate=delegate_fn,
         )
         try:
             result = await tool.execute(args, ctx)

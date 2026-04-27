@@ -8,6 +8,7 @@ T1 ships ``timestamp_window.v1`` only — pure function, no I/O, perfect
 proving ground for the Tool Protocol contract. Other catalog entries
 will get implementations as the corresponding tranches land.
 """
+from forest_soul_forge.tools.builtin.delegate import DelegateTool
 from forest_soul_forge.tools.builtin.memory_disclose import MemoryDiscloseTool
 from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
 from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
@@ -18,6 +19,7 @@ __all__ = [
     "MemoryRecallTool",
     "MemoryWriteTool",
     "MemoryDiscloseTool",
+    "DelegateTool",
 ]
 
 
@@ -32,3 +34,4 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     registry.register(MemoryRecallTool())
     registry.register(MemoryWriteTool())
     registry.register(MemoryDiscloseTool())
+    registry.register(DelegateTool())
