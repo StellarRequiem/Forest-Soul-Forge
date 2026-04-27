@@ -56,3 +56,9 @@ What else did we look at, and why not?
 - [ADR-0021 — Role genres and agent taxonomy](ADR-0021-role-genres-agent-taxonomy.md) — Proposed 2026-04-25
 - [ADR-0022 — Memory subsystem](ADR-0022-memory-subsystem.md) — Proposed 2026-04-25
 - [ADR-0023 — Benchmark suite](ADR-0023-benchmark-suite.md) — Proposed 2026-04-25
+- [ADR-0024 — Project horizons and long-term direction](ADR-0024-project-horizons.md) — Proposed (vision) 2026-04-27
+- [ADR-0025 — Threat model v2 (adversarial operators / federation)](ADR-0025-threat-model-v2.md) — Placeholder 2026-04-27
+- [ADR-0026 — Provider economics (frontier LLM cost model)](ADR-0026-provider-economics.md) — Placeholder 2026-04-27
+- [ADR-0027 — Memory privacy contract (information flow control)](ADR-0027-memory-privacy-contract.md) — Placeholder 2026-04-27
+- [ADR-0028 — Data portability spec (export / leave guarantee)](ADR-0028-data-portability.md) — Placeholder 2026-04-27
+- [ADR-0029 — Regulatory map (EU AI Act / COPPA / CSAM)](ADR-0029-regulatory-map.md) — Placeholder 2026-04-27
