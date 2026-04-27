@@ -44,6 +44,7 @@ from forest_soul_forge.daemon.routers import skills_reload as skills_reload_rout
 from forest_soul_forge.daemon.routers import skills_run as skills_run_router
 from forest_soul_forge.daemon.routers import tool_dispatch as tool_dispatch_router
 from forest_soul_forge.daemon.routers import tools as tools_router
+from forest_soul_forge.daemon.routers import tools_reload as tools_reload_router
 from forest_soul_forge.daemon.routers import traits as traits_router
 from forest_soul_forge.daemon.routers import writes as writes_router
 from forest_soul_forge.registry import Registry
@@ -373,6 +374,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(traits_router.router)
     app.include_router(tools_router.router)
     app.include_router(tool_dispatch_router.router)
+    app.include_router(tools_reload_router.router)
     app.include_router(pending_calls_router.router)
     app.include_router(skills_run_router.router)
     app.include_router(skills_catalog_router.router)
