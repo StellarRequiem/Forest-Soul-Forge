@@ -350,13 +350,35 @@ class ToolDispatcher:
             )
 
         # ---- 6. approval gate -------------------------------------------
-        if bool(resolved.constraints.get("requires_human_approval", False)):
+        # Two paths can elevate to pending_approval:
+        #   (a) the tool's resolved constitution constraint
+        #       (existing ADR-0019 T3 behavior)
+        #   (b) the agent's genre policy (ADR-0033 A4 graduation):
+        #         security_high  → any non-read_only call
+        #         security_mid   → filesystem/external
+        #         security_low   → no elevation (tool config wins)
+        # OR semantics: either path forces approval. Audit metadata
+        # records WHICH path fired so an operator inspecting a
+        # pending ticket can see "tool config" vs "genre policy".
+        constraint_requires = bool(resolved.constraints.get("requires_human_approval", False))
+        effective_side_effects = resolved.side_effects or tool.side_effects
+        from forest_soul_forge.core.genre_engine import genre_requires_approval
+        genre_requires = genre_requires_approval(genre, effective_side_effects)
+        if constraint_requires or genre_requires:
             return self._pending_approval(
                 key,
                 tool_name=tool_name, tool_version=tool_version,
                 args=args,
-                side_effects=resolved.side_effects or tool.side_effects,
+                side_effects=effective_side_effects,
                 instance_id=instance_id, agent_dna=agent_dna,
+                # Pass through the elevation reason so the ticket
+                # row + audit event record which gate fired. The
+                # _pending_approval method threads this into the
+                # event_data and the ticket payload.
+                gate_source=(
+                    "constraint+genre" if (constraint_requires and genre_requires)
+                    else ("genre" if genre_requires else "constraint")
+                ),
                 session_id=session_id,
             )
 
@@ -558,6 +580,7 @@ class ToolDispatcher:
         instance_id: str,
         agent_dna: str,
         session_id: str,
+        gate_source: str = "constraint",
     ) -> DispatchPendingApproval:
         """Emit pending_approval event + persist a queue row.
 
@@ -566,6 +589,13 @@ class ToolDispatcher:
         from a pre-T3 daemon can still look it up after upgrade) but
         now writes the row so the approval-queue endpoints can list
         and decide it.
+
+        ``gate_source`` (ADR-0033 A4) records which gate fired:
+        ``"constraint"`` for the tool's constitution, ``"genre"`` for
+        the security-tier auto-elevation, ``"constraint+genre"`` when
+        both fired. Persisted in the audit event so an operator
+        inspecting a pending ticket can see whether it's a tool-level
+        rule or a tier-level policy that's holding it.
         """
         entry = self.audit.append(
             EVENT_PENDING_APPROVAL,
@@ -574,6 +604,7 @@ class ToolDispatcher:
                 "instance_id": instance_id,
                 "session_id": session_id,
                 "side_effects": side_effects,
+                "gate_source": gate_source,
             },
             agent_dna=agent_dna,
         )

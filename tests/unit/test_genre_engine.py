@@ -22,6 +22,7 @@ from forest_soul_forge.core.genre_engine import (
     GenreEngineError,
     RiskProfile,
     empty_engine,
+    genre_requires_approval,
     load_genres,
     memory_scope_exceeds_ceiling,
     validate_against_trait_engine,
@@ -461,3 +462,57 @@ class TestSecuritySwarm:
         assert set(seen.keys()) == set(nine_roles), (
             "not every swarm role was claimed by some security_* genre"
         )
+
+
+# ===========================================================================
+# ADR-0033 A4 — per-genre approval policy graduation
+# ===========================================================================
+class TestGenreApprovalPolicy:
+    """genre_requires_approval is the dispatcher's gate-source #2 (the
+    tool-level constitution constraint is gate #1). It only elevates
+    for the three security tiers; every other genre passes through."""
+
+    def test_security_high_elevates_everything_beyond_read_only(self):
+        # The high tier assumes hostility; even network calls could
+        # exfiltrate. Read-only is the only tier that auto-passes.
+        assert genre_requires_approval("security_high", "read_only") is False
+        assert genre_requires_approval("security_high", "network") is True
+        assert genre_requires_approval("security_high", "filesystem") is True
+        assert genre_requires_approval("security_high", "external") is True
+
+    def test_security_mid_passes_network_but_gates_writes(self):
+        # Mid tier needs DNS lookups + threat-intel queries to work
+        # without a click on every call. filesystem/external still gate.
+        assert genre_requires_approval("security_mid", "read_only") is False
+        assert genre_requires_approval("security_mid", "network") is False
+        assert genre_requires_approval("security_mid", "filesystem") is True
+        assert genre_requires_approval("security_mid", "external") is True
+
+    def test_security_low_never_elevates(self):
+        # Low tier is bounded to read_only by its genre risk_profile;
+        # the policy is a no-op so the existing tool-level config
+        # remains the only path to approval.
+        for se in ("read_only", "network", "filesystem", "external"):
+            assert genre_requires_approval("security_low", se) is False
+
+    def test_non_security_genres_pass_through(self):
+        # ADR-0033 A4 must not change behavior for the seven existing
+        # genres — they keep the ADR-0019 T3 "tool config wins" rule.
+        for g in ("observer", "investigator", "communicator",
+                  "actuator", "guardian", "researcher", "companion"):
+            for se in ("read_only", "network", "filesystem", "external"):
+                assert genre_requires_approval(g, se) is False, (
+                    f"non-security genre {g!r}/{se!r} should not elevate"
+                )
+
+    def test_none_or_unknown_genre_passes_through(self):
+        # An agent with no genre (unclaimed role) or an unknown genre
+        # name behaves like the existing seven — no elevation.
+        assert genre_requires_approval(None, "external") is False
+        assert genre_requires_approval("definitely_not_a_real_genre", "external") is False
+
+    def test_case_insensitive(self):
+        # The genre name is lowercased before lookup so a soul.md or
+        # constitution entry that drifted on case still matches.
+        assert genre_requires_approval("Security_High", "network") is True
+        assert genre_requires_approval("SECURITY_LOW", "external") is False

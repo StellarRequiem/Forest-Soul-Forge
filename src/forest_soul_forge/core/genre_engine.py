@@ -433,3 +433,51 @@ def memory_scope_exceeds_ceiling(scope: str, ceiling: str) -> bool:
     permits a wider write than intended.
     """
     return _memory_tier_index(scope) > _memory_tier_index(ceiling)
+
+
+# ---------------------------------------------------------------------------
+# ADR-0033 A4 — per-genre approval policy graduation
+# ---------------------------------------------------------------------------
+# Rules baked directly: security tiers each have a different bar for
+# what side_effects automatically elevate to "human approval required".
+# Non-security genres are a no-op: the tool's own constitution config
+# decides (existing ADR-0019 T3 behavior).
+#
+#   security_high → any side_effects beyond read_only requires approval
+#                    (high tier assumes hostility; even network calls
+#                     could exfiltrate, so they're gated)
+#   security_mid  → filesystem / external require approval; network is
+#                    OK because mid-tier investigators need DNS lookups,
+#                    threat-intel queries, and baseline comparisons to
+#                    work without a click on every call
+#   security_low  → no elevation; tool config wins (low tier is bounded
+#                    to read_only by its own genre risk_profile, so
+#                    every call is already safe)
+#
+# Non-security genres pass through unchanged so this graduation has
+# zero effect on the existing seven genres.
+_GENRE_APPROVAL_RULES: dict[str, frozenset[str]] = {
+    "security_high": frozenset({"network", "filesystem", "external"}),
+    "security_mid":  frozenset({"filesystem", "external"}),
+    "security_low":  frozenset(),
+}
+
+
+def genre_requires_approval(genre: str | None, side_effects: str) -> bool:
+    """True iff the genre's approval policy elevates ``side_effects`` to
+    "requires human approval" regardless of the tool's own config.
+
+    The dispatcher consults this at the approval gate and ORs the
+    result with ``resolved.constraints['requires_human_approval']``.
+    Caller's responsibility to audit the elevation reason — the
+    pending-approval ticket should record which gate fired.
+
+    Genres outside the security family always return False so this
+    helper is a no-op for non-security agents.
+    """
+    if not genre:
+        return False
+    rule = _GENRE_APPROVAL_RULES.get(genre.lower())
+    if rule is None:
+        return False
+    return side_effects in rule
