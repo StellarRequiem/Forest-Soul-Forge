@@ -162,6 +162,11 @@ def get_tool_dispatcher(request: Request):
     # engine (load failure / no genres.yaml) is benign — the dispatcher
     # treats a missing engine as 'no enforcement'.
     genre_engine = getattr(request.app.state, "genre_engine", None)
+    # ADR-0022 v0.1: build a Memory bound to the registry's connection.
+    # Single-writer SQLite discipline is preserved by the daemon's
+    # write lock — the dispatcher only touches Memory while holding it.
+    from forest_soul_forge.core.memory import Memory
+    memory = Memory(conn=fsf_registry._conn)  # noqa: SLF001 — internal access by design
     from forest_soul_forge.tools.dispatcher import ToolDispatcher
     dispatcher = ToolDispatcher(
         registry=registry,
@@ -183,6 +188,10 @@ def get_tool_dispatcher(request: Request):
         # didn't load (best-effort: dispatch keeps working without
         # enforcement, character sheet shows the load failure).
         genre_engine=genre_engine,
+        # ADR-0022 v0.1: memory subsystem. memory_recall.v1 + future
+        # memory_write.v1 reach for ctx.memory; the dispatcher
+        # threads this instance through every ToolContext.
+        memory=memory,
     )
     request.app.state.tool_dispatcher = dispatcher
     return dispatcher

@@ -70,6 +70,11 @@ class ToolContext:
     # use this for behavior records — those go in ToolResult.metadata
     # so they're hashed into the audit chain.
     logger: Any = None
+    # ADR-0022 v0.1 — bound Memory instance for the calling agent.
+    # The memory_recall.v1 tool reads from this. Daemon populates;
+    # tests can pass via ``constraints["memory"]`` for in-memory
+    # exercises that don't construct a full Memory.
+    memory: Any = None
 
 
 @dataclass(frozen=True)

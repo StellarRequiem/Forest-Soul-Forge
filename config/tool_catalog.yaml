@@ -254,6 +254,29 @@ tools:
     side_effects: read_only
     archetype_tags: [anomaly_investigator]
 
+  - name: memory_recall
+    version: "1"
+    description: |
+      Read entries from the calling agent's own memory store.
+      Filter by layer (episodic / semantic / procedural) or
+      substring query. ADR-0022 v0.1 — same-agent self-reads only;
+      cross-agent disclosure lands in v0.2 alongside the consent
+      machinery from ADR-0027.
+    input_schema:
+      type: object
+      properties:
+        query: {type: string}
+        layer:
+          type: string
+          enum: [episodic, semantic, procedural]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
+    side_effects: read_only
+    archetype_tags: [companion, researcher, investigator, communicator]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.

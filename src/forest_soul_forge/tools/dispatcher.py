@@ -233,6 +233,12 @@ class ToolDispatcher:
     # build-time kit-tier enforcement — T5 catches the static birth
     # case, T6 catches mid-session changes (e.g. tools_add bypass).
     genre_engine: Any = None  # forest_soul_forge.core.genre_engine.GenreEngine | None
+    # ADR-0022 v0.1: bound Memory instance. Set on every ToolContext
+    # so memory-aware tools (memory_recall.v1, future memory_write.v1)
+    # can read/write without re-opening the registry connection.
+    # Same instance shared across dispatches — single-writer SQLite
+    # discipline preserved by the daemon's write lock.
+    memory: Any = None
 
     async def dispatch(
         self,
@@ -376,6 +382,7 @@ class ToolDispatcher:
             session_id=session_id,
             constraints=dict(resolved.constraints),
             provider=provider,
+            memory=self.memory,
         )
         try:
             result = await tool.execute(args, ctx)
@@ -704,6 +711,7 @@ class ToolDispatcher:
             session_id=session_id,
             constraints=dict(resolved.constraints) if resolved else {},
             provider=provider,
+            memory=self.memory,
         )
         try:
             result = await tool.execute(args, ctx)
