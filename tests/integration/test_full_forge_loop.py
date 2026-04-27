@@ -268,3 +268,162 @@ def test_full_forge_loop(smoke_env):
             f"  expected: {expected}\n"
             f"  got:      {suffix}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Write + recall round-trip — proves the memory subsystem end-to-end
+# through the runtime. Skill A writes a memory; skill B reads it back.
+# ---------------------------------------------------------------------------
+_WRITE_SKILL = textwrap.dedent("""
+schema_version: 1
+name: stash_note
+version: '1'
+description: Save a note to the agent's episodic memory.
+requires: [memory_write.v1]
+inputs:
+  type: object
+  required: [body]
+  properties:
+    body: {type: string}
+steps:
+  - id: stash
+    tool: memory_write.v1
+    args:
+      content: ${inputs.body}
+      layer: episodic
+output:
+  entry_id: ${stash.entry_id}
+""").strip()
+
+
+_RECALL_SKILL = textwrap.dedent("""
+schema_version: 1
+name: read_notes
+version: '1'
+description: Read recent episodic notes back.
+requires: [memory_recall.v1]
+inputs:
+  type: object
+  properties:
+    query: {type: string}
+steps:
+  - id: hits
+    tool: memory_recall.v1
+    args:
+      layer: episodic
+      query: ${inputs.query}
+      limit: 5
+output:
+  count:   ${hits.count}
+  entries: ${hits.entries}
+""").strip()
+
+
+@pytest.fixture
+def memory_smoke_env(tmp_path: Path):
+    """Daemon + the two memory skills installed."""
+    for p, name in [(TRAIT_TREE, "trait tree"),
+                    (CONST_TEMPLATES, "constitution templates"),
+                    (TOOL_CATALOG, "tool catalog")]:
+        if not p.exists():
+            pytest.skip(f"{name} missing at {p}")
+
+    skill_install_dir = tmp_path / "installed"
+    skill_install_dir.mkdir()
+    (skill_install_dir / "stash_note.v1.yaml").write_text(_WRITE_SKILL, encoding="utf-8")
+    (skill_install_dir / "read_notes.v1.yaml").write_text(_RECALL_SKILL, encoding="utf-8")
+
+    settings = DaemonSettings(
+        registry_db_path=tmp_path / "registry.sqlite",
+        artifacts_dir=tmp_path / "souls",
+        audit_chain_path=tmp_path / "audit.jsonl",
+        trait_tree_path=TRAIT_TREE,
+        constitution_templates_path=CONST_TEMPLATES,
+        soul_output_dir=tmp_path / "souls",
+        tool_catalog_path=TOOL_CATALOG,
+        genres_path=GENRES,
+        skill_install_dir=skill_install_dir,
+        default_provider="local",
+        frontier_enabled=False,
+        allow_write_endpoints=True,
+        enrich_narrative_default=False,
+    )
+    app = build_app(settings)
+    provider = _FakeProvider()
+    yield {"app": app, "settings": settings, "provider": provider}
+
+
+def test_write_then_recall_loop(memory_smoke_env):
+    """Two skills, two runs, one round-trip through the memory subsystem.
+
+    Birth a researcher, run stash_note to save a unique phrase, run
+    read_notes to find it back, assert the phrase came through.
+    Then check the character sheet shows total_entries=1.
+    """
+    app = memory_smoke_env["app"]
+    provider = memory_smoke_env["provider"]
+    UNIQUE_PHRASE = "synapse-cabbage-twirl-9347"
+
+    with TestClient(app) as client:
+        app.state.providers = ProviderRegistry(
+            providers={"local": provider, "frontier": provider},
+            default="local",
+        )
+        # Birth a researcher (writable scope ceiling > companion).
+        resp = client.post("/birth", json={
+            "profile": {
+                "role": "anomaly_investigator",
+                "trait_values": {},
+                "domain_weight_overrides": {},
+            },
+            "agent_name": "MemorySmoke",
+            "agent_version": "v1",
+            "owner_id": "smoke",
+        })
+        assert resp.status_code == 201, resp.text
+        instance_id = resp.json()["instance_id"]
+
+        # Stash a unique note.
+        resp = client.post(
+            f"/agents/{instance_id}/skills/run",
+            json={
+                "skill_name": "stash_note",
+                "skill_version": "1",
+                "session_id": "mem-smoke-1",
+                "inputs": {"body": UNIQUE_PHRASE},
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "succeeded", body
+        entry_id = body["output"]["entry_id"]
+        assert entry_id
+
+        # Read it back.
+        resp = client.post(
+            f"/agents/{instance_id}/skills/run",
+            json={
+                "skill_name": "read_notes",
+                "skill_version": "1",
+                "session_id": "mem-smoke-1",
+                "inputs": {"query": "cabbage"},
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "succeeded", body
+        out = body["output"]
+        assert out["count"] >= 1
+        # The phrase comes back verbatim.
+        contents = [e["content"] for e in out["entries"]]
+        assert any(UNIQUE_PHRASE in c for c in contents), (
+            f"recall didn't find the phrase. Got: {contents}"
+        )
+
+        # Character sheet now shows the memory entry.
+        resp = client.get(f"/agents/{instance_id}/character-sheet")
+        assert resp.status_code == 200, resp.text
+        memory = resp.json()["memory"]
+        assert memory["not_yet_measured"] is False
+        assert memory["total_entries"] == 1
+        assert memory["layers"]["episodic"] == 1
