@@ -9,17 +9,18 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
 
 
 def run(args: argparse.Namespace) -> int:
     """Entry point for ``fsf forge tool ...``."""
+    from forest_soul_forge.cli._common import build_provider, resolve_operator
+
     description = (args.description or "").strip()
     if not description:
         print("error: empty description", file=sys.stderr)
         return 2
 
-    provider = _build_provider(args.provider)
+    provider = build_provider(args.provider)
     out_dir = Path(args.out_dir).resolve()
 
     print(f"[Tool Forge] proposing ToolSpec via {provider.name}...",
@@ -34,7 +35,7 @@ def run(args: argparse.Namespace) -> int:
             description=description,
             provider=provider,
             out_dir=out_dir,
-            forged_by=_resolve_operator(),
+            forged_by=resolve_operator(),
             name_override=args.name,
             version=args.version,
             proposed_only=args.dry_run,
@@ -134,45 +135,4 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# Provider construction
-# ---------------------------------------------------------------------------
-def _build_provider(override: str | None) -> Any:
-    """Construct a provider from DaemonSettings without standing up the
-    full daemon. ``override='local'`` or ``'frontier'`` forces one
-    explicitly; None uses ``settings.default_provider``."""
-    from forest_soul_forge.daemon.config import build_settings
-    from forest_soul_forge.daemon.providers.frontier import FrontierProvider
-    from forest_soul_forge.daemon.providers.local import LocalProvider
-
-    settings = build_settings()
-    pick = (override or settings.default_provider).strip().lower()
-
-    if pick == "local":
-        return LocalProvider(
-            base_url=settings.local_base_url,
-            models=settings.local_model_map(),
-            timeout_s=settings.local_timeout_s,
-        )
-    if pick == "frontier":
-        if not settings.frontier_enabled:
-            raise SystemExit(
-                "Frontier provider is disabled by FSF_FRONTIER_ENABLED. "
-                "Enable it or pass --provider local."
-            )
-        return FrontierProvider(
-            enabled=True,
-            base_url=settings.frontier_base_url,
-            api_key=settings.frontier_api_key,
-            models=settings.frontier_model_map(),
-            timeout_s=settings.frontier_timeout_s,
-        )
-    raise SystemExit(
-        f"unknown provider {pick!r}; expected 'local' or 'frontier'"
-    )
-
-
-def _resolve_operator() -> str:
-    """Best-effort: $USER env var, fallback to 'operator'."""
-    import os
-    return os.environ.get("USER") or os.environ.get("USERNAME") or "operator"
+# Provider + operator helpers moved to cli/_common.py per ADR-0032.

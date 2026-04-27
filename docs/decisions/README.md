@@ -64,3 +64,4 @@ What else did we look at, and why not?
 - [ADR-0029 — Regulatory map (EU AI Act / COPPA / CSAM)](ADR-0029-regulatory-map.md) — Placeholder 2026-04-27
 - [ADR-0030 — Tool Forge](ADR-0030-tool-forge.md) — Proposed 2026-04-27
 - [ADR-0031 — Skill Forge](ADR-0031-skill-forge.md) — Proposed 2026-04-27
+- [ADR-0032 — CLI architecture](ADR-0032-cli-architecture.md) — Proposed 2026-04-27
