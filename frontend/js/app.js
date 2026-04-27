@@ -14,6 +14,7 @@ import * as toolsPanel from "./tools.js";
 import * as genresPanel from "./genres.js";
 import * as pendingPanel from "./pending.js";
 import * as skillsPanel from "./skills.js";
+import * as toolRegistryPanel from "./tool-registry.js";
 import { toast } from "./toast.js";
 
 function wireTabs() {
@@ -53,6 +54,7 @@ async function boot() {
     auditPanel.start();
     pendingPanel.start();
     skillsPanel.start();
+    toolRegistryPanel.start();
     return;
   }
 

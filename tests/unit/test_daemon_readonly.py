@@ -548,3 +548,44 @@ class TestToolsCatalog:
         )
         assert resp.status_code == 400
         assert "definitely_not_a_real_tool" in resp.json()["detail"]
+
+
+class TestRegisteredTools:
+    """``GET /tools/registered`` — runtime view of the tool registry."""
+
+    def test_lists_registered_builtins(self, daemon_env):
+        client, _, _ = daemon_env
+        resp = client.get("/tools/registered")
+        assert resp.status_code == 200
+        body = resp.json()
+        names = {t["name"] for t in body["tools"]}
+        # Built-ins registered at lifespan.
+        assert "timestamp_window" in names
+        assert "memory_recall" in names
+        assert "memory_write" in names
+        assert body["count"] == len(body["tools"])
+
+    def test_classifies_builtin_source(self, daemon_env):
+        client, _, _ = daemon_env
+        resp = client.get("/tools/registered")
+        body = resp.json()
+        timestamp = next(
+            t for t in body["tools"]
+            if t["name"] == "timestamp_window"
+        )
+        assert timestamp["source"] == "builtin"
+        assert timestamp["side_effects"] == "read_only"
+
+    def test_in_catalog_field_set(self, daemon_env):
+        client, _, _ = daemon_env
+        resp = client.get("/tools/registered")
+        body = resp.json()
+        # Built-ins should be in the catalog; the tool_catalog.yaml
+        # in this repo lists them.
+        for t in body["tools"]:
+            if t["source"] == "builtin":
+                # in_catalog reflects whether the YAML lists it. The
+                # readonly test fixture uses an empty catalog, so the
+                # built-ins won't be there. Either is fine — we just
+                # want the field present.
+                assert isinstance(t["in_catalog"], bool)

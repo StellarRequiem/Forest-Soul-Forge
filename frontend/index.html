@@ -35,6 +35,7 @@
         <span class="tab__badge" id="pending-badge" hidden></span>
       </button>
       <button class="tab" data-tab="skills" role="tab" aria-selected="false">Skills</button>
+      <button class="tab" data-tab="tool-registry" role="tab" aria-selected="false">Tools</button>
       <button class="tab" data-tab="audit" role="tab" aria-selected="false">Audit</button>
     </nav>
 
@@ -247,6 +248,32 @@
         <div class="panel__body">
           <div id="skills-list" class="skills-list">
             <div class="empty">Loading skills…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Tools tab (ADR-0019 T5) — live tool registry view +         -->
+    <!-- reload button. Shows what the dispatcher will actually     -->
+    <!-- resolve, including plugins loaded via fsf install tool.    -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="tool-registry" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Registered tools</h2>
+          <div class="panel__actions">
+            <span class="muted" id="tool-registry-status">—</span>
+            <button class="btn btn--ghost btn--sm" id="tool-registry-refresh" type="button">refresh</button>
+            <button class="btn btn--primary btn--sm" id="tool-registry-reload" type="button"
+                    title="Re-walk data/plugins/ and rebuild the registry without a daemon restart">
+              reload from disk
+            </button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="tool-registry-list" class="tool-registry-list">
+            <div class="empty">Loading tools…</div>
           </div>
         </div>
       </div>

@@ -893,3 +893,72 @@ input[type="range"] {
   color: var(--danger);
   font-size: 12px;
 }
+
+/* ============================================================== */
+/* Tools tab (ADR-0019 T5 — registered tools + reload)            */
+/* ============================================================== */
+
+.tool-registry-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.tool-registry-group__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: var(--sp-3) 0 var(--sp-1) 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.tool-registry-group__title:first-child {
+  margin-top: 0;
+}
+
+.tool-row--registry {
+  display: grid;
+  grid-template-columns: minmax(180px, max-content) 1fr;
+  gap: 4px var(--sp-3);
+  align-items: center;
+  padding: var(--sp-2) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card, var(--bg));
+}
+.tool-row--registry .tool-row__name {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+}
+.tool-row--registry .tool-row__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  justify-content: flex-start;
+}
+.tool-row--registry .tool-row__desc {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+
+/* Source pills mirror the side-effects pill style. Built-in is
+   neutral (no special color); plugin uses accent (operator-added,
+   meaningful); unknown is the warn color. */
+.pill--source-builtin {
+  border-color: var(--fg-faint);
+  color: var(--fg-faint);
+}
+.pill--source-plugin {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.pill--source-unknown {
+  border-color: #d2a23a;
+  color: #d2a23a;
+}
+.pill--warn {
+  border-color: #d2a23a;
+  color: #d2a23a;
+}

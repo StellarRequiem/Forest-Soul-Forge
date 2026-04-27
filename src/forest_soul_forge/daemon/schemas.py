@@ -422,6 +422,44 @@ class ToolCatalogOut(BaseModel):
     archetypes: list[ArchetypeBundleOut]
 
 
+class RegisteredToolOut(BaseModel):
+    """One row from ``GET /tools/registered`` — the live runtime view.
+
+    Distinct from ``ToolDefOut`` because the catalog YAML and the live
+    registry can disagree (a forged plugin loaded post-edit, a built-in
+    that hasn't been added to the YAML, etc.). The frontend Tools tab
+    renders from this — what the dispatcher will actually see when it
+    looks up a tool key.
+
+    ``source`` is one of:
+      ``builtin``  — registered by ``register_builtins()`` at lifespan
+      ``plugin``   — loaded from ``settings.plugins_dir`` by
+                     ``plugin_loader.load_plugins()``
+      ``unknown``  — registered but not classifiable (shouldn't happen
+                     in v1; defensive)
+
+    ``in_catalog`` reflects whether the catalog YAML also lists the
+    same name+version. False is benign for plugins (the catalog is a
+    static file; plugins augment in memory) but worth surfacing so an
+    operator can spot a typo'd plugin name.
+    """
+
+    name: str
+    version: str
+    side_effects: str
+    source: str
+    in_catalog: bool = True
+    description: str | None = None
+    archetype_tags: list[str] = Field(default_factory=list)
+
+
+class RegisteredToolsOut(BaseModel):
+    """Response for ``GET /tools/registered``."""
+
+    count: int
+    tools: list[RegisteredToolOut]
+
+
 class ResolvedToolOut(BaseModel):
     """One tool in a role's resolved kit, with policy constraints applied.
 

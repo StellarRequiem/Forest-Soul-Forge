@@ -22,12 +22,14 @@ and these endpoints return the empty shape so the frontend can render
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from forest_soul_forge.core.tool_catalog import ToolCatalog
 from forest_soul_forge.daemon.deps import get_tool_catalog
 from forest_soul_forge.daemon.schemas import (
     ArchetypeBundleOut,
+    RegisteredToolOut,
+    RegisteredToolsOut,
     ResolvedKitOut,
     ResolvedToolOut,
     ToolCatalogOut,
@@ -146,3 +148,88 @@ async def get_role_kit(
         catalog_version=catalog.version,
         tools=tools_out,
     )
+
+
+@router.get("/tools/registered", response_model=RegisteredToolsOut)
+async def get_registered_tools(
+    request: Request,
+    catalog: ToolCatalog = Depends(get_tool_catalog),
+) -> RegisteredToolsOut:
+    """Return what's actually live in the tool registry.
+
+    Distinct from ``/tools/catalog`` (the YAML view) — this endpoint
+    surfaces the runtime registry contents, classified by source
+    (built-in vs plugin). The frontend Tools tab renders from this
+    so an operator can see at a glance which tools the dispatcher
+    will resolve, including any plugins loaded post-restart via
+    ``POST /tools/reload``.
+
+    Source classification: a registered tool is ``builtin`` if a
+    file with its name+version exists under
+    ``forest_soul_forge.tools.builtin``; ``plugin`` if a directory
+    with the matching ``<name>.v<version>`` exists under
+    ``settings.plugins_dir``; ``unknown`` otherwise.
+    """
+    registry = getattr(request.app.state, "tool_registry", None)
+    if registry is None:
+        return RegisteredToolsOut(count=0, tools=[])
+
+    settings = getattr(request.app.state, "settings", None)
+    plugins_dir = getattr(settings, "plugins_dir", None) if settings else None
+
+    out: list[RegisteredToolOut] = []
+    for key in sorted(registry.tools):
+        tool = registry.tools[key]
+        name = getattr(tool, "name", "")
+        version = getattr(tool, "version", "")
+        side_effects = getattr(tool, "side_effects", "")
+
+        # Catalog cross-check.
+        td = catalog.tools.get(key)
+        in_catalog = td is not None
+        description = td.description if td else None
+        archetype_tags = list(td.archetype_tags) if td else []
+
+        # Source classification.
+        source = _classify_source(name, version, plugins_dir)
+
+        out.append(RegisteredToolOut(
+            name=name, version=version, side_effects=side_effects,
+            source=source, in_catalog=in_catalog,
+            description=description, archetype_tags=archetype_tags,
+        ))
+    return RegisteredToolsOut(count=len(out), tools=out)
+
+
+def _classify_source(name: str, version: str, plugins_dir) -> str:
+    """Decide whether a registered tool came from builtin or plugin.
+
+    Cheap and best-effort: checks for the well-known file paths.
+    Falls back to ``unknown`` if neither exists — shouldn't happen
+    in v1 but the endpoint stays useful even if a future load path
+    introduces a third category.
+    """
+    # Built-in: file exists under tools/builtin/<name>.py.
+    try:
+        from forest_soul_forge.tools import builtin as _builtin_pkg
+        builtin_dir = _Path(_builtin_pkg.__file__).parent
+        if (builtin_dir / f"{name}.py").exists():
+            return "builtin"
+    except Exception:
+        pass
+
+    # Plugin: directory exists under plugins_dir.
+    if plugins_dir is not None:
+        try:
+            plugin_subdir = _Path(plugins_dir) / f"{name}.v{version}"
+            if plugin_subdir.exists() and plugin_subdir.is_dir():
+                return "plugin"
+        except Exception:
+            pass
+
+    return "unknown"
+
+
+# Local import — pathlib at function scope keeps the test mock surface
+# minimal (no top-level import to monkey-patch).
+from pathlib import Path as _Path  # noqa: E402
