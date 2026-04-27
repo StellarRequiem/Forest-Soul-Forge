@@ -169,6 +169,10 @@ def get_tool_dispatcher(request: Request):
         # table for queryable character-sheet roll-ups. The audit
         # chain is the source of truth; this is the indexed view.
         record_call=fsf_registry.record_tool_call,
+        # ADR-0019 T3: approval-queue persistence. Writes one row per
+        # call gated by requires_human_approval. The endpoints
+        # (list/detail/approve/reject) read and mutate them.
+        pending_writer=fsf_registry.record_pending_approval,
     )
     request.app.state.tool_dispatcher = dispatcher
     return dispatcher

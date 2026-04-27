@@ -185,6 +185,136 @@ class TestDispatchEndpoint:
             assert resp.json()["call_count_after"] == n
 
 
+class TestPendingCallsEndpoints:
+    """ADR-0019 T3 — list / detail / approve / reject end-to-end.
+
+    Setup: birth a network_watcher and override its constitution to
+    require approval on the timestamp_window tool. Then dispatch once
+    to seed a pending row, and exercise all four endpoints.
+    """
+
+    def _force_approval_required(self, instance_id: str, app):
+        """Patch the agent's on-disk constitution so the timestamp_window
+        tool flips to requires_human_approval=True. The test owns the
+        artifact tree so this is fine; in production the operator
+        would re-birth or use tools_add semantics."""
+        registry = app.state.registry
+        agent = registry.get_agent(instance_id)
+        const_path = Path(agent.constitution_path)
+        text = const_path.read_text(encoding="utf-8")
+        new_text = text.replace(
+            "requires_human_approval: false",
+            "requires_human_approval: true",
+            1,
+        )
+        const_path.write_text(new_text, encoding="utf-8")
+
+    def test_full_lifecycle_approve(self, dispatch_env):
+        client, app, instance_id = dispatch_env
+        self._force_approval_required(instance_id, app)
+
+        # 1. Dispatch — gates.
+        resp = client.post(
+            f"/agents/{instance_id}/tools/call",
+            json={
+                "tool_name": "timestamp_window",
+                "tool_version": "1",
+                "session_id": "sess-1",
+                "args": {"expression": "last 1 minutes"},
+            },
+        )
+        assert resp.status_code == 202, resp.text
+        ticket_id = resp.json()["ticket_id"]
+
+        # 2. List shows the ticket.
+        listed = client.get(f"/agents/{instance_id}/pending_calls").json()
+        assert listed["count"] == 1
+        assert listed["pending_calls"][0]["ticket_id"] == ticket_id
+        assert listed["pending_calls"][0]["args"]["expression"] == "last 1 minutes"
+
+        # 3. Detail endpoint.
+        detail = client.get(f"/pending_calls/{ticket_id}").json()
+        assert detail["status"] == "pending"
+        assert detail["tool_key"] == "timestamp_window.v1"
+
+        # 4. Approve — returns the dispatch outcome.
+        approved = client.post(
+            f"/pending_calls/{ticket_id}/approve",
+            json={"operator_id": "alex"},
+        )
+        assert approved.status_code == 200, approved.text
+        body = approved.json()
+        assert body["status"] == "succeeded"
+        assert body["call_count_after"] == 1
+
+        # 5. Ticket no longer pending.
+        again = client.get(f"/agents/{instance_id}/pending_calls").json()
+        assert again["count"] == 0
+        # ...but visible with status=all.
+        full = client.get(
+            f"/agents/{instance_id}/pending_calls?status=all"
+        ).json()
+        assert full["count"] == 1
+        assert full["pending_calls"][0]["status"] == "approved"
+
+    def test_full_lifecycle_reject(self, dispatch_env):
+        client, app, instance_id = dispatch_env
+        self._force_approval_required(instance_id, app)
+        resp = client.post(
+            f"/agents/{instance_id}/tools/call",
+            json={
+                "tool_name": "timestamp_window",
+                "tool_version": "1",
+                "session_id": "sess-1",
+                "args": {"expression": "last 1 minutes"},
+            },
+        )
+        ticket_id = resp.json()["ticket_id"]
+
+        rejected = client.post(
+            f"/pending_calls/{ticket_id}/reject",
+            json={"operator_id": "alex", "reason": "not now"},
+        )
+        assert rejected.status_code == 200, rejected.text
+        body = rejected.json()
+        assert body["status"] == "rejected"
+        assert body["decision_reason"] == "not now"
+
+    def test_double_approve_409(self, dispatch_env):
+        client, app, instance_id = dispatch_env
+        self._force_approval_required(instance_id, app)
+        resp = client.post(
+            f"/agents/{instance_id}/tools/call",
+            json={
+                "tool_name": "timestamp_window",
+                "tool_version": "1",
+                "session_id": "sess-1",
+                "args": {"expression": "last 1 minutes"},
+            },
+        )
+        ticket_id = resp.json()["ticket_id"]
+        client.post(
+            f"/pending_calls/{ticket_id}/approve",
+            json={"operator_id": "alex"},
+        )
+        # Second approve should 409.
+        again = client.post(
+            f"/pending_calls/{ticket_id}/approve",
+            json={"operator_id": "alex"},
+        )
+        assert again.status_code == 409
+
+    def test_unknown_ticket_404(self, dispatch_env):
+        client, _, _ = dispatch_env
+        resp = client.get("/pending_calls/no-such-ticket")
+        assert resp.status_code == 404
+        resp = client.post(
+            "/pending_calls/no-such-ticket/approve",
+            json={"operator_id": "alex"},
+        )
+        assert resp.status_code == 404
+
+
 class TestCharacterSheetStats:
     """ADR-0019 T4 — character sheet pulls live stats from tool_calls."""
 

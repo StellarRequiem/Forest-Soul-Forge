@@ -779,6 +779,53 @@ class ToolCallResultOut(BaseModel):
     )
 
 
+class PendingApprovalOut(BaseModel):
+    """One row from ``GET /agents/{id}/pending_calls``.
+
+    ``args`` is parsed back from the registry's canonical JSON so the
+    frontend gets a JSON object rather than a quoted string. ``status``
+    is exposed even though the default endpoint filters to pending —
+    the full-history variant uses the same shape.
+    """
+
+    ticket_id: str
+    instance_id: str
+    session_id: str
+    tool_key: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    side_effects: str
+    status: str
+    pending_audit_seq: int
+    decided_audit_seq: int | None = None
+    decided_by: str | None = None
+    decision_reason: str | None = None
+    created_at: str
+    decided_at: str | None = None
+
+
+class PendingApprovalListOut(BaseModel):
+    count: int
+    pending_calls: list[PendingApprovalOut]
+
+
+class ApproveRequest(BaseModel):
+    """Body for ``POST /pending_calls/{ticket_id}/approve``."""
+
+    operator_id: str = Field(..., min_length=1, max_length=80)
+
+
+class RejectRequest(BaseModel):
+    """Body for ``POST /pending_calls/{ticket_id}/reject``.
+
+    ``reason`` is required so the rejected event in the audit chain
+    carries the operator's stated rationale. Empty rejections obscure
+    intent in the long run.
+    """
+
+    operator_id: str = Field(..., min_length=1, max_length=80)
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
 class ToolCallResponse(BaseModel):
     """Response shape for ``POST /agents/{id}/tools/call``.
 
