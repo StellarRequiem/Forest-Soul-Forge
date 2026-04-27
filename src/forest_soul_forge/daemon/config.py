@@ -104,6 +104,17 @@ class DaemonSettings(BaseSettings):
             "from data/forge/skills/staged/ into here once reviewed."
         ),
     )
+    plugins_dir: Path = Field(
+        default=Path("data/plugins"),
+        description=(
+            "Where the daemon looks for installed tool plugins at "
+            "lifespan (ADR-0019 T5). One subdirectory per plugin "
+            "named <name>.v<version>/ containing spec.yaml + tool.py. "
+            "Loaded after built-in tools so a plugin can NOT shadow "
+            "a built-in (registry registration would raise duplicate). "
+            "POST /tools/reload re-walks this dir without a restart."
+        ),
+    )
     # Allow the write endpoints. Off by default so a misconfigured instance
     # can't accept birth requests. Ops flips this on once the artifact dir
     # is writable and the trait tree is present.

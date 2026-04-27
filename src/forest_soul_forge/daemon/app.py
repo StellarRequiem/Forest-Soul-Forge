@@ -267,6 +267,39 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                  "error": f"{type(e).__name__}: {e}"}
             )
 
+        # ADR-0019 T5: load .fsf plugins from data/plugins/. Each
+        # plugin augments the in-memory tool_catalog so the dispatcher's
+        # catalog cross-check accepts it. Plugin load failures are
+        # isolated — one broken plugin doesn't keep the others (or the
+        # daemon) down.
+        from forest_soul_forge.tools.plugin_loader import load_plugins
+        try:
+            plugin_results, tool_catalog = load_plugins(
+                settings.plugins_dir,
+                registry=tool_registry,
+                catalog=tool_catalog,
+            )
+            ok = [r for r in plugin_results if r.tool is not None]
+            err = [r for r in plugin_results if r.tool is None]
+            if err:
+                startup_diagnostics.append(
+                    {"component": "plugin_loader", "status": "degraded",
+                     "path": str(settings.plugins_dir),
+                     "error": "; ".join(r.error for r in err if r.error)}
+                )
+            else:
+                startup_diagnostics.append(
+                    {"component": "plugin_loader", "status": "ok",
+                     "path": str(settings.plugins_dir),
+                     "error": f"{len(ok)} plugin(s) loaded" if ok else None}
+                )
+        except Exception as e:
+            startup_diagnostics.append(
+                {"component": "plugin_loader", "status": "failed",
+                 "path": str(settings.plugins_dir),
+                 "error": f"{type(e).__name__}: {e}"}
+            )
+
         # ADR-0021 invariant: every TraitEngine role must be claimed by
         # some genre. Skip when either engine failed to load — running
         # the check in that case would just produce noise on top of the
