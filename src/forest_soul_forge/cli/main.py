@@ -147,6 +147,45 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     forge_skill.set_defaults(_run=_run_forge_skill)
 
+    # `fsf install ...` — promote staged forges into the live catalog.
+    install = sub.add_parser(
+        "install",
+        help="Install a forged tool or skill into the live catalog.",
+    )
+    install_sub = install.add_subparsers(dest="install_cmd", metavar="<artifact>")
+    install_sub.required = True
+
+    install_skill = install_sub.add_parser(
+        "skill",
+        help="Install a staged Skill Forge manifest into the live catalog.",
+    )
+    install_skill.add_argument(
+        "staged_dir",
+        help=(
+            "Path to a Skill Forge staged folder (contains manifest.yaml). "
+            "Typically data/forge/skills/staged/<name>.v<version>/."
+        ),
+    )
+    install_skill.add_argument(
+        "--install-dir", default=None,
+        help=(
+            "Override the install directory. Defaults to "
+            "settings.skill_install_dir (data/forge/skills/installed/)."
+        ),
+    )
+    install_skill.add_argument(
+        "--overwrite", action="store_true",
+        help="Replace the target file if it already exists.",
+    )
+    install_skill.add_argument(
+        "--no-reload", action="store_true",
+        help=(
+            "Skip the POST /skills/reload after copying. The new manifest "
+            "loads on next daemon boot."
+        ),
+    )
+    install_skill.set_defaults(_run=_run_install_skill)
+
     return parser
 
 
@@ -160,6 +199,12 @@ def _run_forge_skill(args: argparse.Namespace) -> int:
     """Hand off to forest_soul_forge.cli.forge_skill.run."""
     from forest_soul_forge.cli.forge_skill import run as forge_skill_run
     return forge_skill_run(args)
+
+
+def _run_install_skill(args: argparse.Namespace) -> int:
+    """Hand off to forest_soul_forge.cli.install.run_skill."""
+    from forest_soul_forge.cli.install import run_skill
+    return run_skill(args)
 
 
 def _version_string() -> str:

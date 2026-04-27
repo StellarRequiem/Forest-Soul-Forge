@@ -40,6 +40,7 @@ from forest_soul_forge.daemon.routers import pending_calls as pending_calls_rout
 from forest_soul_forge.daemon.routers import preview as preview_router
 from forest_soul_forge.daemon.routers import runtime as runtime_router
 from forest_soul_forge.daemon.routers import skills_catalog as skills_catalog_router
+from forest_soul_forge.daemon.routers import skills_reload as skills_reload_router
 from forest_soul_forge.daemon.routers import skills_run as skills_run_router
 from forest_soul_forge.daemon.routers import tool_dispatch as tool_dispatch_router
 from forest_soul_forge.daemon.routers import tools as tools_router
@@ -342,6 +343,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(pending_calls_router.router)
     app.include_router(skills_run_router.router)
     app.include_router(skills_catalog_router.router)
+    app.include_router(skills_reload_router.router)
     app.include_router(genres_router.router)
     app.include_router(character_sheet_router.router)
     app.include_router(preview_router.router)
