@@ -500,6 +500,87 @@ tools:
     side_effects: read_only
     archetype_tags: [security_low, observer, investigator]
 
+  # ----- security_low OS-shellout tools (ADR-0033 Phase B1) ---------------
+  patch_check.v1:
+    name: patch_check
+    version: "1"
+    description: |
+      Probe installed package managers (brew, softwareupdate, apt,
+      dnf) for pending updates. Each backend runs only if its
+      binary exists on PATH; missing ones surface in
+      backends_skipped. Per-backend timeout 30s; query-only
+      subcommands. PatchPatrol's daily sweep.
+    input_schema:
+      type: object
+      properties:
+        backends:
+          type: array
+          items:
+            type: string
+            enum: [brew, softwareupdate, apt, dnf]
+    side_effects: read_only
+    archetype_tags: [security_low, guardian]
+
+  software_inventory.v1:
+    name: software_inventory
+    version: "1"
+    description: |
+      Inventory installed apps + packages via macos_apps (walk
+      /Applications), brew (formulae+casks), dpkg (Debian), rpm
+      (RPM). Each backend conditional on binary availability.
+      Cap: 5000 entries. PatchPatrol baselines with this so
+      file_integrity has a known surface to diff.
+    input_schema:
+      type: object
+      properties:
+        backends:
+          type: array
+          items:
+            type: string
+            enum: [macos_apps, brew, dpkg, rpm]
+    side_effects: read_only
+    archetype_tags: [security_low, guardian]
+
+  port_policy_audit.v1:
+    name: port_policy_audit
+    version: "1"
+    description: |
+      Read-only enumeration of listening TCP+UDP ports via lsof
+      (macOS/BSD), ss (Linux preferred), or netstat (Linux fallback).
+      Tries backends in order; first one whose binary exists wins.
+      Cap: 1000 listeners. Gatekeeper's primary surface for
+      "what's accepting inbound on this machine?"
+    input_schema:
+      type: object
+      properties:
+        backends:
+          type: array
+          items:
+            type: string
+            enum: [lsof, ss, netstat]
+    side_effects: read_only
+    archetype_tags: [security_low, observer]
+
+  usb_device_audit.v1:
+    name: usb_device_audit
+    version: "1"
+    description: |
+      Snapshot the USB device tree via system_profiler (macOS
+      JSON tree) or lsusb (Linux text). Vendor/product IDs
+      normalized to 0xXXXX so baseline diffs don't trigger on
+      format drift. Cap: 500 devices. Gatekeeper diffs against
+      a known-good baseline to catch unauthorized inserts.
+    input_schema:
+      type: object
+      properties:
+        backends:
+          type: array
+          items:
+            type: string
+            enum: [system_profiler, lsusb]
+    side_effects: read_only
+    archetype_tags: [security_low, observer]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.

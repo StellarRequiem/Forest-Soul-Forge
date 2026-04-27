@@ -16,7 +16,11 @@ from forest_soul_forge.tools.builtin.log_scan import LogScanTool
 from forest_soul_forge.tools.builtin.memory_disclose import MemoryDiscloseTool
 from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
 from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
+from forest_soul_forge.tools.builtin.patch_check import PatchCheckTool
+from forest_soul_forge.tools.builtin.port_policy_audit import PortPolicyAuditTool
+from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
+from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
 
 __all__ = [
     "TimestampWindowTool",
@@ -28,6 +32,10 @@ __all__ = [
     "FileIntegrityTool",
     "LogScanTool",
     "LogAggregateTool",
+    "PatchCheckTool",
+    "SoftwareInventoryTool",
+    "PortPolicyAuditTool",
+    "UsbDeviceAuditTool",
 ]
 
 
@@ -48,3 +56,8 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     registry.register(FileIntegrityTool())
     registry.register(LogScanTool())
     registry.register(LogAggregateTool())
+    # ADR-0033 Phase B1 — security_low OS-shellout tools.
+    registry.register(PatchCheckTool())
+    registry.register(SoftwareInventoryTool())
+    registry.register(PortPolicyAuditTool())
+    registry.register(UsbDeviceAuditTool())
