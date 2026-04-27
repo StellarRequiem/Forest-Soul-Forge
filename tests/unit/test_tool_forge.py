@@ -206,6 +206,26 @@ class GreetTool:
         )
 '''
 
+    _TESTGEN_REPLY = '''
+"""Generated tests for greet.v1."""
+import asyncio
+import pytest
+from forest_soul_forge.tools.base import ToolContext, ToolValidationError
+
+
+_CTX = ToolContext(
+    instance_id="test", agent_dna="0" * 12, role="test_role",
+    genre=None, session_id="test", constraints={},
+)
+
+
+class TestGreet:
+    def test_validate_missing_name(self):
+        from tool import GreetTool  # under sandbox runner this works
+        with pytest.raises(ToolValidationError):
+            GreetTool().validate({})
+'''
+
     def test_propose_only_writes_spec(self, tmp_path):
         provider = _FakeProvider(replies=[self._PROPOSE_REPLY])
         result = _run(forge_tool(
@@ -226,7 +246,7 @@ class GreetTool:
 
     def test_full_run_writes_spec_python_and_diff(self, tmp_path):
         provider = _FakeProvider(replies=[
-            self._PROPOSE_REPLY, self._CODEGEN_REPLY,
+            self._PROPOSE_REPLY, self._CODEGEN_REPLY, self._TESTGEN_REPLY,
         ])
         result = _run(forge_tool(
             description="say hello to a name",
@@ -245,7 +265,7 @@ class GreetTool:
 
     def test_name_override(self, tmp_path):
         provider = _FakeProvider(replies=[
-            self._PROPOSE_REPLY, self._CODEGEN_REPLY,
+            self._PROPOSE_REPLY, self._CODEGEN_REPLY, self._TESTGEN_REPLY,
         ])
         result = _run(forge_tool(
             description="hi",
@@ -259,7 +279,7 @@ class GreetTool:
 
     def test_version_override(self, tmp_path):
         provider = _FakeProvider(replies=[
-            self._PROPOSE_REPLY, self._CODEGEN_REPLY,
+            self._PROPOSE_REPLY, self._CODEGEN_REPLY, self._TESTGEN_REPLY,
         ])
         result = _run(forge_tool(
             description="hi",
@@ -273,7 +293,7 @@ class GreetTool:
 
     def test_forge_log_includes_propose_and_codegen(self, tmp_path):
         provider = _FakeProvider(replies=[
-            self._PROPOSE_REPLY, self._CODEGEN_REPLY,
+            self._PROPOSE_REPLY, self._CODEGEN_REPLY, self._TESTGEN_REPLY,
         ])
         result = _run(forge_tool(
             description="hi",
@@ -304,6 +324,7 @@ class GreetTool:
 class TestForgeStaticAnalysisIntegration:
     _PROPOSE = TestForgeTool._PROPOSE_REPLY
     _GOOD_CODEGEN = TestForgeTool._CODEGEN_REPLY
+    _TESTGEN = TestForgeTool._TESTGEN_REPLY
 
     _BAD_CODEGEN = '''
 """greet — but with eval."""
@@ -324,7 +345,7 @@ class GreetTool:
 '''.strip()
 
     def test_clean_codegen_yields_no_flags(self, tmp_path):
-        provider = _FakeProvider(replies=[self._PROPOSE, self._GOOD_CODEGEN])
+        provider = _FakeProvider(replies=[self._PROPOSE, self._GOOD_CODEGEN, self._TESTGEN])
         result = _run(forge_tool(
             description="hi",
             provider=provider,
@@ -336,7 +357,7 @@ class GreetTool:
         assert result.staging_blocked is False
 
     def test_eval_codegen_blocks_staging(self, tmp_path):
-        provider = _FakeProvider(replies=[self._PROPOSE, self._BAD_CODEGEN])
+        provider = _FakeProvider(replies=[self._PROPOSE, self._BAD_CODEGEN, self._TESTGEN])
         result = _run(forge_tool(
             description="hi",
             provider=provider,
@@ -354,7 +375,7 @@ class GreetTool:
         assert result.tool_path.exists()
 
     def test_analysis_recorded_in_forge_log(self, tmp_path):
-        provider = _FakeProvider(replies=[self._PROPOSE, self._BAD_CODEGEN])
+        provider = _FakeProvider(replies=[self._PROPOSE, self._BAD_CODEGEN, self._TESTGEN])
         result = _run(forge_tool(
             description="hi",
             provider=provider,
@@ -365,3 +386,54 @@ class GreetTool:
         assert "STATIC ANALYSIS" in log
         assert "forbidden_builtin" in log
         assert "HARD FLAGS — install blocked" in log
+
+
+# ---------------------------------------------------------------------------
+# T3a integration — codegen produces a test file alongside tool.py
+# ---------------------------------------------------------------------------
+class TestForgeTestGen:
+    _PROPOSE = TestForgeTool._PROPOSE_REPLY
+    _CODEGEN = TestForgeTool._CODEGEN_REPLY
+    _TESTGEN = TestForgeTool._TESTGEN_REPLY
+
+    def test_test_file_written_alongside_tool(self, tmp_path):
+        provider = _FakeProvider(replies=[self._PROPOSE, self._CODEGEN, self._TESTGEN])
+        result = _run(forge_tool(
+            description="hi",
+            provider=provider,
+            out_dir=tmp_path,
+            forged_by="alex",
+        ))
+        assert result.test_path is not None
+        assert result.test_path.exists()
+        # Test file lives alongside tool.py and is named test_<name>.py.
+        assert result.test_path.name == f"test_{result.spec.name}.py"
+        assert "TestGreet" in result.test_path.read_text()
+
+    def test_testgen_failure_does_not_break_forge(self, tmp_path):
+        # Provider runs out of replies on the testgen call → caught
+        # internally, tool still stages, test_path stays None.
+        provider = _FakeProvider(replies=[self._PROPOSE, self._CODEGEN])
+        result = _run(forge_tool(
+            description="hi",
+            provider=provider,
+            out_dir=tmp_path,
+            forged_by="alex",
+        ))
+        assert result.tool_path is not None
+        assert result.test_path is None
+        log = result.log_path.read_text()
+        assert "WARN: testgen failed" in log
+
+    def test_propose_only_skips_testgen(self, tmp_path):
+        # Dry-run path doesn't even attempt codegen, let alone testgen.
+        provider = _FakeProvider(replies=[self._PROPOSE])
+        result = _run(forge_tool(
+            description="hi",
+            provider=provider,
+            out_dir=tmp_path,
+            forged_by="alex",
+            proposed_only=True,
+        ))
+        assert result.test_path is None
+        assert result.tool_path is None

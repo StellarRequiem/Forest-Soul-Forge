@@ -143,6 +143,37 @@ _CODEGEN_SYSTEM = (
     "    annotations`` at the top.\n"
 )
 
+_TESTGEN_SYSTEM = (
+    "You are a Python test generator for Forest Soul Forge tools.\n\n"
+    "You will be given:\n"
+    "  1. The ToolSpec (YAML).\n"
+    "  2. The implementation source.\n\n"
+    "Emit a pytest module that exercises:\n"
+    "  - validate(): missing required args raise ToolValidationError;\n"
+    "    well-formed args return None.\n"
+    "  - execute(): at least one happy-path case (input → expected\n"
+    "    output shape).\n"
+    "  - One edge case from the description (empty input, boundary\n"
+    "    value, etc.) — make a reasonable choice based on the spec.\n\n"
+    "Output ONLY Python — no fences, no preamble.\n\n"
+    "Style rules:\n"
+    "  - Use pytest classes with descriptive method names.\n"
+    "  - Construct the tool class directly: ``tool = MyTool()``. Do not\n"
+    "    register it in a ToolRegistry; tests are isolated.\n"
+    "  - For async ``execute``, use ``asyncio.run(tool.execute(args, ctx))``\n"
+    "    where ``ctx = ToolContext(instance_id='test', agent_dna='0'*12,\n"
+    "    role='test_role', genre=None, session_id='test', constraints={})``.\n"
+    "  - Import ToolContext and ToolValidationError from\n"
+    "    ``forest_soul_forge.tools.base``.\n"
+    "  - DO NOT mock the tool internals; test what the spec describes.\n"
+    "  - DO NOT use ``side_effect`` patches or other mock tricks — the\n"
+    "    sandbox runs without mock libs by default.\n"
+    "  - DO NOT touch the network / filesystem / external services. If\n"
+    "    the tool calls those, write a test that exercises only the\n"
+    "    validate path + a no-op execute case (e.g. empty input → empty\n"
+    "    output).\n"
+)
+
 _REFERENCE_TOOL_SOURCE = '''
 """Reference: timestamp_window.v1 — a pure-function tool.
 
@@ -195,6 +226,22 @@ def build_codegen_prompt(spec: ToolSpec) -> str:
         "Reference implementation:\n"
         f"```python\n{_REFERENCE_TOOL_SOURCE}\n```\n\n"
         "Emit the Python module now. Output ONLY Python — no fences."
+    )
+
+
+def build_testgen_prompt(spec: ToolSpec, tool_source: str) -> str:
+    """Concrete user-side prompt for stage 2.5.
+
+    The model has just generated ``tool_source``; we hand it back so
+    the tests cover the actual implementation, not a hypothetical
+    one. Output is a pytest module ready to drop next to the tool.
+    """
+    return (
+        "Spec:\n"
+        f"```yaml\n{spec.to_yaml()}```\n\n"
+        "Implementation source (you just generated this):\n"
+        f"```python\n{tool_source}\n```\n\n"
+        "Emit the pytest module now. Output ONLY Python — no fences."
     )
 
 
@@ -341,6 +388,12 @@ class ForgeResult:
     log_lines: list[str] = field(default_factory=list)
     analysis: Any | None = None  # forest_soul_forge.forge.static_analysis.AnalysisResult | None
     staging_blocked: bool = False
+    test_path: Path | None = None  # ADR-0030 T3a — generated test_tool.py
+    # ADR-0030 T3b sets these once sandbox runs land. Currently None
+    # (set by sandbox.run_staged_tests when the operator opts in).
+    tests_run: bool = False
+    tests_passed: bool | None = None
+    tests_summary: str | None = None
 
 
 async def forge_tool(
@@ -431,6 +484,30 @@ async def forge_tool(
     tool_path.write_text(python_source, encoding="utf-8")
     log.append(f"\n=== STAGED ===\n  {staged_dir}")
 
+    # Stage 2.5 — TESTGEN (ADR-0030 T3a)
+    # Second LLM call, fed the just-generated implementation. Failure
+    # is non-fatal — the tool still stages, the operator just doesn't
+    # get auto-tests. Sandbox run (T3b) skips when test file is absent.
+    test_path: Path | None = None
+    log.append("\n=== TESTGEN: provider.complete ===")
+    try:
+        raw_tests = await provider.complete(
+            build_testgen_prompt(spec, python_source),
+            task_kind=TaskKind.TOOL_USE,
+            system=_TESTGEN_SYSTEM,
+        )
+        log.append("--- raw test source ---")
+        log.append(raw_tests)
+        test_source = parse_python_codegen(raw_tests)
+        test_path = staged_dir / f"test_{spec.name}.py"
+        test_path.write_text(test_source, encoding="utf-8")
+        log.append(f"=== TESTS STAGED ===\n  {test_path}")
+    except Exception as e:  # noqa: BLE001 — testgen failures are non-fatal
+        log.append(
+            f"WARN: testgen failed ({type(e).__name__}: {e}). "
+            "Tool staged without tests."
+        )
+
     # Stage 3 — STATIC ANALYSIS (ADR-0030 T2)
     from forest_soul_forge.forge.static_analysis import analyze
     analysis = analyze(python_source, declared_side_effects=spec.side_effects)
@@ -482,6 +559,7 @@ async def forge_tool(
         log_lines=log,
         analysis=analysis,
         staging_blocked=staging_blocked,
+        test_path=test_path,
     )
 
 
