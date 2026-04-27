@@ -232,3 +232,131 @@ Symmetric write tools (`memory_append.v1`, `memory_promote.v1`) are deliberately
 - **T11** — Vector embedding index over episodic + consolidated (semantic recall). Local-only embedding model. Out of v1 unless episodic regularly exceeds 10k entries.
 
 T1+T2+T3+T4 is the "agents can remember" milestone. T5+T6 are the consolidation + forgetting half. T7+T8 wire the rest of the system. T9 unblocks character sheet completeness. T10+T11 are polish and scale.
+
+## v0.2 — cross-agent disclosure (added 2026-04-27)
+
+The original ADR proposed a JSONL-based memory store. v0.1 implemented a simpler SQLite-table version (registry schema v6 — `memory_entries`) per practical constraints encountered in implementation. The data model below extends that v0.1 schema; the JSONL layout above remains the long-term direction for offline export + portability (ADR-0028).
+
+v0.1 ships **private scope only**. v0.2 adds the cross-agent paths the runtime needs once Horizon 2 multi-agent coordination starts shipping.
+
+### What v0.2 unlocks
+
+- **Lineage scope**: a parent agent's memory entries (scope=`lineage`) become readable by its descendants, and vice-versa. Verified via the existing `agent_ancestry` closure table (ADR-0006). No consent flow needed because lineage is a structural relationship the operator already established at spawn time.
+- **Per-event consent**: an agent disclosing a specific memory entry to a specific recipient (per-event consent per ADR-0027 §2). Stored as rows in a new `memory_consents` table.
+- **Disclosure tool** (`memory_disclose.v1`): the explicit boundary-crossing path. Takes an entry id + recipient instance_id, copies the boundary-minimum data per ADR-0027 §4 (summary + entry_id + scope) onto the recipient's memory.
+- **Cross-agent read audit**: every cross-agent read (lineage or consented) emits `memory_read` to the chain (ADR-0027 §6). Same-agent self-reads stay silent.
+
+### Storage additions
+
+```sql
+-- ADR-0022 v0.2 — per-event consent grants. One row per
+-- (entry_id, recipient_instance_id) authorization. Withdrawing
+-- consent deletes the row + emits memory_consent_revoked.
+CREATE TABLE memory_consents (
+    entry_id           TEXT NOT NULL,
+    recipient_instance TEXT NOT NULL,
+    granted_at         TEXT NOT NULL,
+    granted_by         TEXT NOT NULL,  -- operator id
+    PRIMARY KEY (entry_id, recipient_instance),
+    FOREIGN KEY (entry_id) REFERENCES memory_entries(entry_id)
+);
+CREATE INDEX idx_memory_consents_entry ON memory_consents(entry_id);
+CREATE INDEX idx_memory_consents_recipient ON memory_consents(recipient_instance);
+
+-- v0.2 also adds a derived "disclosure pointer" — a row on the
+-- recipient's memory_entries that references (without copying) an
+-- entry on the source agent. Same memory_entries table; new
+-- columns gated by the schema bump.
+ALTER TABLE memory_entries ADD COLUMN disclosed_from_entry TEXT;
+ALTER TABLE memory_entries ADD COLUMN disclosed_summary    TEXT;
+ALTER TABLE memory_entries ADD COLUMN disclosed_at         TEXT;
+```
+
+The recipient's row carries:
+- `disclosed_from_entry` — the source `entry_id` (for revocation propagation)
+- `disclosed_summary` — the operator-supplied or LLM-generated summary
+- `disclosed_at` — timestamp of the disclosure event
+- `content` — the summary, NOT the source entry's full content (ADR-0027 §4)
+
+This means `Memory.recall` continues to work unchanged on the recipient side — it sees the disclosed entry like any other private memory, with the bonus metadata available for "where did this come from?" UI.
+
+### `memory_disclose.v1` shape
+
+```yaml
+name: memory_disclose
+version: '1'
+description: |
+  Disclose one of the calling agent's memory entries to another agent.
+  ADR-0027 §4 — only the boundary-minimum (summary + entry_id + scope)
+  crosses; full content stays at origin. Per-event consent is recorded
+  in memory_consents for revocation propagation.
+side_effects: read_only  # writes to local SQLite, like memory_write.v1
+input_schema:
+  type: object
+  required: [entry_id, recipient_instance, summary]
+  properties:
+    entry_id:           {type: string}
+    recipient_instance: {type: string}
+    summary:            {type: string, maxLength: 1024}
+output_schema:
+  type: object
+  properties:
+    consent_id:           {type: string}
+    recipient_entry_id:   {type: string}
+    disclosed_at:         {type: string}
+```
+
+Side-effects classification stays `read_only` (same logic as memory_write.v1 — local SQLite mutation, no network/host filesystem). Genre ceiling check applies to the SOURCE agent's scope: a Companion calling `memory_disclose` would refuse because its memory is `private`-only.
+
+### Cross-agent read flow
+
+`memory_recall.v1` v0.2 grows a `mode` arg:
+
+| `mode` (v0.2) | Behavior                                                                                |
+|---------------|-----------------------------------------------------------------------------------------|
+| `private` (default) | v0.1 behavior unchanged — caller's own entries only.                              |
+| `lineage`     | Caller's own + ancestors' + descendants' entries with `scope >= lineage`. Each cross-agent entry returned emits `memory_read` to the chain. |
+| `consented`   | Caller's own + entries on which the caller is in `memory_consents.recipient_instance`. Emits `memory_read` per result. |
+
+The lineage view is computed via the closure table — same join `audit_for_agent` already uses for ancestry queries. v0.2 adds a `recall_visible_to(viewer_instance_id, ...)` method on `Memory` that runs the cross-agent visibility check at the SQL level (single query joining `memory_entries` + `agent_ancestry` + `memory_consents`).
+
+### Audit chain entries
+
+ADR-0027 §6 already declared the full set:
+
+```
+memory_read              { reader_instance, target_instance, entry_id,
+                           scope, mode }
+memory_disclosed         { source_instance, recipient_instance,
+                           source_entry_id, recipient_entry_id, summary }
+memory_consent_granted   { entry_id, recipient_instance, granted_by }
+memory_consent_revoked   { entry_id, recipient_instance, revoked_by,
+                           affected_entry_ids: [...] }
+```
+
+v0.2 implementation populates these during the read/write/disclose paths. memory_read emits ONLY for cross-agent reads — same-agent self-reads stay silent (per ADR-0027 §6) to avoid log spam.
+
+### Implementation tranches (v0.2)
+
+- **T12** — Schema bump v6→v7: ALTER memory_entries + CREATE memory_consents.
+- **T13** — `Memory.recall_visible_to(viewer, ...)` — lineage + consented read paths. Emits memory_read for cross-agent results.
+- **T14** — `memory_disclose.v1` built-in tool. Writes recipient row + memory_consents row + memory_disclosed audit event.
+- **T15** — `memory_recall.v1` `mode` arg. Default stays `private`. New `lineage` and `consented` modes.
+- **T16** — Consent lifecycle endpoints: `POST /agents/{id}/memory/{entry_id}/consent` (grant) and `DELETE` (revoke). Operator-side, not agent-side — consent is operator-authorized at this layer; per-relationship + tiered consent (per-conversation, not per-entry) lands in v0.3.
+- **T17** — Frontend: memory tab on the Agents detail panel showing entries grouped by layer + scope. Disclosed entries get a "from <other agent>" indicator. Revoke button on consent rows.
+
+### What v0.2 does NOT do
+
+- **Per-relationship consent.** v0.2 is per-event only. "I trust this friend with all my emotional state" is v0.3.
+- **Tiered consent.** Same — v0.3.
+- **Auto-revocation propagation across realms.** When federation lands (Horizon 3), revoking consent should be a federation-protocol message that propagates to peer realms. v0.2 is single-realm, so there's no propagation to do.
+- **Encrypted at rest.** Out of v0.2 scope; ADR-0025 (threat model v2) covers this in the federation context.
+
+The v0.2 design preserves the "delete from disclosed agents is impossible" property from ADR-0027 §3 — revoke removes the consent grant + flags `disclosed_from_entry` on the recipient's row as "consent withdrawn" but doesn't delete the recipient's entry. The recipient agent has already integrated that information; we don't pretend we can take it back.
+
+### Cross-references for v0.2
+
+- ADR-0027 §1 (read scopes), §2 (consent model), §3 (deletion semantics), §4 (data minimization), §5 (genre ceilings), §6 (audit obligations) — every section drives a piece of v0.2.
+- ADR-0006 — closure table is the existing ancestry truth; v0.2 reuses it.
+- ADR-0019 T6 — genre runtime enforcement extends to memory_disclose; the source agent's genre ceiling is the disclosure ceiling.
+- ADR-0028 — data portability needs to cover cross-agent disclosures; an export should include both originating entries and any pointers to entries on other agents the user disclosed to them.
