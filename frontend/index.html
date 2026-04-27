@@ -36,6 +36,7 @@
       </button>
       <button class="tab" data-tab="skills" role="tab" aria-selected="false">Skills</button>
       <button class="tab" data-tab="tool-registry" role="tab" aria-selected="false">Tools</button>
+      <button class="tab" data-tab="memory" role="tab" aria-selected="false">Memory</button>
       <button class="tab" data-tab="audit" role="tab" aria-selected="false">Audit</button>
     </nav>
 
@@ -274,6 +275,70 @@
         <div class="panel__body">
           <div id="tool-registry-list" class="tool-registry-list">
             <div class="empty">Loading tools…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Memory tab — ADR-0022 v0.2 / ADR-0033                       -->
+    <!-- agent picker → entries · grants issued · disclosed copies   -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="memory" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Memory</h2>
+          <div class="panel__actions">
+            <label for="memory-agent" class="lbl">agent</label>
+            <select id="memory-agent" class="sel sel--sm">
+              <option value="">—</option>
+            </select>
+            <label for="memory-mode" class="lbl">mode</label>
+            <select id="memory-mode" class="sel sel--sm">
+              <option value="private" selected>private</option>
+              <option value="lineage">lineage</option>
+              <option value="consented">consented</option>
+            </select>
+            <button class="btn btn--ghost btn--sm" id="memory-refresh" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <!-- Three sub-sections: own entries · grants issued · grant a new consent -->
+          <div class="memory-grid">
+            <div class="memory-section">
+              <h3 class="memory-section__title">Entries visible to this agent</h3>
+              <div id="memory-entries" class="memory-list">
+                <div class="empty">Pick an agent to view its memory.</div>
+              </div>
+            </div>
+            <div class="memory-section">
+              <h3 class="memory-section__title">Consent grants issued</h3>
+              <div id="memory-consents" class="memory-list">
+                <div class="empty">—</div>
+              </div>
+              <div class="memory-grant">
+                <h4 class="memory-grant__title">Grant a new consent</h4>
+                <div class="memory-grant__row">
+                  <label class="lbl">entry</label>
+                  <select id="memory-grant-entry" class="sel sel--sm">
+                    <option value="">—</option>
+                  </select>
+                  <label class="lbl">recipient</label>
+                  <select id="memory-grant-recipient" class="sel sel--sm">
+                    <option value="">—</option>
+                  </select>
+                  <button class="btn btn--primary btn--sm" id="memory-grant-btn" type="button">
+                    grant
+                  </button>
+                </div>
+                <p class="memory-grant__hint tiny muted">
+                  Consent is per-entry. Only <code>scope='consented'</code>
+                  entries appear in the entry picker. The recipient gets read
+                  access; <code>memory_disclose.v1</code> is what materializes
+                  the actual disclosed copy.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>

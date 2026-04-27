@@ -128,6 +128,11 @@ export const api = {
   get: (path, opts) => request(path, { ...opts, method: "GET" }),
   post: (path, body, opts) => request(path, { ...opts, method: "POST", body }),
   put: (path, body, opts) => request(path, { ...opts, method: "PUT", body }),
+  // DELETE is idempotent by definition so we don't bake an idempotency
+  // key in. Auth still flows via the X-FSF-Token header set on
+  // request(); 401 retry is the caller's job (memory.js drives a
+  // single retry via the same auth flow used by writeCall).
+  del: (path, opts) => request(path, { ...opts, method: "DELETE" }),
 };
 
 /**

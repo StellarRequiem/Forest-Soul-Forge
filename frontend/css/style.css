@@ -962,3 +962,130 @@ input[type="range"] {
   border-color: #d2a23a;
   color: #d2a23a;
 }
+
+
+/* ============================================================
+   Memory tab — ADR-0022 v0.2 / ADR-0033 T17
+   ============================================================ */
+.memory-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap-md, 16px);
+}
+@media (max-width: 900px) {
+  .memory-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.memory-section__title {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+  margin: 0 0 8px 0;
+}
+
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.memory-row,
+.memory-consent-row {
+  border: 1px solid var(--border, #2a3340);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--bg-soft, #161c25);
+}
+
+/* Disclosed-copy rows get a subtle visual hint so the operator can
+   distinguish them at a glance from original observations. */
+.memory-row--disclosed {
+  border-left: 3px solid var(--warn, #d2a23a);
+}
+
+.memory-row__top,
+.memory-consent-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.memory-row__id,
+.memory-consent-row__id,
+.memory-consent-row__recipient {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  color: var(--fg-mid);
+}
+
+.memory-row__body {
+  font-size: 0.92em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-row__ref,
+.memory-row__foot,
+.memory-consent-row__meta {
+  margin-top: 4px;
+}
+
+.memory-consent-row__actions {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Per-scope pill colors. consented = teal-ish, lineage = blue,
+   private = muted, realm reserved for H3. Reuse the existing
+   pill base styles defined elsewhere in this file. */
+.pill--scope-private {
+  border-color: #4a5460;
+  color: #98a2b3;
+}
+.pill--scope-lineage {
+  border-color: #4a7fbe;
+  color: #6ea6dd;
+}
+.pill--scope-consented {
+  border-color: #3a9d8c;
+  color: #5dc2af;
+}
+.pill--scope-realm {
+  border-color: #8a4ab1;
+  color: #b07ed5;
+}
+
+.memory-grant {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border, #2a3340);
+}
+.memory-grant__title {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+  margin: 0 0 8px 0;
+}
+.memory-grant__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.memory-grant__hint {
+  margin-top: 6px;
+}
+.memory-grant__hint code {
+  background: var(--bg-soft, #161c25);
+  padding: 0 4px;
+  border-radius: 3px;
+}

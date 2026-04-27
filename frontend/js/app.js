@@ -15,6 +15,7 @@ import * as genresPanel from "./genres.js";
 import * as pendingPanel from "./pending.js";
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
+import * as memoryPanel from "./memory.js";
 import { toast } from "./toast.js";
 
 function wireTabs() {
@@ -55,6 +56,7 @@ async function boot() {
     pendingPanel.start();
     skillsPanel.start();
     toolRegistryPanel.start();
+    memoryPanel.start();
     return;
   }
 
@@ -83,6 +85,11 @@ async function boot() {
   agentsPanel.start();
   auditPanel.start();
   pendingPanel.start();
+  // Memory tab (ADR-0022 v0.2 T17) — depends on state.agents being
+  // populated by agentsPanel; subscribes to keep its picker in sync.
+  // Non-fatal posture — tab degrades to empty state if the daemon
+  // doesn't expose memory endpoints (older deploys).
+  memoryPanel.start();
 }
 
 if (document.readyState === "loading") {
