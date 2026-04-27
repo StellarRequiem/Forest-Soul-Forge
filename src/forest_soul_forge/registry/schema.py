@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 6
+SCHEMA_VERSION: int = 7
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -226,12 +226,45 @@ DDL_STATEMENTS: tuple[str, ...] = (
         consented_to_json TEXT NOT NULL DEFAULT '[]',
         created_at      TEXT NOT NULL,
         deleted_at      TEXT,
-        FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+        -- v7 additions (ADR-0022 v0.2 — cross-agent disclosure):
+        -- when this row is a *disclosed copy* on a recipient's store,
+        -- these three columns capture the minimum-disclosure metadata
+        -- per ADR-0027 §4. Null on the originating agent's row.
+        disclosed_from_entry TEXT,
+        disclosed_summary    TEXT,
+        disclosed_at         TEXT,
+        FOREIGN KEY (instance_id) REFERENCES agents(instance_id),
+        FOREIGN KEY (disclosed_from_entry) REFERENCES memory_entries(entry_id)
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_memory_instance ON memory_entries(instance_id);",
     "CREATE INDEX IF NOT EXISTS idx_memory_layer ON memory_entries(layer);",
     "CREATE INDEX IF NOT EXISTS idx_memory_created ON memory_entries(created_at);",
+    # Disclosed-copy back-reference index — answers "who has copies of
+    # entry X?" in O(rows-with-pointer) instead of full-table scan.
+    # Used by the future revocation propagation path (ADR-0022 v0.3).
+    "CREATE INDEX IF NOT EXISTS idx_memory_disclosed_from ON memory_entries(disclosed_from_entry);",
+    # --- memory consents (ADR-0022 v0.2) ---------------------------------
+    # Per-(entry, recipient) consent grants. Per-event consent only in
+    # v0.2; per-relationship + tiered consent (ADR-0027 §2) are deferred
+    # to v0.3 driven by Horizon 3 social-anchoring needs.
+    #
+    # Composite primary key (entry_id, recipient_instance) makes the
+    # "is X allowed to see entry Y?" check a single index probe, and
+    # naturally rejects duplicate grants without an explicit constraint.
+    """
+    CREATE TABLE IF NOT EXISTS memory_consents (
+        entry_id           TEXT NOT NULL,
+        recipient_instance TEXT NOT NULL,
+        granted_at         TEXT NOT NULL,
+        granted_by         TEXT NOT NULL,
+        revoked_at         TEXT,
+        PRIMARY KEY (entry_id, recipient_instance),
+        FOREIGN KEY (entry_id) REFERENCES memory_entries(entry_id),
+        FOREIGN KEY (recipient_instance) REFERENCES agents(instance_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_memory_consents_recipient ON memory_consents(recipient_instance);",
     # --- metadata --------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS registry_meta (
@@ -263,6 +296,8 @@ REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     "tool_call_pending_approvals",
     "tool_calls",
     "tool_call_counters",
+    # memory_consents references memory_entries(entry_id) — clear first.
+    "memory_consents",
     "memory_entries",
     "tools",
     "agent_capabilities",
@@ -398,5 +433,40 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX IF NOT EXISTS idx_memory_instance ON memory_entries(instance_id);",
         "CREATE INDEX IF NOT EXISTS idx_memory_layer ON memory_entries(layer);",
         "CREATE INDEX IF NOT EXISTS idx_memory_created ON memory_entries(created_at);",
+    ),
+    # v6 → v7: cross-agent memory disclosure (ADR-0022 v0.2). Adds the
+    # three disclosed_* columns on memory_entries (NULL on originating
+    # rows; populated on disclosed-copy rows on the recipient's side)
+    # plus the memory_consents table for per-event consent grants.
+    #
+    # Pure addition — old v6 rows are unaffected. Existing readers that
+    # don't know about disclosed_* see NULL and behave as they did
+    # under v0.1 (private-only).
+    7: (
+        # ALTER TABLE ADD COLUMN — these are nullable (no DEFAULT) so
+        # existing rows get NULL, which is the correct semantic ("this
+        # is an originating entry, not a disclosed copy").
+        "ALTER TABLE memory_entries ADD COLUMN disclosed_from_entry TEXT;",
+        "ALTER TABLE memory_entries ADD COLUMN disclosed_summary    TEXT;",
+        "ALTER TABLE memory_entries ADD COLUMN disclosed_at         TEXT;",
+        # Index for back-reference lookups: "who holds copies of X?"
+        "CREATE INDEX IF NOT EXISTS idx_memory_disclosed_from ON memory_entries(disclosed_from_entry);",
+        # New memory_consents table. Composite PK collapses the
+        # uniqueness constraint into the index; FK to memory_entries
+        # ties consent lifetime to the entry's lifetime (purging the
+        # entry deletes its consent rows on cascade-aware tooling).
+        """
+        CREATE TABLE IF NOT EXISTS memory_consents (
+            entry_id           TEXT NOT NULL,
+            recipient_instance TEXT NOT NULL,
+            granted_at         TEXT NOT NULL,
+            granted_by         TEXT NOT NULL,
+            revoked_at         TEXT,
+            PRIMARY KEY (entry_id, recipient_instance),
+            FOREIGN KEY (entry_id) REFERENCES memory_entries(entry_id),
+            FOREIGN KEY (recipient_instance) REFERENCES agents(instance_id)
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_memory_consents_recipient ON memory_consents(recipient_instance);",
     ),
 }

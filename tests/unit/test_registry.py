@@ -127,11 +127,12 @@ class TestBootstrap:
     def test_fresh_db_creates_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
         with Registry.bootstrap(db) as r:
-            # Version bumped to 6 when memory_entries landed (ADR-0022
-            # v0.1 + ADR-0027). The assertion is kept as a guard so
-            # any future version bump forces a matching update here —
-            # not a free-floating number.
-            assert r.schema_version() == 6
+            # Version bumped to 7 when memory_consents + disclosed_*
+            # columns landed (ADR-0022 v0.2 — cross-agent disclosure).
+            # The assertion is kept as a guard so any future version
+            # bump forces a matching update here — not a free-floating
+            # number.
+            assert r.schema_version() == 7
             assert r.list_agents() == []
             assert r.audit_tail() == []
         assert db.exists()
@@ -140,21 +141,23 @@ class TestBootstrap:
         db = tmp_path / "reg.sqlite"
         Registry.bootstrap(db).close()
         with Registry.bootstrap(db) as r:
-            # Version bumped to 6 when memory_entries landed (ADR-0022
-            # v0.1 + ADR-0027). The assertion is kept as a guard so
-            # any future version bump forces a matching update here —
-            # not a free-floating number.
-            assert r.schema_version() == 6
+            # Version bumped to 7 when memory_consents + disclosed_*
+            # columns landed (ADR-0022 v0.2 — cross-agent disclosure).
+            # The assertion is kept as a guard so any future version
+            # bump forces a matching update here — not a free-floating
+            # number.
+            assert r.schema_version() == 7
 
     def test_empty_existing_file_gets_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
         db.touch()  # crashed bootstrap leaves a 0-byte file
         with Registry.bootstrap(db) as r:
-            # Version bumped to 6 when memory_entries landed (ADR-0022
-            # v0.1 + ADR-0027). The assertion is kept as a guard so
-            # any future version bump forces a matching update here —
-            # not a free-floating number.
-            assert r.schema_version() == 6
+            # Version bumped to 7 when memory_consents + disclosed_*
+            # columns landed (ADR-0022 v0.2 — cross-agent disclosure).
+            # The assertion is kept as a guard so any future version
+            # bump forces a matching update here — not a free-floating
+            # number.
+            assert r.schema_version() == 7
 
     def test_schema_downgrade_raises(self, tmp_path: Path):
         """A file stamped at a version *newer* than the code refuses to open.
@@ -254,17 +257,18 @@ class TestBootstrap:
 
         # Act: open through the real bootstrap path. The bootstrap walks
         # every registered migration step in order, so a v1 file ends up
-        # at the current SCHEMA_VERSION (6 after memory subsystem). The
-        # assertion tests that all migration steps landed on the same pass.
+        # at the current SCHEMA_VERSION (7 after memory v0.2 cross-agent
+        # disclosure). The assertion tests that all migration steps
+        # landed on the same pass.
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 6
+            assert r.schema_version() == 7
 
             # Data survives.
             row = r.get_agent(pre_existing)
             assert row.agent_name == "Legacy"
             assert row.sibling_index == 1  # DEFAULT 1 backfilled
 
-            # New tables are present and writable (proves the v2-v6
+            # New tables are present and writable (proves the v2-v7
             # migrations all ran, not just that the bootstrap was lenient).
             import sqlite3 as _sqlite3
             raw = _sqlite3.connect(str(db))
@@ -276,6 +280,7 @@ class TestBootstrap:
             assert "tool_calls" in tables
             assert "tool_call_pending_approvals" in tables
             assert "memory_entries" in tables
+            assert "memory_consents" in tables   # v7 add (ADR-0022 v0.2)
             indexes = {t[0] for t in raw.execute(
                 "SELECT name FROM sqlite_master WHERE type='index';"
             )}
@@ -285,6 +290,120 @@ class TestBootstrap:
             assert "idx_tool_calls_instance" in indexes
             assert "idx_pending_approvals_instance" in indexes
             assert "idx_memory_instance" in indexes
+            assert "idx_memory_disclosed_from" in indexes      # v7 add
+            assert "idx_memory_consents_recipient" in indexes  # v7 add
+
+            # disclosed_* columns added on memory_entries by v7.
+            mem_cols = {row[1] for row in raw.execute("PRAGMA table_info(memory_entries)")}
+            assert {"disclosed_from_entry", "disclosed_summary", "disclosed_at"}.issubset(mem_cols), (
+                f"v7 disclosed_* columns missing from memory_entries: {mem_cols}"
+            )
+            raw.close()
+
+    def test_v6_to_v7_forward_migration(self, tmp_path: Path):
+        """ADR-0022 v0.2: a v6 DB with existing memory_entries migrates
+        forward to v7 with the three disclosed_* columns added (NULL on
+        existing rows) and a usable memory_consents table.
+
+        The earlier ``test_v1_to_v2_forward_migration_preserves_data``
+        covers the cumulative path; this one isolates the v6→v7 step
+        so a regression in MIGRATIONS[7] surfaces with a tight error
+        rather than getting buried in the cumulative test's output.
+        """
+        import sqlite3
+        from forest_soul_forge.registry import schema as _schema
+
+        db = tmp_path / "reg.sqlite"
+        # Boot at current version, then stamp back to v6 so the bootstrap
+        # treats it as a v6 DB next time. This is cleaner than hand-building
+        # a v6 DB because the v6 row shape is already in the codebase via
+        # the migration history.
+        Registry.bootstrap(db).close()
+
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("UPDATE registry_meta SET value='6' WHERE key='schema_version';")
+        # Drop the v7 additions so the on-disk shape really is v6.
+        # ALTER TABLE DROP COLUMN exists in modern SQLite (≥3.35); fall back
+        # by recreating if the runtime is older.
+        try:
+            for col in ("disclosed_at", "disclosed_summary", "disclosed_from_entry"):
+                conn.execute(f"ALTER TABLE memory_entries DROP COLUMN {col};")
+        except sqlite3.OperationalError:
+            # Older SQLite — copy-and-rename dance.
+            conn.executescript("""
+                CREATE TABLE _mem_v6 AS SELECT entry_id, instance_id, agent_dna, layer, scope,
+                    content, content_digest, tags_json, consented_to_json, created_at, deleted_at
+                    FROM memory_entries;
+                DROP TABLE memory_entries;
+                ALTER TABLE _mem_v6 RENAME TO memory_entries;
+            """)
+        conn.execute("DROP TABLE IF EXISTS memory_consents;")
+        # Insert a v6-shaped row so we can prove it survives the migration.
+        conn.execute(
+            "INSERT INTO agents (instance_id, dna, role, agent_name, "
+            "capabilities_json, soul_path, constitution_path, "
+            "constitution_hash, created_at) VALUES "
+            "('alpha-001', '0' * 12, 'observer', 'Alpha', '{}', "
+            "'souls/alpha.md', 'constitutions/alpha.yaml', '0' * 64, "
+            "'2026-04-27T00:00:00Z')"
+        )
+        conn.execute(
+            "INSERT INTO memory_entries (entry_id, instance_id, agent_dna, "
+            "layer, scope, content, content_digest, created_at) "
+            "VALUES ('e1', 'alpha-001', '0' * 12, 'episodic', 'private', "
+            "'pre-migration', 'digest', '2026-04-27T00:00:01Z')"
+        )
+        conn.commit()
+        conn.close()
+
+        # Reopen — bootstrap should run MIGRATIONS[7].
+        with Registry.bootstrap(db) as r:
+            assert r.schema_version() == 7
+
+            raw = sqlite3.connect(str(db))
+            raw.execute("PRAGMA foreign_keys = ON")
+
+            # Existing v6 row survives with NULL on the three new columns.
+            row = raw.execute(
+                "SELECT entry_id, content, disclosed_from_entry, "
+                "disclosed_summary, disclosed_at FROM memory_entries"
+            ).fetchone()
+            assert row == ("e1", "pre-migration", None, None, None), (
+                f"v6 memory row drifted across migration: {row}"
+            )
+
+            # memory_consents is present and usable end-to-end.
+            raw.execute(
+                "INSERT INTO memory_consents (entry_id, recipient_instance, "
+                "granted_at, granted_by) VALUES (?, ?, ?, ?)",
+                ("e1", "alpha-001", "2026-04-27T00:00:02Z", "operator"),
+            )
+            # Composite PK rejects duplicate grants.
+            with pytest.raises(sqlite3.IntegrityError):
+                raw.execute(
+                    "INSERT INTO memory_consents (entry_id, recipient_instance, "
+                    "granted_at, granted_by) VALUES (?, ?, ?, ?)",
+                    ("e1", "alpha-001", "2026-04-27T00:00:03Z", "operator"),
+                )
+
+            # Disclosed-copy back-reference index supports
+            # "who holds copies of e1?" queries.
+            raw.execute(
+                "INSERT INTO memory_entries (entry_id, instance_id, agent_dna, "
+                "layer, scope, content, content_digest, created_at, "
+                "disclosed_from_entry, disclosed_summary, disclosed_at) "
+                "VALUES ('e2', 'alpha-001', '0' * 12, 'episodic', 'consented', "
+                "'disclosed-copy', 'digest2', '2026-04-27T00:00:04Z', "
+                "'e1', 'told about pre-migration', '2026-04-27T00:00:04Z')"
+            )
+            copies = raw.execute(
+                "SELECT entry_id FROM memory_entries WHERE disclosed_from_entry=?",
+                ("e1",),
+            ).fetchall()
+            assert copies == [("e2",)], (
+                f"disclosed_from_entry lookup wrong: {copies}"
+            )
             raw.close()
 
     def test_migration_missing_entry_raises(self, tmp_path: Path):
