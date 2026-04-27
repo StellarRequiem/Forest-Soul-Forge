@@ -645,3 +645,126 @@ input[type="range"] {
   grid-template-columns: 1fr auto;
 }
 .tools-added .tool-row__desc { grid-column: 1 / -1; }
+
+/* ============================================================== */
+/* Approvals tab (ADR-0019 T3 UI)                                 */
+/* ============================================================== */
+
+/* Tab badge — small unobtrusive count next to the tab label.     */
+.tab__badge {
+  display: inline-block;
+  margin-left: var(--sp-1);
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 8px;
+  vertical-align: 1px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.pending-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+  background: var(--bg-card, var(--bg));
+  display: grid;
+  gap: var(--sp-2);
+}
+.pending-card--approved {
+  border-color: var(--accent);
+  opacity: 0.85;
+}
+.pending-card--rejected {
+  border-color: var(--danger);
+  opacity: 0.85;
+}
+
+.pending-card__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.pending-card__tool {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+}
+
+.pending-card__badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.pending-card__badge--pending {
+  background: var(--bg);
+  color: var(--fg-faint);
+}
+.pending-card__badge--approved {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.pending-card__badge--rejected {
+  background: var(--danger);
+  color: var(--bg);
+  border-color: var(--danger);
+}
+
+.pending-card__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.pill--ghost { color: var(--fg-faint); }
+.pill--se-read_only  { border-color: var(--accent); color: var(--accent); }
+.pill--se-network    { border-color: #d2a23a; color: #d2a23a; }
+.pill--se-filesystem { border-color: #c97a3a; color: #c97a3a; }
+.pill--se-external   { border-color: var(--danger); color: var(--danger); }
+
+.pending-card__args {
+  margin: 0;
+  padding: var(--sp-2);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.pending-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  color: var(--fg-faint);
+}
+
+.pending-card__actions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+  border-top: 1px dashed var(--border);
+  padding-top: var(--sp-2);
+}

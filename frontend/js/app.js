@@ -12,6 +12,7 @@ import * as auditPanel from "./audit.js";
 import * as providersPanel from "./providers.js";
 import * as toolsPanel from "./tools.js";
 import * as genresPanel from "./genres.js";
+import * as pendingPanel from "./pending.js";
 import { toast } from "./toast.js";
 
 function wireTabs() {
@@ -49,6 +50,7 @@ async function boot() {
     // Don't boot the preview / forms modules if the tree isn't there.
     agentsPanel.start();
     auditPanel.start();
+    pendingPanel.start();
     return;
   }
 
@@ -76,6 +78,7 @@ async function boot() {
   forms.start();
   agentsPanel.start();
   auditPanel.start();
+  pendingPanel.start();
 }
 
 if (document.readyState === "loading") {

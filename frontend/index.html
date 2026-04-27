@@ -30,6 +30,10 @@
     <nav class="tabs" role="tablist">
       <button class="tab" data-tab="forge" role="tab" aria-selected="true">Forge</button>
       <button class="tab" data-tab="agents" role="tab" aria-selected="false">Agents</button>
+      <button class="tab" data-tab="pending" role="tab" aria-selected="false">
+        Approvals
+        <span class="tab__badge" id="pending-badge" hidden></span>
+      </button>
       <button class="tab" data-tab="audit" role="tab" aria-selected="false">Audit</button>
     </nav>
 
@@ -188,6 +192,38 @@
             <div class="agent-detail" id="agent-detail">
               <div class="empty">Select an agent to see its soul, lineage, and archive controls.</div>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Approvals tab (ADR-0019 T3) — operator gate for tool calls  -->
+    <!-- requires_human_approval=true. Lists pending tickets with    -->
+    <!-- args + side_effects + approve/reject buttons.               -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="pending" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Pending tool calls</h2>
+          <div class="panel__actions">
+            <label for="pending-agent-select" class="lbl">agent</label>
+            <select id="pending-agent-select" class="inp inp--sm">
+              <option value="">— pick an agent —</option>
+            </select>
+            <label for="pending-operator-id" class="lbl">operator</label>
+            <input type="text" id="pending-operator-id" class="inp inp--sm" placeholder="your-id" />
+            <label for="pending-status-filter" class="lbl">show</label>
+            <select id="pending-status-filter" class="inp inp--sm">
+              <option value="pending">pending</option>
+              <option value="all">all (history)</option>
+            </select>
+            <button class="btn btn--ghost btn--sm" id="pending-refresh" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="pending-list" class="pending-list">
+            <div class="empty">Pick an agent above to see its queued tool calls.</div>
           </div>
         </div>
       </div>

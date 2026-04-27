@@ -19,6 +19,10 @@
 //                      published by tools.js, consumed by preview.js + forms.js
 //   - genres           GenresOut from GET /genres (cached for session)
 //   - selectedGenre    string — current genre filter ("" = all genres)
+//   - pendingByAgent   { instance_id -> count } — populated by pending.js
+//                      poll. Optional; pending.js renders directly from
+//                      its own fetches, but other panels can subscribe
+//                      if they want to surface the count.
 
 const subs = new Map(); // key -> Set<fn>
 const data = new Map(); // key -> value
