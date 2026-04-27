@@ -13,6 +13,27 @@ The integration test in `tests/integration/test_full_forge_loop.py`
 covers the same scenario without a real provider; this doc is for when
 you need to verify the *real* path including the Ollama bridge.
 
+## TL;DR — automated runner
+
+If you just want to know "is everything working end-to-end right now":
+
+```bash
+$ ./scripts/live-smoke.sh
+```
+
+The script walks every stage below: daemon health → birth →
+forge skill → install → run → recall → character-sheet check →
+audit-chain check. It stops on the first failure, prints a
+summary, and keeps the staged artifacts in `/tmp/fsf-live-smoke-*`
+for diagnosis.
+
+Exit codes: 0 pass, 1 fail (some stage broke), 2 prereq missing
+(jq / curl / fsf not on PATH).
+
+The rest of this runbook is the manual walk-through — read it when
+you want to inspect a specific stage by hand or when the script
+flags a failure you need to dig into.
+
 ## Prerequisites
 
 - Ollama running with at least one model pulled (e.g. `ollama pull llama3.2`).
