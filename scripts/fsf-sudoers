@@ -1,0 +1,27 @@
+# /etc/sudoers.d/fsf — Forest Soul Forge privileged-helper rule.
+#
+# ADR-0033 A6 — lets the daemon's user invoke /usr/local/sbin/fsf-priv
+# without a password prompt. The helper itself enforces a strict
+# allowlist on subcommands + arguments, so this rule grants no
+# operations beyond those four subcommands.
+#
+# Replace ${DAEMON_USER} below with the actual user the daemon runs
+# as (e.g. `llm01` on the operator's machine). The install runbook
+# at docs/runbooks/sudo-helper-install.md walks through this.
+#
+# After editing, validate with:
+#     sudo visudo -c -f /etc/sudoers.d/fsf
+# Install with:
+#     sudo install -m 0440 scripts/fsf-sudoers /etc/sudoers.d/fsf
+
+${DAEMON_USER} ALL=(root) NOPASSWD: /usr/local/sbin/fsf-priv kill-pid *
+${DAEMON_USER} ALL=(root) NOPASSWD: /usr/local/sbin/fsf-priv pf-add *
+${DAEMON_USER} ALL=(root) NOPASSWD: /usr/local/sbin/fsf-priv pf-drop *
+${DAEMON_USER} ALL=(root) NOPASSWD: /usr/local/sbin/fsf-priv read-protected *
+
+# Defaults: do NOT set HOME / PATH from the caller — the helper
+# resolves binaries from a fixed PATH and ignores caller env. This
+# is a hardening line; the helper's argparse + allowlists are the
+# primary defense.
+Defaults!/usr/local/sbin/fsf-priv  env_reset
+Defaults!/usr/local/sbin/fsf-priv  secure_path="/usr/sbin:/usr/bin:/sbin:/bin"

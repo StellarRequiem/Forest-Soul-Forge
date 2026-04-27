@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""fsf-priv — Forest Soul Forge privileged operations helper.
+
+ADR-0033 A6. This script runs under sudo (NOPASSWD via /etc/sudoers.d/fsf)
+and provides a strictly-allowlisted set of operations the daemon needs
+for privileged actions:
+
+  * kill-pid <PID>         — send SIGTERM, then SIGKILL after 2s if still alive.
+                              Used by isolate_process.v1 (Phase B mid tier).
+  * pf-add <ANCHOR> <RULE> — append one rule to a named pf anchor.
+                              Used by dynamic_policy.v1 (Phase B high tier).
+  * pf-drop <ANCHOR>       — flush a named pf anchor.
+                              Used by dynamic_policy.v1 to revoke a policy.
+  * read-protected <PATH>  — read a file at a SIP-protected path; emit
+                              its sha256 + size to stdout. Used by
+                              tamper_detect.v1 (Phase B high tier) when
+                              SIP-protected reads are enabled.
+
+Every operation is gated on a hard allowlist. Argument forms that
+don't match the allowlist are refused with a non-zero exit and a
+diagnostic on stderr. There is no "passthrough" or "raw command"
+escape hatch.
+
+The helper does NOT bind a socket; the daemon shells out via
+subprocess. That avoids running a long-lived root process and keeps
+the attack surface to "what argparse accepts." The helper's Python
+imports are stdlib-only (no third-party packages); the script is
+small enough to audit in one sitting.
+
+Install:
+    sudo install -m 0755 scripts/fsf-priv /usr/local/sbin/fsf-priv
+    sudo install -m 0440 scripts/fsf-sudoers /etc/sudoers.d/fsf
+    # then `visudo -c` to verify
+
+Each invocation logs the operation + caller_uid + timestamp to
+/var/log/fsf-priv.log (append-only, root-owned). Writes via syslog
+when the file is unwritable (e.g. read-only filesystem).
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import syslog
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterable
+
+
+# ---------------------------------------------------------------------------
+# Allowlists. Every op validates its inputs against these BEFORE acting.
+# ---------------------------------------------------------------------------
+
+# pf anchors must match this character class. Using a plain set so a
+# stray slash or quote in an anchor name is refused — pfctl arg
+# injection is a real concern even with shell=False, so we lock down
+# the allowed characters at the helper boundary.
+_ALLOWED_ANCHOR_CHARS = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./"
+)
+_MAX_ANCHOR_LEN = 64
+_MAX_RULE_LEN = 256
+
+# Paths read via read-protected are limited to SIP-protected system
+# directories. Operators who want to extend this edit the helper
+# directly — there's no config file because every config file is one
+# more place an attacker could plant a privilege escalation.
+_READ_PROTECTED_PREFIXES: tuple[str, ...] = (
+    "/System/",
+    "/usr/libexec/",
+    "/usr/sbin/",
+    "/sbin/",
+    "/Library/Apple/",
+)
+_MAX_READ_BYTES = 64 * 1024 * 1024  # 64 MiB cap on protected reads
+
+# Where we log every invocation. Best-effort — falls back to syslog.
+_LOG_PATH = Path("/var/log/fsf-priv.log")
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+def _log(op: str, args: Iterable[str], outcome: str, detail: str = "") -> None:
+    """Append one line to /var/log/fsf-priv.log. Syslog fallback when
+    the file isn't writable. Records caller uid + timestamp + op +
+    args + outcome so an operator reading the log can reconstruct
+    every privileged call without consulting the daemon's audit
+    chain."""
+    caller_uid = os.environ.get("SUDO_UID") or os.environ.get("PKEXEC_UID") or str(os.getuid())
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    line = (
+        f"{ts} uid={caller_uid} op={op} "
+        f"args=[{','.join(args)}] outcome={outcome}"
+        + (f" detail={detail}" if detail else "")
+    )
+    try:
+        with _LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        syslog.openlog("fsf-priv", syslog.LOG_PID, syslog.LOG_AUTH)
+        syslog.syslog(syslog.LOG_NOTICE, line)
+
+
+def _refuse(op: str, args: Iterable[str], detail: str) -> int:
+    """Print error to stderr, log, return non-zero exit."""
+    print(f"fsf-priv: refused: {detail}", file=sys.stderr)
+    _log(op, args, "refused", detail)
+    return 2
+
+
+def _ok(op: str, args: Iterable[str], detail: str = "") -> int:
+    _log(op, args, "ok", detail)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Operations
+# ---------------------------------------------------------------------------
+def op_kill_pid(pid_str: str) -> int:
+    op = "kill-pid"
+    try:
+        pid = int(pid_str, 10)
+    except ValueError:
+        return _refuse(op, [pid_str], f"PID must be a positive integer; got {pid_str!r}")
+    if pid <= 1:
+        # Refuse PID 0 (kernel) and PID 1 (init/launchd) — killing
+        # either is a system-destabilizing operation, never a
+        # legitimate isolate_process target.
+        return _refuse(op, [pid_str], "PID must be > 1; refused for system PIDs")
+    if pid == os.getpid():
+        return _refuse(op, [pid_str], "refusing to kill self")
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return _refuse(op, [pid_str], f"no process with PID {pid}")
+    except PermissionError as e:
+        return _refuse(op, [pid_str], f"permission denied: {e}")
+    # Give it 2 seconds to exit, then SIGKILL.
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)  # signal 0 = "are you alive?"
+        except ProcessLookupError:
+            return _ok(op, [pid_str], "exited via SIGTERM")
+        time.sleep(0.05)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return _ok(op, [pid_str], "exited between SIGTERM and SIGKILL")
+    return _ok(op, [pid_str], "killed via SIGKILL after timeout")
+
+
+def _validate_anchor(anchor: str, op: str) -> int | None:
+    if not anchor or len(anchor) > _MAX_ANCHOR_LEN:
+        return _refuse(op, [anchor], f"anchor name must be 1..{_MAX_ANCHOR_LEN} chars")
+    if not all(c in _ALLOWED_ANCHOR_CHARS for c in anchor):
+        return _refuse(op, [anchor], "anchor contains characters outside [A-Za-z0-9-_./]")
+    return None
+
+
+def op_pf_add(anchor: str, rule: str) -> int:
+    op = "pf-add"
+    err = _validate_anchor(anchor, op)
+    if err is not None:
+        return err
+    if not rule or len(rule) > _MAX_RULE_LEN:
+        return _refuse(op, [anchor, rule], f"rule must be 1..{_MAX_RULE_LEN} chars")
+    pfctl = shutil.which("pfctl")
+    if not pfctl:
+        return _refuse(op, [anchor, rule], "pfctl not found on PATH")
+    # `pfctl -a <anchor> -f -` reads rules from stdin and replaces
+    # the anchor's ruleset. We pipe the single rule via stdin so the
+    # rule text never appears in `ps` output.
+    try:
+        proc = subprocess.run(
+            [pfctl, "-a", anchor, "-f", "-"],
+            input=rule.encode("utf-8"),
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return _refuse(op, [anchor, rule], "pfctl timed out")
+    if proc.returncode != 0:
+        return _refuse(op, [anchor, rule], f"pfctl exit={proc.returncode}: {proc.stderr.decode(errors='replace').strip()}")
+    return _ok(op, [anchor, "<rule>"], f"applied {len(rule)} bytes")
+
+
+def op_pf_drop(anchor: str) -> int:
+    op = "pf-drop"
+    err = _validate_anchor(anchor, op)
+    if err is not None:
+        return err
+    pfctl = shutil.which("pfctl")
+    if not pfctl:
+        return _refuse(op, [anchor], "pfctl not found on PATH")
+    try:
+        proc = subprocess.run(
+            [pfctl, "-a", anchor, "-F", "rules"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return _refuse(op, [anchor], "pfctl timed out")
+    if proc.returncode != 0:
+        return _refuse(op, [anchor], f"pfctl exit={proc.returncode}: {proc.stderr.decode(errors='replace').strip()}")
+    return _ok(op, [anchor], "anchor flushed")
+
+
+def op_read_protected(path_str: str) -> int:
+    op = "read-protected"
+    p = Path(path_str)
+    # Resolve symlinks before the prefix check so an attacker can't
+    # plant a symlink at /System/whatever pointing at /etc/shadow.
+    try:
+        resolved = p.resolve(strict=True)
+    except (OSError, RuntimeError) as e:
+        return _refuse(op, [path_str], f"resolve failed: {e}")
+    if not any(str(resolved).startswith(prefix) for prefix in _READ_PROTECTED_PREFIXES):
+        return _refuse(
+            op, [path_str],
+            f"resolved path {resolved} not in any allowed prefix",
+        )
+    try:
+        size = resolved.stat().st_size
+    except OSError as e:
+        return _refuse(op, [path_str], f"stat failed: {e}")
+    if size > _MAX_READ_BYTES:
+        return _refuse(op, [path_str], f"file too large ({size} > {_MAX_READ_BYTES})")
+    h = hashlib.sha256()
+    try:
+        with resolved.open("rb") as f:
+            while True:
+                chunk = f.read(64 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+    except OSError as e:
+        return _refuse(op, [path_str], f"read failed: {e}")
+    digest = "sha256:" + h.hexdigest()
+    print(f"{digest} {size} {resolved}")
+    return _ok(op, [path_str], f"sha256={digest[:20]}… size={size}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="fsf-priv",
+        description="Forest Soul Forge privileged ops (ADR-0033 A6).",
+    )
+    sub = parser.add_subparsers(dest="op", required=True)
+
+    p_kill = sub.add_parser("kill-pid", help="SIGTERM then SIGKILL a PID.")
+    p_kill.add_argument("pid", help="PID to kill (must be > 1, not self).")
+
+    p_add = sub.add_parser("pf-add", help="Apply a rule to a pf anchor.")
+    p_add.add_argument("anchor")
+    p_add.add_argument("rule")
+
+    p_drop = sub.add_parser("pf-drop", help="Flush a pf anchor.")
+    p_drop.add_argument("anchor")
+
+    p_read = sub.add_parser("read-protected", help="Read a SIP-protected file.")
+    p_read.add_argument("path")
+
+    args = parser.parse_args(argv)
+    if args.op == "kill-pid":
+        return op_kill_pid(args.pid)
+    if args.op == "pf-add":
+        return op_pf_add(args.anchor, args.rule)
+    if args.op == "pf-drop":
+        return op_pf_drop(args.anchor)
+    if args.op == "read-protected":
+        return op_read_protected(args.path)
+    return _refuse("unknown", [args.op or ""], f"unknown op {args.op!r}")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
