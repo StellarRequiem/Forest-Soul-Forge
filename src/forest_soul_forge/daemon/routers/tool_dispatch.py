@@ -77,6 +77,10 @@ _REFUSAL_STATUS = {
     "bad_args": status.HTTP_400_BAD_REQUEST,
     "max_calls_exceeded": status.HTTP_403_FORBIDDEN,
     "side_effects_exceed_budget": status.HTTP_403_FORBIDDEN,
+    # ADR-0019 T6 — genre risk floor violated at dispatch time
+    # (Companion + frontier provider, Observer + non-read_only tool,
+    # etc.). 403 because the request is well-formed; the policy says no.
+    "genre_floor_violated": status.HTTP_403_FORBIDDEN,
 }
 
 

@@ -158,6 +158,10 @@ def get_tool_dispatcher(request: Request):
                 "startup. Check /healthz for the underlying error."
             ),
         )
+    # ADR-0019 T6: pull the loaded genre engine if it's there. Empty
+    # engine (load failure / no genres.yaml) is benign — the dispatcher
+    # treats a missing engine as 'no enforcement'.
+    genre_engine = getattr(request.app.state, "genre_engine", None)
     from forest_soul_forge.tools.dispatcher import ToolDispatcher
     dispatcher = ToolDispatcher(
         registry=registry,
@@ -173,6 +177,12 @@ def get_tool_dispatcher(request: Request):
         # call gated by requires_human_approval. The endpoints
         # (list/detail/approve/reject) read and mutate them.
         pending_writer=fsf_registry.record_pending_approval,
+        # ADR-0019 T6: runtime enforcement of genre risk floor.
+        # Companion → reject non-local provider; Observer → reject
+        # non-read_only side effects; etc. None when genres.yaml
+        # didn't load (best-effort: dispatch keeps working without
+        # enforcement, character sheet shows the load failure).
+        genre_engine=genre_engine,
     )
     request.app.state.tool_dispatcher = dispatcher
     return dispatcher

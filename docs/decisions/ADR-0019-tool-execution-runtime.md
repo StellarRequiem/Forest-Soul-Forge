@@ -197,18 +197,20 @@ ADR-0016 (session modes + self-spawning cipher) is closely related but orthogona
 
 ## Implementation tranches
 
-- **T1** — Tool Protocol + ToolContext + ToolResult dataclasses. Tool registry with lifespan load. One reference tool implementation: `timestamp_window.v1` (already in the catalog; trivial pure function — perfect first runtime exercise).
-- **T2** — Fast-path dispatcher. Constraint resolution at call time. `tool_invoked` + `tool_call_rejected` audit events. Per-session counter wiring (registry schema v3 bump, `tool_calls` table, `sessions` table).
-- **T3** — Approval queue. Three new audit events. `/agents/{id}/pending_calls` endpoint for the frontend. Frontend modal that shows pending calls and approve/deny buttons.
-- **T4** — Per-call accounting. tokens_used + cost_usd plumbing. Character sheet stats section starts populating.
+- **T1** — Tool Protocol + ToolContext + ToolResult dataclasses. Tool registry with lifespan load. One reference tool implementation: `timestamp_window.v1` (already in the catalog; trivial pure function — perfect first runtime exercise). **Landed.**
+- **T2** — Fast-path dispatcher. Constraint resolution at call time. `tool_call_dispatched` + `tool_call_succeeded` + `tool_call_failed` + `tool_call_refused` audit events. Per-session counter wiring (registry schema v3 bump, `tool_call_counters` table). `POST /agents/{id}/tools/call` endpoint. **Landed.**
+- **T3** — Approval queue. `tool_call_pending_approval` (T2-set) + `tool_call_approved` + `tool_call_rejected` audit events. `tool_call_pending_approvals` registry table (schema v5). `GET /agents/{id}/pending_calls`, `GET /pending_calls/{id}`, `POST .../approve`, `POST .../reject` endpoints. Frontend modal that shows pending calls and approve/reject buttons with reason capture. **Landed.**
+- **T4** — Per-call accounting. tokens_used + cost_usd plumbing. `tool_calls` registry table (schema v4). Character sheet stats section populates from real numbers. **Landed.**
 - **T5** — Plugin format + loader. `.fsf` schema. Daemon lifespan loads plugins from `data/plugins/`. Hot-reload deferred.
-- **T6** — Reference plugin: a small but real one. Candidate: `mcp_call.v1` (needs T7) or `web_search.v1` against an allowlist.
-- **T7** — MCP-as-client. `mcp_call.v1` family. `~/.fsf/mcp_servers.yaml` operator config (server_alias → URL).
-- **T8** — MCP-as-server. `/mcp` endpoint exposes the tool registry. Authn via X-FSF-Token initially; JWT-with-scope deferred.
-- **T9** — Genre-level runtime enforcement. Companion → reject frontier provider at dispatch. Observer → reject non-read_only at dispatch (catches tools added mid-session that the kit-tier guard didn't see at birth).
+- **T6** — Genre-level runtime enforcement (pulled forward from original T9). `genre_floor_violated` refusal reason. Companion → reject non-local provider at dispatch. Observer → reject non-read_only at dispatch (catches tools added mid-session that the kit-tier guard didn't see at birth). Symmetric with ADR-0021 T5 build-time check. **Landed.**
+- **T7** — Reference plugin: a small but real one. Candidate: `mcp_call.v1` (needs T8) or `web_search.v1` against an allowlist. (Was T6 originally.)
+- **T8** — MCP-as-client. `mcp_call.v1` family. `~/.fsf/mcp_servers.yaml` operator config (server_alias → URL). (Was T7 originally.)
+- **T9** — MCP-as-server. `/mcp` endpoint exposes the tool registry. Authn via X-FSF-Token initially; JWT-with-scope deferred. (Was T8 originally.)
 - **T10** — Per-genre `approval_timeout_seconds`. New field on `risk_profile`. Sweeper on the daemon that fires `tool_call_denied` for timed-out queue entries.
 
-T1–T4 is the "agents can run" milestone. T5–T8 is "ecosystem." T9–T10 is "the policies are enforced everywhere they should be."
+T1–T4 + T6 was the "agents can run" milestone — landed. T5 + T7–T9 is "ecosystem." T10 is "the policies are enforced everywhere they should be."
+
+**Renumbering note:** T6 (genre runtime enforcement) was pulled forward from the original T9 because it composes naturally with T2's dispatcher and ADR-0021 T5's build-time check. The original T6/T7/T8 (reference plugin, MCP-client, MCP-server) shifted up by one to T7/T8/T9 to accommodate. Other tranches' contents are unchanged.
 
 ## Cross-references
 

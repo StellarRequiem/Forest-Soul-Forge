@@ -24,6 +24,7 @@ from forest_soul_forge.registry import Registry
 from forest_soul_forge.tools.base import (
     ToolError,
     ToolRegistry,
+    ToolResult,
 )
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
 from forest_soul_forge.tools.dispatcher import (
@@ -761,6 +762,210 @@ class TestApprovalEvents:
         ]
         assert len(rejected) == 1
         assert rejected[0].event_data["reason"] == "not now"
+
+
+class TestGenreFloor:
+    """ADR-0019 T6 — genre runtime enforcement.
+
+    The dispatcher consults engine.role_to_genre + risk_profile at
+    call time. Symmetric with ADR-0021 T5 (build-time kit check).
+    """
+
+    def _engine(self, *, max_side_effects="read_only", provider_constraint=None,
+                role="network_watcher", genre_name="observer"):
+        """Build a minimal GenreEngine that claims one role with one
+        risk profile. Avoids the YAML loader."""
+        from forest_soul_forge.core.genre_engine import (
+            GenreDef, GenreEngine, RiskProfile,
+        )
+        gd = GenreDef(
+            name=genre_name,
+            description="test",
+            risk_profile=RiskProfile(
+                max_side_effects=max_side_effects,
+                provider_constraint=provider_constraint,
+            ),
+            default_kit_pattern=(),
+            trait_emphasis=(),
+            memory_pattern="ephemeral",
+            spawn_compatibility=(),
+            roles=(role,),
+        )
+        return GenreEngine(
+            version="1",
+            genres={genre_name: gd},
+            role_to_genre={role: genre_name},
+        )
+
+    class _NetworkTool:
+        name = "lookup"
+        version = "1"
+        side_effects = "network"
+
+        def validate(self, args):
+            return None
+
+        async def execute(self, args, ctx):
+            return ToolResult(output={"ok": True})
+
+    def test_no_engine_passes_through(self, dispatcher_env):
+        """When the dispatcher has no engine wired, every call is
+        treated as if the genre check passed. Preserves backward
+        compat for deployments without genres.yaml."""
+        dispatcher_env["dispatcher"].genre_engine = None
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchSucceeded)
+
+    def test_unclaimed_role_passes_through(self, dispatcher_env):
+        """A role not in role_to_genre means 'no genre, no enforcement'."""
+        dispatcher_env["dispatcher"].genre_engine = self._engine(
+            role="some_other_role",
+        )
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre=None, session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchSucceeded)
+
+    def test_side_effects_within_floor_passes(self, dispatcher_env):
+        # Observer (read_only floor) running a read_only tool — fine.
+        dispatcher_env["dispatcher"].genre_engine = self._engine(
+            max_side_effects="read_only",
+        )
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchSucceeded)
+
+    def test_side_effects_exceeds_floor_refused(self, dispatcher_env):
+        """Observer (read_only) with a network tool — refuse with
+        genre_floor_violated."""
+        dispatcher_env["dispatcher"].genre_engine = self._engine(
+            max_side_effects="read_only",
+        )
+        dispatcher_env["registry"].register(self._NetworkTool())
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(
+            constitution, tool_name="lookup", side_effects="network",
+        )
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="lookup", tool_version="1",
+            args={},
+        ))
+        assert isinstance(outcome, DispatchRefused)
+        assert outcome.reason == "genre_floor_violated"
+        assert "side_effects" in outcome.detail
+
+    def test_local_only_with_frontier_provider_refused(self, dispatcher_env):
+        """Companion (local_only) attempting dispatch with a
+        frontier-named provider — refuse."""
+        class _FrontierProvider:
+            name = "frontier"
+        dispatcher_env["dispatcher"].genre_engine = self._engine(
+            max_side_effects="read_only",
+            provider_constraint="local_only",
+            genre_name="companion",
+        )
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="companion", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+            provider=_FrontierProvider(),
+        ))
+        assert isinstance(outcome, DispatchRefused)
+        assert outcome.reason == "genre_floor_violated"
+        assert "provider" in outcome.detail
+
+    def test_local_only_with_local_provider_passes(self, dispatcher_env):
+        class _LocalProvider:
+            name = "local"
+        dispatcher_env["dispatcher"].genre_engine = self._engine(
+            provider_constraint="local_only",
+            genre_name="companion",
+        )
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="companion", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+            provider=_LocalProvider(),
+        ))
+        assert isinstance(outcome, DispatchSucceeded)
+
+    def test_resume_approved_also_enforces_floor(self, dispatcher_env):
+        """Operator approval cannot override genre risk floor."""
+        class _FrontierProvider:
+            name = "frontier"
+        dispatcher_env["dispatcher"].genre_engine = self._engine(
+            provider_constraint="local_only",
+            genre_name="companion",
+        )
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution, requires_approval=True)
+        outcome = _run(dispatcher_env["dispatcher"].resume_approved(
+            ticket_id="pending-x",
+            operator_id="alex",
+            instance_id="i1", agent_dna="d" * 12,
+            role="network_watcher", genre="companion", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+            provider=_FrontierProvider(),
+        ))
+        assert isinstance(outcome, DispatchRefused)
+        assert outcome.reason == "genre_floor_violated"
+
+    def test_genre_refusal_not_recorded_in_tool_calls(self, dispatcher_env):
+        """Refusals never reach execute → no tool_calls row.
+        Same rule as bad_args / unknown_tool — keeps per-tool stats
+        free of policy-rejection noise."""
+        recorded: list[dict] = []
+        dispatcher_env["dispatcher"].record_call = lambda **kw: recorded.append(kw)
+        dispatcher_env["dispatcher"].genre_engine = self._engine(
+            max_side_effects="read_only",
+        )
+        dispatcher_env["registry"].register(self._NetworkTool())
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(
+            constitution, tool_name="lookup", side_effects="network",
+        )
+        _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="lookup", tool_version="1",
+            args={},
+        ))
+        assert recorded == []
 
 
 class TestRegistryApprovalQueue:

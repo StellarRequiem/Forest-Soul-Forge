@@ -222,6 +222,17 @@ class ToolDispatcher:
     # endpoints will see no rows. Tests use ``None`` for in-memory
     # flows; the daemon wires the real registry method.
     pending_writer: Any = None  # callable (kwargs) -> None | None
+    # ADR-0019 T6: genre runtime enforcement. The engine's
+    # role_to_genre + genres.{name}.risk_profile is consulted at
+    # dispatch time:
+    #   - if tool.side_effects exceeds genre.max_side_effects → refuse
+    #   - if genre.provider_constraint == "local_only" and the active
+    #     provider isn't local → refuse
+    # When None, no enforcement. Roles unclaimed by any genre also
+    # pass through. The check is symmetric with ADR-0021 T5's
+    # build-time kit-tier enforcement — T5 catches the static birth
+    # case, T6 catches mid-session changes (e.g. tools_add bypass).
+    genre_engine: Any = None  # forest_soul_forge.core.genre_engine.GenreEngine | None
 
     async def dispatch(
         self,
@@ -291,7 +302,26 @@ class ToolDispatcher:
                 session_id=session_id,
             )
 
-        # ---- 4. counter pre-check (read, not yet incremented) ----------
+        # ---- 4. genre runtime enforcement (ADR-0019 T6) ----------------
+        # Symmetric with ADR-0021 T5 (build-time kit-tier check): T5
+        # catches what's in the constitution at birth; T6 catches what
+        # the runtime is about to invoke. Belt-and-suspenders so a
+        # genre tightening or a tools_add slip doesn't let a Companion
+        # fire a network tool.
+        ok, detail = _check_genre_floor(
+            engine=self.genre_engine,
+            role=role,
+            tool_side_effects=resolved.side_effects or tool.side_effects,
+            provider=provider,
+        )
+        if not ok:
+            return self._refuse(
+                key, "genre_floor_violated", detail or "",
+                instance_id=instance_id, agent_dna=agent_dna,
+                session_id=session_id,
+            )
+
+        # ---- 5. counter pre-check (read, not yet incremented) ----------
         max_calls = int(resolved.constraints.get("max_calls_per_session", 0) or 0)
         current = int(self.counter_get(instance_id, session_id))
         if max_calls and current >= max_calls:
@@ -303,7 +333,7 @@ class ToolDispatcher:
                 session_id=session_id,
             )
 
-        # ---- 5. approval gate -------------------------------------------
+        # ---- 6. approval gate -------------------------------------------
         if bool(resolved.constraints.get("requires_human_approval", False)):
             return self._pending_approval(
                 key,
@@ -607,6 +637,31 @@ class ToolDispatcher:
                 session_id=session_id,
             )
 
+        # Genre floor still binds even after operator approval. The
+        # approval queue is for operator say-so on the agent's
+        # constitution (requires_human_approval); the genre floor is a
+        # higher-priority policy that applies at the runtime layer.
+        # Symmetric with the dispatch() path.
+        resolved_for_genre = _load_resolved_constraints(
+            constitution_path, tool_name, tool_version
+        )
+        side_effects_for_genre = (
+            (resolved_for_genre.side_effects if resolved_for_genre else "")
+            or tool.side_effects
+        )
+        ok, detail = _check_genre_floor(
+            engine=self.genre_engine,
+            role=role,
+            tool_side_effects=side_effects_for_genre,
+            provider=provider,
+        )
+        if not ok:
+            return self._refuse(
+                key, "genre_floor_violated", detail or "",
+                instance_id=instance_id, agent_dna=agent_dna,
+                session_id=session_id,
+            )
+
         # Counter pre-check — same rule as fast path. An approval that
         # arrives after the session burned its budget is refused.
         resolved = _load_resolved_constraints(
@@ -810,6 +865,84 @@ def _digest(obj: Any) -> str:
     import json
     encoded = json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+# Side-effects ordering — mirrors core.genre_engine._SIDE_EFFECT_TIERS.
+# Keep this private to the dispatcher; the comparison is the only place
+# that needs the integer ordering. A tool's side_effects is allowed
+# only if its rank ≤ the genre's max rank.
+_SIDE_EFFECT_RANK = {
+    "read_only": 0,
+    "network": 1,
+    "filesystem": 2,
+    "external": 3,
+}
+
+
+def _provider_is_local(provider: Any) -> bool:
+    """Best-effort check that the active provider is the local one.
+
+    The genre engine's only provider_constraint today is ``"local_only"``
+    (Companion). Without a name attribute we conservatively say
+    "not local" so the constraint fires by default when in doubt.
+    """
+    if provider is None:
+        # No provider attached (test path or non-LLM dispatch) — we
+        # consider this 'compatible' with local_only because there's
+        # no frontier call about to happen anyway. T9 will tighten if
+        # this proves too lax.
+        return True
+    name = getattr(provider, "name", None)
+    return isinstance(name, str) and name.strip().lower() == "local"
+
+
+def _check_genre_floor(
+    *,
+    engine: Any,
+    role: str,
+    tool_side_effects: str,
+    provider: Any,
+) -> tuple[bool, str | None]:
+    """Return (ok, detail). ``ok=True`` means the call passes.
+
+    Pure function — no side effects, no audit emission. The caller
+    decides whether to refuse (and emit) based on the result.
+
+    Returns ``(True, None)`` when:
+      - engine is None (T6 not wired)
+      - role isn't claimed by any genre (legacy / unclaimed)
+      - genre exists and side_effects + provider both pass
+
+    Returns ``(False, "<axis>: <reason>")`` otherwise.
+    """
+    if engine is None:
+        return True, None
+    genre_name = getattr(engine, "role_to_genre", {}).get(role)
+    if genre_name is None:
+        return True, None
+    genre = getattr(engine, "genres", {}).get(genre_name)
+    if genre is None:
+        return True, None
+    rp = genre.risk_profile
+
+    # Side-effects ladder check.
+    tool_rank = _SIDE_EFFECT_RANK.get(tool_side_effects, 99)
+    max_rank = _SIDE_EFFECT_RANK.get(rp.max_side_effects, 99)
+    if tool_rank > max_rank:
+        return False, (
+            f"side_effects: tool tier {tool_side_effects!r} exceeds "
+            f"genre {genre_name!r} max {rp.max_side_effects!r}"
+        )
+
+    # Provider constraint check.
+    if rp.provider_constraint == "local_only" and not _provider_is_local(provider):
+        provider_name = getattr(provider, "name", "unknown")
+        return False, (
+            f"provider: genre {genre_name!r} requires local_only; "
+            f"active provider is {provider_name!r}"
+        )
+
+    return True, None
 
 
 def _canonical_json(obj: Any) -> str:
