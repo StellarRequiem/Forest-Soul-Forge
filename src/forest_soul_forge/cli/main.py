@@ -97,13 +97,42 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     forge_tool.set_defaults(_run=_run_forge_tool)
 
-    # `fsf forge skill ...` — placeholder; ADR-0031 T1+ will wire this.
+    # `fsf forge skill ...` — ADR-0031 T1 propose-only.
     forge_skill = forge_sub.add_parser(
         "skill",
-        help="(ADR-0031, not yet implemented) Forge a skill manifest.",
+        help="Forge a new skill manifest from an English workflow description.",
     )
-    forge_skill.add_argument("description", nargs="?", default="")
-    forge_skill.set_defaults(_run=_run_forge_skill_stub)
+    forge_skill.add_argument(
+        "description",
+        help=(
+            "Plain-English description of the workflow. The LLM emits a "
+            "YAML manifest (steps + data flow) which we validate before "
+            "staging."
+        ),
+    )
+    forge_skill.add_argument(
+        "--name", default=None,
+        help="Override the proposed skill name (snake_case).",
+    )
+    forge_skill.add_argument(
+        "--version", default="1",
+        help="Version string for the new skill (default: '1').",
+    )
+    forge_skill.add_argument(
+        "--provider", default=None,
+        help=(
+            "Override the active provider for codegen ('local' or "
+            "'frontier'). Defaults to settings.default_provider."
+        ),
+    )
+    forge_skill.add_argument(
+        "--out-dir", default="data/forge/skills/staged",
+        help=(
+            "Where to drop the staged manifest "
+            "(default: data/forge/skills/staged)."
+        ),
+    )
+    forge_skill.set_defaults(_run=_run_forge_skill)
 
     return parser
 
@@ -114,13 +143,10 @@ def _run_forge_tool(args: argparse.Namespace) -> int:
     return forge_tool_run(args)
 
 
-def _run_forge_skill_stub(args: argparse.Namespace) -> int:
-    print(
-        "fsf forge skill: ADR-0031 not yet implemented. "
-        "See docs/decisions/ADR-0031-skill-forge.md for the design.",
-        file=sys.stderr,
-    )
-    return 2
+def _run_forge_skill(args: argparse.Namespace) -> int:
+    """Hand off to forest_soul_forge.cli.forge_skill.run."""
+    from forest_soul_forge.cli.forge_skill import run as forge_skill_run
+    return forge_skill_run(args)
 
 
 def _version_string() -> str:
