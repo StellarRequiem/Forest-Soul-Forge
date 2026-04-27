@@ -189,8 +189,9 @@ def _build_parser() -> argparse.ArgumentParser:
     install_tool = install_sub.add_parser(
         "tool",
         help=(
-            "Install a staged Tool Forge tool into tools/builtin/. "
-            "Daemon restart required pending ADR-0019 T5 plugin loader."
+            "Install a staged Tool Forge tool. Defaults to plugin mode "
+            "(data/plugins/, no daemon restart). --builtin opts into the "
+            "legacy in-source path."
         ),
     )
     install_tool.add_argument(
@@ -198,22 +199,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to a Tool Forge staged folder (contains tool.py + spec.yaml).",
     )
     install_tool.add_argument(
+        "--builtin", action="store_true",
+        help=(
+            "Legacy mode: copy tool.py to src/forest_soul_forge/tools/builtin/ "
+            "and append catalog YAML. Daemon restart required. Use for "
+            "in-source dev work; otherwise leave off and use the default "
+            "plugin mode."
+        ),
+    )
+    install_tool.add_argument(
+        "--plugins-dir", default=None,
+        help=(
+            "Override the plugin directory. Defaults to "
+            "settings.plugins_dir (data/plugins/). Plugin mode only."
+        ),
+    )
+    install_tool.add_argument(
         "--builtin-dir", default=None,
         help=(
-            "Override the builtin directory. Defaults to "
-            "src/forest_soul_forge/tools/builtin/ relative to the repo root."
+            "Override the builtin directory (--builtin mode only). "
+            "Defaults to src/forest_soul_forge/tools/builtin/."
         ),
     )
     install_tool.add_argument(
         "--catalog-path", default=None,
         help=(
-            "Override the catalog YAML path. Defaults to "
-            "config/tool_catalog.yaml relative to the repo root."
+            "Override the catalog YAML path (--builtin mode only). "
+            "Defaults to config/tool_catalog.yaml."
         ),
     )
     install_tool.add_argument(
         "--overwrite", action="store_true",
-        help="Replace the target .py if it already exists.",
+        help="Replace the target if it already exists.",
     )
     install_tool.add_argument(
         "--force", action="store_true",
@@ -221,6 +238,13 @@ def _build_parser() -> argparse.ArgumentParser:
             "Install even if REJECTED.md is present (Tool Forge static-"
             "analysis or test-run failures). Use during forge iteration "
             "when you accept the risk."
+        ),
+    )
+    install_tool.add_argument(
+        "--no-reload", action="store_true",
+        help=(
+            "Plugin mode only: skip the POST /tools/reload after copy. "
+            "The new tool loads on next daemon boot."
         ),
     )
     install_tool.set_defaults(_run=_run_install_tool)

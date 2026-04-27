@@ -95,23 +95,179 @@ def run_skill(args: argparse.Namespace) -> int:
 def run_tool(args: argparse.Namespace) -> int:
     """``fsf install tool <staged-dir>``.
 
-    Partial implementation pending ADR-0019 T5 (.fsf plugin loader).
-    For now:
-      1. Validate the staged folder has tool.py + spec.yaml + (optional)
-         catalog-diff.yaml.
-      2. Refuse to install if REJECTED.md is present unless --force
-         (mirrors the Tool Forge gating).
-      3. Copy tool.py to ``src/forest_soul_forge/tools/builtin/<name>.py``.
-      4. Append the catalog diff to ``config/tool_catalog.yaml`` under
-         the existing ``tools:`` block.
-      5. Update ``tools/builtin/__init__.py`` to register + export the
-         new tool class.
-      6. Emit forge_tool_installed audit-chain entry.
+    Default mode (--plugin, post-ADR-0019 T5): copies the staged
+    spec.yaml + tool.py to data/plugins/<name>.v<version>/, calls
+    POST /tools/reload, no daemon restart needed.
 
-    A daemon restart IS required after install — the import / catalog /
-    registry are loaded once at lifespan. T5 of ADR-0019 lifts this
-    restriction by introducing .fsf plugin packaging + hot-reload.
+    --builtin mode: legacy in-source path. Copies tool.py to
+    src/forest_soul_forge/tools/builtin/<name>.py + appends catalog
+    YAML. Daemon restart still required. Used during dev when you
+    want the tool in the source tree.
+
+    Both modes:
+      1. Validate the staged folder has tool.py + spec.yaml.
+      2. Refuse if REJECTED.md is present unless --force.
+      3. Emit forge_tool_installed audit-chain entry.
     """
+    from forest_soul_forge.cli._common import resolve_operator
+    import yaml
+
+    # Mode dispatch — --builtin overrides the default.
+    if getattr(args, "builtin", False):
+        return _run_tool_builtin_mode(args)
+    return _run_tool_plugin_mode(args)
+
+
+def _run_tool_plugin_mode(args: argparse.Namespace) -> int:
+    """Plugin mode (default, post-ADR-0019 T5)."""
+    from forest_soul_forge.cli._common import resolve_operator
+    import yaml
+
+    staged_dir = Path(args.staged_dir).resolve()
+    if not staged_dir.exists():
+        print(f"error: staged dir not found: {staged_dir}", file=sys.stderr)
+        return 2
+    spec_path = staged_dir / "spec.yaml"
+    tool_path = staged_dir / "tool.py"
+    rejected_path = staged_dir / "REJECTED.md"
+    for p, label in [(spec_path, "spec.yaml"), (tool_path, "tool.py")]:
+        if not p.exists():
+            print(
+                f"error: {label} missing in {staged_dir} — is this a "
+                f"Tool Forge staged folder?",
+                file=sys.stderr,
+            )
+            return 1
+    if rejected_path.exists() and not args.force:
+        print(
+            f"error: {staged_dir} has REJECTED.md (Tool Forge static "
+            f"analysis or generated tests failed). Pass --force to "
+            f"install anyway.",
+            file=sys.stderr,
+        )
+        return 1
+
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    name = spec.get("name") or ""
+    version = spec.get("version") or "1"
+    if not name:
+        print("error: spec.yaml has no name field", file=sys.stderr)
+        return 1
+
+    # Resolve plugins_dir from settings.
+    from forest_soul_forge.daemon.config import build_settings
+    settings = build_settings()
+    plugins_dir = (
+        Path(args.plugins_dir)
+        if args.plugins_dir
+        else Path(settings.plugins_dir)
+    )
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = plugins_dir / f"{name}.v{version}"
+    if target_dir.exists() and not args.overwrite:
+        print(
+            f"error: {target_dir} already exists. Pass --overwrite to "
+            f"replace.",
+            file=sys.stderr,
+        )
+        return 1
+    if target_dir.exists() and args.overwrite:
+        shutil.rmtree(target_dir)
+    target_dir.mkdir()
+
+    # Copy spec + tool.py + tests if present.
+    shutil.copyfile(spec_path, target_dir / "spec.yaml")
+    shutil.copyfile(tool_path, target_dir / "tool.py")
+    test_path = staged_dir / f"test_{name}.py"
+    if test_path.exists():
+        shutil.copyfile(test_path, target_dir / f"test_{name}.py")
+
+    print(f"[Tool install] plugin staged at:\n  {target_dir}")
+
+    # Audit entry.
+    from forest_soul_forge.core.audit_chain import AuditChain
+    chain = AuditChain(settings.audit_chain_path)
+    entry = chain.append(
+        "forge_tool_installed",
+        {
+            "tool_name": name,
+            "tool_version": str(version),
+            "side_effects": spec.get("side_effects"),
+            "installed_from": str(staged_dir),
+            "installed_to": str(target_dir),
+            "installed_by": resolve_operator(),
+            "mode": "cli_plugin",
+            "force": bool(args.force),
+        },
+    )
+    print(f"[Tool install] audit_seq={entry.seq} forge_tool_installed")
+
+    if not args.no_reload:
+        _try_tools_reload()
+    else:
+        print(
+            "  --no-reload: the new tool will load on next daemon boot "
+            "(or run `curl -X POST .../tools/reload`).",
+            file=sys.stderr,
+        )
+
+    return 0
+
+
+def _try_tools_reload() -> None:
+    """Best-effort POST /tools/reload mirroring the skill version."""
+    import os
+    import urllib.request
+    import urllib.error
+    import json
+
+    base = (os.environ.get("FSF_DAEMON_URL") or "http://127.0.0.1:7423")
+    token = os.environ.get("FSF_API_TOKEN") or ""
+    req = urllib.request.Request(
+        base.rstrip("/") + "/tools/reload",
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            **({"X-FSF-Token": token} if token else {}),
+        },
+        data=b"{}",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            if resp.status == 200:
+                body = json.loads(resp.read().decode("utf-8") or "{}")
+                count = body.get("registered_count", "?")
+                loaded = body.get("plugins_loaded", "?")
+                print(
+                    f"[Tool install] reloaded daemon → "
+                    f"{count} tools registered ({loaded} plugin(s))"
+                )
+                errs = body.get("plugin_errors") or []
+                if errs:
+                    print("  reload reported plugin errors:")
+                    for e in errs:
+                        print(f"    - {e}")
+                return
+            print(
+                f"[Tool install] reload returned HTTP {resp.status}",
+                file=sys.stderr,
+            )
+    except urllib.error.URLError as e:
+        print(
+            f"[Tool install] daemon not reachable ({e.reason}); "
+            f"the new tool will load on next daemon boot.",
+            file=sys.stderr,
+        )
+    except Exception as e:
+        print(
+            f"[Tool install] reload failed: {type(e).__name__}: {e}; "
+            f"the new tool will load on next daemon boot.",
+            file=sys.stderr,
+        )
+
+
+def _run_tool_builtin_mode(args: argparse.Namespace) -> int:
+    """Legacy in-source builtin path. Daemon restart required."""
     from forest_soul_forge.cli._common import resolve_operator
     import yaml
 

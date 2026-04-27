@@ -178,9 +178,9 @@ fields populate per call.
 | Skill failed: `tool_refused` `genre_floor_violated` | Agent's genre forbids the tool's side_effects. Re-birth as a different genre. |
 | Skill failed: `tool_pending_approval`          | Tool requires human approval. See Approvals tab to approve.       |
 
-## After Round 2a lands
+## After Round 2a + B3 land
 
-Steps 3–4 collapse into:
+Skill install:
 
 ```bash
 $ fsf install skill data/forge/skills/staged/get_window_smoke.v1/
@@ -189,7 +189,27 @@ $ fsf install skill data/forge/skills/staged/get_window_smoke.v1/
 [Skill Forge install] audit_seq=N forge_skill_installed
 ```
 
-No daemon restart, no manual file copy, audit-chain entry recorded.
+Tool install (plugin mode, the new default):
+
+```bash
+$ fsf install tool data/forge/staged/my_tool.v1/
+[Tool install] plugin staged at:
+  data/plugins/my_tool.v1
+[Tool install] audit_seq=M forge_tool_installed
+[Tool install] reloaded daemon → 4 tools registered (1 plugin(s))
+```
+
+No daemon restart, no manual `tools/builtin/__init__.py` edit, audit-
+chain entries recorded for both. Plugin tools live in
+``data/plugins/<name>.v<version>/`` (spec.yaml + tool.py), discovered
+by the lifespan loader and refreshed by ``POST /tools/reload``.
+
+For dev work where you want the tool tracked in the source tree:
+
+```bash
+$ fsf install tool data/forge/staged/my_tool.v1/ --builtin
+# legacy in-source path; daemon restart still required
+```
 
 ## Cross-references
 

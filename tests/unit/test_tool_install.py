@@ -69,12 +69,16 @@ def _empty_catalog(tmp_path: Path) -> Path:
 
 
 def _args(staged_dir: Path, builtin_dir: Path, catalog_path: Path, **overrides) -> argparse.Namespace:
+    """Build args for --builtin-mode invocations (legacy in-source path)."""
     return argparse.Namespace(
         staged_dir=str(staged_dir),
+        builtin=True,  # opt into legacy in-source mode
+        plugins_dir=None,
         builtin_dir=str(builtin_dir),
         catalog_path=str(catalog_path),
         overwrite=overrides.get("overwrite", False),
         force=overrides.get("force", False),
+        no_reload=True,  # plugin-mode-only flag, ignored here
     )
 
 
