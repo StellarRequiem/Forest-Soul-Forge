@@ -186,6 +186,45 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     install_skill.set_defaults(_run=_run_install_skill)
 
+    install_tool = install_sub.add_parser(
+        "tool",
+        help=(
+            "Install a staged Tool Forge tool into tools/builtin/. "
+            "Daemon restart required pending ADR-0019 T5 plugin loader."
+        ),
+    )
+    install_tool.add_argument(
+        "staged_dir",
+        help="Path to a Tool Forge staged folder (contains tool.py + spec.yaml).",
+    )
+    install_tool.add_argument(
+        "--builtin-dir", default=None,
+        help=(
+            "Override the builtin directory. Defaults to "
+            "src/forest_soul_forge/tools/builtin/ relative to the repo root."
+        ),
+    )
+    install_tool.add_argument(
+        "--catalog-path", default=None,
+        help=(
+            "Override the catalog YAML path. Defaults to "
+            "config/tool_catalog.yaml relative to the repo root."
+        ),
+    )
+    install_tool.add_argument(
+        "--overwrite", action="store_true",
+        help="Replace the target .py if it already exists.",
+    )
+    install_tool.add_argument(
+        "--force", action="store_true",
+        help=(
+            "Install even if REJECTED.md is present (Tool Forge static-"
+            "analysis or test-run failures). Use during forge iteration "
+            "when you accept the risk."
+        ),
+    )
+    install_tool.set_defaults(_run=_run_install_tool)
+
     return parser
 
 
@@ -205,6 +244,12 @@ def _run_install_skill(args: argparse.Namespace) -> int:
     """Hand off to forest_soul_forge.cli.install.run_skill."""
     from forest_soul_forge.cli.install import run_skill
     return run_skill(args)
+
+
+def _run_install_tool(args: argparse.Namespace) -> int:
+    """Hand off to forest_soul_forge.cli.install.run_tool."""
+    from forest_soul_forge.cli.install import run_tool
+    return run_tool(args)
 
 
 def _version_string() -> str:

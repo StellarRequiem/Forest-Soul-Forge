@@ -92,6 +92,186 @@ def run_skill(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_tool(args: argparse.Namespace) -> int:
+    """``fsf install tool <staged-dir>``.
+
+    Partial implementation pending ADR-0019 T5 (.fsf plugin loader).
+    For now:
+      1. Validate the staged folder has tool.py + spec.yaml + (optional)
+         catalog-diff.yaml.
+      2. Refuse to install if REJECTED.md is present unless --force
+         (mirrors the Tool Forge gating).
+      3. Copy tool.py to ``src/forest_soul_forge/tools/builtin/<name>.py``.
+      4. Append the catalog diff to ``config/tool_catalog.yaml`` under
+         the existing ``tools:`` block.
+      5. Update ``tools/builtin/__init__.py`` to register + export the
+         new tool class.
+      6. Emit forge_tool_installed audit-chain entry.
+
+    A daemon restart IS required after install — the import / catalog /
+    registry are loaded once at lifespan. T5 of ADR-0019 lifts this
+    restriction by introducing .fsf plugin packaging + hot-reload.
+    """
+    from forest_soul_forge.cli._common import resolve_operator
+    import yaml
+
+    staged_dir = Path(args.staged_dir).resolve()
+    if not staged_dir.exists():
+        print(f"error: staged dir not found: {staged_dir}", file=sys.stderr)
+        return 2
+    spec_path = staged_dir / "spec.yaml"
+    tool_path = staged_dir / "tool.py"
+    diff_path = staged_dir / "catalog-diff.yaml"
+    rejected_path = staged_dir / "REJECTED.md"
+    for p, label in [(spec_path, "spec.yaml"), (tool_path, "tool.py")]:
+        if not p.exists():
+            print(
+                f"error: {label} missing in {staged_dir} — is this a "
+                f"Tool Forge staged folder?",
+                file=sys.stderr,
+            )
+            return 1
+    if rejected_path.exists() and not args.force:
+        print(
+            f"error: {staged_dir} has REJECTED.md (Tool Forge static "
+            f"analysis or generated tests failed). Pass --force to "
+            f"install anyway.",
+            file=sys.stderr,
+        )
+        return 1
+
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    name = spec.get("name") or ""
+    version = spec.get("version") or "1"
+    if not name:
+        print(f"error: spec.yaml has no name field", file=sys.stderr)
+        return 1
+
+    # Install destinations.
+    repo_root = _repo_root()
+    builtin_dir = (
+        Path(args.builtin_dir)
+        if args.builtin_dir
+        else repo_root / "src" / "forest_soul_forge" / "tools" / "builtin"
+    )
+    catalog_path = (
+        Path(args.catalog_path)
+        if args.catalog_path
+        else repo_root / "config" / "tool_catalog.yaml"
+    )
+    builtin_dir.mkdir(parents=True, exist_ok=True)
+    target_py = builtin_dir / f"{name}.py"
+    if target_py.exists() and not args.overwrite:
+        print(
+            f"error: {target_py} already exists. Pass --overwrite to "
+            f"replace.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Copy the .py.
+    shutil.copyfile(tool_path, target_py)
+    print(f"[Tool install] copied:\n  {tool_path}\n  → {target_py}")
+
+    # Append the catalog entry. We DON'T do a structured YAML merge
+    # (preserving comments + ordering matters); we append the diff
+    # block as raw YAML at the end of the tools: section. The
+    # operator can re-order later if they care.
+    if diff_path.exists():
+        appended = _append_catalog_entry(catalog_path, diff_path)
+        if appended:
+            print(f"[Tool install] catalog entry appended → {catalog_path}")
+        else:
+            print(
+                f"[Tool install] catalog already contains {name}.v{version} — "
+                f"skipped append.",
+                file=sys.stderr,
+            )
+    else:
+        print(
+            f"[Tool install] no catalog-diff.yaml found; you'll need to "
+            f"add the catalog entry by hand.",
+            file=sys.stderr,
+        )
+
+    # Audit entry.
+    from forest_soul_forge.daemon.config import build_settings
+    from forest_soul_forge.core.audit_chain import AuditChain
+    settings = build_settings()
+    chain = AuditChain(settings.audit_chain_path)
+    entry = chain.append(
+        "forge_tool_installed",
+        {
+            "tool_name": name,
+            "tool_version": str(version),
+            "side_effects": spec.get("side_effects"),
+            "installed_from": str(staged_dir),
+            "installed_to": str(target_py),
+            "installed_by": resolve_operator(),
+            "mode": "cli_direct",
+            "force": bool(args.force),
+        },
+    )
+    print(f"[Tool install] audit_seq={entry.seq} forge_tool_installed")
+
+    print()
+    print(
+        "Restart the daemon (or rebuild the container) to pick up the "
+        "new tool. ADR-0019 T5 will lift the restart requirement once "
+        "the .fsf plugin loader lands."
+    )
+    print(
+        "Don't forget to register the tool class in "
+        "src/forest_soul_forge/tools/builtin/__init__.py — "
+        "`register_builtins(registry)` needs an explicit entry."
+    )
+    return 0
+
+
+def _repo_root() -> Path:
+    """Best-effort repo-root resolution. Walks up from this file
+    looking for pyproject.toml. Falls back to cwd."""
+    cur = Path(__file__).resolve()
+    for _ in range(6):
+        cur = cur.parent
+        if (cur / "pyproject.toml").exists():
+            return cur
+    return Path.cwd()
+
+
+def _append_catalog_entry(catalog_path: Path, diff_path: Path) -> bool:
+    """Append the catalog-diff entry to the catalog file. Returns
+    True if a new entry was appended; False if the entry's name was
+    already present (idempotent re-install).
+
+    Implementation detail: we parse the diff (always a single-item
+    list) and the catalog YAML, check for duplicate by name+version,
+    then re-emit the catalog. Comments inside the catalog are LOST
+    on re-emit (PyYAML doesn't round-trip them) — operators who
+    care should re-add by hand. T7 of ADR-0030 (catalog hot-reload)
+    will do better.
+    """
+    import yaml
+    diff_data = yaml.safe_load(diff_path.read_text(encoding="utf-8"))
+    if not isinstance(diff_data, list) or not diff_data:
+        return False
+    new_entry = diff_data[0]
+    new_key = (new_entry.get("name"), str(new_entry.get("version") or "1"))
+
+    catalog_data = yaml.safe_load(catalog_path.read_text(encoding="utf-8")) or {}
+    tools_list = catalog_data.get("tools") or []
+    for entry in tools_list:
+        if (entry.get("name"), str(entry.get("version") or "1")) == new_key:
+            return False
+    tools_list.append(new_entry)
+    catalog_data["tools"] = tools_list
+    catalog_path.write_text(
+        yaml.safe_dump(catalog_data, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
+    )
+    return True
+
+
 def _try_reload(settings) -> None:
     """Best-effort POST /skills/reload. If the daemon isn't running
     we just print a hint — the next daemon boot will pick up the
