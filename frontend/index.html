@@ -34,6 +34,7 @@
         Approvals
         <span class="tab__badge" id="pending-badge" hidden></span>
       </button>
+      <button class="tab" data-tab="skills" role="tab" aria-selected="false">Skills</button>
       <button class="tab" data-tab="audit" role="tab" aria-selected="false">Audit</button>
     </nav>
 
@@ -224,6 +225,28 @@
         <div class="panel__body">
           <div id="pending-list" class="pending-list">
             <div class="empty">Pick an agent above to see its queued tool calls.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Skills tab (ADR-0031 T5) — installed skill catalog +        -->
+    <!-- inline run form. Operator picks a skill, picks an agent,    -->
+    <!-- fills inputs, clicks run.                                   -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="skills" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Installed skills</h2>
+          <div class="panel__actions">
+            <span class="muted" id="skills-status">—</span>
+            <button class="btn btn--ghost btn--sm" id="skills-refresh" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="skills-list" class="skills-list">
+            <div class="empty">Loading skills…</div>
           </div>
         </div>
       </div>
