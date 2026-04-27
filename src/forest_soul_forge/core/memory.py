@@ -41,6 +41,21 @@ from typing import Any
 LAYERS = ("episodic", "semantic", "procedural")
 SCOPES = ("private", "lineage", "realm", "consented")
 
+# v0.2 (ADR-0033 / ADR-0022 v0.2) recall modes — control how widely
+# the reader can see across other agents' memory stores.
+#
+#   private   — owner-only, scope='private'. Default. Equivalent to v0.1.
+#   lineage   — owner's private+lineage entries + lineage_chain peers'
+#               scope='lineage' entries. The swarm's escalation path
+#               (security_low → security_mid → security_high).
+#   consented — lineage + scope='consented' entries the reader has an
+#               active grant for in memory_consents.
+#
+# `realm` is unreachable until federation lands (Horizon 3); deliberately
+# omitted from RECALL_MODES so an attempt to use it raises a clear error
+# instead of silently returning empty results.
+RECALL_MODES = ("private", "lineage", "consented")
+
 # Genre privacy floors per ADR-0027 §5. The mapping is keyed by genre
 # name and gives the **widest scope the genre is allowed to write**.
 # Companion is the strictest. Genres absent from this map default to
@@ -88,7 +103,19 @@ class UnknownScopeError(MemoryError):
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class MemoryEntry:
-    """One row from the memory_entries table."""
+    """One row from the memory_entries table.
+
+    The trailing three fields (added in schema v7 / ADR-0022 v0.2) are
+    populated only on **disclosed-copy** rows on the recipient's side
+    per ADR-0027 §4 minimum-disclosure rule. On originating-side rows
+    they are ``None``.
+
+    A row with ``disclosed_from_entry`` set means: "this is a reference
+    copy I was told about by another agent, not an original observation
+    of mine." Tools that surface memory to operators or LLMs should
+    distinguish the two — the summary string is intentionally narrower
+    than the original entry's content.
+    """
 
     entry_id: str
     instance_id: str
@@ -101,10 +128,20 @@ class MemoryEntry:
     consented_to: tuple[str, ...]
     created_at: str
     deleted_at: str | None = None
+    disclosed_from_entry: str | None = None
+    disclosed_summary: str | None = None
+    disclosed_at: str | None = None
 
     @property
     def is_deleted(self) -> bool:
         return self.deleted_at is not None
+
+    @property
+    def is_disclosed_copy(self) -> bool:
+        """True iff this row is a disclosed copy on a recipient store
+        (not an original observation). Useful for UI rendering and for
+        the audit trail summary."""
+        return self.disclosed_from_entry is not None
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +270,202 @@ class Memory:
         rows = self.conn.execute(sql, params).fetchall()
         return [_row_to_entry(r) for r in rows]
 
+    def recall_visible_to(
+        self,
+        *,
+        reader_instance_id: str,
+        mode: str = "private",
+        lineage_chain: tuple[str, ...] = (),
+        layer: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        include_deleted: bool = False,
+    ) -> list[MemoryEntry]:
+        """Recall from the reader's perspective, honoring scope visibility.
+
+        ADR-0033 + ADR-0022 v0.2 cross-agent disclosure path. Three modes:
+
+          mode='private'  — equivalent to v0.1 ``recall(reader)``: only
+                             reader's own ``scope='private'`` rows.
+          mode='lineage'  — reader's own private+lineage entries, PLUS
+                             any ``scope='lineage'`` row whose owner is
+                             in ``lineage_chain``. Caller computes the
+                             chain (parent + descendants) from the
+                             agent_ancestry table; this method just
+                             filters.
+          mode='consented' — lineage's set, PLUS any ``scope='consented'``
+                             row the reader has an active grant for in
+                             memory_consents (revoked_at IS NULL).
+
+        ``lineage_chain`` may include the reader's own instance_id; the
+        OR semantics tolerate that (rows aren't double-counted).
+
+        ``include_deleted=False`` skips tombstoned rows (default). Soft-
+        deleted entries are still in the table per ADR-0027 §3 but
+        excluded from default reads.
+
+        ``query`` is a substring match against content + tags +
+        disclosed_summary so disclosed copies are findable by the same
+        terms an operator would use against an original entry.
+
+        ``realm`` mode is intentionally not supported — federation
+        (Horizon 3) hasn't landed and ``realm`` scope is unreachable.
+        Asking for ``mode='realm'`` raises :class:`UnknownScopeError`
+        rather than silently returning empty results.
+        """
+        if mode not in RECALL_MODES:
+            raise UnknownScopeError(
+                f"recall mode must be one of {list(RECALL_MODES)}; "
+                f"got {mode!r}. ('realm' scope is reserved for H3 "
+                f"federation and unreachable today.)"
+            )
+        if layer is not None and layer not in LAYERS:
+            raise UnknownLayerError(
+                f"layer must be one of {list(LAYERS)}; got {layer!r}"
+            )
+
+        # Build the visibility predicate. Each clause is an OR-ed
+        # condition over (instance_id, scope). Parameters are
+        # accumulated in the same order so positional binding works
+        # cleanly.
+        visibility_clauses: list[str] = []
+        params: list[Any] = []
+
+        # Always: reader's own private entries (every mode).
+        visibility_clauses.append(
+            "(instance_id = ? AND scope = 'private')"
+        )
+        params.append(reader_instance_id)
+
+        # `lineage` and `consented` modes also see lineage entries.
+        if mode in ("lineage", "consented"):
+            # Reader's own scope='lineage' entries.
+            visibility_clauses.append(
+                "(instance_id = ? AND scope = 'lineage')"
+            )
+            params.append(reader_instance_id)
+            # Lineage chain peers' scope='lineage' entries. Use a
+            # placeholder list of the right cardinality. Empty chain →
+            # skip the clause entirely (no peers, no extra visibility).
+            chain = tuple(set(lineage_chain) - {reader_instance_id})
+            if chain:
+                placeholders = ",".join("?" for _ in chain)
+                visibility_clauses.append(
+                    f"(instance_id IN ({placeholders}) AND scope = 'lineage')"
+                )
+                params.extend(chain)
+
+        # `consented` also sees consented rows the reader has a grant for.
+        if mode == "consented":
+            # Reader's own scope='consented' entries.
+            visibility_clauses.append(
+                "(instance_id = ? AND scope = 'consented')"
+            )
+            params.append(reader_instance_id)
+            # Cross-agent consented entries: the reader has an active
+            # grant in memory_consents.
+            visibility_clauses.append(
+                "(scope = 'consented' AND entry_id IN ("
+                "  SELECT entry_id FROM memory_consents "
+                "  WHERE recipient_instance = ? AND revoked_at IS NULL"
+                "))"
+            )
+            params.append(reader_instance_id)
+
+        clauses = ["(" + " OR ".join(visibility_clauses) + ")"]
+        if layer is not None:
+            clauses.append("layer = ?")
+            params.append(layer)
+        if not include_deleted:
+            clauses.append("deleted_at IS NULL")
+        if query:
+            # Match content, tags, OR disclosed_summary so disclosed
+            # copies surface for the same terms.
+            clauses.append(
+                "(content LIKE ? OR tags_json LIKE ? "
+                "OR disclosed_summary LIKE ?)"
+            )
+            like = f"%{query}%"
+            params.extend([like, like, like])
+
+        sql = (
+            "SELECT * FROM memory_entries WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY created_at DESC LIMIT ?;"
+        )
+        params.append(int(limit))
+        rows = self.conn.execute(sql, params).fetchall()
+        return [_row_to_entry(r) for r in rows]
+
+    # ---- consent path (ADR-0022 v0.2) ----------------------------------
+    def grant_consent(
+        self,
+        *,
+        entry_id: str,
+        recipient_instance: str,
+        granted_by: str,
+    ) -> None:
+        """Record a per-event consent grant from the entry's owner to
+        ``recipient_instance``. Idempotent on the (entry_id, recipient)
+        pair — re-granting an already-granted consent updates the
+        ``granted_at`` timestamp and clears any ``revoked_at`` so a
+        previously revoked consent can be re-granted cleanly.
+
+        Caller is responsible for emitting ``memory_consent_granted``
+        on the audit chain.
+        """
+        self.conn.execute(
+            """
+            INSERT INTO memory_consents (
+                entry_id, recipient_instance, granted_at, granted_by, revoked_at
+            ) VALUES (?, ?, ?, ?, NULL)
+            ON CONFLICT(entry_id, recipient_instance) DO UPDATE SET
+                granted_at = excluded.granted_at,
+                granted_by = excluded.granted_by,
+                revoked_at = NULL;
+            """,
+            (entry_id, recipient_instance, _now_iso(), granted_by),
+        )
+
+    def revoke_consent(
+        self,
+        *,
+        entry_id: str,
+        recipient_instance: str,
+    ) -> bool:
+        """Revoke a previously granted consent. Returns True if a row
+        was updated. Per ADR-0027 §2 — withdrawal does NOT propagate to
+        copies the recipient already disclosed; that's the deletion
+        contract's job. The Memory class records the revocation; the
+        runtime emits ``memory_consent_revoked`` on the chain.
+        """
+        cur = self.conn.execute(
+            """
+            UPDATE memory_consents
+            SET revoked_at = ?
+            WHERE entry_id = ? AND recipient_instance = ?
+              AND revoked_at IS NULL;
+            """,
+            (_now_iso(), entry_id, recipient_instance),
+        )
+        return cur.rowcount > 0
+
+    def is_consented(
+        self, *, entry_id: str, recipient_instance: str,
+    ) -> bool:
+        """True iff ``recipient_instance`` has an active (non-revoked)
+        consent grant on ``entry_id``."""
+        row = self.conn.execute(
+            """
+            SELECT 1 FROM memory_consents
+            WHERE entry_id = ? AND recipient_instance = ?
+              AND revoked_at IS NULL
+            LIMIT 1;
+            """,
+            (entry_id, recipient_instance),
+        ).fetchone()
+        return row is not None
+
     def get(self, entry_id: str) -> MemoryEntry | None:
         row = self.conn.execute(
             "SELECT * FROM memory_entries WHERE entry_id=?;",
@@ -296,6 +529,12 @@ def _sha256(s: str) -> str:
 
 
 def _row_to_entry(row) -> MemoryEntry:
+    # The v7 disclosed_* columns may be absent on a row from a v6-shaped
+    # in-memory test fixture or a registry that hasn't been migrated
+    # yet. Defensively probe via row.keys() so this helper works on both
+    # shapes — important for Memory unit tests that build their own
+    # SQLite without going through Registry.bootstrap.
+    keys = row.keys() if hasattr(row, "keys") else ()
     return MemoryEntry(
         entry_id=row["entry_id"],
         instance_id=row["instance_id"],
@@ -308,4 +547,10 @@ def _row_to_entry(row) -> MemoryEntry:
         consented_to=tuple(json.loads(row["consented_to_json"] or "[]")),
         created_at=row["created_at"],
         deleted_at=row["deleted_at"],
+        disclosed_from_entry=row["disclosed_from_entry"]
+            if "disclosed_from_entry" in keys else None,
+        disclosed_summary=row["disclosed_summary"]
+            if "disclosed_summary" in keys else None,
+        disclosed_at=row["disclosed_at"]
+            if "disclosed_at" in keys else None,
     )
