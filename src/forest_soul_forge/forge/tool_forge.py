@@ -321,6 +321,14 @@ class ForgeResult:
 
     All paths are absolute. ``proposed_only`` indicates a dry-run
     invocation that stopped after stage 1.
+
+    ``analysis`` is the AnalysisResult from ADR-0030 T2 — populated
+    when codegen ran. None for proposed-only flows.
+
+    ``staging_blocked`` is True when at least one hard analysis flag
+    fired. The CLI surfaces this as "REJECTED" status and refuses to
+    advertise the tool for install (``--force`` overrides). The file
+    is still written to staged/ so the operator can inspect it.
     """
 
     spec: ToolSpec
@@ -331,6 +339,8 @@ class ForgeResult:
     proposed_only: bool = False
     catalog_diff_path: Path | None = None
     log_lines: list[str] = field(default_factory=list)
+    analysis: Any | None = None  # forest_soul_forge.forge.static_analysis.AnalysisResult | None
+    staging_blocked: bool = False
 
 
 async def forge_tool(
@@ -416,15 +426,45 @@ async def forge_tool(
     log.append(raw_python)
 
     python_source = parse_python_codegen(raw_python)
-    if "class " not in python_source:
-        # Surface as a forge log warning rather than a hard error.
-        # T2's static analyzer will reject if no Tool class is found.
-        log.append("WARN: codegen output contains no `class ` keyword — "
-                   "T2 static analysis will likely reject this.")
 
     tool_path = staged_dir / "tool.py"
     tool_path.write_text(python_source, encoding="utf-8")
     log.append(f"\n=== STAGED ===\n  {staged_dir}")
+
+    # Stage 3 — STATIC ANALYSIS (ADR-0030 T2)
+    from forest_soul_forge.forge.static_analysis import analyze
+    analysis = analyze(python_source, declared_side_effects=spec.side_effects)
+    log.append("\n=== STATIC ANALYSIS ===")
+    if not analysis.flags:
+        log.append("  no flags raised.")
+    else:
+        log.append(
+            f"  hard: {len(analysis.hard_flags)}, "
+            f"soft: {len(analysis.soft_flags)}"
+        )
+        for flag in analysis.flags:
+            line_tag = f" L{flag.line}" if flag.line else ""
+            log.append(f"  [{flag.kind}] {flag.rule}{line_tag}: {flag.message}")
+    staging_blocked = analysis.install_blocked
+    if staging_blocked:
+        # Drop a sibling REJECTED.md so a folder listing tells the
+        # operator at a glance which staged tools should not be
+        # installed without a --force re-forge.
+        (staged_dir / "REJECTED.md").write_text(
+            "# REJECTED — hard static-analysis flags\n\n"
+            "This staged tool failed Tool Forge's static-analysis\n"
+            "(ADR-0030 T2). Installing without addressing the hard\n"
+            "flags risks a runtime that can't dispatch the tool, or\n"
+            "introduces sandbox-escape primitives.\n\n"
+            "Hard flags:\n\n"
+            + "\n".join(
+                f"- **{f.rule}** (L{f.line}): {f.message}"
+                for f in analysis.hard_flags
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        log.append("\n=== HARD FLAGS — install blocked. ===")
 
     # Catalog diff — what the operator should append to
     # config/tool_catalog.yaml. Generated once so the operator can
@@ -440,6 +480,8 @@ async def forge_tool(
         log_path=log_path, staged_dir=staged_dir,
         catalog_diff_path=catalog_diff_path,
         log_lines=log,
+        analysis=analysis,
+        staging_blocked=staging_blocked,
     )
 
 

@@ -296,3 +296,72 @@ class GreetTool:
                 out_dir=tmp_path,
                 forged_by="alex",
             ))
+
+
+# ---------------------------------------------------------------------------
+# T2 integration — analysis result threaded through the forge pipeline
+# ---------------------------------------------------------------------------
+class TestForgeStaticAnalysisIntegration:
+    _PROPOSE = TestForgeTool._PROPOSE_REPLY
+    _GOOD_CODEGEN = TestForgeTool._CODEGEN_REPLY
+
+    _BAD_CODEGEN = '''
+"""greet — but with eval."""
+from forest_soul_forge.tools.base import ToolResult, ToolValidationError
+
+
+class GreetTool:
+    name = "greet"
+    version = "1"
+    side_effects = "read_only"
+
+    def validate(self, args):
+        if "name" not in args:
+            raise ToolValidationError("missing 'name'")
+
+    async def execute(self, args, ctx):
+        return ToolResult(output={"greeting": eval("'hi ' + args['name']")})
+'''.strip()
+
+    def test_clean_codegen_yields_no_flags(self, tmp_path):
+        provider = _FakeProvider(replies=[self._PROPOSE, self._GOOD_CODEGEN])
+        result = _run(forge_tool(
+            description="hi",
+            provider=provider,
+            out_dir=tmp_path,
+            forged_by="alex",
+        ))
+        assert result.analysis is not None
+        assert result.analysis.flags == ()
+        assert result.staging_blocked is False
+
+    def test_eval_codegen_blocks_staging(self, tmp_path):
+        provider = _FakeProvider(replies=[self._PROPOSE, self._BAD_CODEGEN])
+        result = _run(forge_tool(
+            description="hi",
+            provider=provider,
+            out_dir=tmp_path,
+            forged_by="alex",
+        ))
+        assert result.analysis is not None
+        rules = [f.rule for f in result.analysis.flags]
+        assert "forbidden_builtin" in rules
+        assert result.staging_blocked is True
+        # REJECTED.md was written alongside the staged folder.
+        assert (result.staged_dir / "REJECTED.md").exists()
+        # Tool is still on disk for operator inspection.
+        assert result.tool_path is not None
+        assert result.tool_path.exists()
+
+    def test_analysis_recorded_in_forge_log(self, tmp_path):
+        provider = _FakeProvider(replies=[self._PROPOSE, self._BAD_CODEGEN])
+        result = _run(forge_tool(
+            description="hi",
+            provider=provider,
+            out_dir=tmp_path,
+            forged_by="alex",
+        ))
+        log = result.log_path.read_text()
+        assert "STATIC ANALYSIS" in log
+        assert "forbidden_builtin" in log
+        assert "HARD FLAGS — install blocked" in log

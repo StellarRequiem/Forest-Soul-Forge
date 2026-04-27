@@ -74,14 +74,50 @@ def run(args: argparse.Namespace) -> int:
             return 0
 
     # If we got here, codegen ran during forge_tool_sync (proposed_only
-    # was False). Tell the operator what landed.
+    # was False). Surface the static-analysis report (ADR-0030 T2)
+    # before the staging summary so hard flags are the first thing the
+    # operator sees.
+    analysis = result.analysis
+    if analysis is not None and analysis.flags:
+        print()
+        print(f"[Tool Forge] static analysis: "
+              f"{len(analysis.hard_flags)} hard, "
+              f"{len(analysis.soft_flags)} soft")
+        for f in analysis.hard_flags:
+            tag = f" L{f.line}" if f.line else ""
+            print(f"  [HARD] {f.rule}{tag}: {f.message}")
+        for f in analysis.soft_flags:
+            tag = f" L{f.line}" if f.line else ""
+            print(f"  [soft] {f.rule}{tag}: {f.message}")
+        print()
+    elif analysis is not None:
+        print()
+        print("[Tool Forge] static analysis: clean (0 hard, 0 soft)")
+
+    if result.staging_blocked and not args.force:
+        print(
+            f"[Tool Forge] REJECTED — hard flags fired. Folder kept at:\n"
+            f"  {result.staged_dir}\n"
+            f"  REJECTED.md lists the hard flags.\n\n"
+            f"Re-forge with a clearer description, or pass --force to "
+            f"keep this output anyway.",
+            file=sys.stderr,
+        )
+        return 1
+
     print(f"[Tool Forge] staged at:\n  {result.staged_dir}")
     print(f"  spec.yaml:        {result.spec_path}")
     print(f"  tool.py:          {result.tool_path}")
     print(f"  catalog-diff:     {result.catalog_diff_path}")
     print(f"  forge.log:        {result.log_path}")
+    if result.staging_blocked and args.force:
+        print()
+        print(
+            "[Tool Forge] WARNING: --force used. Hard flags were not "
+            "addressed. REJECTED.md is alongside the staged folder."
+        )
     print()
-    print("Next steps (T2-T4 will automate these):")
+    print("Next steps (T3-T4 will automate these):")
     print(
         "  1. Review tool.py — read it, run ruff, run the generated tests "
         "if any."

@@ -86,6 +86,15 @@ def _build_parser() -> argparse.ArgumentParser:
             "usage should leave this off."
         ),
     )
+    forge_tool.add_argument(
+        "--force", action="store_true",
+        help=(
+            "Stage the forged tool even if static analysis raised hard "
+            "flags. The folder still gets a REJECTED.md alongside; the "
+            "operator is on the hook for review. Useful during forge "
+            "iteration when you know the LLM nearly got it right."
+        ),
+    )
     forge_tool.set_defaults(_run=_run_forge_tool)
 
     # `fsf forge skill ...` — placeholder; ADR-0031 T1+ will wire this.
