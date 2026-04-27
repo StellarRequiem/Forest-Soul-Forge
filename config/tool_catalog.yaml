@@ -385,6 +385,121 @@ tools:
     side_effects: read_only
     archetype_tags: [investigator, communicator, security_low, security_mid, security_high]
 
+  # ----- security_low tier (ADR-0033 Phase B1) ----------------------------
+  audit_chain_verify.v1:
+    name: audit_chain_verify
+    version: "1"
+    description: |
+      Walk the daemon's audit chain JSONL and verify hash links
+      end-to-end. Returns ok/broken-at + reason; surfaces unknown
+      event types as a forward-compat warning (not a failure).
+      Wraps AuditChain.verify; LogLurker's reason to exist.
+    input_schema:
+      type: object
+      properties:
+        max_unknown_to_report:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 20
+    side_effects: read_only
+    archetype_tags: [security_low, guardian, observer]
+
+  file_integrity.v1:
+    name: file_integrity
+    version: "1"
+    description: |
+      sha256 a list of operator-named paths (files or directories);
+      optionally diff against a baseline {path: digest} dict.
+      Symlinks are NOT followed — they're recorded as
+      'symlink:<target>' so the algorithm doesn't get tricked by
+      planted symlinks. Capped at 5000 files / 256 MiB per file
+      per call. Used by PatchPatrol + LogLurker for daily sweeps.
+    input_schema:
+      type: object
+      required: [paths]
+      properties:
+        paths:
+          type: array
+          items: {type: string}
+          minItems: 1
+          maxItems: 200
+        mode:
+          type: string
+          enum: [snapshot, diff]
+          default: snapshot
+        baseline:
+          type: object
+          description: "Required when mode='diff'; ignored otherwise."
+    side_effects: read_only
+    archetype_tags: [security_low, security_high, guardian]
+
+  log_scan.v1:
+    name: log_scan
+    version: "1"
+    description: |
+      Regex/pattern scan over a list of files or directories. Walks
+      directories recursively; never follows symlinks. Refuses
+      catastrophic-backtracking patterns at validation time.
+      Returns matches with optional surrounding context lines, capped
+      at max_matches (default 500). LogLurker's primary surface.
+    input_schema:
+      type: object
+      required: [paths, pattern]
+      properties:
+        paths:
+          type: array
+          items: {type: string}
+          minItems: 1
+          maxItems: 200
+        pattern:
+          type: string
+          maxLength: 256
+        flags:
+          type: array
+          items:
+            type: string
+            enum: [IGNORECASE, DOTALL, MULTILINE, VERBOSE]
+        context_lines:
+          type: integer
+          minimum: 0
+          maximum: 5
+          default: 0
+        max_matches:
+          type: integer
+          minimum: 1
+          maximum: 5000
+          default: 500
+    side_effects: read_only
+    archetype_tags: [security_low, observer, investigator]
+
+  log_aggregate.v1:
+    name: log_aggregate
+    version: "1"
+    description: |
+      Combine multiple log files into one timestamp-sorted view,
+      normalizing common timestamp formats (ISO 8601, syslog,
+      apache-common, unix epoch) to ISO 8601 UTC. Untimestamped
+      lines float to the head of the output rather than being
+      silently dropped. Caps: 50 files, 64 MiB per file, 10000
+      lines out (operator-tunable up to 50000). Feeds AnomalyAce.
+    input_schema:
+      type: object
+      required: [paths]
+      properties:
+        paths:
+          type: array
+          items: {type: string}
+          minItems: 1
+          maxItems: 50
+        max_lines_out:
+          type: integer
+          minimum: 1
+          maximum: 50000
+          default: 10000
+    side_effects: read_only
+    archetype_tags: [security_low, observer, investigator]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
