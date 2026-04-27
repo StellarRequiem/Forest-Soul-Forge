@@ -1,16 +1,20 @@
 # 🌲 Forest Soul Forge
 
-**Forge AI agents with real character.** A local-first agent foundry where every agent has cryptographically-signed identity, quantified personality, a tamper-evident behavior log, and a constitutional rulebook compiled from sliders you set yourself.
+**Forge AI agents with real character.** A local-first agent foundry where every agent has cryptographically-signed identity, quantified personality, a tamper-evident behavior log, a constitutional rulebook compiled from sliders you set yourself, and a runtime that can dispatch tools, run multi-step skills, remember across sessions, and delegate work across a lineage of other agents — all gated, audited, and reversible.
 
 ```
 ┌──────────────────┐   build  ┌──────────────────┐   spawn  ┌──────────────────┐
 │  trait sliders   │ ───────▶ │  Soul + Const    │ ───────▶ │ child inherits   │
 │  29 dimensions   │          │  signed identity │          │ lineage + DNA    │
 │  6 domains       │          │  immutable hash  │          │ traceable line   │
-└──────────────────┘          └──────────────────┘          └──────────────────┘
-       caution=85                  ff250994a6...                  gen2 watcher
-       empathy=70                  observer · network             of network_watcher
-       thoroughness=85             approval-required              parent: 5937af...
+└──────────────────┘          └─────────┬────────┘          └────────┬─────────┘
+       caution=85                       │                            │
+       empathy=70             dispatch  ▼                  delegate  ▼
+       thoroughness=85          ┌──────────────────┐         ┌──────────────────┐
+                                │ tools + skills   │         │ swarm escalation │
+                                │ approval queue   │         │ agent_delegated  │
+                                │ memory subsystem │         │ across tiers     │
+                                └──────────────────┘         └──────────────────┘
 ```
 
 Agents are local-first, audit-trailed, and policy-gated. No cloud lock-in. No silent exfil. No "trust me bro" — every action chained to a tamper-evident JSONL with content-addressed hashes.
@@ -19,13 +23,17 @@ Agents are local-first, audit-trailed, and policy-gated. No cloud lock-in. No si
 
 ## What this is, technically
 
-A **personal agent factory** that turns trait profiles into governed agents. The unit of work is an *agent instance*: a soul.md narrative + constitution.yaml policy + audit-chain provenance + registry row, all four agreeing on the same content-addressed hash.
+A **personal agent factory** that turns trait profiles into governed agents who can actually do work. The unit of work is an *agent instance*: a soul.md narrative + constitution.yaml policy + audit-chain provenance + registry row, all four agreeing on the same content-addressed hash. From there the runtime adds:
 
 - 🧬 **Agent DNA** — every agent has a 12-char short ID + 64-char SHA-256 derived from its canonical trait profile. Same profile → same DNA, every time.
 - 🌳 **Lineage** — spawn an agent from a parent and the child inherits a recorded ancestry chain. Closure-table queries (ancestors / descendants) are O(depth).
-- 🔐 **Audit chain** — append-only JSONL with hash-chained entries. `agent_created`, `agent_spawned`, `agent_archived`, `voice_regenerated`, `spawn_genre_override`. Tamper-evident under the threat model in ADR-0005.
-- 🎭 **Genre taxonomy** — seven role families (Observer, Investigator, Communicator, Actuator, Guardian, Researcher, Companion) with built-in spawn rules and risk floors. Pick a genre, get the right defaults.
-- 🛠️ **Tool catalog** — versioned MCP-style descriptors. Per-archetype kits + per-genre fallback. Trait-driven constraint policy auto-tightens approval rules for high-risk side effects.
+- 🔐 **Audit chain** — append-only JSONL with hash-chained entries. Every agent lifecycle event, every tool dispatch, every memory write/disclose, every consent grant, every cross-agent delegation lands here. Tamper-evident under the threat model in ADR-0005.
+- 🎭 **Genre taxonomy** — ten role families with built-in spawn rules, risk floors, and per-genre memory ceilings + approval policies. Pick a genre, get the right defaults.
+- 🛠️ **Tool runtime** — versioned MCP-style tools with declarative constraint policy, per-session call counters, side-effect tiers, and an approval queue for human-gated calls. Includes `delegate.v1` for cross-agent skill invocation.
+- 📚 **Skill runtime** — multi-step manifests that orchestrate tool calls into reusable procedures. Skills emit their own audit events; nested tool calls inherit the agent's constraints.
+- 🧠 **Memory subsystem** — per-agent episodic / semantic / procedural store with four scopes (private / lineage / consented / realm). Cross-agent disclosure follows ADR-0027's minimum-disclosure rule: the recipient gets a summary + back-reference, never the original content.
+- 🏭 **Tool Forge + Skill Forge** — describe a tool or skill in plain English, get a hash-pinned implementation that satisfies the runtime contract. Static analysis + sandboxed test execution before install.
+- 🔌 **`.fsf` plugin format** — operator-installed tools land in `data/plugins/<name>.v<version>/` and hot-load via `POST /tools/reload`.
 - 🤖 **Pluggable LLM provider** — local-first (Ollama, LM Studio) by default; optional frontier (OpenAI-compatible). Per-task model routing.
 - 📜 **LLM-enriched soul.md** — `## Voice` section auto-generated by the active model, weighted by your genre's signature traits. Falls back to a deterministic template if the model is down. soul.md is never broken-by-LLM-failure.
 
@@ -33,34 +41,107 @@ Local execution, content-addressed artifacts as source of truth, SQLite as a der
 
 ---
 
-## The systems (a.k.a. what you actually play with)
+## The systems (what you actually play with)
 
 ### 🎚️ Trait sliders — 29 dimensions, 6 domains
 
 Drag sliders for `caution`, `empathy`, `thoroughness`, `evidence_demand`, `verbosity`, `directness`, and 23 others. Every trait belongs to a domain (security / audit / cognitive / communication / emotional / embodiment) and a tier (primary / secondary / tertiary). Tier weighting decides how much each trait pulls on the final policy.
 
 Same sliders feed:
-- The agent's **DNA** (deterministic — your kid will always have the same ID for the same profile).
+- The agent's **DNA** (deterministic — the same profile always produces the same ID).
 - The agent's **constitution** (machine-readable rulebook with strictness-wins conflict resolution).
 - The agent's **soul.md** voice (LLM-rendered narrative with concrete behaviors, not adjectives).
 
-### 🎭 Seven genres
+### 🎭 Ten genres
 
-| Genre | What it does | Risk floor |
-|-------|--------------|-----------:|
-| **Observer** | Watches. Reports. Doesn't act. | read_only |
-| **Investigator** | Correlates across observation surfaces. Drills into a finding. | network |
-| **Communicator** | Wraps findings into briefings, pages, summaries. Outbound human-gated. | network |
-| **Actuator** | Takes durable external actions (tickets, deploys, alerts). All gated. | external |
-| **Guardian** | Safety check, second opinion, refusal arbiter. Reads-only. | read_only |
-| **Researcher** | Literature scan, knowledge consolidation. Allowlisted reach. | network |
-| **Companion** | Therapy / accessibility / interactive presence. Local-only provider. | network + local-only |
+Seven shipped with ADR-0021; three more (`security_low / mid / high`) added with ADR-0033 for the defensive plane.
 
-Each genre carries its own trait emphasis (Companion → empathy/patience/warmth; Actuator → caution/evidence_demand), spawn-compatibility table (Observer can spawn Investigator but NOT Actuator without explicit override + audit event), and risk floor (Observer agents can't accept network tools, period).
+| Genre | What it does | Risk floor | Memory ceiling |
+|---|---|---|---|
+| **Observer** | Watches. Reports. Doesn't act. | read_only | lineage |
+| **Investigator** | Correlates across observation surfaces. Drills into a finding. | network | lineage |
+| **Communicator** | Wraps findings into briefings, pages, summaries. Outbound human-gated. | network | consented |
+| **Actuator** | Takes durable external actions (tickets, deploys, alerts). All gated. | external | lineage |
+| **Guardian** | Safety check, second opinion, refusal arbiter. Reads-only. | read_only | private |
+| **Researcher** | Literature scan, knowledge consolidation. Allowlisted reach. | network | consented |
+| **Companion** | Therapy / accessibility / interactive presence. | network + local-only | private |
+| **security_low** | Always-on patrol — patches, gatekeepers, log lurkers. | read_only | lineage |
+| **security_mid** | Investigators + responders — anomaly, NDR, SOAR-style triage. | network | lineage |
+| **security_high** | Paranoid apex — zero-trust, vault, deception. | external + local-only | private |
 
-### 🧰 Tool overrides
+Each genre carries its own trait emphasis, spawn-compatibility table, risk floor, memory ceiling, and approval policy. Spawning across an incompatible genre boundary requires an explicit `--override-genre-spawn-rule` flag and emits a dedicated `spawn_genre_override` audit event.
 
-Pick from the tool catalog at birth time — `packet_query`, `flow_summary`, `dns_lookup`, `log_grep`, `log_aggregate`, `baseline_compare`, `correlation_window`, `timestamp_window`. Toggle any default off, add anything from the catalog. The constraint policy reacts in real time — high-caution + high-thoroughness on a network tool means "approval required, ≤ 50 calls/session, every call audited."
+### 🛠️ Tool runtime + approval queue
+
+Every tool is a versioned, hash-pinned implementation that satisfies a Protocol-style contract. The dispatcher threads a `ToolContext` (instance_id, role, genre, session_id, memory, delegate, provider) through every call and enforces:
+
+- **Constitution gating** — the agent must list this tool in its constitution; tools_add at birth grants access
+- **Per-session call counter** — `max_calls_per_session` from the constraint policy, enforced atomically
+- **Genre risk floor** — Companion-genre agents can't fire network tools; Observer can't fire write-class
+- **Approval queue** — calls with `requires_human_approval` (or elevated by genre policy) land in a pending queue; an operator approves or rejects via the Approvals tab, and the dispatcher resumes the original call against the same args + idempotency key
+- **Per-genre approval graduation** (ADR-0033 A4) — `security_high` gates everything beyond `read_only`; `security_mid` gates filesystem + external (network passes for investigators); `security_low` defers to tool config
+- **Per-call accounting** — tokens_used + cost_usd flow into the character sheet so the operator sees what every agent has spent
+
+Built-in tools today: `timestamp_window`, `memory_recall`, `memory_write`, `memory_disclose`, `delegate`. Operators install more via `.fsf` plugins.
+
+### 📚 Skill runtime
+
+Skills are YAML manifests that orchestrate tool calls into reusable procedures with a bounded interpolation language (`${step.field}`, `count`, `any`, `all`, `len`, `default`). The runtime walks the DAG, dispatches each tool through the same `ToolDispatcher` (so the agent's constraints + counter + audit chain stay coherent), and emits seven audit events per skill run.
+
+`POST /agents/{id}/skills/run` invokes a skill against an agent. Pending-approval steps suspend the run and return a ticket; the operator decides via the Approvals tab.
+
+### 🏭 Tool Forge + Skill Forge
+
+Describe what you want in English; the forge generates a hash-pinned implementation. Six-stage pipeline:
+
+1. **DESCRIBE** — operator types plain English
+2. **PROPOSE** — LLM emits a candidate spec (name, version, side_effects, archetype tags, schema)
+3. **CODEGEN** — Python/YAML emitted; static analysis flags risk patterns
+4. **REVIEW** — operator reads the diff
+5. **PROVE** — sandbox-run generated tests
+6. **INSTALL** — emit to `data/forge/staged/`, append catalog diff, audit-chain entry; `POST /tools/reload` picks up
+
+CLI: `fsf forge tool` and `fsf forge skill`. Installer: `fsf install tool` (default `--plugin`, hot-loadable) and `fsf install skill`.
+
+### 🧠 Memory subsystem (ADR-0022 v0.2)
+
+Per-agent store with three layers (episodic / semantic / procedural) and four scopes:
+
+| Scope | Who can read | Default for |
+|---|---|---|
+| `private` | The owning agent only | Companion / Guardian / security_high |
+| `lineage` | Owner + parent + descendants | Observer / Investigator / Actuator / security_low / security_mid |
+| `consented` | Explicit allowlist of agent IDs | Researcher / Communicator |
+| `realm` | Any agent in the same realm | Reserved for Horizon 3 federation |
+
+`memory_recall.v1` takes a `mode` arg (private / lineage / consented) and walks the agent_ancestry table to compute the lineage chain. `memory_disclose.v1` materializes a summary-only copy on a recipient's store per ADR-0027 §4 minimum-disclosure rule — the original content stays put. Per-event consent flows through `POST/DELETE /agents/{id}/memory/consents` and the Memory tab in the frontend.
+
+### 🛡️ Security Swarm (ADR-0033)
+
+Three-tier defensive plane. Phase A foundation (genres + memory v0.2 + delegate.v1 + approval graduation + sudo helper) is shipped. Phase B is the toolkit forge (~27 tools split across the three tiers). Phase D births the nine canonical agents:
+
+```
+Low Swarm (security_low)
+  PatchPatrol — anxious perfectionist; OS/software inventory, patch nag
+  Gatekeeper  — blunt bouncer; firewall + NAC + MFA enforcer
+  LogLurker   — introverted hoarder; log aggregation + alerting
+            ▼ escalates via memory disclosure + delegate.v1
+Mid Swarm (security_mid)
+  AnomalyAce    — curious detective; SIEM, UEBA, anomaly scoring
+  NetNinja      — calm wire-watcher; NDR, lateral-movement detection
+  ResponseRogue — action hero; SOAR-style triage, isolation, evidence
+            ▼ escalates
+High Swarm (security_high)
+  ZeroZero       — cold paranoid; continuous auth, JIT access, micro-seg
+  VaultWarden    — overprotective; key inventory, HSM-bounded, tamper
+  DeceptionDuke  — trickster; honeypots, canary tokens, decoy files
+```
+
+Every link is an audit event. Every memory write respects the per-tier ceiling. Every privileged step hits the approval queue. The chain is **explicit and inspectable** — there is no hidden swarm gossip.
+
+### 🔐 Sudo helper (ADR-0033 A6)
+
+Phase B's three privileged tools (`isolate_process.v1`, `dynamic_policy.v1`, `tamper_detect.v1` SIP path) need elevated capabilities. The daemon stays non-root; a small allowlisted helper at `/usr/local/sbin/fsf-priv` runs under `sudo NOPASSWD` for exactly four operations (kill-pid, pf-add, pf-drop, read-protected). Two layers of defense: the helper has its own argparse + per-op allowlists, and the daemon-side `PrivClient` refuses bad input before shell-out. See [docs/runbooks/sudo-helper-install.md](docs/runbooks/sudo-helper-install.md).
 
 ### 📃 The constitution
 
@@ -73,24 +154,24 @@ Strictness wins on conflict. Hash covers policies + thresholds + scope + duties 
 
 ### 📓 The audit chain
 
-Append-only JSONL at `data/audit_chain.jsonl`. Every birth, spawn, archive, voice-regeneration, and override emits a hash-chained entry. The chain is the source of truth — the SQLite registry is rebuildable from it.
+Append-only JSONL at `data/audit_chain.jsonl`. Every birth, spawn, archive, voice-regeneration, override, tool dispatch, skill invocation, memory operation, consent grant, and cross-agent delegation emits a hash-chained entry. The chain is the source of truth — the SQLite registry is rebuildable from it.
 
 ```jsonl
 {"seq":42,"timestamp":"2026-04-26T07:11:18Z","prev_hash":"a1b2...","entry_hash":"c3d4...","agent_dna":"5937afd40a51","event_type":"agent_spawned","event_data":{...}}
-{"seq":43,"timestamp":"2026-04-26T07:11:18Z","prev_hash":"c3d4...","entry_hash":"e5f6...","agent_dna":"5937afd40a51","event_type":"spawn_genre_override","event_data":{"parent_genre":"observer","child_genre":"actuator","rationale":"operator override"}}
+{"seq":43,"timestamp":"2026-04-26T07:11:18Z","prev_hash":"c3d4...","entry_hash":"e5f6...","agent_dna":"5937afd40a51","event_type":"memory_disclosed","event_data":{"summary_digest":"sha256:...","recipient_instance":"...","summary_length":42}}
+{"seq":44,"timestamp":"2026-04-26T07:11:19Z","prev_hash":"e5f6...","entry_hash":"7890...","agent_dna":"5937afd40a51","event_type":"agent_delegated","event_data":{"caller_instance":"...","target_instance":"...","skill_name":"investigate_finding","reason":"escalating signal"}}
 ```
-
-### 🎙️ Voice rendering (LLM-enriched souls)
-
-Run with the LLM enrichment on, the soul.md gets a `## Voice` section written by the active model, anchored on your genre's signature traits. Run with it off, the template renderer produces a deterministic body. Either way the soul.md is byte-stable below the heading.
-
-Provider failures (Ollama down, network blip, model loading) fall back to template silently — soul.md generation **never fails because the LLM did**.
 
 ### 🖥️ The Forge UI
 
-Vanilla JS on nginx. No build step, no framework lock-in. Three tabs:
+Vanilla JS on nginx. No build step, no framework lock-in. Seven tabs:
+
 - **Forge** — slide traits, pick genre, pick role, pick tools, watch a live preview update with DNA, grade, dominant domain, radar chart, constitution_hash. Click Birth.
 - **Agents** — every agent born, with parent/child links, status, archive controls.
+- **Approvals** — pending tool calls awaiting operator decision; approve or reject inline.
+- **Skills** — installed skill catalog; per-card "Run on agent…" form with inputs JSON + result inline.
+- **Tools** — registered tools (built-in vs plugin vs unknown), with reload-from-disk button.
+- **Memory** — per-agent entries by mode (private/lineage/consented), consent grants issued, inline grant + revoke. Disclosed copies surfaced with a left-border accent.
 - **Audit** — tail of the chain, filterable by agent.
 
 ---
@@ -118,6 +199,16 @@ If you're on macOS, every operation has a `.command` script you can double-click
 - `ollama-up.command` / `kill-ollama.command` — local model lifecycle
 - `run-tests.command` / `t4-tests.command` — dockerized pytest harness
 - `push.command` — git push origin (persistent)
+- `scripts/live-smoke.sh` — eight-stage end-to-end smoke runner against a live daemon
+
+CLI for power users:
+
+```bash
+fsf forge tool   "scan a directory for files older than N days"
+fsf forge skill  "morning sweep: scan logs, baseline diff, alert on signals"
+fsf install tool data/forge/staged/<name>.v1/    # default --plugin (hot-loadable)
+fsf install skill data/forge/staged/<name>.v1/skill.yaml
+```
 
 ---
 
@@ -126,9 +217,7 @@ If you're on macOS, every operation has a `.command` script you can double-click
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ Browser (vanilla JS, nginx static serve)                        │
-│   Forge tab — trait sliders · genre · role · tools · preview    │
-│   Agents tab — registry browse, lineage, archive                │
-│   Audit tab  — chain tail, per-agent filter                     │
+│  Forge · Agents · Approvals · Skills · Tools · Memory · Audit   │
 └──────────────────────────────┬──────────────────────────────────┘
                                │ HTTP (CORS-allowed, X-FSF-Token)
                                ▼
@@ -136,27 +225,39 @@ If you're on macOS, every operation has a `.command` script you can double-click
 │ FastAPI daemon  127.0.0.1:7423                                  │
 │   /healthz · /agents · /traits · /genres · /tools · /preview    │
 │   /birth · /spawn · /archive · /agents/{id}/regenerate-voice    │
-│   /runtime/provider · /runtime/provider/generate                │
-│   X-Idempotency-Key (per ADR-0007), single-writer SQLite lock   │
-└─────────┬─────────────────────┬──────────────────┬──────────────┘
-          │                     │                  │
-          ▼                     ▼                  ▼
-┌─────────────────┐   ┌──────────────────┐   ┌─────────────────┐
-│ Trait + genre + │   │  Soul + Const    │   │  Audit chain    │
-│ tool engines    │   │  generators      │   │  (JSONL)        │
-│ (pure funcs)    │   │  artifact dir    │   │  hash-chained   │
-└─────────────────┘   └────────┬─────────┘   └────────┬────────┘
-                               │                      │
-                               ▼                      ▼
-                      ┌─────────────────────────────────┐
-                      │  SQLite registry (rebuildable)  │
-                      └─────────────────────────────────┘
-                               │
-                               ▼
-                      ┌─────────────────┐
-                      │ LLM provider    │   ← local-first (Ollama/LM Studio)
-                      │ (pluggable)     │     optional frontier (OpenAI-compat)
-                      └─────────────────┘
+│   /agents/{id}/tools/call · /agents/{id}/skills/run             │
+│   /pending-calls · /pending-calls/{id}/approve|reject           │
+│   /agents/{id}/memory/consents (POST | DELETE | GET)            │
+│   /tools/registered · /tools/reload · /skills · /skills/reload  │
+│   /agents/{id}/character-sheet · /runtime/provider              │
+│   X-Idempotency-Key, single-writer SQLite lock, write_lock      │
+└─────────┬───────────────┬──────────────┬──────────────┬─────────┘
+          │               │              │              │
+          ▼               ▼              ▼              ▼
+┌─────────────────┐  ┌──────────┐  ┌────────────┐  ┌──────────────┐
+│ Trait + genre   │  │ Tool +   │  │ Memory     │  │ Audit chain  │
+│ + tool engines  │  │ skill    │  │ subsystem  │  │ (JSONL,      │
+│ + constraint    │  │ runtimes │  │ (sqlite +  │  │ hash-linked) │
+│ policy          │  │          │  │ consents)  │  │              │
+└────────┬────────┘  └────┬─────┘  └─────┬──────┘  └──────┬───────┘
+         │                │              │                │
+         └────────────────┴──────┬───────┴────────────────┘
+                                 ▼
+                       ┌─────────────────────────┐
+                       │ SQLite registry v7      │
+                       │ (rebuildable from above)│
+                       └────────────┬────────────┘
+                                    ▼
+                            ┌─────────────────┐
+                            │ LLM provider    │ ← local-first (Ollama)
+                            │ (pluggable)     │   optional frontier
+                            └─────────────────┘
+                                    ▲
+                                    │
+                            ┌───────┴─────────┐
+                            │ Privileged ops  │ ← /usr/local/sbin/fsf-priv
+                            │ (sudo helper)   │   (optional; gates 4 ops)
+                            └─────────────────┘
 ```
 
 Read [docs/architecture/layout.md](docs/architecture/layout.md) for the directory map. Read the [ADR index](docs/decisions/README.md) for every architectural decision and why.
@@ -180,11 +281,21 @@ Every non-trivial design choice has its own ADR. Files live in [docs/decisions/]
 | 0016  | Session modes + self-spawning cipher                      | Proposed |
 | 0017  | LLM-enriched soul.md narrative                            | Proposed |
 | 0018  | Agent tool catalog                                        | Proposed |
-| 0019  | Tool execution runtime                                    | Proposed |
+| 0019  | Tool execution runtime (T1–T6 implemented)                | Proposed |
 | 0020  | Agent character sheet                                     | Proposed |
-| 0021  | Role genres / agent taxonomy                              | Proposed |
-| 0022  | Memory subsystem                                          | Proposed |
+| 0021  | Role genres / agent taxonomy (T1–T8 implemented)          | Proposed |
+| 0022  | Memory subsystem (v0.1 + v0.2 implemented)                | Proposed |
 | 0023  | Benchmark suite                                           | Proposed |
+| 0024  | Project horizons + roadmap brainstorm                     | Proposed |
+| 0025  | Threat model v2                                           | Placeholder |
+| 0026  | Provider economics                                        | Placeholder |
+| 0027  | Memory privacy contract (information-flow control)        | Proposed |
+| 0028  | Data portability                                          | Placeholder |
+| 0029  | Regulatory map                                            | Placeholder |
+| 0030  | Tool Forge (T1–T4 implemented)                            | Proposed |
+| 0031  | Skill Forge (T1, T2a/T2b, T5, T7, T8 implemented)         | Proposed |
+| 0032  | CLI architecture                                          | Proposed |
+| 0033  | **Security Swarm** (Phase A complete; B–E queued)         | Proposed |
 
 Don't trust the doc — trust the code. Every Accepted ADR has a corresponding implementation; every Proposed ADR is in flight or queued.
 
@@ -192,27 +303,81 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 
 ## What's running today
 
+**Foundation (Accepted):**
 - ✅ Trait engine (29 traits, 6 domains, role-weighted grading)
 - ✅ Constitution builder + content-addressed hash
-- ✅ Agent DNA + lineage chain
-- ✅ Audit chain (5 event types, hash-linked, rebuildable registry)
+- ✅ Agent DNA + lineage chain (closure-table queries)
+- ✅ Audit chain (hash-linked, rebuildable registry, 30+ event types)
 - ✅ FastAPI daemon (auth, idempotency, CORS, write-lock, lifespan diagnostics)
 - ✅ Local-first provider (Ollama + frontier slot for OpenAI-compat)
 - ✅ LLM voice renderer with template fallback
-- ✅ Tool catalog + per-archetype kits + trait-driven constraints
-- ✅ Genre engine — seven genres, role claims, spawn-compat rules, kit-tier enforcement, genre-weighted voice prompts, frontend selector
-- ✅ Vanilla-JS frontend with three tabs (Forge / Agents / Audit) and a live-preview radar chart
+
+**Tool runtime (ADR-0018 + ADR-0019, implemented):**
+- ✅ Tool catalog + per-archetype kits + per-genre fallback
+- ✅ Trait-driven constraint policy (caution × thoroughness × side_effects)
+- ✅ ToolDispatcher with 5 audit event types, per-call accounting, genre risk-floor enforcement
+- ✅ Approval queue: persisted tickets, list / approve / reject / resume endpoints, frontend modal
+- ✅ Per-genre approval graduation (security_high gates everything beyond read_only)
+- ✅ Plugin loader + `.fsf` package format + `POST /tools/reload`
+- ✅ `delegate.v1` cross-agent skill invocation with lineage gating + audit
+
+**Genres (ADR-0021 + ADR-0033, implemented):**
+- ✅ Ten genres: Observer / Investigator / Communicator / Actuator / Guardian / Researcher / Companion + security_low / mid / high
+- ✅ Spawn-compat rules with operator override (audited)
+- ✅ Kit-tier enforcement + voice-renderer trait_emphasis weighting
+- ✅ Per-genre memory ceiling enforcement at write path
+- ✅ Genre selector in frontend with role-list filtering
+
+**Memory (ADR-0022 v0.1 + v0.2, implemented):**
+- ✅ Per-agent store with episodic/semantic/procedural layers
+- ✅ Four scopes (private / lineage / consented / realm-reserved)
+- ✅ `memory_write.v1`, `memory_recall.v1` (mode arg + auto-lineage discovery), `memory_disclose.v1`
+- ✅ Cross-agent disclosure with summary-only minimum-disclosure rule
+- ✅ Per-event consent grants via POST/DELETE/GET endpoints
+- ✅ Frontend Memory tab with mode selector + grant/revoke UI
+
+**Forge (ADR-0030 + ADR-0031, implemented):**
+- ✅ Tool Forge: describe → propose → codegen → review → prove (sandboxed pytest) → install
+- ✅ Skill Forge: manifest parser + interpolation language + skill runtime + 7 audit events
+- ✅ `fsf install tool` / `fsf install skill` with hot-reload endpoints
+
+**Security Swarm Phase A (ADR-0033, implemented):**
+- ✅ Three-tier security genre family + memory_ceiling field
+- ✅ `delegate.v1` cross-agent invocation primitive
+- ✅ Per-genre approval policy graduation
+- ✅ Sudo helper at `/usr/local/sbin/fsf-priv` (greenlit; optional install)
+- ✅ Audit event registration: `agent_delegated`, `memory_consent_*`, etc.
+
+**Frontend:**
+- ✅ Seven tabs (Forge / Agents / Approvals / Skills / Tools / Memory / Audit)
+- ✅ Live-preview radar chart, character-sheet view, plugin reload, consent grants
+
+**Ops:**
 - ✅ Docker compose stack with optional `llm` profile (Ollama)
+- ✅ `scripts/live-smoke.sh` end-to-end smoke runner (8 stages)
+
+---
 
 ## What's coming next
 
+**Phase B — Security Swarm toolkit forge** (ADR-0033 §Phases):
+
+| Tier | Tools | Status |
+|---|---|---|
+| **B1 low** (~9) | patch_check, software_inventory, log_scan, log_aggregate, audit_chain_verify, file_integrity, port_policy_audit, usb_device_audit, mfa_check | queued |
+| **B2 mid** (~10) | behavioral_baseline, log_correlate, anomaly_score, ueba_track, traffic_flow_local, lateral_movement_detect, port_scan_local, triage, isolate_process *(sudo helper)*, evidence_collect | queued |
+| **B3 high** (~8) | jit_access, continuous_verify, posture_check, dynamic_policy *(sudo helper)*, key_inventory, tamper_detect *(SIP)*, canary_token, honeypot_local | queued |
+
+**Then:**
+
 | Item | Status |
-|------|--------|
-| Character sheet endpoint (ADR-0020 implementation) | next up |
-| Tool execution runtime (ADR-0019) — make agents *do work* | designed, T1 next up |
-| Memory subsystem (ADR-0022 implementation) | queued |
-| Benchmark suite per-genre fixtures (ADR-0023 implementation) | queued |
+|---|---|
+| Phase D — birth 9 swarm agents + skill catalog (~25 manifests) | queued |
+| Phase E — synthetic-incident smoke test driving the full chain | queued |
+| Memory v0.3 — per-relationship + tiered consent (Horizon 3) | designed |
 | Companion-tier real-time A/V interaction | planned |
+| HSM hardware adapter for VaultWarden's `key_rotate.v1` | gated on operator decision |
+| External product MCP adapters (Wazuh / Suricata / etc.) | gated on operator install |
 
 ---
 
@@ -220,7 +385,7 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 
 Two co-equal pillars, specified in the agent's core (not layered on as configuration):
 
-**1. Protect the user and their data.** Local execution. No silent exfil. Auditable behavior. Explicit human approval on high-impact actions. Tamper-evident record of everything the agent did.
+**1. Protect the user and their data.** Local execution. No silent exfil. Auditable behavior. Explicit human approval on high-impact actions. Tamper-evident record of everything the agent did. The Security Swarm extends this from "the agent is well-behaved" to "the agent's environment is actively defended."
 
 **2. Understand the user.** Adaptive, accessibility-aware interaction as a first-class purpose. Every agent performs mental / emotional / physical status checks on the user as standard practice. The medical / therapeutic tier (Companion genre) supports real-time A/V interaction via consumer or custom peripherals, operator-or-guardian-provided profile data, and explicit rapport-building. Goal: accurate translation and interaction with the world for users for whom "default" tone and modality don't fit — sensory impairments, neurodivergence, spectrum conditions, age extremes, ADA accommodations.
 
@@ -231,8 +396,9 @@ A Forest Soul Forge agent that protects its user but doesn't try to understand t
 ## Get involved
 
 - **Run it locally** — `docker-up.command` and you're forging in 60 seconds.
-- **Read an ADR** — start with ADR-0001 (trait tree) or ADR-0021 (genres). They're short.
-- **Birth an agent** — drag sliders, click Birth, inspect `data/soul_generated/`. Try Spawn.
+- **Read an ADR** — start with ADR-0001 (trait tree), ADR-0021 (genres), or ADR-0033 (security swarm). They're short and cite their own trade-offs.
+- **Birth an agent** — drag sliders, click Birth, inspect `data/soul_generated/`. Try Spawn. Try the Skills tab. Try the Memory tab.
+- **Forge a tool or skill** — `fsf forge tool "..."` from the CLI. Six-stage pipeline keeps you in control at every step.
 - **Open an issue** — feature ideas, role requests, genre additions all welcome.
 
 ---
