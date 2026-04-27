@@ -254,7 +254,9 @@ tools:
     side_effects: read_only
     archetype_tags: [anomaly_investigator]
 
-  - name: memory_recall
+  # ----- memory subsystem (ADR-0022 v0.1+v0.2) ----------------------------
+  memory_recall.v1:
+    name: memory_recall
     version: "1"
     description: |
       Read entries from the calling agent's own memory store.
@@ -277,16 +279,17 @@ tools:
     side_effects: read_only
     archetype_tags: [companion, researcher, investigator, communicator]
 
-  - name: memory_write
+  memory_write.v1:
+    name: memory_write
     version: "1"
     description: |
       Append an entry to the calling agent's own memory store.
       Same-agent self-writes only — cross-agent disclosure is a
-      separate tool (memory_disclose.v1, future). The genre's
-      privacy ceiling caps the scope: a Companion-genre agent
-      cannot write past `private`. side_effects=read_only because
-      the write is local-only (registry SQLite) — no network, no
-      host filesystem outside the registry, no external service.
+      separate tool (memory_disclose.v1). The genre's privacy
+      ceiling caps the scope: a Companion-genre agent cannot
+      write past `private`. side_effects=read_only because the
+      write is local-only (registry SQLite) — no network, no host
+      filesystem outside the registry, no external service.
     input_schema:
       type: object
       required: [content, layer]
@@ -304,6 +307,30 @@ tools:
           items: {type: string}
     side_effects: read_only
     archetype_tags: [companion, researcher, investigator, communicator]
+
+  memory_disclose.v1:
+    name: memory_disclose
+    version: "1"
+    description: |
+      Disclose one of the calling agent's `scope='consented'` memory
+      entries to another agent's store. ADR-0022 v0.2 + ADR-0027 §4
+      data-minimization rule: the recipient gets a summary string
+      and a back-reference to the source entry — NOT the original
+      content. Refuses if the source is not owned by the caller, is
+      deleted, is at a non-consented scope, or if no active consent
+      grant exists for the (source, recipient) pair. Used by the
+      Security Swarm (ADR-0033) to escalate findings across tier
+      boundaries. side_effects=read_only because the disclosed copy
+      lands in the local registry; no network or external system.
+    input_schema:
+      type: object
+      required: [source_entry_id, recipient_instance, summary]
+      properties:
+        source_entry_id:    {type: string}
+        recipient_instance: {type: string}
+        summary:            {type: string}
+    side_effects: read_only
+    archetype_tags: [investigator, communicator, security_low, security_mid, security_high]
 
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
