@@ -37,6 +37,13 @@ _SIDE_EFFECT_TIERS = ("read_only", "network", "filesystem", "external")
 # For a genre's risk_profile.provider_constraint. Only "local_only" today
 # (Companion's Phase 5 floor). Extensible to "frontier_only" / "any" later.
 _PROVIDER_CONSTRAINTS = frozenset({"local_only"})
+# ADR-0027 §1 read scopes. A genre's `memory_ceiling` is the widest scope an
+# agent in that genre may write a memory entry under — strictly stricter than
+# (or equal to) `realm`. Enforced at the memory write path (ADR-0022 v0.1+).
+# Order encodes strictness: private < lineage < consented < realm. A genre's
+# ceiling rejects any write whose scope index exceeds this.
+_MEMORY_CEILING_TIERS: tuple[str, ...] = ("private", "lineage", "consented", "realm")
+_MEMORY_CEILINGS = frozenset(_MEMORY_CEILING_TIERS)
 
 
 class GenreEngineError(Exception):
@@ -54,10 +61,17 @@ class RiskProfile:
     ``provider_constraint`` is None for most genres; ``"local_only"`` for
     Companion (ADR-0008 Phase 5 floor — therapy / accessibility agents
     must run on local providers, no frontier).
+
+    ``memory_ceiling`` is the widest scope an agent in this genre may write
+    a memory entry under (ADR-0027 §1 + §5). Defaults to ``"private"``
+    when the YAML omits it — strictest sensible fallback. Enforced at the
+    memory write path; widening past the ceiling requires an explicit
+    ``memory_scope_override`` audit event with operator id + reason.
     """
 
     max_side_effects: str
     provider_constraint: str | None = None
+    memory_ceiling: str = "private"
 
 
 @dataclass(frozen=True)
@@ -241,9 +255,26 @@ def _parse_genre_entry(name: str, entry: Any) -> GenreDef:
                 f"{provider_constraint!r}"
             )
 
+    # ADR-0027 §1 + §5 — memory_ceiling. Optional; defaults to "private"
+    # (the strictest scope, safest fallback when YAML omits the field).
+    # Validated against the four canonical scopes; an unknown value is
+    # always a typo, never a forward-compat extension.
+    memory_ceiling_raw = risk_raw.get("memory_ceiling")
+    if memory_ceiling_raw is None:
+        memory_ceiling = "private"
+    else:
+        memory_ceiling = str(memory_ceiling_raw).strip()
+        if memory_ceiling not in _MEMORY_CEILINGS:
+            raise GenreEngineError(
+                f"genre {name!r}.risk_profile.memory_ceiling must be one of "
+                f"{sorted(_MEMORY_CEILINGS)} or omitted; got "
+                f"{memory_ceiling!r}"
+            )
+
     risk_profile = RiskProfile(
         max_side_effects=max_side_effects,
         provider_constraint=provider_constraint,
+        memory_ceiling=memory_ceiling,
     )
 
     default_kit_pattern = _require_str_list(entry, name, "default_kit_pattern")
@@ -374,3 +405,31 @@ def kit_violations_for_genre(
         if _tier_index(se) > ceiling:
             violations.append((name, se))
     return violations
+
+
+# ---------------------------------------------------------------------------
+# ADR-0033 + ADR-0027 §5 — memory ceiling enforcement
+# ---------------------------------------------------------------------------
+def _memory_tier_index(scope: str) -> int:
+    """Return strictness index of a memory scope. Unknown → strictest
+    (private = 0). Same fail-closed shape as ``_tier_index`` for
+    ``side_effects``."""
+    try:
+        return _MEMORY_CEILING_TIERS.index(scope)
+    except ValueError:
+        return 0
+
+
+def memory_scope_exceeds_ceiling(scope: str, ceiling: str) -> bool:
+    """True iff ``scope`` is wider than ``ceiling``.
+
+    Used at the memory write path: a Companion-genre agent (ceiling=private)
+    that tries to write at scope=lineage triggers a refusal with this
+    function returning True. Operator override path raises a separate
+    audit event (``memory_scope_override``).
+
+    Unknown scope OR unknown ceiling fail closed (treated as widest /
+    strictest respectively) so a typo on either side never quietly
+    permits a wider write than intended.
+    """
+    return _memory_tier_index(scope) > _memory_tier_index(ceiling)

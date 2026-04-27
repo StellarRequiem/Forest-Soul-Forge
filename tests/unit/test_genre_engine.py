@@ -1,11 +1,13 @@
-"""Tests for ``forest_soul_forge.core.genre_engine`` (ADR-0021 T1).
+"""Tests for ``forest_soul_forge.core.genre_engine`` (ADR-0021 T1, ADR-0033).
 
 Coverage:
-- TestRealCatalog        — config/genres.yaml loads + has all 7 genres + claims 3 known roles
+- TestRealCatalog        — config/genres.yaml loads + has all 10 genres + claims known roles
 - TestLoadErrors         — every malformed-input path raises GenreEngineError
 - TestPublicAPI          — genre_for / roles_for / all_genres / can_spawn
 - TestEmptyEngine        — fallback path returns sensible empty defaults
 - TestValidateAgainstTraitEngine — separate ADR-0021 invariant function
+- TestMemoryCeiling      — ADR-0027 §1+§5 ceiling parsing + comparator (added with ADR-0033)
+- TestSecuritySwarm      — ADR-0033 three-tier genre family + 9 canonical roles
 """
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ from forest_soul_forge.core.genre_engine import (
     RiskProfile,
     empty_engine,
     load_genres,
+    memory_scope_exceeds_ceiling,
     validate_against_trait_engine,
 )
 
@@ -70,11 +73,13 @@ class TestRealCatalog:
         assert engine.version == "0.1"
         assert engine.source_path == REAL_GENRES
 
-    def test_has_seven_genres(self):
+    def test_has_ten_genres(self):
+        # ADR-0021 shipped 7; ADR-0033 added the security_low/mid/high family.
         engine = load_genres(REAL_GENRES)
         assert set(engine.genres.keys()) == {
             "observer", "investigator", "communicator", "actuator",
             "guardian", "researcher", "companion",
+            "security_low", "security_mid", "security_high",
         }
 
     def test_existing_trait_engine_roles_claimed(self):
@@ -243,8 +248,9 @@ class TestPublicAPI:
         with pytest.raises(GenreEngineError, match="unknown genre"):
             engine.roles_for("phantom")
 
-    def test_all_genres_returns_seven(self, engine):
-        assert len(engine.all_genres()) == 7
+    def test_all_genres_returns_ten(self, engine):
+        # 7 from ADR-0021 + 3 from ADR-0033.
+        assert len(engine.all_genres()) == 10
 
     def test_can_spawn_unknown_parent_raises(self, engine):
         with pytest.raises(GenreEngineError, match="unknown parent genre"):
@@ -295,3 +301,163 @@ class TestValidateAgainstTraitEngine:
         e = empty_engine()
         unclaimed = validate_against_trait_engine(e, ["a", "b", "c"])
         assert unclaimed == ["a", "b", "c"]
+
+
+# ===========================================================================
+# Memory ceiling — ADR-0027 §1+§5 (added with ADR-0033)
+# ===========================================================================
+class TestMemoryCeiling:
+    """Per-genre memory write ceilings — Companion's `private` floor is the
+    canonical example, but every genre carries a ceiling now."""
+
+    def test_real_catalog_ceilings_match_adr_0027(self):
+        # ADR-0027 §5 names the ceilings; pin them so a future yaml edit
+        # that drifts this contract surfaces.
+        engine = load_genres(REAL_GENRES)
+        expected = {
+            "companion":    "private",
+            "guardian":     "private",
+            "observer":     "lineage",
+            "investigator": "lineage",
+            "actuator":     "lineage",
+            "researcher":   "consented",
+            "communicator": "consented",
+            # ADR-0033 additions:
+            "security_low":  "lineage",
+            "security_mid":  "lineage",
+            "security_high": "private",
+        }
+        for gname, ceiling in expected.items():
+            actual = engine.genres[gname].risk_profile.memory_ceiling
+            assert actual == ceiling, (
+                f"genre {gname!r}: ceiling drifted from ADR-0027/ADR-0033 — "
+                f"expected {ceiling!r}, got {actual!r}"
+            )
+
+    def test_omitted_ceiling_defaults_to_private(self, tmp_path):
+        # When risk_profile omits memory_ceiling the loader picks "private"
+        # — the strictest scope, safest fallback for forgotten config.
+        body = yaml.safe_load(_good_yaml())  # _good_yaml has no ceiling
+        p = _write(tmp_path, yaml.safe_dump(body))
+        engine = load_genres(p)
+        assert engine.genres["watcher"].risk_profile.memory_ceiling == "private"
+
+    def test_unknown_ceiling_raises(self, tmp_path):
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["risk_profile"]["memory_ceiling"] = "telepathy"
+        p = _write(tmp_path, yaml.safe_dump(body))
+        with pytest.raises(GenreEngineError, match="memory_ceiling"):
+            load_genres(p)
+
+    def test_scope_exceeds_ceiling_companion_case(self):
+        # Companion's identity rule from ADR-0027 §5: cannot widen to lineage.
+        assert memory_scope_exceeds_ceiling("lineage", "private") is True
+        assert memory_scope_exceeds_ceiling("realm", "private") is True
+        # Same scope is fine.
+        assert memory_scope_exceeds_ceiling("private", "private") is False
+
+    def test_scope_exceeds_ceiling_lineage_case(self):
+        # Mid-tier security: lineage allowed; consented or wider is rejected.
+        assert memory_scope_exceeds_ceiling("private", "lineage") is False
+        assert memory_scope_exceeds_ceiling("lineage", "lineage") is False
+        assert memory_scope_exceeds_ceiling("consented", "lineage") is True
+        assert memory_scope_exceeds_ceiling("realm", "lineage") is True
+
+    def test_scope_exceeds_ceiling_unknown_fails_closed(self):
+        # Unknown scope index → 0 (treated as private). Better to falsely
+        # ALLOW the write and surface in audit (private is fine everywhere)
+        # than to falsely permit a wider write.
+        assert memory_scope_exceeds_ceiling("brand_new_scope", "lineage") is False
+
+
+# ===========================================================================
+# Security Swarm — ADR-0033 three-tier genre family
+# ===========================================================================
+class TestSecuritySwarm:
+    """The new genres + 9 canonical roles that ADR-0033 adds. Pinned so a
+    future yaml edit that drifts the swarm shape surfaces."""
+
+    @pytest.fixture(scope="class")
+    def engine(self):
+        return load_genres(REAL_GENRES)
+
+    def test_security_low_claims_three_roles(self, engine):
+        roles = engine.roles_for("security_low")
+        assert set(roles) == {"patch_patrol", "gatekeeper", "log_lurker"}
+
+    def test_security_mid_claims_three_roles(self, engine):
+        roles = engine.roles_for("security_mid")
+        assert set(roles) == {"anomaly_ace", "net_ninja", "response_rogue"}
+
+    def test_security_high_claims_three_roles(self, engine):
+        roles = engine.roles_for("security_high")
+        assert set(roles) == {"zero_zero", "vault_warden", "deception_duke"}
+
+    def test_low_can_escalate_to_mid_but_not_high(self, engine):
+        # ADR-0033: tier-skipping is forbidden. low → mid only.
+        assert engine.can_spawn("security_low", "security_mid") is True
+        assert engine.can_spawn("security_low", "security_high") is False
+
+    def test_mid_can_escalate_to_high(self, engine):
+        assert engine.can_spawn("security_mid", "security_high") is True
+
+    def test_mid_can_spawn_back_down_to_low(self, engine):
+        # Mid investigators sometimes spawn observers for deeper passive
+        # watching — same rationale as Investigator → Observer in ADR-0021.
+        assert engine.can_spawn("security_mid", "security_low") is True
+
+    def test_high_is_a_sink(self, engine):
+        # ADR-0033: apex tier never spawns out. Only self-spawn.
+        for other in (
+            "security_low", "security_mid",
+            "observer", "investigator", "communicator",
+            "actuator", "guardian", "researcher", "companion",
+        ):
+            assert engine.can_spawn("security_high", other) is False, (
+                f"security_high should not be allowed to spawn into {other!r}"
+            )
+        assert engine.can_spawn("security_high", "security_high") is True
+
+    def test_high_carries_local_only_provider_constraint(self, engine):
+        # ADR-0033: key material + posture data must not leave the machine.
+        # Mirrors Companion's floor for the same reason.
+        high = engine.genres["security_high"]
+        assert high.risk_profile.provider_constraint == "local_only"
+
+    def test_high_ceiling_is_private(self, engine):
+        # ADR-0033: cross-tier disclosure must be explicit; private default.
+        assert engine.genres["security_high"].risk_profile.memory_ceiling == "private"
+
+    def test_low_max_side_effects_is_read_only(self, engine):
+        # ADR-0033: low tier is observation/audit only, never actuating.
+        assert engine.genres["security_low"].risk_profile.max_side_effects == "read_only"
+
+    def test_mid_max_side_effects_is_network(self, engine):
+        assert engine.genres["security_mid"].risk_profile.max_side_effects == "network"
+
+    def test_high_max_side_effects_is_external(self, engine):
+        # High tier has the broadest side-effect ceiling because it includes
+        # privileged actuation (dynamic_policy, isolate_process). Constrained
+        # by approval queue + provider_constraint, not by tier.
+        assert engine.genres["security_high"].risk_profile.max_side_effects == "external"
+
+    def test_no_swarm_role_is_double_claimed(self, engine):
+        # Guard against a future edit that accidentally lists e.g.
+        # log_lurker under both security_low and security_mid.
+        nine_roles = (
+            "patch_patrol", "gatekeeper", "log_lurker",
+            "anomaly_ace", "net_ninja", "response_rogue",
+            "zero_zero", "vault_warden", "deception_duke",
+        )
+        seen: dict[str, str] = {}
+        for genre in engine.genres.values():
+            for role in genre.roles:
+                if role in nine_roles:
+                    assert role not in seen, (
+                        f"swarm role {role!r} double-claimed by "
+                        f"{seen[role]!r} and {genre.name!r}"
+                    )
+                    seen[role] = genre.name
+        assert set(seen.keys()) == set(nine_roles), (
+            "not every swarm role was claimed by some security_* genre"
+        )

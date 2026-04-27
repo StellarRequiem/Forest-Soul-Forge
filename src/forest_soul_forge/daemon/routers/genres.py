@@ -30,6 +30,7 @@ def _genre_to_out(gd) -> GenreOut:  # noqa: ANN001 — GenreDef is frozen
         risk_profile=GenreRiskProfileOut(
             max_side_effects=gd.risk_profile.max_side_effects,
             provider_constraint=gd.risk_profile.provider_constraint,
+            memory_ceiling=gd.risk_profile.memory_ceiling,
         ),
         default_kit_pattern=list(gd.default_kit_pattern),
         trait_emphasis=list(gd.trait_emphasis),

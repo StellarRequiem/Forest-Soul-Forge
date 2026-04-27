@@ -498,6 +498,10 @@ class GenreRiskProfileOut(BaseModel):
 
     max_side_effects: str
     provider_constraint: str | None = None
+    # ADR-0027 §1+§5 — widest memory scope an agent in this genre may
+    # write under. Surfaced via /genres so the frontend can render the
+    # privacy floor of each genre and the security-swarm tier difference.
+    memory_ceiling: str = "private"
 
 
 class GenreOut(BaseModel):

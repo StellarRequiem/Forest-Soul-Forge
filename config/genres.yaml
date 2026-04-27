@@ -25,6 +25,7 @@ genres:
       that the operator can gate.
     risk_profile:
       max_side_effects: read_only
+      memory_ceiling: lineage   # ADR-0027 §5: working notes flow up to investigators/communicators
     default_kit_pattern:
       - passive_observation
       - timestamp_helpers
@@ -48,6 +49,7 @@ genres:
       watching, or forward to Communicator to report findings.
     risk_profile:
       max_side_effects: network
+      memory_ceiling: lineage   # ADR-0027 §5: episodic findings flow to communicators
     default_kit_pattern:
       - passive_observation
       - cross_source_correlation
@@ -69,6 +71,7 @@ genres:
       lineage.
     risk_profile:
       max_side_effects: network
+      memory_ceiling: consented   # ADR-0027 §5: pre-federation; "realm" is unreachable until H3
     default_kit_pattern:
       - summarization
       - external_messaging
@@ -95,6 +98,7 @@ genres:
       action chains.
     risk_profile:
       max_side_effects: external
+      memory_ceiling: lineage   # ADR-0027 §5: action results visible to escalation chain only
     default_kit_pattern:
       - external_actions
       - approval_workflows
@@ -114,6 +118,7 @@ genres:
       emphasis. The "no" agent in a multi-agent flow.
     risk_profile:
       max_side_effects: read_only
+      memory_ceiling: private   # ADR-0027 §5: assessments stay internal to the arbiter
     default_kit_pattern:
       - content_review
       - policy_check
@@ -135,6 +140,7 @@ genres:
       drills into a specific anomaly; a Researcher surveys a topic.
     risk_profile:
       max_side_effects: network
+      memory_ceiling: consented   # ADR-0027 §5: synthesis can disclose to allowlisted recipients
     default_kit_pattern:
       - web_research
       - corpus_synthesis
@@ -157,6 +163,7 @@ genres:
     risk_profile:
       max_side_effects: network
       provider_constraint: local_only
+      memory_ceiling: private   # ADR-0027 §5: Companion identity, non-overridable
     default_kit_pattern:
       - interactive_session
       - memory_recall
@@ -174,3 +181,77 @@ genres:
       # forge, not the agents being spawned). Inherits Companion's
       # local-only provider floor automatically.
       - operator_companion
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Security Swarm (ADR-0033) — three new genres for the defensive plane.
+  # Strict tier hierarchy: low catches the obvious, mid digs deeper, high
+  # assumes hostility. Memory ceiling tightens as you climb. Cross-tier
+  # spawn permitted only via the swarm's escalation pattern (low→mid,
+  # mid→high) — no skipping levels.
+  # ─────────────────────────────────────────────────────────────────────
+
+  security_low:
+    description: |
+      Always-on, narrow-scope defenders that catch the obvious. Read-only
+      or local-advisory tooling; findings flow up to security_mid via
+      memory lineage scope. Never act outside their narrow kit. The
+      swarm's first responders — high vigilance, low blast radius.
+    risk_profile:
+      max_side_effects: read_only
+      memory_ceiling: lineage   # ADR-0033: findings must be readable by mid-tier investigators
+    default_kit_pattern:
+      - host_inventory
+      - log_observation
+      - policy_audit
+    trait_emphasis: [vigilance, audit_trail_discipline, thoroughness, double_checking]
+    memory_pattern: short_retention
+    spawn_compatibility: [security_low, security_mid]
+    roles:
+      - patch_patrol
+      - gatekeeper
+      - log_lurker
+
+  security_mid:
+    description: |
+      Investigators and responders. Read broadly across host telemetry,
+      correlate, score anomalies, and — with operator approval — contain.
+      Receives findings from security_low and emits its own to
+      security_high. The swarm's working tier; most action lives here.
+    risk_profile:
+      max_side_effects: network
+      memory_ceiling: lineage   # ADR-0033: episodic findings flow to high-tier policy/key roles
+    default_kit_pattern:
+      - cross_source_correlation
+      - behavioral_baseline
+      - host_containment
+    trait_emphasis: [evidence_demand, lateral_thinking, technical_accuracy, suspicion]
+    memory_pattern: episodic_long
+    spawn_compatibility: [security_low, security_mid, security_high]
+    roles:
+      - anomaly_ace
+      - net_ninja
+      - response_rogue
+
+  security_high:
+    description: |
+      The paranoid apex. Assumes hostility, gates everything, and runs
+      the smallest blast radius the platform can produce. Memory writes
+      default to private; cross-tier disclosure is explicit and audited.
+      Spawns are tier-internal — high never spawns out of tier. Local-only
+      providers required (mirrors Companion's floor for the same reason:
+      key material and posture data must not leave the machine).
+    risk_profile:
+      max_side_effects: external
+      provider_constraint: local_only
+      memory_ceiling: private   # ADR-0033: apex tier; explicit consent required for any disclosure
+    default_kit_pattern:
+      - zero_trust_enforcement
+      - key_management
+      - deception_primitives
+    trait_emphasis: [caution, suspicion, evidence_demand, audit_trail_discipline]
+    memory_pattern: long_consolidated
+    spawn_compatibility: [security_high]
+    roles:
+      - zero_zero
+      - vault_warden
+      - deception_duke
