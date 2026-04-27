@@ -44,6 +44,13 @@ daemon = [
 [project.urls]
 Repository = "https://github.com/StellarRequiem/Forest-Soul-Forge"
 
+[project.scripts]
+# ADR-0030 Tool Forge CLI / ADR-0031 Skill Forge CLI dispatch through
+# this single entry point. ``fsf forge tool ...`` and ``fsf forge skill
+# ...`` are the canonical surfaces; future subcommands (``fsf agents``,
+# ``fsf audit``) hang off the same root.
+fsf = "forest_soul_forge.cli.main:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/forest_soul_forge"]
 
