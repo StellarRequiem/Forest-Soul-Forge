@@ -74,6 +74,26 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # ADR-0021 T6 — operator override on spawn-compat. Recorded so the
     # operator can later answer "why did we spawn this combination?".
     "spawn_genre_override",
+    # ADR-0031 T2 — skill runtime lifecycle. Seven entries so the chain
+    # records the moment-by-moment progression of a skill run; an
+    # auditor can reconstruct the DAG walk from the chain alone.
+    # skill_invoked at start, skill_completed at end (both with the
+    # same skill_invoked_seq backref); per-step events in between
+    # carry skill_invoked_seq + step_id so they group cleanly.
+    "skill_invoked",
+    "skill_step_started",
+    "skill_step_completed",
+    "skill_step_skipped",
+    "skill_step_failed",
+    "skill_completed",
+    # ADR-0030 T1 / ADR-0031 T1 — forge lifecycle. Forge events are
+    # emitted by the CLI (and future frontend) before the artifact
+    # exists in the catalog; they record what the operator
+    # considered, not just what got installed.
+    "forge_tool_proposed",
+    "forge_tool_installed",
+    "forge_skill_proposed",
+    "forge_skill_installed",
 })
 
 
