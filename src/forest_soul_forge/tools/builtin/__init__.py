@@ -8,10 +8,14 @@ T1 ships ``timestamp_window.v1`` only — pure function, no I/O, perfect
 proving ground for the Tool Protocol contract. Other catalog entries
 will get implementations as the corresponding tranches land.
 """
+from forest_soul_forge.tools.builtin.anomaly_score import AnomalyScoreTool
 from forest_soul_forge.tools.builtin.audit_chain_verify import AuditChainVerifyTool
+from forest_soul_forge.tools.builtin.behavioral_baseline import BehavioralBaselineTool
 from forest_soul_forge.tools.builtin.delegate import DelegateTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
+from forest_soul_forge.tools.builtin.lateral_movement_detect import LateralMovementDetectTool
 from forest_soul_forge.tools.builtin.log_aggregate import LogAggregateTool
+from forest_soul_forge.tools.builtin.log_correlate import LogCorrelateTool
 from forest_soul_forge.tools.builtin.log_scan import LogScanTool
 from forest_soul_forge.tools.builtin.memory_disclose import MemoryDiscloseTool
 from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
@@ -36,6 +40,10 @@ __all__ = [
     "SoftwareInventoryTool",
     "PortPolicyAuditTool",
     "UsbDeviceAuditTool",
+    "BehavioralBaselineTool",
+    "AnomalyScoreTool",
+    "LogCorrelateTool",
+    "LateralMovementDetectTool",
 ]
 
 
@@ -61,3 +69,8 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     registry.register(SoftwareInventoryTool())
     registry.register(PortPolicyAuditTool())
     registry.register(UsbDeviceAuditTool())
+    # ADR-0033 Phase B2 — security_mid pure-python analytics.
+    registry.register(BehavioralBaselineTool())
+    registry.register(AnomalyScoreTool())
+    registry.register(LogCorrelateTool())
+    registry.register(LateralMovementDetectTool())

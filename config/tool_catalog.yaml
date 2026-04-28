@@ -581,6 +581,135 @@ tools:
     side_effects: read_only
     archetype_tags: [security_low, observer]
 
+  # ----- security_mid analytics (ADR-0033 Phase B2) -----------------------
+  behavioral_baseline.v1:
+    name: behavioral_baseline
+    version: "1"
+    description: |
+      Compute summary stats (categorical frequency tables, numeric
+      mean/stddev/min/max, timestamp bucket distributions) over a
+      list of events. Output shape is consumed directly by
+      anomaly_score.v1 — they're a designed pair. AnomalyAce calls
+      this on a healthy window and persists the result via
+      memory_write at scope='lineage' so the next sweep can score
+      against it.
+    input_schema:
+      type: object
+      required: [events, fields]
+      properties:
+        events:
+          type: array
+          items: {type: object}
+          maxItems: 100000
+        fields:
+          type: object
+          description: |
+            map of {field_name: {type: categorical|numeric|timestamp,
+            top_n?, buckets?}}
+    side_effects: read_only
+    archetype_tags: [security_mid, investigator]
+
+  anomaly_score.v1:
+    name: anomaly_score
+    version: "1"
+    description: |
+      Score a window of events against a baseline emitted by
+      behavioral_baseline.v1. Per-field: categorical → novelty
+      score (1.0 if value never seen, else 1/(1+log10(1+count))) +
+      max-per-row aggregate; numeric → max |z-score| against
+      baseline mean+stddev (cap at 100 when stddev=0); timestamp →
+      chi-square-ish divergence between bucket distributions.
+      Returns a single overall score (max of per-field) for skills
+      that need one number to threshold against.
+    input_schema:
+      type: object
+      required: [events, baseline]
+      properties:
+        events:
+          type: array
+          items: {type: object}
+          maxItems: 100000
+        baseline: {type: object}
+        fields:
+          type: array
+          items: {type: string}
+    side_effects: read_only
+    archetype_tags: [security_mid, investigator]
+
+  log_correlate.v1:
+    name: log_correlate
+    version: "1"
+    description: |
+      Cross-source join over normalized log streams. Group events
+      by an extracted key — either a dict field (key.field) or the
+      first capturing group of a regex against a text field
+      (key.regex + key.field). Returns groups sorted by event
+      count, each with earliest/latest timestamps, distinct sources,
+      and a capped sample of the matched events. Caps: 500 groups,
+      50 events per group (operator-tunable up to 10000 each).
+    input_schema:
+      type: object
+      required: [events, key]
+      properties:
+        events:
+          type: array
+          items: {type: object}
+          maxItems: 100000
+        key:
+          type: object
+          description: |
+            {field: <name>} OR {regex: <pat>, field: <text-field>}
+        max_groups:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 500
+        max_per_group:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 50
+    side_effects: read_only
+    archetype_tags: [security_mid, investigator]
+
+  lateral_movement_detect.v1:
+    name: lateral_movement_detect
+    version: "1"
+    description: |
+      Graph analysis over connection tuples. Given a list of
+      (src, dst[, port]) records, surface lateral-movement-shaped
+      patterns: fan_out (sources reaching many dsts), fan_in
+      (dsts receiving from many srcs), new_edges (against an
+      optional baseline_edges list), distinct_ports (a single
+      src→dst pair touching many ports = port scan signature).
+      Each pattern reports triggering nodes/edges with capped
+      examples. Used by NetNinja over flow records.
+    input_schema:
+      type: object
+      required: [edges]
+      properties:
+        edges:
+          type: array
+          items: {type: object}
+          maxItems: 100000
+        baseline_edges:
+          type: array
+          items: {type: object}
+          maxItems: 100000
+        thresholds:
+          type: object
+          properties:
+            fan_out_min:        {type: integer, minimum: 1, default: 10}
+            fan_in_min:         {type: integer, minimum: 1, default: 10}
+            distinct_ports_min: {type: integer, minimum: 1, default: 20}
+        max_examples:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 25
+    side_effects: read_only
+    archetype_tags: [security_mid, investigator]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
