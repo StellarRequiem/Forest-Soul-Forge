@@ -41,9 +41,21 @@ echo "copied $copied manifests to $DEST"
 auth_header=""
 [[ -n "$TOKEN" ]] && auth_header="-H X-FSF-Token: $TOKEN"
 
-resp=$(curl -sf -X POST "$DAEMON/skills/reload" $auth_header || true)
-if [[ -n "$resp" ]]; then
-  echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  reload: {d.get(\"status\",\"?\")}, loaded={d.get(\"loaded\",0)}')" 2>/dev/null || echo "  reload response: $resp"
+# /skills/reload returns {count, errors, source_dir}. Earlier parser
+# looked for {status, loaded} which always printed loaded=0 even when
+# all 21 manifests loaded fine. Capture both body and HTTP status so
+# auth / 4xx surfaces don't disappear silently.
+tmp="$(mktemp)"
+http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST "$DAEMON/skills/reload" $auth_header)
+body="$(cat "$tmp")"; rm -f "$tmp"
+if [[ "$http_code" != "200" ]]; then
+  echo "  reload HTTP $http_code: ${body:0:200}"
 else
-  echo "  reload skipped (daemon unreachable or endpoint missing)"
+  echo "$body" | jq -r '
+    "  reloaded: \(.count) skills from \(.source_dir // "?")",
+    (if (.errors | length) > 0
+      then "  errors:" + (.errors | map("\n    - " + .) | join(""))
+      else "  errors: none"
+    end)
+  '
 fi
