@@ -35,7 +35,7 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | Trait roles | 14 (5 original + 9 swarm) |
 | Audit event types | 30+ |
 | Frontend modules (vanilla JS) | 18 |
-| `.command` operator scripts | 13 |
+| `.command` operator scripts | 16 (+ start/stop/reset for the demo edition) |
 | Total commits on `main` | 130 |
 | Audit docs filed | 1 (`docs/audits/2026-04-28-phase-d-e-review.md`) |
 
@@ -124,7 +124,7 @@ Forest-Soul-Forge/
 │   ├── security-swarm-install-skills.sh  # cp + reload
 │   ├── security-smoke.sh          # synthetic-incident driver
 │   └── ...                        # demo + verifiers
-├── *.command                      # 13 macOS double-click ops
+├── *.command                      # 16 macOS double-click ops (start/stop/reset/run/...)
 └── docker-compose.yml             # daemon + frontend + (optional) ollama
 ```
 
@@ -338,14 +338,27 @@ Mutating endpoints accept `X-Idempotency-Key`. Repeat with the same key + same b
 ### Bring up the stack
 
 ```bash
-# Docker (full stack, with optional Ollama)
-docker compose --profile llm up -d
-# OR direct (no Docker, daemon + frontend foreground)
+# First-time bootstrap + launch (handles venv creation, pip install, then runs):
+./start.command
+
+# Day-to-day "venv exists, just run" shortcut:
 ./run.command
 
-# Then open
+# Stop a running stack (kills processes on 7423 + 5173):
+./stop.command
+
+# Reset to clean state (archives audit chain + registry + soul artifacts):
+./reset.command
+
+# Docker alternative (any OS):
+docker compose --profile llm up -d
 open "http://127.0.0.1:5173/?api=http://127.0.0.1:7423"
 ```
+
+`start.command` is the safe entry point for first-time contributors —
+checks Python ≥3.11, makes the .venv, pip-installs editable, then
+delegates to `run.command`. Repeat invocations skip the work that's
+already done.
 
 ### Run tests
 

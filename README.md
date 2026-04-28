@@ -36,7 +36,7 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 | **Skill manifests shipped** | **21** chain + supporting (`examples/skills/`) |
 | **Audit event types** | 30+ (lifecycle, dispatch, memory, delegation, swarm) |
 | **Frontend modules (vanilla JS)** | 18 (`frontend/js/`) |
-| **Operator `.command` scripts** | 13 (one-double-click ops) |
+| **Operator `.command` scripts** | 16 (start/stop/reset + 13 ops) |
 
 ---
 
@@ -208,27 +208,40 @@ The audit doc at [`docs/audits/2026-04-28-phase-d-e-review.md`](docs/audits/2026
 git clone https://github.com/StellarRequiem/Forest-Soul-Forge.git
 cd Forest-Soul-Forge
 
-# 2. Bring up the stack
-docker compose --profile llm up -d        # daemon + frontend + Ollama
-# OR run directly without Docker:
-./run.command                              # uvicorn + static frontend, foreground
+# 2. One-click bootstrap + launch (macOS — recommended)
+./start.command          # checks Python ≥3.11, makes .venv, pip-installs, starts stack
+                         # ~30s first run, ~5s after that. Browser opens automatically.
 
-# 3. Open the Forge
+# Alternative: Docker (any OS, requires Docker Desktop)
+docker compose --profile llm up -d
 open "http://127.0.0.1:5173/?api=http://127.0.0.1:7423"
 ```
 
+That's it. `start.command` is the safe entry point for first-time
+contributors and evaluators — it bootstraps the venv on first run and
+fast-paths after that. For day-to-day "venv is built, just bring it
+up" use, `run.command` is still the direct shortcut.
+
 ### macOS double-click ops (`.command` scripts)
 
+The three demo-edition entry points (front of pack) and the rest of
+the operator scripts:
+
 ```
-docker-up.command            daemon + frontend (add --profile llm for Ollama)
-stack-rebuild.command        rebuild both containers --no-cache
-frontend-rebuild.command     rebuild only the frontend
-run.command                  launch daemon + frontend directly (no Docker)
+start.command                bootstrap + launch (recommended first run)
+stop.command                 kill any process on ports 7423 + 5173
+reset.command                archive all generated state, back to clean slate
+                             (renames data/audit_chain.jsonl etc. to .bak)
+
+run.command                  launch daemon + frontend directly (skips bootstrap)
+swarm-bringup.command        ADR-0033 Phase D+E one-shot bring-up + smoke
+docker-up.command            daemon + frontend via Docker (add --profile llm for Ollama)
+stack-rebuild.command        rebuild both Docker containers --no-cache
+frontend-rebuild.command     rebuild only the frontend container
 ollama-up / kill-ollama      local model lifecycle
 live-fire-voice.command      birth a real agent end-to-end
 run-tests / t4-tests         dockerized pytest harness
 push.command                 git push origin main
-swarm-bringup.command        ADR-0033 Phase D+E one-shot bring-up + smoke
 ```
 
 ### CLI for power users
@@ -396,7 +409,7 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 ### Ops
 - Docker compose stack with optional `llm` profile
 - Direct-run path via `run.command` (no Docker)
-- 13 macOS `.command` scripts for one-double-click ops
+- 16 macOS `.command` scripts for one-double-click ops (incl. demo-edition `start`/`stop`/`reset`)
 - `scripts/live-smoke.sh` 8-stage end-to-end smoke runner
 
 ---
