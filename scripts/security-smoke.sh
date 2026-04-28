@@ -181,6 +181,21 @@ echo ""
 echo "----- last 8 audit events -----"
 echo "$chain" | jq -r '.events[-8:] | reverse | .[] | "  \(.seq | tostring | .[:6]) \(.event_type) instance=\((.instance_id // "?") | .[0:24])"' 2>/dev/null
 
+# Surface the most recent tool_call_failed exception message — needed
+# because skill_runtime's failure_detail only carries the exception
+# class name, not the actual message.
+echo ""
+echo "----- most recent tool failures (with message) -----"
+echo "$chain" | jq -r '
+  [.events[] | select(.event_type == "tool_call_failed" or .event_type == "tool_call_refused")] |
+  .[-3:] | reverse | .[] |
+  "  \(.seq) \(.event_type) " +
+    (
+      .event_json | fromjson |
+      "tool=\(.tool_key) exc=\(.exception_type // .reason // "?") msg=\((.exception_message // .detail // "") | tostring | .[0:300])"
+    )
+' 2>/dev/null
+
 if (( fail > 0 )); then
   echo ""
   echo "smoke FAILED" >&2
