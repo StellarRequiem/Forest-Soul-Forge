@@ -39,7 +39,6 @@ steps:
 
   - id: key_audit_handoff
     tool: delegate.v1
-    when: ${defined(inputs.downstream_agent_id)}
     args:
       target_instance_id: ${inputs.downstream_agent_id}
       target_skill: key_audit.v1
@@ -51,4 +50,4 @@ steps:
 output:
   alert: ${inputs.alert}
   match_count: ${inputs.match_count}
-  delegated_to_vault: ${defined(key_audit_handoff)}
+  delegated_to_vault: ${key_audit_handoff.grant_id}

@@ -69,7 +69,7 @@ steps:
 
   - id: escalate
     tool: delegate.v1
-    when: ${gte(scan.match_count, inputs.escalate_threshold)}
+    when: ${scan.match_count >= inputs.escalate_threshold}
     args:
       target_instance_id: ${inputs.downstream_agent_id}
       target_skill: investigate_finding.v1
@@ -83,4 +83,4 @@ steps:
 output:
   match_count: ${scan.match_count}
   files_scanned: ${scan.files_scanned}
-  escalated: ${defined(escalate)}
+  pattern: ${inputs.pattern}

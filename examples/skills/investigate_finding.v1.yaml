@@ -45,7 +45,7 @@ steps:
 
   - id: contain
     tool: delegate.v1
-    when: ${gte(inputs.match_count, inputs.contain_threshold)}
+    when: ${inputs.match_count >= inputs.contain_threshold}
     args:
       target_instance_id: ${inputs.downstream_agent_id}
       target_skill: contain_incident.v1
@@ -57,4 +57,4 @@ steps:
 
 output:
   match_count: ${inputs.match_count}
-  delegated: ${defined(contain)}
+  match_count_in: ${inputs.match_count}
