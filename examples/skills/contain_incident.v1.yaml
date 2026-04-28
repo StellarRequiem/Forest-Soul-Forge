@@ -49,6 +49,7 @@ steps:
       inputs:
         triggered_by: "contain_incident"
         match_count: ${inputs.match_count}
+      allow_out_of_lineage: true
       reason: "post-incident key state snapshot"
 
 output:

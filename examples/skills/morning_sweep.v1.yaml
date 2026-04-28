@@ -82,6 +82,11 @@ steps:
         pattern: ${inputs.pattern}
         downstream_agent_id: ${inputs.contain_agent_id}
         vault_agent_id: ${inputs.vault_agent_id}
+      # Swarm agents are peer roots (each /birth makes a top-level agent),
+      # not a parent/child lineage. The cross-tier handoff is intentional
+      # per ADR-0033 §Cross-agent chains; the override records as an audit
+      # event so the operator sees every cross-lineage delegation.
+      allow_out_of_lineage: true
       reason: "morning_sweep matched threshold; correlate + score"
 
 output:

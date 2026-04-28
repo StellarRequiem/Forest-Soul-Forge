@@ -57,6 +57,7 @@ steps:
         alert: "${inputs.match_count} matches of pattern ${inputs.pattern}"
         match_count: ${inputs.match_count}
         downstream_agent_id: ${inputs.vault_agent_id}
+      allow_out_of_lineage: true
       reason: "match_count >= threshold; route to containment"
 
 output:
