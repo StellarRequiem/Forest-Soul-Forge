@@ -388,9 +388,17 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.skill_catalog = skill_catalog
         app.state.priv_client = priv_client
         app.state.startup_diagnostics = startup_diagnostics
-        # threading.Lock (not asyncio.Lock): sync route handlers run on the
-        # FastAPI threadpool, so a thread-level lock is the right primitive.
-        app.state.write_lock = threading.Lock()
+        # threading.RLock (not asyncio.Lock): sync route handlers run on
+        # the FastAPI threadpool, so a thread-level lock is the right
+        # primitive. RLock (reentrant) — not plain Lock — because the
+        # delegator acquires this same lock when running a target's
+        # skill nested inside a caller's skill_run. Plain Lock would
+        # deadlock the worker thread on the second acquisition. RLock
+        # tracks ownership + a per-thread acquire count, releases when
+        # the count hits zero. Discovered live during the ADR-0033
+        # Phase E smoke when the canonical chain hung at the first
+        # delegate.v1 call.
+        app.state.write_lock = threading.RLock()
         try:
             yield
         finally:

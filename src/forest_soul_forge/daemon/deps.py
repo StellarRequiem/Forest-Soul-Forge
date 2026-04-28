@@ -9,7 +9,9 @@ Shared objects live on ``app.state``:
 * ``app.state.providers`` — the :class:`ProviderRegistry`.
 * ``app.state.trait_engine`` — parsed trait tree, used by /birth.
 * ``app.state.audit_chain`` — append-only chain, used by /birth /spawn /archive.
-* ``app.state.write_lock`` — :class:`threading.Lock` serializing writes.
+* ``app.state.write_lock`` — :class:`threading.RLock` serializing writes.
+  Reentrant because nested skill runs (delegate.v1 invoking a target's
+  skill from inside a caller's skill_run) re-acquire the same lock.
 
 Routers reach these via the helpers below so the dependency graph is
 explicit and testable.
