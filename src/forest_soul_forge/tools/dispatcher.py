@@ -249,6 +249,13 @@ class ToolDispatcher:
     # don't exercise cross-agent calls); ``delegate.v1`` refuses
     # cleanly in that case rather than crashing.
     delegator_factory: Any = None
+    # ADR-0033 A6: bound PrivClient instance for the privileged-ops
+    # tools. Same posture as ``memory`` — set on every ToolContext
+    # so isolate_process.v1, dynamic_policy.v1, and tamper_detect.v1
+    # don't have to reach back into daemon state. None when the
+    # sudo helper isn't installed; the privileged tools refuse
+    # cleanly in that case rather than crashing.
+    priv_client: Any = None
 
     async def dispatch(
         self,
@@ -423,6 +430,7 @@ class ToolDispatcher:
             provider=provider,
             memory=self.memory,
             delegate=delegate_fn,
+            priv_client=self.priv_client,
         )
         try:
             result = await tool.execute(args, ctx)
@@ -766,6 +774,7 @@ class ToolDispatcher:
             provider=provider,
             memory=self.memory,
             delegate=delegate_fn,
+            priv_client=self.priv_client,
         )
         try:
             result = await tool.execute(args, ctx)

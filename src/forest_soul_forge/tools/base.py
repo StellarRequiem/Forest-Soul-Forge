@@ -84,6 +84,13 @@ class ToolContext:
     # contexts that don't need cross-agent calls); the tool refuses
     # cleanly in that case rather than crashing.
     delegate: Any = None
+    # ADR-0033 A6 — bound PrivClient instance for privileged-ops tools
+    # (isolate_process.v1, dynamic_policy.v1, tamper_detect.v1's SIP
+    # path). The daemon's lifespan calls assert_available() at boot;
+    # if the helper isn't installed, this stays None and the
+    # privileged tools refuse cleanly with "helper not wired" so the
+    # daemon stays up and only those tools degrade.
+    priv_client: Any = None
 
 
 @dataclass(frozen=True)

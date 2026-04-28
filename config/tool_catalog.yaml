@@ -822,6 +822,73 @@ tools:
     side_effects: read_only
     archetype_tags: [security_mid, guardian]
 
+  triage.v1:
+    name: triage
+    version: "1"
+    description: |
+      LLM-driven structured triage of an alert. Operator supplies
+      the alert + a list of {label, prompt} diagnostic questions
+      (e.g. "is_lateral", "is_known_actor"); the tool calls the
+      bound provider once per question, then runs a final
+      classification call returning {severity, summary,
+      recommended_action} as JSON. Severity scored 0..1
+      (low=0.25, medium=0.5, high=0.75, critical=1.0). Falls back
+      to medium severity (with a fallback flag) when no provider
+      is wired or the model output can't be parsed — caller
+      always gets a usable verdict. Caps: 10 questions, 600 chars
+      per prompt, 60s total timeout.
+    input_schema:
+      type: object
+      required: [alert, questions]
+      properties:
+        alert:
+          type: string
+          maxLength: 4000
+        questions:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [label, prompt]
+            properties:
+              label:  {type: string}
+              prompt: {type: string, maxLength: 600}
+        context:
+          type: object
+    side_effects: network
+    archetype_tags: [security_mid, investigator]
+
+  isolate_process.v1:
+    name: isolate_process
+    version: "1"
+    description: |
+      ResponseRogue's containment primitive — kill a PID via the
+      privileged sudo helper at /usr/local/sbin/fsf-priv (Phase A6).
+      The helper sends SIGTERM, waits 2s, then SIGKILL if the
+      process is still alive. Refuses pid ≤ 1 (kernel/init); reason
+      is recorded in the audit chain so operators can review why
+      the kill was attempted. side_effects=external means
+      security_high gates this regardless of tool config; for
+      security_mid agents (ResponseRogue's tier) it gates per the
+      tool's own requires_human_approval. Refuses cleanly with
+      "PrivClient not wired" when the helper isn't installed —
+      operator runs docs/runbooks/sudo-helper-install.md to enable.
+    input_schema:
+      type: object
+      required: [pid, reason]
+      properties:
+        pid:
+          type: integer
+          minimum: 2
+        reason:
+          type: string
+          maxLength: 256
+    side_effects: external
+    # Note: side_effects=external automatically gates requires_human_approval
+    # via tool_policy.py's external_always_human_approval rule — no extra
+    # constraint needed in YAML. The constitution build process picks it up.
+    archetype_tags: [security_mid, guardian]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.

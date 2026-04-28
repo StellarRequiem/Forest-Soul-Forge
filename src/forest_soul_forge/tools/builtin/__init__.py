@@ -14,6 +14,7 @@ from forest_soul_forge.tools.builtin.behavioral_baseline import BehavioralBaseli
 from forest_soul_forge.tools.builtin.delegate import DelegateTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
+from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.lateral_movement_detect import LateralMovementDetectTool
 from forest_soul_forge.tools.builtin.log_aggregate import LogAggregateTool
 from forest_soul_forge.tools.builtin.log_correlate import LogCorrelateTool
@@ -27,6 +28,7 @@ from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
 from forest_soul_forge.tools.builtin.traffic_flow_local import TrafficFlowLocalTool
+from forest_soul_forge.tools.builtin.triage import TriageTool
 from forest_soul_forge.tools.builtin.ueba_track import UebaTrackTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
 
@@ -52,6 +54,8 @@ __all__ = [
     "PortScanLocalTool",
     "TrafficFlowLocalTool",
     "EvidenceCollectTool",
+    "TriageTool",
+    "IsolateProcessTool",
 ]
 
 
@@ -87,3 +91,6 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     registry.register(PortScanLocalTool())
     registry.register(TrafficFlowLocalTool())
     registry.register(EvidenceCollectTool())
+    # ADR-0033 Phase B2 — security_mid LLM-driven + privileged.
+    registry.register(TriageTool())
+    registry.register(IsolateProcessTool())
