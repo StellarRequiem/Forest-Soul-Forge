@@ -174,8 +174,14 @@ echo "$resp" | jq -r '
   "  failure_reason:   \(.failure_reason // "n/a")",
   "  failure_detail:   \((.failure_detail // "n/a") | tostring | .[0:200])",
   "  steps_executed:   \(.steps_executed // "n/a")",
-  "  steps_skipped:    \(.steps_skipped // "n/a")"
+  "  steps_skipped:    \(.steps_skipped // "n/a")",
+  "  invoked_seq:      \(.invoked_seq // "n/a")",
+  "  completed_seq:    \(.completed_seq // "n/a")"
 ' 2>/dev/null
+
+echo ""
+echo "----- skill response — full JSON (first 60 lines) -----"
+echo "$resp" | jq '.' 2>/dev/null | head -60
 
 # /audit/tail returns events in DESC order (most recent first).
 # events[:N] = N most recent. Earlier this used events[-N:] which is
