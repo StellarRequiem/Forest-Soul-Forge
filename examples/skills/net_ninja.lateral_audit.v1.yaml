@@ -1,0 +1,63 @@
+schema_version: 1
+name: lateral_audit
+version: '1'
+description: |
+  NetNinja's lateral-movement detector. Pulls current flow
+  snapshot, runs graph analysis against an optional baseline
+  edge set (typically the prior wire_review's flows), surfaces
+  fan-out / fan-in / port-scan / new-edge patterns. Output
+  composes with anomaly_score so AnomalyAce can take it as a
+  finding via delegate.
+
+requires:
+  - traffic_flow_local.v1
+  - lateral_movement_detect.v1
+  - memory_recall.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties:
+    fan_out_min:
+      type: integer
+      minimum: 1
+      default: 10
+    distinct_ports_min:
+      type: integer
+      minimum: 1
+      default: 20
+
+steps:
+  - id: flows
+    tool: traffic_flow_local.v1
+    args: {}
+
+  - id: prior
+    tool: memory_recall.v1
+    args:
+      scope: lineage
+      tags: ["wire_review"]
+      limit: 1
+
+  - id: detect
+    tool: lateral_movement_detect.v1
+    args:
+      edges: ${flows.flows}
+      baseline_edges: ${prior.entries}
+      thresholds:
+        fan_out_min: ${inputs.fan_out_min}
+        distinct_ports_min: ${inputs.distinct_ports_min}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["lateral_audit", "net_ninja"]
+      content:
+        kind: lateral_audit_report
+        flow_count: ${flows.count}
+        finding_count: ${detect.finding_count}
+        patterns: ${detect.patterns}
+
+output:
+  finding_count: ${detect.finding_count}

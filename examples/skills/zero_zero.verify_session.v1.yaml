@@ -1,0 +1,59 @@
+schema_version: 1
+name: verify_session
+version: '1'
+description: |
+  ZeroZero's mid-session re-check. Captures current host
+  posture, recalls the prior posture snapshot from lineage
+  memory, runs continuous_verify to surface drift, persists
+  the new snapshot forward. Designed to be called on a cadence
+  (every N minutes during a sensitive operator session) — drift
+  triggers a finding the operator sees on the approval queue.
+
+requires:
+  - posture_check.v1
+  - memory_recall.v1
+  - continuous_verify.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties:
+    escalate_on_missing:
+      type: boolean
+      default: false
+      description: "treat vanished probes as severity=high"
+
+steps:
+  - id: current
+    tool: posture_check.v1
+    args: {}
+
+  - id: prior
+    tool: memory_recall.v1
+    args:
+      scope: lineage
+      tags: ["verify_session", "zero_zero"]
+      limit: 1
+
+  - id: drift
+    tool: continuous_verify.v1
+    args:
+      current: ${current}
+      baseline: ${prior.entries}
+      escalate_on_missing: ${inputs.escalate_on_missing}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["verify_session", "zero_zero"]
+      content:
+        kind: session_drift_check
+        verdict: ${drift.verdict}
+        added: ${count(drift.checks_added)}
+        changed: ${count(drift.checks_changed)}
+        removed: ${count(drift.checks_removed)}
+
+output:
+  verdict: ${drift.verdict}
+  severity_drift: ${drift.severity_drift}

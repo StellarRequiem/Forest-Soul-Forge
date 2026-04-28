@@ -1,0 +1,48 @@
+schema_version: 1
+name: evidence_capture
+version: '1'
+description: |
+  ResponseRogue's pure forensic snapshot — no triage, no kill.
+  Used by the operator to capture process state on demand
+  (e.g. "before I touch anything, take a snapshot for IR").
+  Distinct from contain_incident which composes capture + kill;
+  this skill is the safe, read-only entry point.
+
+requires:
+  - evidence_collect.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [pids]
+  properties:
+    pids:
+      type: array
+      items: {type: integer, minimum: 2}
+      maxItems: 50
+    label:
+      type: string
+      maxLength: 64
+
+steps:
+  - id: snapshot
+    tool: evidence_collect.v1
+    args:
+      pids: ${inputs.pids}
+      label: ${inputs.label}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["evidence_capture", "response_rogue"]
+      content:
+        kind: forensic_snapshot
+        archive_path: ${snapshot.archive_path}
+        archive_sha256: ${snapshot.archive_sha256}
+        files_included: ${snapshot.files_included}
+        pid_count: ${count(inputs.pids)}
+
+output:
+  archive_path: ${snapshot.archive_path}
+  archive_sha256: ${snapshot.archive_sha256}

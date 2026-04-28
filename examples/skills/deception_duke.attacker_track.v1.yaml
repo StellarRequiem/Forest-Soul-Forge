@@ -1,0 +1,80 @@
+schema_version: 1
+name: attacker_track
+version: '1'
+description: |
+  DeceptionDuke's attacker-touch detector. Recalls the canary
+  baseline from lay_canaries, runs canary_token op=check to
+  classify each token (untouched / accessed / modified /
+  vanished), optionally pairs with a honeypot_local listener
+  during the same window to capture unsolicited connection
+  attempts. Persists the verdict and any captured connection
+  events. Modified or vanished tokens → critical.
+
+requires:
+  - canary_token.v1
+  - memory_recall.v1
+  - honeypot_local.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [tokens]
+  properties:
+    tokens:
+      type: array
+      items:
+        type: object
+        required: [path]
+        properties:
+          path:  {type: string}
+          label: {type: string}
+    honeypot_port:
+      type: integer
+      minimum: 1024
+      maximum: 65535
+    honeypot_duration_seconds:
+      type: integer
+      minimum: 1
+      maximum: 300
+      default: 30
+    honeypot_banner:
+      type: string
+      maxLength: 256
+
+steps:
+  - id: prior
+    tool: memory_recall.v1
+    args:
+      scope: lineage
+      tags: ["lay_canaries", "deception_duke"]
+      limit: 1
+
+  - id: check
+    tool: canary_token.v1
+    args:
+      op: check
+      tokens: ${inputs.tokens}
+      baseline: ${prior.entries}
+
+  - id: listen
+    tool: honeypot_local.v1
+    when: ${defined(inputs.honeypot_port)}
+    args:
+      port: ${inputs.honeypot_port}
+      duration_seconds: ${inputs.honeypot_duration_seconds}
+      banner: ${inputs.honeypot_banner}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["attacker_track", "deception_duke"]
+      content:
+        kind: attacker_track_report
+        canary_verdict: ${check.verdict}
+        canary_findings: ${check.findings_count}
+        honeypot_events: ${listen.event_count}
+
+output:
+  canary_verdict: ${check.verdict}
+  honeypot_events: ${listen.event_count}

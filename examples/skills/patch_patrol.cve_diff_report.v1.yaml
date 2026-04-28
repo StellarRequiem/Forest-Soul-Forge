@@ -1,0 +1,45 @@
+schema_version: 1
+name: cve_diff_report
+version: '1'
+description: |
+  PatchPatrol's diff-since-last-sweep. Recalls the prior
+  daily_patch_sweep snapshot from lineage memory and compares
+  the current pending-update list to it; surfaces what's NEW
+  since yesterday. Operators ignoring slow-burn vulnerabilities
+  is the failure mode this catches.
+
+requires:
+  - patch_check.v1
+  - memory_recall.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties: {}
+
+steps:
+  - id: current
+    tool: patch_check.v1
+    args: {}
+
+  - id: prior
+    tool: memory_recall.v1
+    args:
+      scope: lineage
+      tags: ["daily_patch_sweep"]
+      limit: 1
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["cve_diff_report", "patch_patrol"]
+      content:
+        kind: cve_diff_report
+        current_count: ${current.update_count}
+        prior_entries: ${count(prior.entries)}
+        backends_run: ${current.backends_run}
+
+output:
+  current_count: ${current.update_count}
+  has_prior_baseline: ${gt(count(prior.entries), 0)}

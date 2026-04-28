@@ -1,0 +1,34 @@
+schema_version: 1
+name: device_inventory
+version: '1'
+description: |
+  Gatekeeper's USB device snapshot. Walks the USB device tree
+  via system_profiler / lsusb and writes the inventory to
+  lineage memory. New devices since the prior snapshot are a
+  finding for the operator to review (e.g. unsanctioned drives).
+
+requires:
+  - usb_device_audit.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties: {}
+
+steps:
+  - id: snapshot
+    tool: usb_device_audit.v1
+    args: {}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["device_inventory", "gatekeeper"]
+      content:
+        kind: usb_device_snapshot
+        device_count: ${snapshot.device_count}
+        backend_used: ${snapshot.backend_used}
+
+output:
+  device_count: ${snapshot.device_count}

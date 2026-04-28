@@ -1,0 +1,48 @@
+schema_version: 1
+name: lay_canaries
+version: '1'
+description: |
+  DeceptionDuke's trap-laying procedure. Plants operator-named
+  honeytokens at chosen paths via canary_token op=plant and
+  records the resulting baseline (paths, hashes, atimes) to
+  lineage memory. attacker_track later recalls this baseline
+  to detect any token that's been touched.
+
+requires:
+  - canary_token.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [tokens]
+  properties:
+    tokens:
+      type: array
+      items:
+        type: object
+        required: [path]
+        properties:
+          path:    {type: string}
+          content: {type: string}
+          label:   {type: string}
+
+steps:
+  - id: plant
+    tool: canary_token.v1
+    args:
+      op: plant
+      tokens: ${inputs.tokens}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["lay_canaries", "deception_duke"]
+      content:
+        kind: canary_baseline
+        token_count: ${count(inputs.tokens)}
+        results: ${plant.results}
+
+output:
+  token_count: ${count(inputs.tokens)}
+  verdict: ${plant.verdict}

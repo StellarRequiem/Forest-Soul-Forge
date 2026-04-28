@@ -1,0 +1,65 @@
+schema_version: 1
+name: tighten_policy
+version: '1'
+description: |
+  ZeroZero's transient firewall lockdown. Applies an operator-
+  named pf rule under a chosen anchor via dynamic_policy.v1.
+  Auto-gates approval per external_always_human_approval —
+  every rule push goes through the queue. The TTL is
+  operator-promised: the skill records the intended duration
+  in audit metadata; ResponseRogue or the operator must run
+  this skill again with op=drop when the timer fires.
+
+requires:
+  - dynamic_policy.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [op, anchor, reason]
+  properties:
+    op:
+      type: string
+      enum: [add, drop]
+    anchor:
+      type: string
+      maxLength: 64
+    rule:
+      type: string
+      maxLength: 256
+      description: "required when op=add; absent for op=drop"
+    reason:
+      type: string
+      maxLength: 256
+    intended_ttl_seconds:
+      type: integer
+      minimum: 0
+      default: 0
+      description: "0 = indefinite; otherwise advisory only — recorded in audit"
+
+steps:
+  - id: apply
+    tool: dynamic_policy.v1
+    args:
+      op:     ${inputs.op}
+      anchor: ${inputs.anchor}
+      rule:   ${inputs.rule}
+      reason: ${inputs.reason}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["tighten_policy", "zero_zero"]
+      content:
+        kind: dynamic_policy_change
+        op: ${inputs.op}
+        anchor: ${inputs.anchor}
+        rule: ${inputs.rule}
+        reason: ${inputs.reason}
+        intended_ttl_seconds: ${inputs.intended_ttl_seconds}
+        ok: ${apply.ok}
+
+output:
+  ok: ${apply.ok}
+  exit_code: ${apply.exit_code}

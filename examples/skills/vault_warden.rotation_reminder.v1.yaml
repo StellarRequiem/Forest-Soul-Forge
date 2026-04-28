@@ -1,0 +1,47 @@
+schema_version: 1
+name: rotation_reminder
+version: '1'
+description: |
+  VaultWarden's rotation-due nag. Inventories key material on
+  the host, compares mtimes to the operator's max-age policy
+  (default 90 days for SSH keys, 365 for keychain entries),
+  and writes a finding for any key past its window. Advisory
+  only — no rotation action; HSM-backed key_rotate.v1 lives
+  in the deferred hardware tier.
+
+requires:
+  - key_inventory.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties:
+    ssh_max_age_days:
+      type: integer
+      minimum: 1
+      default: 90
+    keychain_max_age_days:
+      type: integer
+      minimum: 1
+      default: 365
+
+steps:
+  - id: inventory
+    tool: key_inventory.v1
+    args:
+      categories: ["keychain", "ssh", "signing"]
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["rotation_reminder", "vault_warden"]
+      content:
+        kind: rotation_reminder
+        ssh_max_age_days: ${inputs.ssh_max_age_days}
+        keychain_max_age_days: ${inputs.keychain_max_age_days}
+        warning_count: ${inventory.warning_count}
+        warnings: ${inventory.warnings}
+
+output:
+  warning_count: ${inventory.warning_count}

@@ -1,0 +1,53 @@
+schema_version: 1
+name: posture_drift_audit
+version: '1'
+description: |
+  ZeroZero's daily long-window drift audit. Same shape as
+  verify_session but pulls a longer baseline (most recent entry
+  from the daily-tagged history rather than session-tagged).
+  Operator runs this once per day to catch slow drift between
+  sessions; verify_session catches drift WITHIN a session.
+
+requires:
+  - posture_check.v1
+  - memory_recall.v1
+  - continuous_verify.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties: {}
+
+steps:
+  - id: current
+    tool: posture_check.v1
+    args: {}
+
+  - id: prior_daily
+    tool: memory_recall.v1
+    args:
+      scope: lineage
+      tags: ["posture_drift_audit"]
+      limit: 1
+
+  - id: drift
+    tool: continuous_verify.v1
+    args:
+      current: ${current}
+      baseline: ${prior_daily.entries}
+      escalate_on_missing: true
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["posture_drift_audit", "zero_zero"]
+      content:
+        kind: daily_drift_audit
+        verdict: ${drift.verdict}
+        platform: ${current.platform}
+        overall_severity: ${current.overall_severity}
+
+output:
+  verdict: ${drift.verdict}
+  overall_severity: ${current.overall_severity}

@@ -1,0 +1,42 @@
+schema_version: 1
+name: wire_review
+version: '1'
+description: |
+  NetNinja's flow snapshot. Captures the current OS connection
+  table (lsof / ss) and persists a normalized record set to
+  lineage memory. Composes with lateral_audit and
+  AnomalyAce.investigate_finding for cross-time correlation.
+
+requires:
+  - traffic_flow_local.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties:
+    backends:
+      type: array
+      items: {type: string}
+    include_timewait:
+      type: boolean
+      default: false
+
+steps:
+  - id: flows
+    tool: traffic_flow_local.v1
+    args:
+      backends: ${inputs.backends}
+      include_timewait: ${inputs.include_timewait}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["wire_review", "net_ninja"]
+      content:
+        kind: flow_snapshot
+        flow_count: ${flows.count}
+        backend_used: ${flows.backend_used}
+
+output:
+  flow_count: ${flows.count}

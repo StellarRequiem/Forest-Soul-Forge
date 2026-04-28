@@ -1,0 +1,49 @@
+schema_version: 1
+name: chain_health_probe
+version: '1'
+description: |
+  LogLurker's audit-chain integrity check. Walks the daemon's
+  hashed JSONL audit chain from a configured offset, verifies
+  each entry's prev_hash links forward, and persists the
+  verdict. A break in the chain is the highest-severity
+  finding LogLurker can produce — it implies tampering with
+  the canonical record.
+
+requires:
+  - audit_chain_verify.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties:
+    offset:
+      type: integer
+      minimum: 0
+      default: 0
+      description: "first chain entry to check"
+    limit:
+      type: integer
+      minimum: 1
+      default: 1000
+
+steps:
+  - id: verify
+    tool: audit_chain_verify.v1
+    args:
+      offset: ${inputs.offset}
+      limit: ${inputs.limit}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["chain_health_probe", "log_lurker"]
+      content:
+        kind: chain_health_report
+        ok: ${verify.ok}
+        entries_checked: ${verify.entries_checked}
+        first_break_at: ${verify.first_break_at}
+
+output:
+  ok: ${verify.ok}
+  entries_checked: ${verify.entries_checked}

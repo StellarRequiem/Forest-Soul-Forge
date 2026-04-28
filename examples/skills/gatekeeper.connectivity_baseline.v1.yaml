@@ -1,0 +1,34 @@
+schema_version: 1
+name: connectivity_baseline
+version: '1'
+description: |
+  Gatekeeper's listening-port snapshot. Enumerates ports the
+  host is listening on (with owning processes when ps allows)
+  and writes the snapshot to lineage memory. Subsequent runs
+  let downstream net_ninja diff for new exposures.
+
+requires:
+  - port_policy_audit.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties: {}
+
+steps:
+  - id: snapshot
+    tool: port_policy_audit.v1
+    args: {}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["connectivity_baseline", "gatekeeper"]
+      content:
+        kind: listening_port_snapshot
+        listener_count: ${snapshot.listener_count}
+        backend_used: ${snapshot.backend_used}
+
+output:
+  listener_count: ${snapshot.listener_count}

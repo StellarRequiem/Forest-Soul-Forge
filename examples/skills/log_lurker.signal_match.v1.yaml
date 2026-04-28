@@ -1,0 +1,54 @@
+schema_version: 1
+name: signal_match
+version: '1'
+description: |
+  LogLurker's targeted single-pattern scan. Used by the operator
+  for ad-hoc "did this specific signature ever fire?" questions.
+  Narrower than morning_sweep's bulk scan; persists matches with
+  the operator-supplied tag so downstream memory queries can
+  retrieve them by name.
+
+requires:
+  - timestamp_window.v1
+  - log_scan.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [path, pattern, tag]
+  properties:
+    path:    {type: string}
+    pattern: {type: string}
+    since:   {type: string, default: "last 7 days"}
+    tag:     {type: string, description: "memory tag for the match record"}
+
+steps:
+  - id: window
+    tool: timestamp_window.v1
+    args:
+      expression: ${inputs.since}
+
+  - id: scan
+    tool: log_scan.v1
+    args:
+      path: ${inputs.path}
+      patterns:
+        - ${inputs.pattern}
+      since: ${window.start}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags:
+        - "signal_match"
+        - "log_lurker"
+        - ${inputs.tag}
+      content:
+        kind: signal_match
+        pattern: ${inputs.pattern}
+        match_count: ${scan.match_count}
+        path: ${inputs.path}
+
+output:
+  match_count: ${scan.match_count}

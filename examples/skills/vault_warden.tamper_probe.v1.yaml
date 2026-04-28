@@ -1,0 +1,60 @@
+schema_version: 1
+name: tamper_probe
+version: '1'
+description: |
+  VaultWarden's canary-integrity sweep with optional SIP probe.
+  Hashes operator-named canary files, compares to baseline from
+  prior runs, and (on macOS with PrivClient wired) verifies the
+  helper still reads SIP-protected files. Vanished canaries OR
+  failed SIP reads → critical verdict. Findings persist to
+  lineage memory for cross-time drift.
+
+requires:
+  - tamper_detect.v1
+  - memory_recall.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [canaries]
+  properties:
+    canaries:
+      type: array
+      items: {type: string}
+    probe_sip:
+      type: boolean
+      default: false
+    sip_paths:
+      type: array
+      items: {type: string}
+
+steps:
+  - id: prior
+    tool: memory_recall.v1
+    args:
+      scope: lineage
+      tags: ["tamper_probe", "vault_warden"]
+      limit: 1
+
+  - id: probe
+    tool: tamper_detect.v1
+    args:
+      canaries:         ${inputs.canaries}
+      baseline_digests: ${prior.entries}
+      probe_sip:        ${inputs.probe_sip}
+      sip_paths:        ${inputs.sip_paths}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["tamper_probe", "vault_warden"]
+      content:
+        kind: tamper_probe_report
+        verdict: ${probe.verdict}
+        findings_count: ${probe.findings_count}
+        canary_results: ${probe.canary_results}
+
+output:
+  verdict: ${probe.verdict}
+  findings_count: ${probe.findings_count}

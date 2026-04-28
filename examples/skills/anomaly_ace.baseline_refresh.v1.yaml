@@ -1,0 +1,46 @@
+schema_version: 1
+name: baseline_refresh
+version: '1'
+description: |
+  AnomalyAce's baseline-rebuild routine. Pulls the operator-
+  supplied healthy-window event set, fits a behavioral_baseline,
+  persists it to lineage memory under the standard
+  'behavioral_baseline' tag so investigate_finding's
+  memory_recall picks it up. Run on a quiet day to refresh,
+  not on a day where you suspect compromise.
+
+requires:
+  - behavioral_baseline.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [events, fields]
+  properties:
+    events:
+      type: array
+      items: {type: object}
+    fields:
+      type: object
+      description: "field shape per behavioral_baseline schema"
+
+steps:
+  - id: fit
+    tool: behavioral_baseline.v1
+    args:
+      events: ${inputs.events}
+      fields: ${inputs.fields}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["behavioral_baseline", "anomaly_ace"]
+      content:
+        kind: baseline_snapshot
+        baseline: ${fit.baseline}
+        sample_count: ${fit.sample_count}
+        fields: ${inputs.fields}
+
+output:
+  sample_count: ${fit.sample_count}

@@ -1,0 +1,41 @@
+schema_version: 1
+name: daily_patch_sweep
+version: '1'
+description: |
+  PatchPatrol's daily routine. Polls all installed package
+  managers for pending updates, snapshots the installed software
+  inventory, and persists both to lineage memory so cve_diff_report
+  can compare against the prior run. Read-only; no installs.
+
+requires:
+  - patch_check.v1
+  - software_inventory.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  properties: {}
+
+steps:
+  - id: pending
+    tool: patch_check.v1
+    args: {}
+
+  - id: installed
+    tool: software_inventory.v1
+    args: {}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["daily_patch_sweep", "patch_patrol"]
+      content:
+        kind: patch_sweep_snapshot
+        update_count: ${pending.update_count}
+        backends_run: ${pending.backends_run}
+        installed_count: ${installed.count}
+
+output:
+  update_count: ${pending.update_count}
+  installed_count: ${installed.count}
