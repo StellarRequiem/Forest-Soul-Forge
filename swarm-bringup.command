@@ -25,23 +25,19 @@ if ! curl -sf "$DAEMON/healthz" > /tmp/fsf-health.$$ 2>&1; then
   echo "daemon not reachable at $DAEMON — start it first"
   fail "healthz"
 fi
-# Print the diagnostics array verbatim so failures surface; status:? from the
-# previous parser hid 8 lifespan diagnostics that we needed to see.
-python3 <<'PY' < /tmp/fsf-health.$$
-import json, sys
-d = json.load(sys.stdin)
-print(f"  status: {d.get('status','?')}")
-diags = d.get('startup_diagnostics', [])
-print(f"  startup: {len(diags)} diagnostics")
-for diag in diags:
-    comp = diag.get('component', '?')
-    st   = diag.get('status', '?')
-    err  = diag.get('error') or ''
-    if st in ('ok','disabled'):
-        print(f"    [{st}]       {comp}")
-    else:
-        print(f"    [{st}] {comp}: {err[:140]}")
-PY
+# Print the diagnostics array verbatim so failures surface. Use jq because
+# we already depend on it; previous heredoc form had a redirect-order bug
+# (the file redirect won and Python tried to parse the JSON as source code).
+jq -r '
+  "  status: \(.status // "?")",
+  "  startup: \(.startup_diagnostics | length) diagnostics",
+  ( .startup_diagnostics[] |
+      if .status == "ok" or .status == "disabled"
+      then "    [\(.status)]       \(.component)"
+      else "    [\(.status)] \(.component): \((.error // "") | .[0:140])"
+      end
+  )
+' /tmp/fsf-health.$$
 rm -f /tmp/fsf-health.$$
 echo ""
 echo "  NOTE: if any diagnostic above is failed/degraded for trait_engine,"
