@@ -257,6 +257,41 @@ class AuditChain:
                 entries.append(_entry_from_dict(obj))
         return entries
 
+    def tail(self, n: int) -> list[ChainEntry]:
+        """Return the most recent ``n`` entries (newest first).
+
+        Reads the canonical JSONL from disk so runtime events are visible
+        immediately — the registry's ``audit_events`` table only mirrors
+        what's ingested at lifespan startup, so ``/audit/tail`` going
+        through the registry would never see live dispatch / delegation
+        events. Per ADR-0006, the JSONL is the source of truth and the
+        registry is a derived index; tailing the source is the right
+        primary path. Indexed by-agent / by-dna queries still live on
+        the registry where the index actually helps.
+
+        Memory bound is O(``n``) — uses a deque to keep only the last
+        ``n`` parsed entries regardless of chain size. Malformed lines
+        are skipped silently (consistent with :meth:`_recompute_head`);
+        :meth:`verify` is the right tool for detecting structural breaks.
+        """
+        from collections import deque
+
+        if n <= 0:
+            return []
+        keepers: deque[ChainEntry] = deque(maxlen=n)
+        with self.path.open("r", encoding="utf-8") as f:
+            for raw in f:
+                raw = raw.rstrip("\n")
+                if not raw:
+                    continue
+                try:
+                    obj = json.loads(raw)
+                    keepers.append(_entry_from_dict(obj))
+                except (json.JSONDecodeError, AuditChainError):
+                    # Tolerant — verify() reports structural breaks.
+                    continue
+        return list(reversed(keepers))
+
     # ---- mutation -------------------------------------------------------
     def append(
         self,

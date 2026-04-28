@@ -231,13 +231,14 @@ Seven tabs (Forge, Agents, Approvals, Skills, Tools, Memory, Audit). Vanilla JS,
 
 ## What's blocked or unfinished
 
-### ✅ Closed in this round (Phase D + E)
+### ✅ Closed in this round (Phase D + E + audit-tail follow-up)
 
 - **Skill-engine dict-args gap** — fixed via `compile_arg(value)` recursive type-dispatched compiler in `forge/skill_expression.py`. Dict/list/literal YAML values now flow through to the tool validator unchanged; nested `${...}` interpolation still works. Commit `04c0d27`.
 - **`write_lock` non-reentrant** — `threading.Lock()` → `threading.RLock()` in `daemon/app.py`. Nested `delegate.v1` calls (caller's skill_run → delegator → target's skill_run on the same thread) no longer self-deadlock. Commit `d215fd1`.
 - **Delegator looked at wrong manifest path** — install script writes flat `<name>.v<version>.yaml`; delegator was reading subdir `<name>.v<version>/skill.yaml`. Now tries flat-then-subdir. Commit `41c6f5d`.
 - **Peer-root swarm chain delegations refused** — chain manifests now set `allow_out_of_lineage: true`; the override is itself an audit event, so cross-tier delegations remain visible. Commit `4ed194b`.
 - **JSONSchema input defaults at runtime** — engine doesn't apply them. Worked around by hard-coding the `investigate_finding` contain-threshold to literal `1`. Engine-side fix is queued; manifest authors should reference inputs explicitly until then. Commit `4f241ea`.
+- **`/audit/tail` only returned lifespan events** — `daemon/routers/audit.py` now reads the canonical JSONL via `AuditChain.tail(n)` instead of querying the registry's lifespan-only mirror. Per ADR-0006, the JSONL is the source of truth and the registry is a derived index; tailing the source is the right primary path. Indexed `/audit/agent/{id}` and `/audit/by-dna/{dna}` queries still hit the registry where the index actually helps. Bounded-memory deque keeps tail O(N) regardless of chain size; tolerant of malformed lines (consistent with `_recompute_head`).
 
 The full incident report — symptom, file, fix, commit — lives in [`docs/audits/2026-04-28-phase-d-e-review.md`](docs/audits/2026-04-28-phase-d-e-review.md).
 
@@ -245,7 +246,6 @@ The full incident report — symptom, file, fix, commit — lives in [`docs/audi
 
 | Item | Status / blocker | Effort |
 |---|---|---|
-| Mirror runtime audit events into the registry table | Right now `/audit/tail` only returns lifespan-time events; runtime events live in `data/audit_chain.jsonl` and aren't auto-mirrored. The smoke's verification logic works around this by reading the JSONL directly. Cleanest fix: have `/audit/tail` tail-read the JSONL (preserves the canonical-source/derived-index split per ADR-0006). | ~30–50 LoC |
 | `daemon/routers/writes.py` decomposition | 1127 LoC kitchen-sink router; smell, not bug. Should split before open-web routers add more endpoints. | ~1 day refactor |
 | Integration tests | 1 file (forge loop). Need 3–5 covering dispatcher + memory + delegate, tool_dispatch with approval queue resume, skill_run multi-tool composition. | ~1 day |
 | Open-web ADR-003X + Phase C1 (per-agent encrypted secrets store) | Design captured in `MEMORY.md`; primitives = `mcp_call.v1` + `browser_action.v1` + `web_fetch.v1` + `suggest_agent.v1`. Three new genres: `web_observer`, `web_researcher`, `web_actuator`. | ~5 rounds of build |
@@ -405,12 +405,11 @@ A healthy daemon shows ~6 diagnostics, all `ok` or `disabled`. `failed` or `degr
 
 If you want to make immediate impact, pick from this list (top = highest leverage):
 
-1. **Mirror runtime audit events into the registry table** (or have `/audit/tail` read the JSONL directly). Without this, the smoke's verification logic has to read the JSONL file directly. Cleanest fix: ~30 LoC in `daemon/routers/audit.py` to tail-read `data/audit_chain.jsonl`. Preserves the canonical-source / derived-index split per ADR-0006.
-2. **Decompose `daemon/routers/writes.py`** into per-resource routers. 1127 LoC right now; will only grow when open-web routers land. ~1 day refactor with thorough endpoint tests.
+1. **Decompose `daemon/routers/writes.py`** into per-resource routers. 1127 LoC right now; will only grow when open-web routers land. ~1 day refactor with thorough endpoint tests.
+2. **File ADR-003X** for the open-web tool family + Phase C1 (per-agent encrypted secrets store). Design is captured in memory (see [`/sessions/.auto-memory/project_open_web_integration.md`]). Three primitives: `mcp_call.v1`, `browser_action.v1`, `web_fetch.v1`. `suggest_agent.v1` for operator-facing job matching. Three new genres (`web_observer`, `web_researcher`, `web_actuator`).
 3. **Add 3–5 cross-subsystem integration tests.** Currently 1 file. Highest value: dispatcher + memory + delegate, tool_dispatch with approval-queue resume, skill_run with multi-tool composition. ~1 day.
-4. **File ADR-003X** for the open-web tool family. Design is captured in memory (see [`/sessions/.auto-memory/project_open_web_integration.md`]). Three primitives: `mcp_call.v1`, `browser_action.v1`, `web_fetch.v1`. Per-agent encrypted secrets store. `suggest_agent.v1` for operator-facing job matching.
-5. **Frontend test scaffold** (Vitest + jsdom). 3,500 LoC JS, 0 tests. ~half day for the scaffold + 2-3 example tests; future PRs add tests alongside UI changes.
-6. **JSONSchema input defaults at runtime** in the skill engine — small surface change, lets manifests rely on declared defaults instead of hard-coding values inline.
+4. **Frontend test scaffold** (Vitest + jsdom). 3,500 LoC JS, 0 tests. ~half day for the scaffold + 2-3 example tests; future PRs add tests alongside UI changes.
+5. **JSONSchema input defaults at runtime** in the skill engine — small surface change, lets manifests rely on declared defaults instead of hard-coding values inline.
 
 If you want to read code first, start with:
 

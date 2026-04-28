@@ -329,3 +329,69 @@ class TestReadAll:
         parsed = json.loads(line)
         assert parsed["seq"] == entry.seq
         assert parsed["event_data"] == {"a": 1, "b": 2}
+
+
+# ---------------------------------------------------------------------------
+# tail — reads the canonical JSONL, primary path for /audit/tail
+# ---------------------------------------------------------------------------
+class TestTail:
+    """``tail(n)`` is what /audit/tail uses; the registry mirror only sees
+    lifespan-time events, so anything appended at runtime (tool dispatches,
+    agent_delegated, skill_invoked) MUST come from the canonical JSONL or
+    the operator can't see live activity. These tests pin that contract.
+    """
+
+    def test_returns_most_recent_n_newest_first(self, tmp_path: Path) -> None:
+        chain = AuditChain(tmp_path / "chain.jsonl")
+        # Genesis is seq=0; append five events → seqs 1..5.
+        for i in range(1, 6):
+            chain.append("agent_created", {"n": i})
+        tail = chain.tail(3)
+        assert [e.seq for e in tail] == [5, 4, 3]
+        assert tail[0].event_data == {"n": 5}
+        assert tail[2].event_data == {"n": 3}
+
+    def test_returns_runtime_events_not_just_lifespan(self, tmp_path: Path) -> None:
+        # Models the bug we're fixing: registry only sees lifespan events;
+        # the chain sees everything appended after construction. tail()
+        # must reflect appends made *after* the chain object exists.
+        path = tmp_path / "chain.jsonl"
+        chain = AuditChain(path)
+        # "Lifespan-time" event.
+        chain.append("agent_created", {"phase": "boot"})
+        # "Runtime" event — what the registry mirror would miss.
+        chain.append("tool_call_dispatched", {"phase": "runtime"})
+        tail = chain.tail(2)
+        types = [e.event_type for e in tail]
+        assert "tool_call_dispatched" in types
+        assert types[0] == "tool_call_dispatched"  # newest first
+
+    def test_n_zero_returns_empty(self, tmp_path: Path) -> None:
+        chain = AuditChain(tmp_path / "chain.jsonl")
+        chain.append("agent_created", {})
+        assert chain.tail(0) == []
+
+    def test_n_larger_than_chain_returns_all(self, tmp_path: Path) -> None:
+        chain = AuditChain(tmp_path / "chain.jsonl")
+        chain.append("agent_created", {"n": 1})
+        chain.append("agent_created", {"n": 2})
+        # Chain has 3 entries (genesis + 2 appends); ask for 100.
+        tail = chain.tail(100)
+        assert len(tail) == 3
+        # Newest first.
+        assert [e.seq for e in tail] == [2, 1, 0]
+
+    def test_tolerates_malformed_lines(self, tmp_path: Path) -> None:
+        # Mirrors _recompute_head's tolerance: tail() should keep working
+        # even when verify() would flag a structural break, so the
+        # operator can still see recent events while diagnosing the break.
+        path = tmp_path / "chain.jsonl"
+        chain = AuditChain(path)
+        chain.append("agent_created", {"n": 1})
+        with path.open("a", encoding="utf-8") as f:
+            f.write("{not json\n")
+        chain.append("agent_created", {"n": 2})
+        tail = chain.tail(10)
+        # Genesis + two valid appends; the garbage line is silently skipped.
+        assert len(tail) == 3
+        assert tail[0].event_data == {"n": 2}

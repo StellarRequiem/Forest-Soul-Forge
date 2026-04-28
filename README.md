@@ -407,18 +407,17 @@ Per the [Phase B + D + E audit](docs/audits/2026-04-28-phase-d-e-review.md), ran
 
 | Priority | Item | Why |
 |---|---|---|
-| **1** | Mirror runtime audit events into the registry table (or have `/audit/tail` read the JSONL directly) | Right now runtime events live in `data/audit_chain.jsonl` and aren't auto-mirrored — `/audit/tail` only returns lifespan-time events. ~30 LoC fix preserves canonical-source / derived-index split per ADR-0006 |
+| **1** | Open-web tool family ([ADR-003X](docs/decisions/), unfiled) + Phase C1 secrets store | Next major direction: `mcp_call.v1` + `browser_action.v1` + `web_fetch.v1` + per-agent encrypted secrets store + `suggest_agent.v1`. Now that the audit-mirror gap is closed, every open-web event will be visible via `/audit/tail` from day one |
 | **2** | Decompose `daemon/routers/writes.py` (1127 LoC kitchen-sink router) | Smell — split before open-web routers add more endpoints |
 | **3** | 3-5 integration tests for cross-subsystem flows | Currently 1 integration test for the whole stack |
-| **4** | Open-web tool family ([ADR-003X](docs/decisions/), unfiled) + Phase C1 secrets store | Next major direction: `mcp_call.v1` + `browser_action.v1` + `web_fetch.v1` + per-agent encrypted secrets store + `suggest_agent.v1` |
-| **5** | Frontend test scaffold (Vitest + jsdom) | Real coverage gap; 3,500 LoC of JS, 0 tests |
-| **6** | JSONSchema input defaults at runtime in the skill engine | So manifests can rely on declared defaults instead of hard-coding values inline |
-| **7** | `mfa_check.v1` | Deferred — operator hasn't scoped what "MFA posture" means |
-| **8** | Pytest version of `security-smoke.sh` (E2) | Shell suffices for the operator loop; pytest fixture would let CI gate on the chain |
-| **9** | Frontend Swarm tab (E3) | Per-tier agent listing + recent chain events viewer |
-| **10** | Companion-tier real-time A/V interaction | Mission pillar 2 — accessibility-first |
-| **11** | HSM hardware adapter for VaultWarden's `key_rotate.v1` | Gated on operator hardware decision |
-| **12** | External product MCP adapters (Wazuh / Suricata / Defender / etc.) | Gated on operator install |
+| **4** | Frontend test scaffold (Vitest + jsdom) | Real coverage gap; 3,500 LoC of JS, 0 tests |
+| **5** | JSONSchema input defaults at runtime in the skill engine | So manifests can rely on declared defaults instead of hard-coding values inline |
+| **6** | `mfa_check.v1` | Deferred — operator hasn't scoped what "MFA posture" means |
+| **7** | Pytest version of `security-smoke.sh` (E2) | Shell suffices for the operator loop; pytest fixture would let CI gate on the chain |
+| **8** | Frontend Swarm tab (E3) | Per-tier agent listing + recent chain events viewer |
+| **9** | Companion-tier real-time A/V interaction | Mission pillar 2 — accessibility-first |
+| **10** | HSM hardware adapter for VaultWarden's `key_rotate.v1` | Gated on operator hardware decision |
+| **11** | External product MCP adapters (Wazuh / Suricata / Defender / etc.) | Gated on operator install |
 
 ---
 
