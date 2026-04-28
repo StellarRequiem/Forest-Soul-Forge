@@ -1002,6 +1002,71 @@ tools:
     side_effects: read_only
     archetype_tags: [security_high, observer]
 
+  dynamic_policy.v1:
+    name: dynamic_policy
+    version: "1"
+    description: |
+      Apply or revoke a transient firewall rule via the
+      Phase A6 sudo helper (PrivClient.pf_add / pf_drop).
+      Operations: add (anchor + rule body) and drop (anchor
+      only). Refuses op=drop with a rule arg to keep the
+      audit log unambiguous. Refuses cleanly with "no
+      PrivClient wired" when the helper isn't installed or
+      FSF_ENABLE_PRIV_CLIENT is false. side_effects=external
+      auto-triggers human approval per tool_policy. The TTL
+      is operator-promised — the tool does NOT schedule a
+      teardown; the playbook is to record the grant in the
+      audit chain and call again with op=drop when the timer
+      fires, keeping every change as one tool call → one
+      audit entry. Used by ResponseRogue + SecOpsSentinel.
+    input_schema:
+      type: object
+      required: [op, anchor, reason]
+      properties:
+        op:
+          type: string
+          enum: [add, drop]
+        anchor: {type: string, maxLength: 64}
+        rule:   {type: string, maxLength: 256}
+        reason: {type: string, maxLength: 256}
+    side_effects: external
+    archetype_tags: [security_high, guardian]
+
+  tamper_detect.v1:
+    name: tamper_detect
+    version: "1"
+    description: |
+      Two complementary integrity signals: (1) canary file
+      digests vs an operator-supplied baseline, classified
+      ok / mismatch / new / vanished / error per file —
+      vanished is the highest-severity signal because it
+      implies attempted cleanup; (2) optional macOS SIP probe
+      via the helper's read-protected op, which answers "can
+      the helper still read this SIP-protected file?". The
+      canary scan is filesystem (read-only); SIP probe is
+      privileged. Both refuse cleanly when their preconditions
+      aren't met (SIP on Linux → skipped; SIP without
+      PrivClient → skipped). Verdict: vanished or failed SIP
+      probe → critical; mismatch → warn; otherwise ok. Output
+      composes with continuous_verify so a skill can persist
+      the digest map to memory and detect drift across sweeps.
+      Cap: 50 canaries per call, 10 MiB per file.
+    input_schema:
+      type: object
+      required: [canaries]
+      properties:
+        canaries:
+          type: array
+          items: {type: string}
+          maxItems: 50
+        baseline_digests: {type: object}
+        probe_sip:        {type: boolean, default: false}
+        sip_paths:
+          type: array
+          items: {type: string}
+    side_effects: filesystem
+    archetype_tags: [security_high, investigator]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.

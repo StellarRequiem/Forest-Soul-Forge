@@ -195,6 +195,24 @@ class DaemonSettings(BaseSettings):
     frontier_model_tool_use: str | None = None
     frontier_timeout_s: float = Field(default=60.0, gt=0)
 
+    # ----- privileged operations (ADR-0033 A6 + B3) ----------------------
+    # Off by default so a fresh clone boots cleanly without the sudo
+    # helper installed. Operators flip this on AFTER running
+    # docs/runbooks/sudo-helper-install.md. When False, isolate_process.v1,
+    # dynamic_policy.v1, and tamper_detect.v1's SIP path all refuse
+    # cleanly with "no PrivClient wired" — the daemon stays up, those
+    # specific tools degrade. When True, the lifespan calls
+    # PrivClient.assert_available() and raises a startup_diagnostic on
+    # failure but DOES NOT abort boot — read-only tools keep working.
+    enable_priv_client: bool = Field(default=False)
+    priv_helper_path: str = Field(
+        default="/usr/local/sbin/fsf-priv",
+        description=(
+            "Absolute path to the fsf-priv sudo helper. Override for "
+            "test contexts that point at a mock helper."
+        ),
+    )
+
     # ----- cors ------------------------------------------------------------
     # Allow the local frontend (file:// and localhost) to call the daemon
     # during dev. Tighten for any non-local deployment.

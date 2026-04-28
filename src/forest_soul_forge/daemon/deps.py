@@ -167,6 +167,13 @@ def get_tool_dispatcher(request: Request):
     # write lock — the dispatcher only touches Memory while holding it.
     from forest_soul_forge.core.memory import Memory
     memory = Memory(conn=fsf_registry._conn)  # noqa: SLF001 — internal access by design
+    # ADR-0033 A6 + B3: PrivClient (or None) flows from app.state into
+    # the dispatcher and is threaded into every ToolContext. The
+    # privileged tools (isolate_process.v1, dynamic_policy.v1,
+    # tamper_detect.v1's SIP path) refuse cleanly when ctx.priv_client
+    # is None — the daemon stays up even when the helper isn't
+    # installed.
+    priv_client = getattr(request.app.state, "priv_client", None)
     from forest_soul_forge.tools.dispatcher import ToolDispatcher
     dispatcher = ToolDispatcher(
         registry=registry,
@@ -192,6 +199,7 @@ def get_tool_dispatcher(request: Request):
         # memory_write.v1 reach for ctx.memory; the dispatcher
         # threads this instance through every ToolContext.
         memory=memory,
+        priv_client=priv_client,
     )
     # ADR-0033 A3: build the cross-agent delegator factory now that
     # the dispatcher exists, then mutate the dispatcher to hold a

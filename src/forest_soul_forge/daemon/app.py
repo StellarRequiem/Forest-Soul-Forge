@@ -332,6 +332,51 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                      "path": str(settings.genres_path), "error": None}
                 )
 
+        # ADR-0033 A6 + B3: PrivClient lifespan wiring. Off by default;
+        # operators flip FSF_ENABLE_PRIV_CLIENT=true after running the
+        # sudo-helper-install runbook. When on, we construct the client
+        # and call assert_available() — a missing helper is recorded as a
+        # startup diagnostic but does NOT abort boot, since read_only
+        # tools keep working and the privileged tools (isolate_process,
+        # dynamic_policy, tamper_detect SIP path) refuse cleanly with
+        # "no PrivClient wired."
+        priv_client = None
+        if settings.enable_priv_client:
+            from forest_soul_forge.security.priv_client import (
+                HelperMissing,
+                PrivClient,
+            )
+            try:
+                pc = PrivClient(helper_path=settings.priv_helper_path)
+                pc.assert_available()
+                priv_client = pc
+                startup_diagnostics.append(
+                    {"component": "priv_client", "status": "ok",
+                     "path": settings.priv_helper_path, "error": None}
+                )
+            except HelperMissing as e:
+                startup_diagnostics.append(
+                    {"component": "priv_client", "status": "degraded",
+                     "path": settings.priv_helper_path,
+                     "error": (
+                         f"helper unavailable — {e}. Privileged tools "
+                         "will refuse cleanly until the helper is "
+                         "installed and the daemon is restarted."
+                     )}
+                )
+            except Exception as e:
+                startup_diagnostics.append(
+                    {"component": "priv_client", "status": "failed",
+                     "path": settings.priv_helper_path,
+                     "error": f"{type(e).__name__}: {e}"}
+                )
+        else:
+            startup_diagnostics.append(
+                {"component": "priv_client", "status": "disabled",
+                 "path": settings.priv_helper_path,
+                 "error": "FSF_ENABLE_PRIV_CLIENT=false (default)"}
+            )
+
         app.state.settings = settings
         app.state.registry = registry
         app.state.providers = providers
@@ -341,6 +386,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.genre_engine = genre_engine
         app.state.tool_registry = tool_registry
         app.state.skill_catalog = skill_catalog
+        app.state.priv_client = priv_client
         app.state.startup_diagnostics = startup_diagnostics
         # threading.Lock (not asyncio.Lock): sync route handlers run on the
         # FastAPI threadpool, so a thread-level lock is the right primitive.

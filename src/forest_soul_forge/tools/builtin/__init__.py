@@ -13,6 +13,7 @@ from forest_soul_forge.tools.builtin.audit_chain_verify import AuditChainVerifyT
 from forest_soul_forge.tools.builtin.behavioral_baseline import BehavioralBaselineTool
 from forest_soul_forge.tools.builtin.continuous_verify import ContinuousVerifyTool
 from forest_soul_forge.tools.builtin.delegate import DelegateTool
+from forest_soul_forge.tools.builtin.dynamic_policy import DynamicPolicyTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
@@ -30,6 +31,7 @@ from forest_soul_forge.tools.builtin.port_policy_audit import PortPolicyAuditToo
 from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
 from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
+from forest_soul_forge.tools.builtin.tamper_detect import TamperDetectTool
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
 from forest_soul_forge.tools.builtin.traffic_flow_local import TrafficFlowLocalTool
 from forest_soul_forge.tools.builtin.triage import TriageTool
@@ -64,6 +66,8 @@ __all__ = [
     "ContinuousVerifyTool",
     "JitAccessTool",
     "KeyInventoryTool",
+    "DynamicPolicyTool",
+    "TamperDetectTool",
 ]
 
 
@@ -108,3 +112,6 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # ADR-0033 Phase B3 — security_high access + key inventory.
     registry.register(JitAccessTool())
     registry.register(KeyInventoryTool())
+    # ADR-0033 Phase B3 — security_high privileged (PrivClient).
+    registry.register(DynamicPolicyTool())
+    registry.register(TamperDetectTool())
