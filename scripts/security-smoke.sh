@@ -94,16 +94,25 @@ payload=$(jq -n --arg path "$LOGFILE" --arg downstream "$AA" '{
   }
 }')
 
-resp=$(curl -sf -X POST "$DAEMON/agents/$LL/skills/morning_sweep.v1/run" \
+# Capture HTTP status + body so daemon rejections are visible. The
+# previous 'curl -sf' form swallowed both on non-2xx, leaving us with
+# only "morning_sweep run returned empty" — useless for diagnosis.
+tmp="$(mktemp)"
+http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST \
+  "$DAEMON/agents/$LL/skills/morning_sweep.v1/run" \
   -H "Content-Type: application/json" \
   $(auth) \
-  -d "$payload" || true)
+  -d "$payload")
+resp="$(cat "$tmp")"; rm -f "$tmp"
 
-if [[ -z "$resp" ]]; then
-  echo "FAIL: morning_sweep run returned empty" >&2
+if [[ "$http_code" != "200" && "$http_code" != "201" ]]; then
+  echo "FAIL: morning_sweep run http=$http_code" >&2
+  echo "body: ${resp:0:500}" >&2
+  echo ""
+  echo "WORKING_DIR_ARTIFACTS: $WORK"
   exit 1
 fi
-log "morning_sweep ran"
+log "morning_sweep ran (http=$http_code)"
 echo "$resp" | jq -C '.' 2>/dev/null | head -40 || echo "$resp"
 
 # ---------------------------------------------------------------------------
