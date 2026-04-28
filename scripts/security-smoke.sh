@@ -177,22 +177,28 @@ echo "$resp" | jq -r '
   "  steps_skipped:    \(.steps_skipped // "n/a")"
 ' 2>/dev/null
 
+# /audit/tail returns events in DESC order (most recent first).
+# events[:N] = N most recent. Earlier this used events[-N:] which is
+# the OLDEST N — wrong direction, hid every recent failure.
 echo ""
-echo "----- last 8 audit events -----"
-echo "$chain" | jq -r '.events[-8:] | reverse | .[] | "  \(.seq | tostring | .[:6]) \(.event_type) instance=\((.instance_id // "?") | .[0:24])"' 2>/dev/null
+echo "----- 12 most recent audit events -----"
+echo "$chain" | jq -r '.events[:12] | .[] | "  \(.seq | tostring | (. + "      ") | .[:6]) \(.event_type) instance=\((.instance_id // "?") | .[0:24])"' 2>/dev/null
 
-# Surface the most recent tool_call_failed exception message — needed
-# because skill_runtime's failure_detail only carries the exception
-# class name, not the actual message.
+# Histogram of what the daemon has emitted recently — quickly tells
+# us whether the chain even tried to dispatch a tool.
+echo ""
+echo "----- event type histogram (most recent 200) -----"
+echo "$chain" | jq -r '.events | group_by(.event_type) | sort_by(-(. | length)) | .[] | "  \(. | length | tostring | (. + "    ") | .[:4]) \(.[0].event_type)"' 2>/dev/null
+
+# Surface the most recent tool failures with full exception message.
 echo ""
 echo "----- most recent tool failures (with message) -----"
 echo "$chain" | jq -r '
   [.events[] | select(.event_type == "tool_call_failed" or .event_type == "tool_call_refused")] |
-  .[-3:] | reverse | .[] |
-  "  \(.seq) \(.event_type) " +
-    (
-      .event_json | fromjson |
-      "tool=\(.tool_key) exc=\(.exception_type // .reason // "?") msg=\((.exception_message // .detail // "") | tostring | .[0:300])"
+  .[:3] | .[] |
+  "  \(.seq) \(.event_type)\n    " +
+    (.event_json | fromjson |
+      "tool=\(.tool_key)\n    exc=\(.exception_type // .reason // "?")\n    msg=\((.exception_message // .detail // "") | tostring | .[0:400])"
     )
 ' 2>/dev/null
 
