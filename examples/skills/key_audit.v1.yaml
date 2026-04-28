@@ -2,25 +2,15 @@ schema_version: 1
 name: key_audit
 version: '1'
 description: |
-  VaultWarden's post-incident key state snapshot. Terminus of
-  the canonical chain — does not delegate further. Enumerates
-  cryptographic key material on the host (paths, sizes, mtimes,
-  perms — never bytes), checks integrity of operator-named
-  canonical key paths against a baseline written from a prior
-  audit, and persists the state to lineage memory so the next
-  audit can diff against it. Surfaces warnings (wrong perms,
-  vanished keys, mtime drift on sensitive paths) for operator
-  review. ADR-0033 §Cross-agent chains link 4.
-
-  This skill writes its OWN baseline forward — first run records,
-  subsequent runs compare. operator can override with an explicit
-  baseline_override input when re-baselining after a known-good
-  rotation event.
+  VaultWarden's post-incident key state snapshot. Minimal-viable
+  chain terminus — runs key_inventory and persists the result
+  count to lineage memory. Does not delegate further. Real
+  integrity probing + baseline diff lands in v2 once we have a
+  durable baseline path. For now this skill proves the chain
+  reaches its tail. ADR-0033 §Cross-agent chains link 4.
 
 requires:
   - key_inventory.v1
-  - file_integrity.v1
-  - memory_recall.v1
   - memory_write.v1
 
 inputs:
@@ -29,54 +19,24 @@ inputs:
     triggered_by:
       type: string
       description: "what skill or operator action triggered this audit"
-    evidence_path:
-      type: string
-      description: "optional incident evidence tarball path; cross-referenced in audit"
-    canonical_key_paths:
-      type: array
-      items: {type: string}
-      description: "absolute paths whose integrity is critical (e.g. ~/.ssh/id_ed25519)"
-    baseline_override:
-      type: object
-      description: "explicit baseline; when present, skips the memory_recall lookup"
+    match_count:
+      type: integer
+      minimum: 0
 
 steps:
   - id: inventory
     tool: key_inventory.v1
     args:
-      categories: ["keychain", "ssh", "signing"]
-
-  - id: pull_baseline
-    tool: memory_recall.v1
-    args:
-      scope: lineage
-      tags: ["key_audit", "vault_warden"]
-      limit: 1
-
-  - id: integrity
-    tool: file_integrity.v1
-    when: ${gt(count(inputs.canonical_key_paths), 0)}
-    args:
-      paths: ${inputs.canonical_key_paths}
-      baseline_digests: ${pull_baseline.entries}
+      categories: ["ssh", "signing"]
 
   - id: persist
     tool: memory_write.v1
     args:
+      layer: episodic
       scope: lineage
       tags: ["key_audit", "vault_warden"]
-      content:
-        kind: key_audit_snapshot
-        triggered_by: ${inputs.triggered_by}
-        evidence_path: ${inputs.evidence_path}
-        platform: ${inventory.platform}
-        warning_count: ${inventory.warning_count}
-        ssh_private_count: ${count(inventory.categories.ssh.private_keys)}
-        signing_blob_count: ${inventory.categories.signing.private_blob_count}
-        integrity_verdict: ${integrity.overall_verdict}
+      content: "key_audit_snapshot: triggered_by=${inputs.triggered_by} platform=${inventory.platform} warning_count=${inventory.warning_count}"
 
 output:
   warning_count: ${inventory.warning_count}
   warnings: ${inventory.warnings}
-  integrity_verdict: ${integrity.overall_verdict}
-  audit_timestamp: ${persist.entry_id}

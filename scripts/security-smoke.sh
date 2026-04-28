@@ -87,7 +87,12 @@ log "found chain agents: LL=$LL AA=$AA RR=$RR VW=$VW"
 # Real endpoint shape (ADR-0031 T2b): POST /agents/{id}/skills/run
 # with body {skill_name, skill_version, session_id, inputs}.
 # Earlier shape /skills/{name.version}/run was wrong — 404'd silently.
-payload=$(jq -n --arg path "$LOGFILE" --arg downstream "$AA" --arg sid "smoke-$TS" '{
+payload=$(jq -n \
+  --arg path "$LOGFILE" \
+  --arg downstream "$AA" \
+  --arg contain "$RR" \
+  --arg vault "$VW" \
+  --arg sid "smoke-$TS" '{
   skill_name: "morning_sweep",
   skill_version: "1",
   session_id: $sid,
@@ -96,7 +101,9 @@ payload=$(jq -n --arg path "$LOGFILE" --arg downstream "$AA" --arg sid "smoke-$T
     pattern: "canary_pattern_xyz123",
     since: "last 1 day",
     escalate_threshold: 1,
-    downstream_agent_id: $downstream
+    downstream_agent_id: $downstream,
+    contain_agent_id: $contain,
+    vault_agent_id: $vault
   }
 }')
 

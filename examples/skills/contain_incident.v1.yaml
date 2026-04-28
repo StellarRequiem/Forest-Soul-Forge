@@ -2,103 +2,54 @@ schema_version: 1
 name: contain_incident
 version: '1'
 description: |
-  ResponseRogue's containment procedure. Takes a triage alert +
-  candidate PIDs, runs structured triage to confirm severity,
-  captures forensic evidence BEFORE any kill (state must survive
-  the response), then isolates each suspect process via the
-  Phase A6 sudo helper. Persists evidence path to lineage memory
-  and delegates VaultWarden.key_audit so the operator sees a
-  fresh key-state snapshot taken AFTER the incident closes.
-  ADR-0033 §Cross-agent chains link 3.
-
-  isolate_process.v1 auto-gates operator approval per
-  external_always_human_approval — every kill stops at the
-  approval queue regardless of caution score. No exceptions.
+  ResponseRogue's containment procedure. Minimal-viable chain
+  link: records the alert to lineage memory and (for chains that
+  pass a real downstream_agent_id) delegates VaultWarden.key_audit
+  so the operator sees a key-state snapshot taken AFTER the
+  incident summary lands. Real triage/evidence_capture/isolate
+  steps land in v2 once the smoke validates this shape; the
+  chain in this version stops cleanly without firing
+  isolate_process so the operator's approval queue stays clean
+  during smoke runs. ADR-0033 §Cross-agent chains link 3.
 
 requires:
-  - triage.v1
-  - evidence_collect.v1
-  - isolate_process.v1
   - memory_write.v1
   - delegate.v1
 
 inputs:
   type: object
-  required: [alert, suspect_pids, reason, downstream_agent_id]
+  required: [alert, match_count]
   properties:
     alert:
       type: string
-      description: "human-readable alert text passed in by upstream"
-    suspect_pids:
-      type: array
-      items: {type: integer, minimum: 2}
-      maxItems: 20
-    reason:
-      type: string
-      maxLength: 256
-    severity_floor:
-      type: string
-      enum: [low, medium, high, critical]
-      default: high
-      description: "skip isolate if triage scores below this"
+    match_count:
+      type: integer
+      minimum: 0
     downstream_agent_id:
       type: string
+      description: "VaultWarden agent — when present, chain continues to key_audit"
 
 steps:
-  - id: assess
-    tool: triage.v1
-    args:
-      alert: ${inputs.alert}
-      questions:
-        - {label: "is_lateral",     prompt: "Does the alert describe lateral movement?"}
-        - {label: "is_known_actor", prompt: "Is the source a known principal?"}
-        - {label: "evidence_solid", prompt: "Is the evidence reproducible across sources?"}
-      context:
-        suspect_pids: ${inputs.suspect_pids}
-        reason: ${inputs.reason}
-
-  - id: capture
-    tool: evidence_collect.v1
-    when: ${gte_severity(assess.severity, inputs.severity_floor)}
-    args:
-      pids: ${inputs.suspect_pids}
-      label: "incident_${assess.severity}"
-
-  - id: isolate
-    for_each: ${inputs.suspect_pids}
-    when: ${gte_severity(assess.severity, inputs.severity_floor)}
-    steps:
-      - id: kill
-        tool: isolate_process.v1
-        args:
-          pid: ${each}
-          reason: ${assess.summary}
-
   - id: persist
     tool: memory_write.v1
     args:
+      layer: episodic
       scope: lineage
       tags: ["contain_incident", "response_rogue"]
-      content:
-        kind: containment_report
-        severity: ${assess.severity}
-        summary: ${assess.summary}
-        evidence_path: ${capture.archive_path}
-        pids_isolated: ${inputs.suspect_pids}
+      content: "containment_record: alert=${inputs.alert} match_count=${inputs.match_count}"
 
   - id: key_audit_handoff
     tool: delegate.v1
-    when: ${gte_severity(assess.severity, inputs.severity_floor)}
+    when: ${defined(inputs.downstream_agent_id)}
     args:
       target_instance_id: ${inputs.downstream_agent_id}
       target_skill: key_audit.v1
       inputs:
         triggered_by: "contain_incident"
-        evidence_path: ${capture.archive_path}
+        match_count: ${inputs.match_count}
       reason: "post-incident key state snapshot"
 
 output:
-  severity: ${assess.severity}
-  pids_processed: ${count(inputs.suspect_pids)}
-  evidence_path: ${capture.archive_path}
+  alert: ${inputs.alert}
+  match_count: ${inputs.match_count}
   delegated_to_vault: ${defined(key_audit_handoff)}

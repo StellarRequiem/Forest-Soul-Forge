@@ -40,6 +40,13 @@ inputs:
       description: "match count at which to delegate to AnomalyAce"
     downstream_agent_id:
       type: string
+      description: "AnomalyAce instance_id"
+    contain_agent_id:
+      type: string
+      description: "ResponseRogue instance_id; passed through to investigate_finding"
+    vault_agent_id:
+      type: string
+      description: "VaultWarden instance_id; passed through to contain_incident"
 
 steps:
   - id: window
@@ -56,15 +63,10 @@ steps:
   - id: persist
     tool: memory_write.v1
     args:
+      layer: episodic
       scope: lineage
       tags: ["morning_sweep", "log_lurker"]
-      content:
-        kind: morning_sweep_summary
-        match_count: ${scan.match_count}
-        files_scanned: ${scan.files_scanned}
-        pattern: ${inputs.pattern}
-        window_start: ${window.start}
-        window_end: ${window.end}
+      content: "morning_sweep_summary: matches=${scan.match_count} files_scanned=${scan.files_scanned} pattern=${inputs.pattern} window=${window.start}..${window.end}"
 
   - id: escalate
     tool: delegate.v1
@@ -75,6 +77,8 @@ steps:
       inputs:
         match_count: ${scan.match_count}
         pattern: ${inputs.pattern}
+        downstream_agent_id: ${inputs.contain_agent_id}
+        vault_agent_id: ${inputs.vault_agent_id}
       reason: "morning_sweep matched threshold; correlate + score"
 
 output:
