@@ -111,7 +111,11 @@ async function runPreview() {
   };
 
   const mySeq = ++seq;
-  setStatus("previewing…");
+  // P1 #8: friendlier status strings — "idle" / "previewing…" read as
+  // "is it broken?" to first-time users. "live preview · in sync" makes
+  // the steady state legible; "recomputing…" shows what's happening
+  // mid-fetch.
+  setStatus("recomputing…");
   inFlight = api.post("/preview", payload);
   try {
     const res = await inFlight;
@@ -119,7 +123,7 @@ async function runPreview() {
     state.set("preview", res);
     state.set("previewError", null);
     renderPreview(res);
-    setStatus("idle");
+    setStatus("live preview · in sync");
   } catch (e) {
     if (mySeq !== seq) return;
     const msg =

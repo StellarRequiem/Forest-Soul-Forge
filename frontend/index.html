@@ -11,7 +11,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>Forest Soul Forge</title>
-  <link rel="stylesheet" href="css/style.css?v=20260428a" />
+  <link rel="stylesheet" href="css/style.css?v=20260428b" />
 </head>
 <body>
   <header class="top-bar">
@@ -33,18 +33,65 @@
 
   <div id="banner" class="banner" hidden></div>
 
+  <!--
+    Welcome banner — first-load context for evaluators landing cold.
+    Dismissible (sets localStorage flag), re-shows when the user clicks
+    the "?" in the top-right. Demo-friction audit P1 #7.
+  -->
+  <div id="welcome" class="welcome" hidden>
+    <div class="welcome__body">
+      <div class="welcome__title">
+        <span class="welcome__icon" aria-hidden="true">🌲</span>
+        Welcome to Forest Soul Forge
+      </div>
+      <p class="welcome__text">
+        Drag the sliders below to shape an agent's personality &mdash;
+        29 traits across 6 domains. Click <strong>Birth</strong> when
+        you're ready to give them a soul. Then watch them work in the
+        <strong>Agents</strong>, <strong>Skills</strong>, and
+        <strong>Audit</strong> tabs. Everything runs locally; every
+        action lands in a hash-chained log.
+      </p>
+    </div>
+    <button class="welcome__close" id="welcome-close" type="button"
+            title="Dismiss (press ? in the header to bring it back)" aria-label="Dismiss welcome banner">
+      &times;
+    </button>
+  </div>
+
   <main class="app">
     <nav class="tabs" role="tablist">
-      <button class="tab" data-tab="forge" role="tab" aria-selected="true">Forge</button>
-      <button class="tab" data-tab="agents" role="tab" aria-selected="false">Agents</button>
+      <!-- SVG tab icons (P1 #13) — keep stroke-only so they pick up
+           color via currentColor + the .tab[aria-selected] rule. -->
+      <button class="tab" data-tab="forge" role="tab" aria-selected="true">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 14 L6 10 M9 3 L13 7 L7 13 L3 9 Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Forge
+      </button>
+      <button class="tab" data-tab="agents" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="6" r="2.2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="11" cy="6" r="2.2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M1.5 13 C1.5 10.5 3.5 9.5 5 9.5 C6.5 9.5 8.5 10.5 8.5 13 M7.5 13 C7.5 10.5 9.5 9.5 11 9.5 C12.5 9.5 14.5 10.5 14.5 13" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+        Agents
+      </button>
       <button class="tab" data-tab="pending" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2 H13 V14 H3 Z M5 5 H11 M5 8 H11 M5 11 H9" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Approvals
         <span class="tab__badge" id="pending-badge" hidden></span>
       </button>
-      <button class="tab" data-tab="skills" role="tab" aria-selected="false">Skills</button>
-      <button class="tab" data-tab="tool-registry" role="tab" aria-selected="false">Tools</button>
-      <button class="tab" data-tab="memory" role="tab" aria-selected="false">Memory</button>
-      <button class="tab" data-tab="audit" role="tab" aria-selected="false">Audit</button>
+      <button class="tab" data-tab="skills" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2 H13 V14 H3 Z M3 5 H13 M6 8 H11 M6 11 H10" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+        Skills
+      </button>
+      <button class="tab" data-tab="tool-registry" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M11 3 L13 5 L8 10 L7 13 L4 10 L9 5 Z M3 13 L4 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>
+        Tools
+      </button>
+      <button class="tab" data-tab="memory" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3 C3 3 2 5 2 7 C2 8 2.5 9 3 9.5 C3 11 4 13 6 13 L10 13 C12 13 13 11 13 9.5 C13.5 9 14 8 14 7 C14 5 13 3 11 3 Z M8 3 V13" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
+        Memory
+      </button>
+      <button class="tab" data-tab="audit" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="5" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="11" cy="11" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.4 6.4 L9.6 9.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+        Audit
+      </button>
     </nav>
 
     <!-- ========================================================== -->
@@ -215,7 +262,9 @@
     <section class="tab-panel" data-panel="pending" role="tabpanel" hidden>
       <div class="panel">
         <div class="panel__header">
-          <h2 class="panel__title">Pending tool calls</h2>
+          <!-- P1 #12: "Pending tool calls" wrapped to two lines at the
+               panel header width. Shorter title fits cleanly. -->
+          <h2 class="panel__title">Approvals queue</h2>
           <div class="panel__actions">
             <label for="pending-agent-select" class="lbl">agent</label>
             <select id="pending-agent-select" class="inp inp--sm">
@@ -382,6 +431,6 @@
        returning visitors don't run stale JS. The same query is forwarded
        to ES module imports because the import specifiers in app.js
        resolve relative to this script URL. Demo-friction audit P0 #2. -->
-  <script type="module" src="js/app.js?v=20260428a"></script>
+  <script type="module" src="js/app.js?v=20260428b"></script>
 </body>
 </html>

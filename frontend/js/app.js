@@ -16,6 +16,7 @@ import * as pendingPanel from "./pending.js";
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
 import * as memoryPanel from "./memory.js";
+import * as welcome from "./welcome.js";
 import { toast } from "./toast.js";
 
 function wireTabs() {
@@ -34,6 +35,9 @@ function wireTabs() {
 
 async function boot() {
   wireTabs();
+  // Welcome banner is independent of everything else — render it before
+  // any network call so first-time users see context immediately.
+  welcome.start();
 
   // Health + providers can run immediately — they don't depend on anything.
   health.start();
