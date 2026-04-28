@@ -889,6 +889,63 @@ tools:
     # constraint needed in YAML. The constitution build process picks it up.
     archetype_tags: [security_mid, guardian]
 
+  # ----- security_high posture + verification (ADR-0033 Phase B3) ---------
+  posture_check.v1:
+    name: posture_check
+    version: "1"
+    description: |
+      Read-only host security posture probe. Runs a list of OS-
+      specific queries (macOS: csrutil, fdesetup, spctl, pfctl,
+      defaults read alf; Linux: getenforce, aa-status, ufw,
+      cryptsetup) and aggregates per-check {state, severity}
+      records into one overall_severity. Probes that hit a
+      missing binary land in checks_skipped — operators can
+      tell "no info" from "bad info." Per-check warn-state
+      severities are operator-tunable via severity_overrides.
+      Used by SecOpsSentinel as the ground-truth probe before
+      JIT access grants and by ContinuousVerify as the input
+      snapshot for drift detection. Timeout: 10s per probe.
+    input_schema:
+      type: object
+      properties:
+        checks:
+          type: array
+          items: {type: string}
+          maxItems: 20
+        severity_overrides:
+          type: object
+          description: |
+            map of {check_name: severity}; severity is one of
+            low/medium/high/critical
+    side_effects: read_only
+    archetype_tags: [security_high, guardian]
+
+  continuous_verify.v1:
+    name: continuous_verify
+    version: "1"
+    description: |
+      Pure-Python composer: diffs a current posture snapshot
+      against a baseline (typically the prior call written to
+      memory at scope='lineage') and emits drift records:
+      checks_added (new probes), checks_removed (vanished
+      probes), checks_changed (state or severity flip), and
+      checks_steady (identical between runs). Verdict is the
+      max severity across flagged items — empty diff → low.
+      No I/O — caller drives posture_check + memory before
+      handing the snapshots in. Used by SecOpsSentinel on a
+      cadence to surface posture drift between sweeps.
+    input_schema:
+      type: object
+      required: [current]
+      properties:
+        current:  {type: object}
+        baseline: {type: object}
+        escalate_on_missing:
+          type: boolean
+          default: false
+    side_effects: read_only
+    archetype_tags: [security_high, investigator]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.

@@ -11,6 +11,7 @@ will get implementations as the corresponding tranches land.
 from forest_soul_forge.tools.builtin.anomaly_score import AnomalyScoreTool
 from forest_soul_forge.tools.builtin.audit_chain_verify import AuditChainVerifyTool
 from forest_soul_forge.tools.builtin.behavioral_baseline import BehavioralBaselineTool
+from forest_soul_forge.tools.builtin.continuous_verify import ContinuousVerifyTool
 from forest_soul_forge.tools.builtin.delegate import DelegateTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
@@ -25,6 +26,7 @@ from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
 from forest_soul_forge.tools.builtin.patch_check import PatchCheckTool
 from forest_soul_forge.tools.builtin.port_policy_audit import PortPolicyAuditTool
 from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
+from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
 from forest_soul_forge.tools.builtin.traffic_flow_local import TrafficFlowLocalTool
@@ -56,6 +58,8 @@ __all__ = [
     "EvidenceCollectTool",
     "TriageTool",
     "IsolateProcessTool",
+    "PostureCheckTool",
+    "ContinuousVerifyTool",
 ]
 
 
@@ -94,3 +98,6 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # ADR-0033 Phase B2 — security_mid LLM-driven + privileged.
     registry.register(TriageTool())
     registry.register(IsolateProcessTool())
+    # ADR-0033 Phase B3 — security_high posture + verification.
+    registry.register(PostureCheckTool())
+    registry.register(ContinuousVerifyTool())
