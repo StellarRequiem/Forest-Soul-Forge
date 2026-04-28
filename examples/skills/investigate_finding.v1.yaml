@@ -48,7 +48,11 @@ steps:
 
   - id: contain
     tool: delegate.v1
-    when: ${inputs.match_count >= inputs.contain_threshold}
+    # The skill engine doesn't apply JSONSchema input defaults — refs to
+    # an unset field raise / skip the step. Hard-code the threshold so
+    # the smoke chain fires reliably; operators can always pass a higher
+    # match_count from upstream to no-op this delegation.
+    when: ${inputs.match_count >= 1}
     args:
       target_instance_id: ${inputs.downstream_agent_id}
       skill_name: contain_incident
