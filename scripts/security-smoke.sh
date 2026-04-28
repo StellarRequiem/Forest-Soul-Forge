@@ -122,14 +122,15 @@ echo "$resp" | jq -C '.' 2>/dev/null | head -40 || echo "$resp"
 # ---------------------------------------------------------------------------
 # 4. Inspect the audit chain for the chain links.
 # ---------------------------------------------------------------------------
-chain=$(curl -sf "$DAEMON/audit?limit=200" $(auth) || true)
+chain=$(curl -sf "$DAEMON/audit/tail?n=200" $(auth) || true)
 if [[ -z "$chain" ]]; then
-  echo "WARN: /audit returned empty" >&2
+  echo "WARN: /audit/tail returned empty" >&2
 fi
 
 count_event() {
   local kind="$1"
-  echo "$chain" | jq -r --arg k "$kind" '[.entries[] | select(.event_type == $k)] | length' 2>/dev/null || echo 0
+  # AuditListOut.events is the canonical key (not 'entries').
+  echo "$chain" | jq -r --arg k "$kind" '[.events[] | select(.event_type == $k)] | length' 2>/dev/null || echo 0
 }
 
 invokes=$(count_event tool_invoked)
