@@ -1,0 +1,96 @@
+schema_version: 1
+name: investigate_finding
+version: '1'
+description: |
+  AnomalyAce's incoming-finding correlator. Takes a list of
+  finding IDs from LogLurker (or any upstream observer), pulls
+  the matching log entries via memory recall at lineage scope,
+  joins them against a behavioral baseline, scores per-event
+  anomaly, and — when the aggregate score crosses threshold —
+  delegates containment to ResponseRogue with the offending
+  PIDs in tow. ADR-0033 §Cross-agent chains link 2.
+
+requires:
+  - memory_recall.v1
+  - log_correlate.v1
+  - anomaly_score.v1
+  - memory_write.v1
+  - delegate.v1
+
+inputs:
+  type: object
+  required: [finding_ids, downstream_agent_id]
+  properties:
+    finding_ids:
+      type: array
+      items: {type: string}
+    match_count:
+      type: integer
+      minimum: 0
+    baseline_tag:
+      type: string
+      default: "behavioral_baseline"
+      description: "memory tag the baseline snapshot lives under"
+    score_threshold:
+      type: number
+      default: 0.7
+      description: "delegate to ResponseRogue when overall score ≥ this"
+    downstream_agent_id:
+      type: string
+
+steps:
+  - id: pull_baseline
+    tool: memory_recall.v1
+    args:
+      scope: lineage
+      tags:
+        - ${inputs.baseline_tag}
+      limit: 1
+
+  - id: pull_findings
+    tool: memory_recall.v1
+    args:
+      scope: lineage
+      tags: ["morning_sweep"]
+      limit: 50
+
+  - id: correlate
+    tool: log_correlate.v1
+    args:
+      events: ${pull_findings.entries}
+      key:
+        field: source_ip
+
+  - id: score
+    tool: anomaly_score.v1
+    args:
+      events: ${correlate.groups}
+      baseline: ${pull_baseline.entries}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["investigate_finding", "anomaly_ace"]
+      content:
+        kind: anomaly_score_report
+        overall_score: ${score.overall}
+        finding_count: ${count(inputs.finding_ids)}
+        ranked: ${score.per_field}
+
+  - id: contain
+    tool: delegate.v1
+    when: ${gte(score.overall, inputs.score_threshold)}
+    args:
+      target_instance_id: ${inputs.downstream_agent_id}
+      target_skill: contain_incident.v1
+      inputs:
+        alert: ${score.summary}
+        suspect_pids: ${score.suspect_pids}
+        reason: "anomaly score crossed threshold"
+      reason: "anomaly score ≥ threshold; route to containment"
+
+output:
+  overall_score: ${score.overall}
+  delegated_to_response: ${defined(contain)}
+  memory_entry_id: ${persist.entry_id}

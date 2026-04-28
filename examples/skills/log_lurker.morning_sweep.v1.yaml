@@ -1,0 +1,93 @@
+schema_version: 1
+name: morning_sweep
+version: '1'
+description: |
+  LogLurker's daily wakeup procedure. Walks operator-named log
+  directories, scans each file for anomalous-signal patterns
+  (operator-supplied regexes), aggregates the matches, persists a
+  finding summary to lineage memory, and — when the match count
+  crosses an operator-supplied threshold — delegates to
+  AnomalyAce.investigate_finding. ADR-0033 §Cross-agent chains
+  link 1.
+
+  This is the entry point for the canonical security swarm chain:
+    morning_sweep → investigate_finding → contain_incident → key_audit
+
+requires:
+  - timestamp_window.v1
+  - log_scan.v1
+  - log_aggregate.v1
+  - memory_write.v1
+  - delegate.v1
+
+inputs:
+  type: object
+  required: [log_paths, patterns, downstream_agent_id]
+  properties:
+    log_paths:
+      type: array
+      items: {type: string}
+      description: "absolute paths to log files (or directories of logs)"
+    patterns:
+      type: array
+      items: {type: string}
+      description: "regex patterns that constitute an anomalous signal"
+    since:
+      type: string
+      description: "natural-language window, default 'last 24 hours'"
+    escalate_threshold:
+      type: integer
+      minimum: 1
+      default: 3
+      description: "match count at which to delegate to AnomalyAce"
+    downstream_agent_id:
+      type: string
+      description: "instance_id of the AnomalyAce agent to delegate to"
+
+steps:
+  - id: window
+    tool: timestamp_window.v1
+    args:
+      expression: ${inputs.since}
+
+  - id: scans
+    for_each: ${inputs.log_paths}
+    steps:
+      - id: scan
+        tool: log_scan.v1
+        args:
+          path: ${each}
+          patterns: ${inputs.patterns}
+          since: ${window.start}
+
+  - id: rollup
+    tool: log_aggregate.v1
+    args:
+      results: ${scans.results}
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      scope: lineage
+      tags: ["morning_sweep", "log_lurker"]
+      content:
+        kind: morning_sweep_summary
+        match_count: ${rollup.total_matches}
+        windows: ${rollup.windows}
+        run_at: ${window.end}
+
+  - id: escalate
+    tool: delegate.v1
+    when: ${gte(rollup.total_matches, inputs.escalate_threshold)}
+    args:
+      target_instance_id: ${inputs.downstream_agent_id}
+      target_skill: investigate_finding.v1
+      inputs:
+        finding_ids: ${rollup.finding_ids}
+        match_count: ${rollup.total_matches}
+      reason: "morning_sweep matched threshold; correlate + score"
+
+output:
+  match_count: ${rollup.total_matches}
+  escalated: ${defined(escalate)}
+  memory_entry_id: ${persist.entry_id}
