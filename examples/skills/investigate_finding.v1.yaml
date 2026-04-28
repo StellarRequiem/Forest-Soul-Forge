@@ -48,12 +48,13 @@ steps:
     when: ${inputs.match_count >= inputs.contain_threshold}
     args:
       target_instance_id: ${inputs.downstream_agent_id}
-      target_skill: contain_incident.v1
+      skill_name: contain_incident
+      skill_version: "1"
       inputs:
         alert: "${inputs.match_count} matches of pattern ${inputs.pattern}"
         match_count: ${inputs.match_count}
         downstream_agent_id: ${inputs.vault_agent_id}
-      reason: "match_count ≥ threshold; route to containment"
+      reason: "match_count >= threshold; route to containment"
 
 output:
   match_count: ${inputs.match_count}

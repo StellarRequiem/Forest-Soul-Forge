@@ -72,7 +72,8 @@ steps:
     when: ${scan.match_count >= inputs.escalate_threshold}
     args:
       target_instance_id: ${inputs.downstream_agent_id}
-      target_skill: investigate_finding.v1
+      skill_name: investigate_finding
+      skill_version: "1"
       inputs:
         match_count: ${scan.match_count}
         pattern: ${inputs.pattern}
