@@ -16,6 +16,8 @@ from forest_soul_forge.tools.builtin.delegate import DelegateTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
+from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
+from forest_soul_forge.tools.builtin.key_inventory import KeyInventoryTool
 from forest_soul_forge.tools.builtin.lateral_movement_detect import LateralMovementDetectTool
 from forest_soul_forge.tools.builtin.log_aggregate import LogAggregateTool
 from forest_soul_forge.tools.builtin.log_correlate import LogCorrelateTool
@@ -60,6 +62,8 @@ __all__ = [
     "IsolateProcessTool",
     "PostureCheckTool",
     "ContinuousVerifyTool",
+    "JitAccessTool",
+    "KeyInventoryTool",
 ]
 
 
@@ -101,3 +105,6 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # ADR-0033 Phase B3 — security_high posture + verification.
     registry.register(PostureCheckTool())
     registry.register(ContinuousVerifyTool())
+    # ADR-0033 Phase B3 — security_high access + key inventory.
+    registry.register(JitAccessTool())
+    registry.register(KeyInventoryTool())

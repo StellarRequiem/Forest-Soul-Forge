@@ -946,6 +946,62 @@ tools:
     side_effects: read_only
     archetype_tags: [security_high, investigator]
 
+  jit_access.v1:
+    name: jit_access
+    version: "1"
+    description: |
+      Issue a time-bounded access grant — the grant IS the
+      audit event. The runtime hashes (principal, scope,
+      ttl_seconds, reason, granted_at, expires_at) into the
+      tool_invoked chain entry; downstream skills query the
+      chain (or memory snapshot) for the latest grant matching
+      (principal, scope) and compare expires_at to now.
+      side_effects=external auto-triggers human approval per
+      tool_policy's external_always_human_approval rule —
+      every grant goes through the operator queue. Caps:
+      ttl_seconds ≤ 86400 (24h), reason ≤ 256 chars, scope is
+      URL-safe-ish. One grant per call (no batch issuance —
+      operator approval per grant is the design intent).
+    input_schema:
+      type: object
+      required: [principal, scope, ttl_seconds, reason]
+      properties:
+        principal:   {type: string, maxLength: 64}
+        scope:       {type: string, maxLength: 64}
+        ttl_seconds: {type: integer, minimum: 1, maximum: 86400}
+        reason:      {type: string, maxLength: 256}
+    side_effects: external
+    archetype_tags: [security_high, guardian]
+
+  key_inventory.v1:
+    name: key_inventory
+    version: "1"
+    description: |
+      Enumerate cryptographic key material on the host —
+      paths + sizes + mtimes + counts ONLY, never the bytes.
+      Categories: keychain (macOS, file paths via ``security
+      list-keychains``; never dump-keychain), ssh (~/.ssh
+      private keys with perms-warning, public keys, line
+      counts for authorized_keys + known_hosts), signing
+      (~/.gnupg file enumeration without invoking gpg).
+      Drift between successive runs is the high-value signal
+      — KeyKeeper composes this with memory_recall +
+      continuous_verify to surface a new private key that
+      wasn't there yesterday. Refuses paths outside the
+      caller's HOME + standard system keychain locations.
+      Timeout: 10s for shellouts.
+    input_schema:
+      type: object
+      properties:
+        categories:
+          type: array
+          items: {type: string, enum: [keychain, ssh, signing]}
+          maxItems: 3
+        home_dir:
+          type: string
+    side_effects: read_only
+    archetype_tags: [security_high, observer]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
