@@ -94,7 +94,10 @@ say "Starting daemon on 127.0.0.1:${DAEMON_PORT} ..."
 DAEMON_PID=$!
 
 say "Starting frontend on 127.0.0.1:${FRONT_PORT} ..."
-(cd frontend && ../.venv/bin/python -m http.server "$FRONT_PORT" --bind 127.0.0.1) \
+# Use the no-cache shim instead of `python -m http.server` so returning
+# visitors don't see stale UI after a deploy. The shim sends
+# Cache-Control: no-store on every response. Demo-friction audit P0 #2.
+(cd frontend && ../.venv/bin/python serve.py "$FRONT_PORT" 127.0.0.1) \
   >> "$FRONT_LOG" 2>&1 &
 FRONT_PID=$!
 

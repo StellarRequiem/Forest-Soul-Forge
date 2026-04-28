@@ -105,6 +105,12 @@ body {
 .status-dot[data-status="unreachable"] .dot,
 .status-dot[data-status="fail"] .dot { background: var(--provider-fail); color: var(--provider-fail); }
 .status-dot[data-status="disabled"] .dot { background: var(--provider-unknown); color: var(--provider-unknown); }
+/* Demo-friction audit P0 #4: provider 'inactive' (UNREACHABLE/DISABLED at
+   the JS layer) is the LLM provider being optional and missing — not a
+   system error. Render with the neutral 'unknown' palette so the dot
+   doesn't read as alarming. The real 'unreachable' state (red) is
+   reserved for the daemon itself being down. */
+.status-dot[data-status="inactive"] .dot { background: var(--provider-unknown); color: var(--provider-unknown); }
 
 /* ------------------------------------------------------------- */
 /* Banner (auth / writes-disabled / chain verify fail)            */

@@ -70,12 +70,33 @@ async function selectAgent(id) {
     state.set("agentDetail", agent);
     renderDetail(agent);
   } catch (e) {
+    // Demo-friction audit P0 #3: a 404 here usually means the agent list
+    // is stale (cache from a different daemon registry state). Auto-trigger
+    // a list refresh and tell the user what's going on, instead of leaving
+    // a bare "404 unknown agent: ..." that looks like a system error.
     detail.innerHTML = "";
-    const err = document.createElement("div");
-    err.className = "empty";
-    err.style.color = "var(--danger)";
-    err.textContent = `Failed to load agent: ${e.message}`;
-    detail.appendChild(err);
+    const wrap = document.createElement("div");
+    wrap.className = "empty";
+    const isNotFound = /\b404\b|unknown agent/i.test(e.message);
+    if (isNotFound) {
+      wrap.style.color = "var(--fg-muted)";
+      wrap.textContent =
+        "This agent isn't in the current registry — the list may be stale. " +
+        "Refreshing now…";
+      detail.appendChild(wrap);
+      // Silently re-pull the list; if the agent really is gone, the card
+      // disappears and the empty-detail prompt returns. If it's a transient
+      // glitch, the user can click the card again.
+      try {
+        await refresh();
+      } catch {
+        /* refresh errors surface via the list panel itself */
+      }
+    } else {
+      wrap.style.color = "var(--danger)";
+      wrap.textContent = `Failed to load agent: ${e.message}`;
+      detail.appendChild(wrap);
+    }
   }
 }
 
@@ -214,5 +235,13 @@ export function start() {
   document.getElementById("agents-refresh").addEventListener("click", refresh);
   document.getElementById("agents-role-filter").addEventListener("change", refresh);
   document.getElementById("agents-status-filter").addEventListener("change", refresh);
+  // Demo-friction audit P0 #3: refresh on tab activation so a returning
+  // visitor doesn't see a stale list. The other panels do this; agents
+  // got missed in the original wiring.
+  document.querySelectorAll(".tab").forEach((tab) => {
+    if (tab.dataset.tab === "agents") {
+      tab.addEventListener("click", refresh);
+    }
+  });
   refresh();
 }

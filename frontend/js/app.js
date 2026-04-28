@@ -85,6 +85,13 @@ async function boot() {
   agentsPanel.start();
   auditPanel.start();
   pendingPanel.start();
+  // Skills + Tools tabs (ADR-0019 T5 / ADR-0031 T5) — must run in the
+  // success path; previously these only started in the trait-tree
+  // failure branch (lines 54-59), so when the trait tree loaded
+  // successfully the Skills and Tools tabs were stuck on "Loading…"
+  // forever. Demo-friction audit 2026-04-28 P0 #1.
+  skillsPanel.start();
+  toolRegistryPanel.start();
   // Memory tab (ADR-0022 v0.2 T17) — depends on state.agents being
   // populated by agentsPanel; subscribes to keep its picker in sync.
   // Non-fatal posture — tab degrades to empty state if the daemon

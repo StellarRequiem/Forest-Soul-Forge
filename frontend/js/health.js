@@ -12,11 +12,30 @@ const POLL_INTERVAL_MS = 15_000;
 
 let pollTimer = null;
 
-/** Map ProviderStatus enum → CSS `data-status` value. */
+/** Map ProviderStatus enum → CSS `data-status` value.
+ *
+ * Demo-friction audit P0 #4: an UNREACHABLE provider isn't a system
+ * error — it's a missing optional dependency (Ollama not running). The
+ * daemon still works fine; voice-renderer just falls back to its
+ * deterministic template. So map UNREACHABLE/DISABLED to a neutral
+ * 'inactive' state rather than the same red 'unreachable' dot we use
+ * for the daemon itself being down.
+ */
 function dotStatus(providerStatus) {
   // Pydantic ProviderStatus: OK | DEGRADED | UNREACHABLE | DISABLED
   if (!providerStatus) return "unknown";
-  return String(providerStatus).toLowerCase();
+  const s = String(providerStatus).toLowerCase();
+  if (s === "unreachable" || s === "disabled") return "inactive";
+  return s;
+}
+
+/** Friendlier label text — "no LLM" instead of "local · unreachable". */
+function providerLabel(name, status) {
+  if (!status) return `${name} · …`;
+  const s = String(status).toLowerCase();
+  if (s === "unreachable") return `${name} · offline (LLM features off)`;
+  if (s === "disabled") return `${name} · disabled`;
+  return `${name} · ${s}`;
 }
 
 function renderHealth(health) {
@@ -30,9 +49,12 @@ function renderHealth(health) {
   const providerName = health.active_provider || "unknown";
   const providerStatus = health.provider?.status;
   dot.setAttribute("data-status", dotStatus(providerStatus));
-  label.textContent = `${providerName} · ${providerStatus?.toLowerCase() || "…"}`;
+  label.textContent = providerLabel(providerName, providerStatus);
+  // Tooltip keeps the precise diagnostic (with the actual error string)
+  // for operators / support — only the visible label and dot color get
+  // softened. Click-through path to the operator is unchanged.
   dot.title = health.provider?.error
-    ? `${providerName}: ${health.provider.error}`
+    ? `${providerName}: ${health.provider.error}\n(LLM-enriched voice falls back to the deterministic template)`
     : `${providerName}: ${providerStatus}`;
 }
 
