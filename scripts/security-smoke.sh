@@ -84,7 +84,13 @@ log "found chain agents: LL=$LL AA=$AA RR=$RR VW=$VW"
 # ---------------------------------------------------------------------------
 # 3. Drive LogLurker.morning_sweep against the seeded log.
 # ---------------------------------------------------------------------------
-payload=$(jq -n --arg path "$LOGFILE" --arg downstream "$AA" '{
+# Real endpoint shape (ADR-0031 T2b): POST /agents/{id}/skills/run
+# with body {skill_name, skill_version, session_id, inputs}.
+# Earlier shape /skills/{name.version}/run was wrong — 404'd silently.
+payload=$(jq -n --arg path "$LOGFILE" --arg downstream "$AA" --arg sid "smoke-$TS" '{
+  skill_name: "morning_sweep",
+  skill_version: "1",
+  session_id: $sid,
   inputs: {
     log_paths: [$path],
     patterns: ["canary_pattern_xyz123"],
@@ -94,12 +100,10 @@ payload=$(jq -n --arg path "$LOGFILE" --arg downstream "$AA" '{
   }
 }')
 
-# Capture HTTP status + body so daemon rejections are visible. The
-# previous 'curl -sf' form swallowed both on non-2xx, leaving us with
-# only "morning_sweep run returned empty" — useless for diagnosis.
+# Capture HTTP status + body so daemon rejections are visible.
 tmp="$(mktemp)"
 http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST \
-  "$DAEMON/agents/$LL/skills/morning_sweep.v1/run" \
+  "$DAEMON/agents/$LL/skills/run" \
   -H "Content-Type: application/json" \
   $(auth) \
   -d "$payload")
