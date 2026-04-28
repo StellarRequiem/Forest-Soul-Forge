@@ -141,16 +141,29 @@ def build_delegator_factory(
                         "chain)."
                     )
 
-            # 3. Resolve target's skill manifest from disk.
-            manifest_path = (
-                Path(skill_install_dir)
+            # 3. Resolve target's skill manifest from disk. Two install
+            #    patterns are supported, matching skills_run.py's flat
+            #    pattern AND the older subdirectory pattern:
+            #      flat:   <install_dir>/<name>.v<version>.yaml
+            #      subdir: <install_dir>/<name>.v<version>/skill.yaml
+            #    Try flat first (it's what `fsf install skill` and the
+            #    swarm-install script produce). Fall through to subdir
+            #    so legacy installations keep working.
+            install_root = Path(skill_install_dir)
+            flat_path = install_root / f"{skill_name}.v{skill_version}.yaml"
+            subdir_path = (
+                install_root
                 / f"{skill_name}.v{skill_version}"
                 / "skill.yaml"
             )
-            if not manifest_path.exists():
+            if flat_path.exists():
+                manifest_path = flat_path
+            elif subdir_path.exists():
+                manifest_path = subdir_path
+            else:
                 raise DelegateError(
-                    f"skill {skill_name}.v{skill_version} not installed at "
-                    f"{manifest_path}"
+                    f"skill {skill_name}.v{skill_version} not installed "
+                    f"(checked {flat_path} and {subdir_path})"
                 )
             try:
                 skill = parse_manifest(manifest_path.read_text(encoding="utf-8"))
