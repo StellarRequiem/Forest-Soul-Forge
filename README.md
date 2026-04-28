@@ -186,7 +186,7 @@ Vanilla JS on nginx. No build step, no framework lock-in. **Seven tabs:**
 
 ## 🟢 Live status — what's verified end-to-end
 
-The Phase E synthetic-incident smoke ran on `2026-04-28` against the live stack. **Verified**:
+The Phase E synthetic-incident smoke ran on `2026-04-28` against the live stack. **The canonical Security Swarm chain fires end-to-end.** Verified:
 
 - ✅ Daemon restart picks up YAML config changes (trait_tree + tool_catalog + genres + constitution_templates)
 - ✅ All 9 swarm agents birth cleanly via `POST /birth` against the security tier kits
@@ -194,11 +194,10 @@ The Phase E synthetic-incident smoke ran on `2026-04-28` against the live stack.
 - ✅ `POST /agents/{id}/skills/run` reaches the engine and executes step-by-step
 - ✅ Real tool semantics validated: `timestamp_window` → `log_scan` → `memory_write` round-trip captured 3 matches against a seeded canary log
 - ✅ Comparison predicates (`>=`, `==`, etc.) work; Python-truthy-style conditionals work
-- ✅ Audit chain captures lifecycle events (`agent_created`, `chain_created`, etc.) and the registry mirror is queryable via `/audit/tail`
+- ✅ Audit chain captures lifecycle events (`agent_created`, `chain_created`, etc.) and runtime events stream to `data/audit_chain.jsonl`
+- ✅ **Cross-agent chain proven**: `LogLurker → AnomalyAce → ResponseRogue → VaultWarden`, four levels of `delegate.v1` nesting, **47 ordered audit events** (4 `skill_invoked` + 12 `tool_call_dispatched` + 12 `tool_call_succeeded` + 4 `skill_completed` + 3 `agent_delegated` + 12 `skill_step_started/completed` pairs)
 
-**Discovered live and queued for the next round** — the skill_expression engine stringifies every YAML arg value at parse time (`parse_template(str(v))` in `forge/skill_manifest.py`). That blocks any tool with structured args (`dict` or `list[str]`) from being called via a manifest. Most consequential: `delegate.v1`'s `inputs: {...}` becomes a string → cross-agent chain composition is blocked on a 30-50 LoC skill-engine fix.
-
-This is captured in the audit notes for the next session. Skills work as individual primitives; the cross-agent chain composition fires once the engine fix lands.
+The audit doc at [`docs/audits/2026-04-28-phase-d-e-review.md`](docs/audits/2026-04-28-phase-d-e-review.md) captures the six findings that surfaced live (and were fixed in this round) — chiefly the skill engine's structured-arg stringification, a non-reentrant write_lock that deadlocked nested delegations, and a delegator/install-script path mismatch. ADR-0033 promoted from Proposed → **Accepted** as a result.
 
 ---
 
@@ -331,7 +330,7 @@ Every non-trivial design choice has its own ADR. Files live in [`docs/decisions/
 | 0030 | Tool Forge (T1–T4 implemented)                          | Proposed |
 | 0031 | Skill Forge (T1, T2a/T2b, T5, T7, T8 implemented)       | Proposed |
 | 0032 | CLI architecture                                        | Proposed |
-| 0033 | **Security Swarm** (Phases A–E shipped; chain-engine gap noted) | Proposed |
+| 0033 | **Security Swarm** (Phases A–E1 shipped + chain proven live 2026-04-28) | **Accepted** |
 
 Don't trust the doc — trust the code. Every Accepted ADR has a corresponding implementation; every Proposed ADR is in flight or queued.
 
@@ -387,7 +386,7 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 - Phase D1: 9 swarm role kits + per-role constitution role_bases
 - Phase D2: 21 skill manifests (4 chain + 17 supporting)
 - Phase D3: bring-up scripts (`security-swarm-birth.sh`, `security-swarm-install-skills.sh`)
-- Phase E1: synthetic-incident smoke test (`security-smoke.sh`)
+- Phase E1: synthetic-incident smoke test (`security-smoke.sh`) — **chain proven end-to-end 2026-04-28** (47 audit events, see [`docs/audits/2026-04-28-phase-d-e-review.md`](docs/audits/2026-04-28-phase-d-e-review.md))
 - Operator runbook: `docs/runbooks/security-swarm-bringup.md`
 
 ### Frontend
@@ -404,19 +403,22 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 
 ## 📅 What's next
 
-Per the post-Phase-D audit, ranked by leverage:
+Per the [Phase B + D + E audit](docs/audits/2026-04-28-phase-d-e-review.md), ranked by leverage:
 
 | Priority | Item | Why |
 |---|---|---|
-| **1** | Skill engine dict-args fix (~30-50 LoC in `skill_manifest.py`) | Unblocks `delegate.v1` from manifests → unblocks the canonical Security Swarm chain end-to-end |
-| **2** | Promote ADR-0033 to Accepted; write `docs/audits/2026-04-28-phase-d-e-review.md` | Closes the loop on what shipped vs what was planned |
-| **3** | Decompose `daemon/routers/writes.py` (1127 LoC kitchen-sink router) | Smell — split before open-web routers add more endpoints |
-| **4** | 3-5 integration tests for cross-subsystem flows | Currently 1 integration test for the whole stack |
-| **5** | Open-web tool family ([ADR-003X](docs/decisions/), unfiled) | Once chain is unblocked: `mcp_call.v1` + `browser_action.v1` + `web_fetch.v1` + per-agent secrets store + `suggest_agent.v1` |
-| **6** | Frontend test scaffold (Vitest + jsdom) | Real coverage gap; 3,500 LoC of JS, 0 tests |
-| **7** | Companion-tier real-time A/V interaction | Mission pillar 2 — accessibility-first |
-| **8** | HSM hardware adapter for VaultWarden's `key_rotate.v1` | Gated on operator hardware decision |
-| **9** | External product MCP adapters (Wazuh / Suricata / Defender / etc.) | Gated on operator install |
+| **1** | Mirror runtime audit events into the registry table (or have `/audit/tail` read the JSONL directly) | Right now runtime events live in `data/audit_chain.jsonl` and aren't auto-mirrored — `/audit/tail` only returns lifespan-time events. ~30 LoC fix preserves canonical-source / derived-index split per ADR-0006 |
+| **2** | Decompose `daemon/routers/writes.py` (1127 LoC kitchen-sink router) | Smell — split before open-web routers add more endpoints |
+| **3** | 3-5 integration tests for cross-subsystem flows | Currently 1 integration test for the whole stack |
+| **4** | Open-web tool family ([ADR-003X](docs/decisions/), unfiled) + Phase C1 secrets store | Next major direction: `mcp_call.v1` + `browser_action.v1` + `web_fetch.v1` + per-agent encrypted secrets store + `suggest_agent.v1` |
+| **5** | Frontend test scaffold (Vitest + jsdom) | Real coverage gap; 3,500 LoC of JS, 0 tests |
+| **6** | JSONSchema input defaults at runtime in the skill engine | So manifests can rely on declared defaults instead of hard-coding values inline |
+| **7** | `mfa_check.v1` | Deferred — operator hasn't scoped what "MFA posture" means |
+| **8** | Pytest version of `security-smoke.sh` (E2) | Shell suffices for the operator loop; pytest fixture would let CI gate on the chain |
+| **9** | Frontend Swarm tab (E3) | Per-tier agent listing + recent chain events viewer |
+| **10** | Companion-tier real-time A/V interaction | Mission pillar 2 — accessibility-first |
+| **11** | HSM hardware adapter for VaultWarden's `key_rotate.v1` | Gated on operator hardware decision |
+| **12** | External product MCP adapters (Wazuh / Suricata / Defender / etc.) | Gated on operator install |
 
 ---
 

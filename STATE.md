@@ -2,9 +2,9 @@
 
 A self-contained snapshot for a developer joining the project. What's implemented, what's blocked, what conventions matter, and where to start.
 
-> **Refresh cadence:** this doc + [`README.md`](README.md) update together at every phase boundary (Phase A close, Phase B close, Phase D close, etc.) and after any meaningful architectural finding (e.g. the skill-engine dict-args gap surfaced live on 2026-04-28). The two are designed to stay in sync; STATE.md is the developer-facing current-reality view, README.md is the product-and-mission view.
+> **Refresh cadence:** this doc + [`README.md`](README.md) update together at every phase boundary (Phase A close, Phase B close, Phase D close, etc.) and after any meaningful architectural finding. The two are designed to stay in sync; STATE.md is the developer-facing current-reality view, README.md is the product-and-mission view.
 
-Last updated: 2026-04-28, after the Phase D + E live test.
+Last updated: 2026-04-28, after Phase D + E closed live (47-event canonical chain, see [`docs/audits/2026-04-28-phase-d-e-review.md`](docs/audits/2026-04-28-phase-d-e-review.md)).
 
 ---
 
@@ -15,7 +15,7 @@ Forest Soul Forge is a **local-first agent foundry**. You drag trait sliders →
 Three big things are true today:
 
 1. **The runtime is real** — 31 builtin tools registered, 21 skill manifests installed, 9 swarm agents born live, daemon serving FastAPI on `127.0.0.1:7423`, frontend on `127.0.0.1:5173`. Single-skill execution end-to-end works.
-2. **The cross-agent chain is blocked on a small skill-engine fix** — `forge/skill_manifest.py` stringifies every YAML arg value at parse time, which breaks `delegate.v1`'s `inputs: {...}` dict argument. ~30–50 LoC patch unblocks Phase E.
+2. **The cross-agent chain fires end-to-end** — the canonical Security Swarm chain (`LogLurker → AnomalyAce → ResponseRogue → VaultWarden`) was verified live 2026-04-28 against a real daemon: 47 audit events, four levels of `delegate.v1` nesting, ordered correctly. Phase E **passes**.
 3. **Audit + privacy are the spine** — every state-changing action lands in a hash-chained JSONL. Memory has four scopes (private / lineage / consented / realm) with explicit cross-agent disclosure. No telemetry, no phone-home.
 
 If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](docs/decisions/ADR-0033-security-swarm.md) — it captures the design discipline the rest of the codebase follows.
@@ -36,7 +36,8 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | Audit event types | 30+ |
 | Frontend modules (vanilla JS) | 18 |
 | `.command` operator scripts | 13 |
-| Total commits on `main` | 120 |
+| Total commits on `main` | 130 |
+| Audit docs filed | 1 (`docs/audits/2026-04-28-phase-d-e-review.md`) |
 
 ---
 
@@ -73,9 +74,9 @@ Forest-Soul-Forge/
 │   ├── forge/
 │   │   ├── tool_forge.py          # 6-stage tool generation pipeline
 │   │   ├── skill_forge.py         # skill manifest generation
-│   │   ├── skill_manifest.py      # ⚠ parse_template(str(v)) — the gap
+│   │   ├── skill_manifest.py      # parses YAML manifests, dispatches args via compile_arg
 │   │   ├── skill_runtime.py       # walks the manifest DAG
-│   │   ├── skill_expression.py    # ${} interpolation language
+│   │   ├── skill_expression.py    # ${} interpolation + compiled-arg classes (Template/Literal/Dict/List)
 │   │   ├── static_analysis.py     # codegen risk linter
 │   │   └── sandbox.py             # subprocess pytest harness
 │   ├── registry/                  # SQLite v7 + ingest
@@ -102,7 +103,7 @@ Forest-Soul-Forge/
 │   ├── decisions/                 # 26 ADRs
 │   ├── runbooks/                  # security-swarm-bringup, sudo-helper-install,
 │   │                              #   end-to-end-smoke-test
-│   ├── audits/                    # convention-only — no entries yet
+│   ├── audits/                    # phase-boundary review docs (1 entry)
 │   ├── architecture/              # layout doc
 │   ├── PROGRESS.md                # high-level progress log
 │   └── vision/                    # handoff notes
@@ -208,7 +209,7 @@ Local-first by mission (ADR-0008): default model provider is Ollama on `127.0.0.
 | **D1 — swarm role kits + constitution role_bases** | ✅ shipped — 9 roles in trait_tree.yaml + 9 archetype kits in tool_catalog.yaml + 9 role_bases in constitution_templates.yaml |
 | **D2 — skill manifests** | ✅ shipped — 21 manifests in `examples/skills/` (4 canonical chain + 17 supporting). All 21 parse + install. |
 | **D3 — bring-up scripts** | ✅ shipped — `scripts/security-swarm-{birth,install-skills}.sh`, `scripts/security-smoke.sh`, `swarm-bringup.command`, operator runbook |
-| **E1 — synthetic-incident smoke** | ✅ shipped at the script level. Live test verified each link individually; end-to-end chain blocked by the skill-engine gap below. |
+| **E1 — synthetic-incident smoke** | ✅ shipped + **passes live**. Canonical chain `LL → AA → RR → VW` produces 47 ordered audit events; see [`docs/audits/2026-04-28-phase-d-e-review.md`](docs/audits/2026-04-28-phase-d-e-review.md). |
 
 ### ✅ Frontend
 
@@ -230,36 +231,32 @@ Seven tabs (Forge, Agents, Approvals, Skills, Tools, Memory, Audit). Vanilla JS,
 
 ## What's blocked or unfinished
 
-### ⚠ The skill-engine dict-args gap (highest leverage to fix)
+### ✅ Closed in this round (Phase D + E)
 
-**File:** `src/forest_soul_forge/forge/skill_manifest.py`
-**Function:** `_parse_step_args` (or wherever `parse_template(str(v))` runs over the YAML args dict)
-**Symptom:** every YAML arg value gets `str()`-cast and wrapped in a `Template` before reaching the tool's validator. Inline lists (`tags: ["a", "b"]`) become string repr `"['a', 'b']"`. Block mappings (`inputs: {match_count: ${x}}`) become string repr too.
+- **Skill-engine dict-args gap** — fixed via `compile_arg(value)` recursive type-dispatched compiler in `forge/skill_expression.py`. Dict/list/literal YAML values now flow through to the tool validator unchanged; nested `${...}` interpolation still works. Commit `04c0d27`.
+- **`write_lock` non-reentrant** — `threading.Lock()` → `threading.RLock()` in `daemon/app.py`. Nested `delegate.v1` calls (caller's skill_run → delegator → target's skill_run on the same thread) no longer self-deadlock. Commit `d215fd1`.
+- **Delegator looked at wrong manifest path** — install script writes flat `<name>.v<version>.yaml`; delegator was reading subdir `<name>.v<version>/skill.yaml`. Now tries flat-then-subdir. Commit `41c6f5d`.
+- **Peer-root swarm chain delegations refused** — chain manifests now set `allow_out_of_lineage: true`; the override is itself an audit event, so cross-tier delegations remain visible. Commit `4ed194b`.
+- **JSONSchema input defaults at runtime** — engine doesn't apply them. Worked around by hard-coding the `investigate_finding` contain-threshold to literal `1`. Engine-side fix is queued; manifest authors should reference inputs explicitly until then. Commit `4f241ea`.
 
-**Concrete impact:**
-- `delegate.v1`'s `inputs: {...}` arg can't be expressed in a manifest → cross-agent chains can't compose
-- `log_correlate.v1`'s `key: {field: source_ip}` similarly broken
-- `lateral_movement_detect.v1`'s `thresholds: {...}` similarly broken
-- Every chain skill in `examples/skills/` is parseable but not runnable through the chain
+The full incident report — symptom, file, fix, commit — lives in [`docs/audits/2026-04-28-phase-d-e-review.md`](docs/audits/2026-04-28-phase-d-e-review.md).
 
-**Fix (estimated 30–50 LoC):** in `_parse_step_args`, special-case dict and list values when the YAML has no `${...}` interpolation present. Pass them through unchanged. Only string values become Templates. Existing tests should pass; add 3–5 new tests for dict/list arg passthrough.
-
-**Verification path:** apply the fix → re-run `swarm-bringup.command` → inspect `/audit/tail` for `agent_delegated` events. Should see at least 3 (`LL → AA → RR → VW`).
-
-### ⚠ Other items in the queue
+### ⚠ Items in the queue (ranked by leverage)
 
 | Item | Status / blocker | Effort |
 |---|---|---|
+| Mirror runtime audit events into the registry table | Right now `/audit/tail` only returns lifespan-time events; runtime events live in `data/audit_chain.jsonl` and aren't auto-mirrored. The smoke's verification logic works around this by reading the JSONL directly. Cleanest fix: have `/audit/tail` tail-read the JSONL (preserves the canonical-source/derived-index split per ADR-0006). | ~30–50 LoC |
+| `daemon/routers/writes.py` decomposition | 1127 LoC kitchen-sink router; smell, not bug. Should split before open-web routers add more endpoints. | ~1 day refactor |
+| Integration tests | 1 file (forge loop). Need 3–5 covering dispatcher + memory + delegate, tool_dispatch with approval queue resume, skill_run multi-tool composition. | ~1 day |
+| Open-web ADR-003X + Phase C1 (per-agent encrypted secrets store) | Design captured in `MEMORY.md`; primitives = `mcp_call.v1` + `browser_action.v1` + `web_fetch.v1` + `suggest_agent.v1`. Three new genres: `web_observer`, `web_researcher`, `web_actuator`. | ~5 rounds of build |
+| Frontend test scaffold | 0 tests for 3,500 LoC of JS. Vitest + jsdom. | ~half day |
 | `mfa_check.v1` | Deferred — operator hasn't scoped what "MFA posture" means (TOTP enrolled? SAML SSO + MFA enforced? Per-account MFA capability matrix?) | unknown |
-| ADR-0033 promote to Accepted | Gates on chain firing live | trivial after fix |
-| First audit doc (`docs/audits/2026-04-28-phase-d-e-review.md`) | Convention says "what shipped vs planned, what's broken, what's deferred" | ~1 hour writing |
-| `daemon/routers/writes.py` decomposition | 1127 LoC kitchen-sink router; smell, not bug | 1 day refactor |
-| Integration tests | 1 file (forge loop). Need 3–5 covering dispatcher + memory + delegate, tool_dispatch with approval queue resume, skill_run multi-tool composition | 1 day |
-| Frontend test scaffold | 0 tests for 3,500 LoC of JS. Vitest + jsdom | half day |
-| Open-web ADR-003X | Design captured in `MEMORY.md` notes; primitives = `mcp_call.v1` + `browser_action.v1` + `web_fetch.v1` + per-agent secrets store + `suggest_agent.v1`. Three new genres: `web_observer`, `web_researcher`, `web_actuator`. | ~5 rounds of build |
-| Companion-tier real-time A/V | Mission pillar 2. Designed in ADRs (0008 + 0021), no implementation yet | unknown, large |
-| HSM hardware adapter (VaultWarden's `key_rotate.v1`) | Gated on operator hardware decision (which HSM) | gated |
-| External product MCP adapters (Wazuh / Suricata / 1Password / Defender / etc.) | Gated on operator install of those products | gated |
+| JSONSchema input defaults at runtime in the skill engine | So manifests can rely on declared defaults instead of hard-coding values inline. | small |
+| Pytest version of the smoke (E2) | Shell script suffices for the operator loop; pytest fixture would let CI gate on the chain. ADR-0023-style. | ~1 day |
+| Frontend Swarm tab (E3) | Per-tier agent listing + recent chain events viewer. | ~1 day |
+| Companion-tier real-time A/V | Mission pillar 2. Designed in ADRs (0008 + 0021), no implementation yet. | unknown, large |
+| HSM hardware adapter (VaultWarden's `key_rotate.v1`) | Gated on operator hardware decision (which HSM). | gated |
+| External product MCP adapters (Wazuh / Suricata / 1Password / Defender / etc.) | Gated on operator install of those products. | gated |
 
 ---
 
@@ -323,7 +320,8 @@ Mutating endpoints accept `X-Idempotency-Key`. Repeat with the same key + same b
 2. Required top-level keys: `schema_version: 1`, `name`, `version`, `description`, `requires` (list of `<tool>.v<version>` keys), `inputs` (JSONSchema-ish), `steps` (DAG), `output` (templated map).
 3. Step kinds: `tool` (call a tool), `for_each` (iterate with nested steps + `${each}` binding), conditional via `when:`.
 4. Expression engine supports: `${step.field}`, dotted drilling, `==`/`!=`/`<`/`<=`/`>`/`>=`/`in`/`not in`, registered functions `count`/`any`/`all`/`len`/`default`. **No** `gte()` / `gt()` / `defined()`.
-5. ⚠ **Until the dict-args fix lands:** don't pass dict or inline-list values to tool args. Use string args + interpolation only. Block-style YAML lists are also stringified.
+5. **Structured args** (`tags: [...]`, `inputs: {...}`, etc.) flow through `compile_arg` and reach the tool validator unchanged. Nested `${...}` interpolation works inside dicts and lists.
+6. **JSONSchema `default:` values are NOT applied by the engine at runtime.** A `when:` predicate referencing an unset input field will skip the step silently. Until the engine grows defaults, manifest authors should reference inputs explicitly (e.g. hard-coded thresholds) or rely on `required:` to surface the missing-input error at parse time.
 
 ### How to add a role
 
@@ -370,7 +368,7 @@ open "http://127.0.0.1:5173/?api=http://127.0.0.1:7423"
 ./scripts/security-smoke.sh
 ```
 
-The smoke seeds a synthetic log, drives `LogLurker.morning_sweep`, and inspects the audit chain. Currently passes through individual links; full chain blocks at the first `delegate.v1` call until the dict-args fix lands.
+The smoke seeds a synthetic log, drives `LogLurker.morning_sweep`, and inspects the audit chain. **Verified end-to-end on 2026-04-28**: 47 ordered audit events, four levels of `delegate.v1` nesting (`LL → AA → RR → VW`), every tool dispatch + agent delegation captured.
 
 ### Forge a tool from the CLI
 
@@ -407,12 +405,12 @@ A healthy daemon shows ~6 diagnostics, all `ok` or `disabled`. `failed` or `degr
 
 If you want to make immediate impact, pick from this list (top = highest leverage):
 
-1. **Fix the skill-engine dict-args gap** (~30–50 LoC in `forge/skill_manifest.py` + tests). Unblocks Phase E end-to-end. Single-file change, high-impact, well-scoped.
-2. **Promote ADR-0033 + write the first audit doc** in `docs/audits/2026-04-28-phase-d-e-review.md`. Closes the loop on Phase B + D + E. ~1 hour.
-3. **Decompose `daemon/routers/writes.py`** into per-resource routers. 1127 LoC right now; will only grow when open-web routers land. ~1 day refactor with thorough endpoint tests.
-4. **Add 3–5 cross-subsystem integration tests.** Currently 1 file. Highest value: dispatcher + memory + delegate, tool_dispatch with approval-queue resume, skill_run with multi-tool composition. ~1 day.
+1. **Mirror runtime audit events into the registry table** (or have `/audit/tail` read the JSONL directly). Without this, the smoke's verification logic has to read the JSONL file directly. Cleanest fix: ~30 LoC in `daemon/routers/audit.py` to tail-read `data/audit_chain.jsonl`. Preserves the canonical-source / derived-index split per ADR-0006.
+2. **Decompose `daemon/routers/writes.py`** into per-resource routers. 1127 LoC right now; will only grow when open-web routers land. ~1 day refactor with thorough endpoint tests.
+3. **Add 3–5 cross-subsystem integration tests.** Currently 1 file. Highest value: dispatcher + memory + delegate, tool_dispatch with approval-queue resume, skill_run with multi-tool composition. ~1 day.
+4. **File ADR-003X** for the open-web tool family. Design is captured in memory (see [`/sessions/.auto-memory/project_open_web_integration.md`]). Three primitives: `mcp_call.v1`, `browser_action.v1`, `web_fetch.v1`. Per-agent encrypted secrets store. `suggest_agent.v1` for operator-facing job matching.
 5. **Frontend test scaffold** (Vitest + jsdom). 3,500 LoC JS, 0 tests. ~half day for the scaffold + 2-3 example tests; future PRs add tests alongside UI changes.
-6. **File ADR-003X** for the open-web tool family. Design is captured in memory (see [`/sessions/.auto-memory/project_open_web_integration.md`]). Three primitives: `mcp_call.v1`, `browser_action.v1`, `web_fetch.v1`. Per-agent encrypted secrets store. `suggest_agent.v1` for operator-facing job matching.
+6. **JSONSchema input defaults at runtime** in the skill engine — small surface change, lets manifests rely on declared defaults instead of hard-coding values inline.
 
 If you want to read code first, start with:
 
@@ -453,9 +451,9 @@ If you want to read code first, start with:
 | 0030 | Tool Forge | Proposed (T1–T4 implemented) |
 | 0031 | Skill Forge | Proposed (T1, T2a/T2b, T5, T7, T8 implemented) |
 | 0032 | CLI architecture | Proposed |
-| 0033 | Security Swarm | Proposed (Phases A–E shipped, chain-engine gap noted) |
+| 0033 | Security Swarm | **Accepted** (Phases A–E1 shipped + chain proven live 2026-04-28) |
 
-ADRs that are `Proposed` but have `(... implemented)` are Decision-record-paper-trail proposed: the design is in flight, parts are committed, the doc itself just hasn't been promoted to `Accepted` because a few tranches remain. ADR-0033 is the current example — Phases A through E1 are shipped, but until the chain fires end-to-end through the smoke, it stays Proposed.
+ADRs that are `Proposed` but have `(... implemented)` are Decision-record-paper-trail proposed: the design is in flight, parts are committed, the doc itself just hasn't been promoted to `Accepted` because a few tranches remain. ADR-0033 was promoted on 2026-04-28 once the canonical Security Swarm chain fired end-to-end through the smoke.
 
 ---
 
