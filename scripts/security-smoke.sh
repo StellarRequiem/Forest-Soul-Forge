@@ -124,7 +124,16 @@ if [[ "$http_code" != "200" && "$http_code" != "201" ]]; then
   exit 1
 fi
 log "morning_sweep ran (http=$http_code)"
-echo "$resp" | jq -C '.' 2>/dev/null | head -40 || echo "$resp"
+# Surface the skill engine's status + failure path explicitly. A 200
+# HTTP response can still carry status="failed" with a failed_step_id.
+echo "$resp" | jq -r '
+  "  status: \(.status)",
+  "  failed_step_id: \(.failed_step_id // "n/a")",
+  "  failure_reason: \(.failure_reason // "n/a")",
+  "  failure_detail: \(.failure_detail // "n/a")",
+  "  steps_executed: \(.steps_executed // "n/a")"
+' 2>/dev/null
+echo "$resp" | jq -C '.' 2>/dev/null | head -50 || echo "$resp"
 
 # ---------------------------------------------------------------------------
 # 4. Inspect the audit chain for the chain links.
@@ -140,25 +149,29 @@ count_event() {
   echo "$chain" | jq -r --arg k "$kind" '[.events[] | select(.event_type == $k)] | length' 2>/dev/null || echo 0
 }
 
-invokes=$(count_event tool_invoked)
+# Real event names per dispatcher.py: tool_call_dispatched (not
+# tool_invoked) for every tool call; agent_delegated for cross-agent;
+# skill_invoked for each skill run. Earlier smoke counted tool_invoked
+# which is never emitted, so it always reported 0.
+dispatched=$(count_event tool_call_dispatched)
+succeeded=$(count_event tool_call_succeeded)
 delegations=$(count_event agent_delegated)
+skills_run=$(count_event skill_invoked)
 approvals=$(count_event tool_call_pending_approval)
 
 log "chain summary:"
-log "  tool_invoked       = $invokes"
-log "  agent_delegated    = $delegations"
-log "  pending_approval   = $approvals  (expect ≥ 1 from isolate_process)"
+log "  skill_invoked         = $skills_run  (expect ≥ 4 — one per chain link)"
+log "  tool_call_dispatched  = $dispatched"
+log "  tool_call_succeeded   = $succeeded"
+log "  agent_delegated       = $delegations  (expect ≥ 3 — log_lurker→AA→RR→VW)"
+log "  tool_call_pending_apv = $approvals    (smoke chain doesn't fire isolate; expect 0)"
 
 # ---------------------------------------------------------------------------
 # 5. Assertions.
 # ---------------------------------------------------------------------------
 fail=0
-[[ "$invokes" -gt 0 ]] || { echo "FAIL: no tool_invoked events"; fail=1; }
+[[ "$dispatched" -gt 0 ]] || { echo "FAIL: no tool_call_dispatched events"; fail=1; }
 [[ "$delegations" -gt 0 ]] || { echo "FAIL: no agent_delegated events (chain didn't escalate)"; fail=1; }
-
-# pending_approval is good — means contain_incident reached isolate_process
-# and stopped at the queue. 0 is acceptable if severity_floor was not met.
-log "(approvals=$approvals — 0 means the chain stopped before isolate, which is acceptable depending on triage verdict)"
 
 if (( fail > 0 )); then
   echo "smoke FAILED" >&2
