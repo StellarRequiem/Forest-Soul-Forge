@@ -29,6 +29,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "$DEST"
+# Clean stale manifests so renames in examples/ propagate to the install
+# dir on each run. Only deletes .yaml files at the top level — leaves
+# any operator-installed subdirectory contents alone.
+removed=0
+for f in "$DEST"/*.yaml; do
+  [[ -f "$f" ]] || continue
+  rm -f "$f"
+  removed=$((removed + 1))
+done
+[[ $removed -gt 0 ]] && echo "cleaned $removed stale manifest(s) from $DEST"
+
 copied=0
 for f in examples/skills/*.yaml; do
   [[ -f "$f" ]] || continue
