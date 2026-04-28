@@ -51,23 +51,27 @@ auth() { [[ -n "$TOKEN" ]] && echo "-H X-FSF-Token: $TOKEN" || echo ""; }
 
 birth() {
   local role="$1" name="$2"
-  local payload
+  local payload http_code body
   payload=$(jq -n --arg role "$role" --arg name "$name" --argjson enrich "$ENRICH" '{
     profile: {role: $role, trait_values: {}, domain_weight_overrides: {}},
     agent_name: $name,
     agent_version: "v1",
     enrich_narrative: $enrich
   }')
-  local resp
-  resp=$(curl -sf -X POST "$DAEMON/birth" \
+  # Capture both body + http code so we can surface daemon rejections instead
+  # of an opaque FAIL. The 'curl -sf' shorthand swallowed the body which made
+  # diagnosis impossible.
+  local tmp; tmp="$(mktemp)"
+  http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST "$DAEMON/birth" \
     -H "Content-Type: application/json" \
     $(auth) \
     -d "$payload")
-  if [[ -z "$resp" ]]; then
-    echo "FAIL  $role" >&2
+  body="$(cat "$tmp")"; rm -f "$tmp"
+  if [[ "$http_code" != "200" && "$http_code" != "201" ]]; then
+    printf 'FAIL  %-15s  http=%s  body=%s\n' "$role" "$http_code" "${body:0:240}" >&2
     return 1
   fi
-  echo "$resp" | jq -r --arg role "$role" --arg name "$name" \
+  echo "$body" | jq -r --arg role "$role" --arg name "$name" \
     '"OK    \($role | tostring | .[:14] | (. + "              ")[:14])  \($name)  instance=\(.instance_id)  dna=\(.dna)"'
 }
 
