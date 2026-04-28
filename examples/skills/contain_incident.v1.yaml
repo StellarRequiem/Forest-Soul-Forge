@@ -35,7 +35,6 @@ steps:
     args:
       layer: episodic
       scope: lineage
-      tags: ["contain_incident", "response_rogue"]
       content: "containment_record: alert=${inputs.alert} match_count=${inputs.match_count}"
 
   - id: key_audit_handoff
