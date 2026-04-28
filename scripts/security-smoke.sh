@@ -124,16 +124,6 @@ if [[ "$http_code" != "200" && "$http_code" != "201" ]]; then
   exit 1
 fi
 log "morning_sweep ran (http=$http_code)"
-# Surface the skill engine's status + failure path explicitly. A 200
-# HTTP response can still carry status="failed" with a failed_step_id.
-echo "$resp" | jq -r '
-  "  status: \(.status)",
-  "  failed_step_id: \(.failed_step_id // "n/a")",
-  "  failure_reason: \(.failure_reason // "n/a")",
-  "  failure_detail: \(.failure_detail // "n/a")",
-  "  steps_executed: \(.steps_executed // "n/a")"
-' 2>/dev/null
-echo "$resp" | jq -C '.' 2>/dev/null | head -50 || echo "$resp"
 
 # ---------------------------------------------------------------------------
 # 4. Inspect the audit chain for the chain links.
@@ -173,7 +163,26 @@ fail=0
 [[ "$dispatched" -gt 0 ]] || { echo "FAIL: no tool_call_dispatched events"; fail=1; }
 [[ "$delegations" -gt 0 ]] || { echo "FAIL: no agent_delegated events (chain didn't escalate)"; fail=1; }
 
+# Print skill engine outcome explicitly at the END so it's the last thing
+# the operator sees before the verdict — easier to scan than scrolled-off
+# blocks above.
+echo ""
+echo "----- skill engine outcome -----"
+echo "$resp" | jq -r '
+  "  status:           \(.status)",
+  "  failed_step_id:   \(.failed_step_id // "n/a")",
+  "  failure_reason:   \(.failure_reason // "n/a")",
+  "  failure_detail:   \((.failure_detail // "n/a") | tostring | .[0:200])",
+  "  steps_executed:   \(.steps_executed // "n/a")",
+  "  steps_skipped:    \(.steps_skipped // "n/a")"
+' 2>/dev/null
+
+echo ""
+echo "----- last 8 audit events -----"
+echo "$chain" | jq -r '.events[-8:] | reverse | .[] | "  \(.seq | tostring | .[:6]) \(.event_type) instance=\((.instance_id // "?") | .[0:24])"' 2>/dev/null
+
 if (( fail > 0 )); then
+  echo ""
   echo "smoke FAILED" >&2
   exit 1
 fi
