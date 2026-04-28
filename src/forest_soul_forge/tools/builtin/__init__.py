@@ -12,6 +12,7 @@ from forest_soul_forge.tools.builtin.anomaly_score import AnomalyScoreTool
 from forest_soul_forge.tools.builtin.audit_chain_verify import AuditChainVerifyTool
 from forest_soul_forge.tools.builtin.behavioral_baseline import BehavioralBaselineTool
 from forest_soul_forge.tools.builtin.delegate import DelegateTool
+from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
 from forest_soul_forge.tools.builtin.lateral_movement_detect import LateralMovementDetectTool
 from forest_soul_forge.tools.builtin.log_aggregate import LogAggregateTool
@@ -22,8 +23,11 @@ from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
 from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
 from forest_soul_forge.tools.builtin.patch_check import PatchCheckTool
 from forest_soul_forge.tools.builtin.port_policy_audit import PortPolicyAuditTool
+from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
+from forest_soul_forge.tools.builtin.traffic_flow_local import TrafficFlowLocalTool
+from forest_soul_forge.tools.builtin.ueba_track import UebaTrackTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
 
 __all__ = [
@@ -44,6 +48,10 @@ __all__ = [
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
+    "UebaTrackTool",
+    "PortScanLocalTool",
+    "TrafficFlowLocalTool",
+    "EvidenceCollectTool",
 ]
 
 
@@ -74,3 +82,8 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     registry.register(AnomalyScoreTool())
     registry.register(LogCorrelateTool())
     registry.register(LateralMovementDetectTool())
+    # ADR-0033 Phase B2 — security_mid telemetry + forensics.
+    registry.register(UebaTrackTool())
+    registry.register(PortScanLocalTool())
+    registry.register(TrafficFlowLocalTool())
+    registry.register(EvidenceCollectTool())

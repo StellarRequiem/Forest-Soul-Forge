@@ -710,6 +710,118 @@ tools:
     side_effects: read_only
     archetype_tags: [security_mid, investigator]
 
+  ueba_track.v1:
+    name: ueba_track
+    version: "1"
+    description: |
+      Per-user behavioral fingerprint over time. Partition events
+      by (user, sliding-window) and emit per-user stats: event
+      count, top values per feature, distinct-value counts. Window
+      sizes: hour | day | week. Pairs with anomaly_score for
+      "compare last hour to rolling N-hours baseline" detection.
+      Used by AnomalyAce + Investigator.
+    input_schema:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items: {type: object}
+          maxItems: 100000
+        features:
+          type: array
+          items: {type: string}
+        window:
+          type: string
+          enum: [hour, day, week]
+          default: hour
+    side_effects: read_only
+    archetype_tags: [security_mid, investigator]
+
+  port_scan_local.v1:
+    name: port_scan_local
+    version: "1"
+    description: |
+      Active TCP/UDP probe against the loopback interface ONLY
+      (127.0.0.1, ::1, localhost). Non-loopback targets refused at
+      validation time. Caps: 1024 ports per call, 0.5s per-port
+      timeout, 100 ports/sec sweep rate. Useful for finding
+      services that listen but weren't surfaced by read-only
+      port_policy_audit (different namespace, restricted /proc
+      visibility). UDP results are inherently ambiguous —
+      "filtered_or_open" is the standard UDP-scan caveat.
+    input_schema:
+      type: object
+      properties:
+        target:
+          type: string
+          enum: ["127.0.0.1", "::1", "localhost"]
+          default: "127.0.0.1"
+        ports:
+          type: array
+          items: {type: integer, minimum: 1, maximum: 65535}
+          maxItems: 1024
+        port_range:
+          type: object
+          properties:
+            start: {type: integer, minimum: 1, maximum: 65535}
+            end:   {type: integer, minimum: 1, maximum: 65535}
+        proto:
+          type: string
+          enum: [tcp, udp]
+          default: tcp
+    side_effects: network
+    archetype_tags: [security_mid, investigator]
+
+  traffic_flow_local.v1:
+    name: traffic_flow_local
+    version: "1"
+    description: |
+      Snapshot the OS connection table (all states, not just LISTEN).
+      Backends: lsof (macOS/BSD) or ss (Linux); first available wins.
+      Output records {src, dst, src_port, dst_port, proto, state, pid,
+      command, user} feed lateral_movement_detect directly. TIME_WAIT
+      entries dropped by default (operator-tunable via include_timewait).
+      Cap: 5000 flows.
+    input_schema:
+      type: object
+      properties:
+        backends:
+          type: array
+          items:
+            type: string
+            enum: [lsof, ss]
+        include_timewait:
+          type: boolean
+          default: false
+    side_effects: read_only
+    archetype_tags: [security_mid, investigator]
+
+  evidence_collect.v1:
+    name: evidence_collect
+    version: "1"
+    description: |
+      Forensic snapshot to a tar.gz archive. Captures: ps output,
+      listening ports, current flow table, and per-PID detail
+      (cmdline, environ, status, cwd, open FDs on Linux; ps + lsof
+      on macOS) for each PID the operator names. Manifest.json
+      indexes the archive. Tarball lands in the daemon's
+      evidence_dir; output returns path + sha256 + file list.
+      ResponseRogue runs this BEFORE isolate_process so the
+      process state is captured while still alive.
+    input_schema:
+      type: object
+      properties:
+        pids:
+          type: array
+          items: {type: integer, minimum: 2}
+          maxItems: 50
+        label:
+          type: string
+          maxLength: 64
+    side_effects: read_only
+    archetype_tags: [security_mid, guardian]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
