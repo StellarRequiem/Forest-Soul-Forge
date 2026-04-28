@@ -1,5 +1,7 @@
 # 🌲 Forest Soul Forge
 
+> **For developers:** the live state of the codebase — what's implemented, what's blocked, conventions, where to start contributing — lives in [`STATE.md`](STATE.md). It's the companion to this README; this one is product-oriented, that one is current-reality-oriented. Both refresh at every phase boundary.
+
 **A local-first agent foundry where every agent has cryptographically-signed identity, quantified personality, a tamper-evident behavior log, a constitutional rulebook compiled from sliders you set yourself, a runtime that can dispatch tools, run skills, remember across sessions, and delegate work to other agents — all gated, audited, reversible.**
 
 ```
