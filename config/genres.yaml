@@ -218,7 +218,12 @@ genres:
       Receives findings from security_low and emits its own to
       security_high. The swarm's working tier; most action lives here.
     risk_profile:
-      max_side_effects: network
+      # ADR-0033 §4 puts isolate_process.v1 (external) in mid tier; the
+      # runtime gate is per-tool requires_human_approval (auto-applied
+      # via tool_policy's external_always rule), not the genre ceiling.
+      # A network-only mid tier would orphan the canonical containment
+      # chain (ResponseRogue can't isolate without external).
+      max_side_effects: external
       memory_ceiling: lineage   # ADR-0033: episodic findings flow to high-tier policy/key roles
     default_kit_pattern:
       - cross_source_correlation

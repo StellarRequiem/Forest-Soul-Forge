@@ -144,6 +144,233 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  # ---- ADR-0033 Phase D — Security Swarm role bases (9) ------------------
+  # Every Swarm role inherits the same baseline floor: never exfiltrate
+  # findings, every external action gates on operator approval, audit-chain
+  # tamper attempts halt immediately. Per-role rules layer additional
+  # constraints specific to that role's blast radius.
+
+  patch_patrol:
+    policies:
+      - id: forbid_install_action
+        rule: forbid
+        triggers: [install_package, modify_host]
+        rationale: "PatchPatrol reports pending updates; install action is the operator's call."
+      - id: approval_for_inventory_diff_share
+        rule: require_human_approval
+        triggers: [exfiltrate_data, share_with_third_party]
+        rationale: "Software inventories carry sensitive fingerprinting; never leave the lineage without approval."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - install_package
+      - modify_production_systems
+    operator_duties:
+      - "Review pending CVEs daily; escalate critical."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  gatekeeper:
+    policies:
+      - id: forbid_firewall_modification
+        rule: forbid
+        triggers: [modify_firewall_rule, modify_network_config]
+        rationale: "Gatekeeper audits posture; firewall changes go through ZeroZero / dynamic_policy."
+      - id: approval_for_device_quarantine
+        rule: require_human_approval
+        triggers: [quarantine_device, eject_volume]
+        rationale: "USB quarantine is operator-driven."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - modify_firewall_rule
+      - quarantine_device
+    operator_duties:
+      - "Review new USB devices within 24h."
+      - "Investigate connectivity baseline drift."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  log_lurker:
+    policies:
+      - id: forbid_log_modification
+        rule: forbid
+        triggers: [modify_log_file, delete_log_entry]
+        rationale: "LogLurker reads logs; never writes them. Tamper would defeat the chain integrity probe."
+      - id: chain_break_halt
+        rule: require_human_approval
+        triggers: [audit_chain_break_detected]
+        rationale: "Chain break is the highest-severity finding LogLurker can produce."
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.45
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_log_file
+      - exfiltrate_data
+    operator_duties:
+      - "Review chain_health_probe failures immediately."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  anomaly_ace:
+    policies:
+      - id: forbid_speculative_action
+        rule: forbid
+        triggers: [act_on_unscored_finding]
+        rationale: "AnomalyAce correlates and scores; action requires a downstream agent + score ≥ threshold."
+      - id: evidence_demand_for_escalation
+        rule: require_human_approval
+        triggers: [escalate_finding, delegate_high_severity]
+        rationale: "Escalations to ResponseRogue are high-impact; operator confirms."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.55
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - kill_process
+      - modify_firewall_rule
+    operator_duties:
+      - "Review baseline_refresh outputs before reuse."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  net_ninja:
+    policies:
+      - id: forbid_active_packet_injection
+        rule: forbid
+        triggers: [inject_packet, send_arbitrary_traffic]
+        rationale: "NetNinja observes flows; never originates traffic beyond loopback scans."
+      - id: scan_loopback_only
+        rule: require_human_approval
+        triggers: [scan_non_loopback]
+        rationale: "Loopback scan is unprivileged; non-loopback requires explicit operator approval."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - inject_packet
+      - scan_external_target
+    operator_duties:
+      - "Review lateral_audit findings within 1h during incidents."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  response_rogue:
+    policies:
+      - id: approval_for_isolate
+        rule: require_human_approval
+        triggers: [kill_process, isolate_process, modify_host]
+        rationale: "Every isolate_process call gates on operator approval; never autonomous kill."
+      - id: capture_before_kill
+        rule: require_human_approval
+        triggers: [skip_evidence_collect]
+        rationale: "Forensic snapshot must precede containment; the chain is fixed."
+    risk_thresholds:
+      auto_halt_risk: 0.85
+      escalate_risk: 0.60
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - silent_kill
+      - skip_evidence_collect
+    operator_duties:
+      - "Review every contain_incident pending_approval entry."
+      - "Confirm evidence path before approving isolate_process."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  zero_zero:
+    policies:
+      - id: approval_for_policy_push
+        rule: require_human_approval
+        triggers: [push_firewall_rule, modify_firewall_rule, dynamic_policy]
+        rationale: "Every pf rule push gates on operator approval — apex tier means zero implicit trust."
+      - id: forbid_silent_drift
+        rule: forbid
+        triggers: [bypass_continuous_verify]
+        rationale: "ZeroZero's value is paranoid re-checking; bypassing it defeats the role."
+    risk_thresholds:
+      auto_halt_risk: 0.90
+      escalate_risk: 0.65
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - push_firewall_rule_silently
+      - cross_tier_disclosure_without_consent
+    operator_duties:
+      - "Review every policy push within 5 minutes of approval."
+      - "Audit verify_session drift findings hourly during sensitive sessions."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  vault_warden:
+    policies:
+      - id: forbid_key_extraction
+        rule: forbid
+        triggers: [extract_key_material, dump_keychain, exfiltrate_secret]
+        rationale: "VaultWarden enumerates, never extracts. Any key bytes leaving the role is a fatal violation."
+      - id: approval_for_rotation_advice
+        rule: require_human_approval
+        triggers: [advise_rotation, flag_key_compromise]
+        rationale: "Rotation advice goes through operator review before propagating."
+    risk_thresholds:
+      auto_halt_risk: 0.90
+      escalate_risk: 0.60
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - extract_key_material
+      - rotate_key_without_approval
+    operator_duties:
+      - "Review tamper_probe findings immediately."
+      - "Confirm rotation reminders before acting on them."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  deception_duke:
+    policies:
+      - id: forbid_active_attack_engagement
+        rule: forbid
+        triggers: [engage_attacker_directly, send_payload_to_attacker]
+        rationale: "DeceptionDuke logs and traps; never engages. Active engagement is OOS."
+      - id: approval_for_canary_planting
+        rule: require_human_approval
+        triggers: [plant_canary, modify_filesystem]
+        rationale: "Canary planting is a filesystem write — operator approves each campaign."
+    risk_thresholds:
+      auto_halt_risk: 0.85
+      escalate_risk: 0.55
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - engage_attacker_directly
+      - plant_canary_outside_allowlist
+    operator_duties:
+      - "Review attacker_track findings within 1h."
+      - "Audit honeypot connection logs daily."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
 
 # ---------------------------------------------------------------------------
 # Layer 2 — trait modifiers
