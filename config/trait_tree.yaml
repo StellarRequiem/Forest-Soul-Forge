@@ -402,6 +402,101 @@ roles:
       emotional: 1.8
       embodiment: 1.5
 
+  # ---- ADR-0033 Phase D — Security Swarm roles (9) -----------------------
+  # Domain weights anchor each role to its tier and dominant signal:
+  # security/audit lead for everyone; cognitive scales with how much
+  # correlation the role does; communication stays modest because the
+  # Swarm reports through memory lineage, not direct human contact.
+  patch_patrol:
+    description: "Anxious perfectionist. Daily patch + inventory sweeps; flags drift."
+    domain_weights:
+      security: 1.8
+      audit: 2.0
+      cognitive: 0.8
+      communication: 0.6
+      emotional: 0.4
+      embodiment: 0.5
+
+  gatekeeper:
+    description: "Blunt bouncer. Firewall + USB + MFA posture audits."
+    domain_weights:
+      security: 2.0
+      audit: 1.5
+      cognitive: 0.8
+      communication: 1.0
+      emotional: 0.5
+      embodiment: 0.6
+
+  log_lurker:
+    description: "Vigilant log archaeologist. Pattern scans + chain integrity probes."
+    domain_weights:
+      security: 1.5
+      audit: 2.0
+      cognitive: 1.5
+      communication: 0.5
+      emotional: 0.4
+      embodiment: 0.4
+
+  anomaly_ace:
+    description: "Lateral-thinking investigator. Baseline + correlate + score deviations."
+    domain_weights:
+      security: 1.5
+      audit: 1.5
+      cognitive: 2.0
+      communication: 0.7
+      emotional: 0.5
+      embodiment: 0.6
+
+  net_ninja:
+    description: "Wire-level analyst. Flow tables + lateral-movement graphs + loopback scan."
+    domain_weights:
+      security: 2.0
+      audit: 1.3
+      cognitive: 1.8
+      communication: 0.7
+      emotional: 0.4
+      embodiment: 0.6
+
+  response_rogue:
+    description: "Direct responder. Triage + isolate + evidence capture under operator gate."
+    domain_weights:
+      security: 1.8
+      audit: 1.5
+      cognitive: 1.3
+      communication: 1.0
+      emotional: 0.5
+      embodiment: 0.7
+
+  zero_zero:
+    description: "Paranoid apex. JIT access + posture verify + dynamic firewall policy."
+    domain_weights:
+      security: 2.5
+      audit: 1.8
+      cognitive: 1.5
+      communication: 0.5
+      emotional: 0.4
+      embodiment: 0.5
+
+  vault_warden:
+    description: "Key-material steward. Inventory + tamper detection + rotation reminders."
+    domain_weights:
+      security: 2.0
+      audit: 2.5
+      cognitive: 1.0
+      communication: 0.8
+      emotional: 0.4
+      embodiment: 0.5
+
+  deception_duke:
+    description: "Trap-layer. Canaries + honeypots + attacker engagement loops."
+    domain_weights:
+      security: 1.8
+      audit: 1.3
+      cognitive: 2.2
+      communication: 0.6
+      emotional: 0.4
+      embodiment: 0.5
+
 # ---------------------------------------------------------------------------
 # META — constraints enforced by the trait engine
 # ---------------------------------------------------------------------------

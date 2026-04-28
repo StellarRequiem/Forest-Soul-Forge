@@ -1180,6 +1180,106 @@ archetypes:
       - correlation_window.v1
       - timestamp_window.v1
 
+  # ---- ADR-0033 Phase D — Security Swarm role kits (9) -------------------
+  # Every Swarm role gets memory_recall + memory_write so they can read and
+  # write at scope='lineage' for inter-tier handoff. Mid + high tier also
+  # get delegate.v1 so they can initiate cross-agent chains.
+  #
+  # NOTE: three tools called out in ADR-0033 §4 are NOT in the kit because
+  # they're deferred: config_audit (B1 follow-on), mfa_check (B1 deferred
+  # pending operator scoping of MFA posture target), decoy_file (functionally
+  # absorbed by canary_token.v1). When those land, add them to the
+  # corresponding role.
+  patch_patrol:
+    standard_tools:
+      - patch_check.v1
+      - software_inventory.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - memory_write.v1
+
+  gatekeeper:
+    standard_tools:
+      - port_policy_audit.v1
+      - usb_device_audit.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - memory_write.v1
+
+  log_lurker:
+    standard_tools:
+      - log_scan.v1
+      - log_aggregate.v1
+      - audit_chain_verify.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - delegate.v1
+
+  anomaly_ace:
+    standard_tools:
+      - behavioral_baseline.v1
+      - log_correlate.v1
+      - anomaly_score.v1
+      - ueba_track.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - delegate.v1
+
+  net_ninja:
+    standard_tools:
+      - traffic_flow_local.v1
+      - lateral_movement_detect.v1
+      - port_scan_local.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - delegate.v1
+
+  response_rogue:
+    standard_tools:
+      - triage.v1
+      - isolate_process.v1
+      - evidence_collect.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - delegate.v1
+
+  zero_zero:
+    standard_tools:
+      - jit_access.v1
+      - continuous_verify.v1
+      - posture_check.v1
+      - dynamic_policy.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - memory_disclose.v1
+      - delegate.v1
+
+  vault_warden:
+    standard_tools:
+      - key_inventory.v1
+      - tamper_detect.v1
+      - file_integrity.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - memory_disclose.v1
+      - delegate.v1
+
+  deception_duke:
+    standard_tools:
+      - canary_token.v1
+      - honeypot_local.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - memory_disclose.v1
+      - delegate.v1
+
 # Per-genre fallback kits (ADR-0021 T4). Used by the kit resolver as
 # the LAST step in the chain when a role has no archetype-specific
 # standard_tools entry above. Lets a freshly-declared role inherit a
