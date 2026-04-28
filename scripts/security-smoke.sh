@@ -93,7 +93,7 @@ payload=$(jq -n --arg path "$LOGFILE" --arg downstream "$AA" --arg sid "smoke-$T
   session_id: $sid,
   inputs: {
     log_paths: [$path],
-    patterns: ["canary_pattern_xyz123"],
+    pattern: "canary_pattern_xyz123",
     since: "last 1 day",
     escalate_threshold: 1,
     downstream_agent_id: $downstream
