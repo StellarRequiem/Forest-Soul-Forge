@@ -1067,6 +1067,96 @@ tools:
     side_effects: filesystem
     archetype_tags: [security_high, investigator]
 
+  canary_token.v1:
+    name: canary_token
+    version: "1"
+    description: |
+      Plant + check honeytokens with dual signals — atime
+      drift (read access) AND content-hash (modification).
+      Either signal is a finding; together they cover the
+      full set of "someone interacted with this token" cases.
+      Operations: plant (write decoy files, record baseline
+      hash + atime + size) and check (re-stat + re-hash
+      against baseline; classify untouched / accessed /
+      modified / vanished / error per token). atime tracking
+      degraded? per-token atime_capability='unavailable' so
+      operator knows the token falls back to hash-only
+      detection. Default token body is a recognisable
+      FSF-CANARY-DO-NOT-USE banner + random ID so analysts
+      seeing it in egress immediately know it's a planted
+      decoy. Verdict: vanished or modified → critical;
+      accessed → warn. Caps: 50 tokens, 4 KiB content per
+      token, 4 MiB re-hash cap.
+    input_schema:
+      type: object
+      required: [op, tokens]
+      properties:
+        op:
+          type: string
+          enum: [plant, check]
+        tokens:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [path]
+            properties:
+              path:    {type: string}
+              content: {type: string}
+              label:   {type: string}
+        baseline:
+          type: object
+          description: "required for op=check; map of path → {hash, atime_unix, size}"
+        atime_drift_seconds:
+          type: integer
+          minimum: 0
+          default: 0
+    side_effects: filesystem
+    archetype_tags: [security_high, guardian]
+
+  honeypot_local.v1:
+    name: honeypot_local
+    version: "1"
+    description: |
+      Bind a TCP listener on a chosen high port (default
+      loopback-only); accept connections for a bounded
+      duration; capture {timestamp, src_ip, src_port,
+      banner_sent, bytes_received_preview[:128]} per attempt.
+      Any connection to a port that should have nothing on it
+      is by definition suspicious — this is the active-recon
+      signal. side_effects=network because binding holds the
+      port for the window AND the optional banner emits bytes
+      to whoever connects. Banner is operator-controlled (no
+      default — refuses to mislead operators into thinking
+      they have a real service running). Caps: port range
+      1024..65535, duration 1..300s, max_connections 1..1000,
+      banner ≤ 256 bytes, payload preview truncated at 128
+      bytes per connection. Bind to non-loopback host flagged
+      in 'skipped' as a confirmation hint to operator.
+    input_schema:
+      type: object
+      required: [port, duration_seconds]
+      properties:
+        port:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+        duration_seconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+        banner:    {type: string, maxLength: 256}
+        bind_host:
+          type: string
+          default: "127.0.0.1"
+        max_connections:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+    side_effects: network
+    archetype_tags: [security_high, observer]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.

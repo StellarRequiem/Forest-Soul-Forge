@@ -11,11 +11,13 @@ will get implementations as the corresponding tranches land.
 from forest_soul_forge.tools.builtin.anomaly_score import AnomalyScoreTool
 from forest_soul_forge.tools.builtin.audit_chain_verify import AuditChainVerifyTool
 from forest_soul_forge.tools.builtin.behavioral_baseline import BehavioralBaselineTool
+from forest_soul_forge.tools.builtin.canary_token import CanaryTokenTool
 from forest_soul_forge.tools.builtin.continuous_verify import ContinuousVerifyTool
 from forest_soul_forge.tools.builtin.delegate import DelegateTool
 from forest_soul_forge.tools.builtin.dynamic_policy import DynamicPolicyTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
+from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
 from forest_soul_forge.tools.builtin.key_inventory import KeyInventoryTool
@@ -68,6 +70,8 @@ __all__ = [
     "KeyInventoryTool",
     "DynamicPolicyTool",
     "TamperDetectTool",
+    "CanaryTokenTool",
+    "HoneypotLocalTool",
 ]
 
 
@@ -115,3 +119,6 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # ADR-0033 Phase B3 — security_high privileged (PrivClient).
     registry.register(DynamicPolicyTool())
     registry.register(TamperDetectTool())
+    # ADR-0033 Phase B3 — security_high deception layer.
+    registry.register(CanaryTokenTool())
+    registry.register(HoneypotLocalTool())
