@@ -488,3 +488,114 @@ class Template:
             if isinstance(p, Expr):
                 out |= p.references()
         return out
+
+
+# ---------------------------------------------------------------------------
+# Compiled argument values — preserve YAML structure (dict / list) end-to-end
+# ---------------------------------------------------------------------------
+#
+# Pre-2026-04-29 the manifest parser called ``parse_template(str(v))`` on every
+# YAML arg value, which stringified dicts and lists into their Python repr
+# before they reached the tool's validator. That broke:
+#
+#   args:
+#     tags: ["morning_sweep", "log_lurker"]   # → string "['morning_sweep', ...]"
+#     inputs: {match_count: ${scan.match_count}}  # → string "{'match_count': ...}"
+#
+# ``delegate.v1``'s ``inputs: dict`` arg in particular blocked the canonical
+# Security Swarm cross-agent chain — every link uses delegate.v1.
+#
+# The fix below preserves YAML structure: ``compile_arg`` recursively walks
+# dicts and lists, parsing string leaves into Templates (so ``${...}``
+# interpolation still works inside nested structures) and wrapping native
+# literals (int/float/bool/None) in ``_LiteralArg``. Each compiled-arg type
+# implements the same ``evaluate(ctx) → Any`` + ``references() → set[str]``
+# contract as Template, so the runtime's ``tpl.evaluate(bindings)`` call site
+# in skill_runtime.py needed no changes.
+
+
+@dataclass(frozen=True)
+class _LiteralArg:
+    """A non-template literal value — int, float, bool, None. Returned
+    unchanged at runtime. Has the same evaluate/references interface as
+    Template so the runtime can treat all arg-value shapes uniformly."""
+
+    value: Any
+
+    def evaluate(self, ctx: dict[str, Any]) -> Any:
+        return self.value
+
+    def references(self) -> set[str]:
+        return set()
+
+
+@dataclass(frozen=True)
+class _DictArg:
+    """A YAML mapping where each value is itself a compiled arg
+    (Template / _DictArg / _ListArg / _LiteralArg). At runtime, evaluates
+    each value against the bindings and returns a real ``dict``."""
+
+    items: tuple[tuple[str, Any], ...]   # frozen sequence of (key, compiled)
+
+    def evaluate(self, ctx: dict[str, Any]) -> dict[str, Any]:
+        return {k: v.evaluate(ctx) for k, v in self.items}
+
+    def references(self) -> set[str]:
+        out: set[str] = set()
+        for _, v in self.items:
+            out |= v.references()
+        return out
+
+
+@dataclass(frozen=True)
+class _ListArg:
+    """A YAML sequence where each item is itself a compiled arg. At
+    runtime, evaluates each item against the bindings and returns a real
+    ``list``."""
+
+    items: tuple[Any, ...]
+
+    def evaluate(self, ctx: dict[str, Any]) -> list[Any]:
+        return [v.evaluate(ctx) for v in self.items]
+
+    def references(self) -> set[str]:
+        out: set[str] = set()
+        for v in self.items:
+            out |= v.references()
+        return out
+
+
+def compile_arg(value: Any) -> "Template | _LiteralArg | _DictArg | _ListArg":
+    """Compile a YAML arg value into a structure with .evaluate(ctx) and
+    .references(). Preserves dict/list shape from the YAML so tools that
+    expect structured args (``delegate.v1`` / ``log_correlate.v1`` /
+    ``lateral_movement_detect.v1`` / ``memory_write.v1`` tags / ...)
+    receive them unchanged.
+
+    Type dispatch:
+      * ``str``           → ``parse_template(value)``  — preserves ``${...}``
+      * ``dict``          → ``_DictArg``  — recursively compile each value
+      * ``list``          → ``_ListArg``  — recursively compile each item
+      * ``int|float|bool``→ ``_LiteralArg``  — pass through unchanged
+      * ``None``          → ``_LiteralArg(None)``
+      * other             → fallback: ``parse_template(str(value))``
+    """
+    if isinstance(value, str):
+        return parse_template(value)
+    if isinstance(value, bool):
+        # Order matters: bool is a subclass of int in Python, so this
+        # branch must precede the int check.
+        return _LiteralArg(value=value)
+    if isinstance(value, (int, float)):
+        return _LiteralArg(value=value)
+    if value is None:
+        return _LiteralArg(value=None)
+    if isinstance(value, dict):
+        items = tuple((str(k), compile_arg(v)) for k, v in value.items())
+        return _DictArg(items=items)
+    if isinstance(value, list):
+        return _ListArg(items=tuple(compile_arg(v) for v in value))
+    # Unknown type — fall back to stringification with a parse_template
+    # wrap. Shouldn't happen for well-formed YAML; preserves the old
+    # behavior as a safety net.
+    return parse_template(str(value))

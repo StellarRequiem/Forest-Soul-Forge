@@ -41,6 +41,9 @@ steps:
     args:
       layer: episodic
       scope: lineage
+      tags:
+        - investigate_finding
+        - anomaly_ace
       content: "anomaly_finding: match_count=${inputs.match_count} pattern=${inputs.pattern}"
 
   - id: contain

@@ -26,6 +26,7 @@ import yaml
 from forest_soul_forge.forge.skill_expression import (
     ExpressionError,
     Template,
+    compile_arg,
     parse_template,
 )
 
@@ -52,7 +53,7 @@ class ToolStep:
 
     id: str
     tool: str  # "name.vversion" — leaf step only ever calls a tool
-    args: dict[str, Template]
+    args: dict[str, Any]   # Template | _LiteralArg | _DictArg | _ListArg
     when: Template | None = None
     unless: Template | None = None
 
@@ -267,10 +268,14 @@ def _parse_steps(
             raise ManifestError(
                 f"{sub_path}.args", "args must be a mapping",
             )
-        args: dict[str, Template] = {}
+        # ``compile_arg`` preserves YAML structure (dict/list) end-to-end so
+        # tools that strict-check args as ``dict`` or ``list[str]`` receive
+        # the right shape at runtime. Pre-fix this was ``parse_template(str(v))``
+        # which stringified everything → blocked delegate.v1 from manifests.
+        args: dict[str, Any] = {}
         for k, v in args_raw.items():
             try:
-                tpl = parse_template(str(v))
+                tpl = compile_arg(v)
             except ExpressionError as e:
                 raise ManifestError(f"{sub_path}.args.{k}", f"{e}") from e
             _check_refs(tpl, declared=scope, path=f"{sub_path}.args.{k}")

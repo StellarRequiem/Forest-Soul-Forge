@@ -65,6 +65,9 @@ steps:
     args:
       layer: episodic
       scope: lineage
+      tags:
+        - morning_sweep
+        - log_lurker
       content: "morning_sweep_summary: matches=${scan.match_count} files_scanned=${scan.files_scanned} pattern=${inputs.pattern} window=${window.start}..${window.end}"
 
   - id: escalate

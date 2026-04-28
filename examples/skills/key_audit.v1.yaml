@@ -26,13 +26,19 @@ inputs:
 steps:
   - id: inventory
     tool: key_inventory.v1
-    args: {}
+    args:
+      categories:
+        - ssh
+        - signing
 
   - id: persist
     tool: memory_write.v1
     args:
       layer: episodic
       scope: lineage
+      tags:
+        - key_audit
+        - vault_warden
       content: "key_audit_snapshot: triggered_by=${inputs.triggered_by} platform=${inventory.platform} warning_count=${inventory.warning_count}"
 
 output:
