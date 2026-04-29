@@ -479,7 +479,7 @@ If you want to read code first, start with:
 | 0032 | CLI architecture | Proposed |
 | 0033 | Security Swarm | **Accepted** (Phases A–E1 shipped + chain proven live 2026-04-28) |
 | 003X | Open-Web Tool Family (web_fetch + browser_action + mcp_call + secrets store + suggest_agent + 3 web genres) | Proposed — C1 (secrets), C2 (web_fetch), C3 (browser_action), C4 (mcp_call), C6 (suggest_agent), C7 (3 web genres) shipped 2026-04-29; C8 (demo) in flight |
-| 003X K | K-track parallels (memory verification, ceremony events, SSE stream, triune spawn) | K1 (memory_verify), K2 (ceremony.v1), K3 (/audit/stream), K4 (triune bond + Heartwood/Branch/Leaf seeds + delegate.v1 enforcement) shipped 2026-04-29; K5 (chronicle CLI), K6 (hardware_binding) in flight |
+| 003X K | K-track parallels (memory verification, ceremony events, SSE stream, triune spawn, chronicle export) | K1 (memory_verify), K2 (ceremony.v1), K3 (/audit/stream), K4 (triune bond + Heartwood/Branch/Leaf seeds + delegate.v1 enforcement), K5 (fsf chronicle CLI + per-agent/per-bond/full-chain HTML+MD export with sanitized-by-default payloads) shipped 2026-04-29; K6 (hardware_binding) in flight |
 
 ADRs that are `Proposed` but have `(... implemented)` are Decision-record-paper-trail proposed: the design is in flight, parts are committed, the doc itself just hasn't been promoted to `Accepted` because a few tranches remain. ADR-0033 was promoted on 2026-04-28 once the canonical Security Swarm chain fired end-to-end through the smoke.
 

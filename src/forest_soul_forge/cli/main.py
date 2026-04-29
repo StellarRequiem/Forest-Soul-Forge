@@ -253,6 +253,10 @@ def _build_parser() -> argparse.ArgumentParser:
     from forest_soul_forge.cli.triune import add_subparser as _triune_add_subparser
     _triune_add_subparser(sub)
 
+    # `fsf chronicle ...` — export agent/triune/forge history (ADR-003X K5).
+    from forest_soul_forge.cli.chronicle import add_subparser as _chronicle_add_subparser
+    _chronicle_add_subparser(sub)
+
     return parser
 
 
