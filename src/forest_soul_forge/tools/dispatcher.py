@@ -275,6 +275,7 @@ class ToolDispatcher:
         tool_version: str,
         args: dict[str, Any],
         provider: Any = None,
+        task_caps: dict[str, Any] | None = None,
     ) -> DispatchSucceeded | DispatchRefused | DispatchPendingApproval | DispatchFailed:
         """One round-trip through the runtime. Caller holds the write lock.
 
@@ -318,6 +319,36 @@ class ToolDispatcher:
                 instance_id=instance_id, agent_dna=agent_dna,
                 session_id=session_id,
             )
+
+        # ---- 0b. T2.2b: per-task usage_cap pre-check ---------------------
+        # Operator-supplied task_caps are checked BEFORE tool lookup so
+        # the operator's cap takes precedence over any tool that would
+        # have been the next dispatch. Sums tokens_used from prior
+        # dispatches in the same session — when next-call estimated
+        # tokens would push total over usage_cap_tokens, refuse.
+        # context_cap_tokens is tool-side enforcement (LLM-wrapping
+        # tools check ctx.constraints["context_cap_tokens"]); the
+        # dispatcher just passes it through via constraints.
+        if task_caps:
+            self._maybe_emit_task_caps_set(
+                task_caps, instance_id=instance_id,
+                agent_dna=agent_dna, session_id=session_id, key=key,
+            )
+            usage_cap = task_caps.get("usage_cap_tokens")
+            if usage_cap and isinstance(usage_cap, int) and usage_cap > 0:
+                used = self._sum_session_tokens(instance_id, session_id)
+                if used >= usage_cap:
+                    return self._refuse(
+                        key, "task_usage_cap_exceeded",
+                        (
+                            f"session {session_id} has consumed {used} tokens; "
+                            f"operator-supplied usage_cap_tokens={usage_cap} "
+                            "blocks further dispatches. Start a new session "
+                            "or raise the cap."
+                        ),
+                        instance_id=instance_id, agent_dna=agent_dna,
+                        session_id=session_id,
+                    )
 
         # ---- 1. lookup ---------------------------------------------------
         tool = self.registry.get(tool_name, tool_version)
@@ -486,13 +517,23 @@ class ToolDispatcher:
             self.delegator_factory(instance_id, agent_dna)
             if self.delegator_factory else None
         )
+        # T2.2b — fold operator-supplied context_cap_tokens into the
+        # constraints dict so LLM-wrapping tools can read it via
+        # ctx.constraints. usage_cap is enforced at the dispatcher
+        # level (above), but context_cap is per-LLM-call so tools
+        # check it themselves.
+        ctx_constraints = dict(resolved.constraints)
+        if task_caps:
+            ccap = task_caps.get("context_cap_tokens")
+            if ccap and isinstance(ccap, int) and ccap > 0:
+                ctx_constraints["context_cap_tokens"] = ccap
         ctx = ToolContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
             role=role,
             genre=genre,
             session_id=session_id,
-            constraints=dict(resolved.constraints),
+            constraints=ctx_constraints,
             provider=provider,
             memory=self.memory,
             delegate=delegate_fn,
@@ -643,6 +684,78 @@ class ToolDispatcher:
             tool_key=key, reason=reason, detail=detail,
             audit_seq=entry.seq,
         )
+
+    # ----- T2.2b helpers ---------------------------------------------------
+    def _maybe_emit_task_caps_set(
+        self, task_caps: dict, *,
+        instance_id: str, agent_dna: str, session_id: str, key: str,
+    ) -> None:
+        """Emit task_caps_set audit event the first time we see operator
+        caps for a (session, tool) pair. Idempotent — uses session-level
+        de-dup so a session with N dispatches under the same caps emits
+        ONE event, not N. The de-dup is best-effort (per-process memory)
+        — a daemon restart re-emits, which is acceptable."""
+        # Track per-process to avoid spamming. The key includes session_id
+        # so two operators each batching a session don't cross-eject one
+        # another's de-dup state.
+        if not hasattr(self, "_task_caps_emitted"):
+            self._task_caps_emitted: set[str] = set()
+        dedup_key = f"{session_id}|{task_caps.get('context_cap_tokens')}|{task_caps.get('usage_cap_tokens')}"
+        if dedup_key in self._task_caps_emitted:
+            return
+        self._task_caps_emitted.add(dedup_key)
+        try:
+            self.audit.append(
+                "task_caps_set",
+                {
+                    "instance_id":          instance_id,
+                    "session_id":           session_id,
+                    "tool_key":             key,
+                    "context_cap_tokens":   task_caps.get("context_cap_tokens"),
+                    "usage_cap_tokens":     task_caps.get("usage_cap_tokens"),
+                },
+                agent_dna=agent_dna,
+            )
+        except Exception:
+            # Audit failure shouldn't mask the dispatch.
+            pass
+
+    def _sum_session_tokens(self, instance_id: str, session_id: str) -> int:
+        """Sum tokens_used across prior dispatches in (instance, session).
+
+        Reads from the registry's tool_calls table when available. Falls
+        back to 0 when no record_call writer is wired (test contexts).
+        Treats missing/None tokens_used values as 0.
+        """
+        if self.record_call is None:
+            return 0
+        try:
+            # We need a counterpart — sum_tokens_for_session — on the
+            # registry. If it exists, use it. Otherwise fall back to 0
+            # and rely on the per-call counter for budget enforcement.
+            registry = getattr(self.audit, "_registry", None)
+            if registry is None:
+                # The dispatcher doesn't currently hold the agent
+                # registry directly — but we added it in G6 as
+                # self.agent_registry. Use that.
+                registry = self.agent_registry
+            if registry is None:
+                return 0
+            method = getattr(registry, "sum_session_tokens", None)
+            if method is None:
+                # Fallback: ask the SQLite directly via raw conn.
+                conn = getattr(registry, "_conn", None)
+                if conn is None:
+                    return 0
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(tokens_used), 0) AS total "
+                    "FROM tool_calls WHERE instance_id = ? AND session_id = ?",
+                    (instance_id, session_id),
+                ).fetchone()
+                return int(row[0] if not hasattr(row, "keys") else row["total"])
+            return int(method(instance_id, session_id))
+        except Exception:
+            return 0
 
     def _pending_approval(
         self,

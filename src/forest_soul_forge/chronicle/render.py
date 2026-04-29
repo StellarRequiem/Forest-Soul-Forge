@@ -145,6 +145,18 @@ def _san_posture_override_applied(d: dict) -> str:
     return f"Posture override (model:{model}) on {tool}: {summary}"
 
 
+def _san_task_caps_set(d: dict) -> str:
+    """T2.2b — operator-supplied per-task caps registered for this session."""
+    sess = (d.get("session_id") or "?")[:16]
+    parts = []
+    if d.get("context_cap_tokens"):
+        parts.append(f"context≤{d['context_cap_tokens']}")
+    if d.get("usage_cap_tokens"):
+        parts.append(f"usage≤{d['usage_cap_tokens']}")
+    cap_str = ", ".join(parts) if parts else "(empty)"
+    return f"Task caps set (session={sess}): {cap_str}"
+
+
 def _san_governance_relaxed(d: dict) -> str:
     """T2.1 — dispatched per-relaxation, with relaxation_type indicating
     which kind. Operators filtering on this single event type get every
@@ -266,6 +278,7 @@ SANITIZERS: dict[str, Any] = {
     "out_of_triune_attempt":       _san_out_of_triune_attempt,
     "governance_relaxed":          _san_governance_relaxed,        # T2.1
     "posture_override_applied":    _san_posture_override_applied,  # T2.2a
+    "task_caps_set":               _san_task_caps_set,             # T2.2b
     "spawn_genre_override":        _san_spawn_genre_override,
     "hardware_bound":              _san_hardware_bound,
     "hardware_mismatch":           _san_hardware_mismatch,

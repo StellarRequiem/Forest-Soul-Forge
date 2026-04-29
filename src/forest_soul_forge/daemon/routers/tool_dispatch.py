@@ -120,6 +120,14 @@ async def call_tool(
     # window). The write lock is a threading.Lock; FastAPI runs sync
     # endpoints on a threadpool but this is an async endpoint, so we
     # acquire the lock manually rather than via Depends.
+    # T2.2b — extract operator-supplied per-task caps. None means no cap.
+    task_caps_dict: dict | None = None
+    if payload.task_caps is not None:
+        task_caps_dict = {
+            "context_cap_tokens": payload.task_caps.context_cap_tokens,
+            "usage_cap_tokens":   payload.task_caps.usage_cap_tokens,
+        }
+
     with write_lock:
         outcome = await dispatcher.dispatch(
             instance_id=instance_id,
@@ -136,6 +144,10 @@ async def call_tool(
             # it. Done lazily so a missing provider registry doesn't
             # crash dispatches that don't need one.
             provider=_resolve_active_provider(request),
+            # T2.2b — operator-supplied per-task caps. None when the
+            # operator didn't set any; dispatcher treats absence as
+            # "no per-task limit" (constitution + genre floor still apply).
+            task_caps=task_caps_dict,
         )
 
     if isinstance(outcome, DispatchSucceeded):

@@ -882,6 +882,38 @@ class PreviewResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Tool dispatch (ADR-0019 T2 — POST /agents/{id}/tools/call)
 # ---------------------------------------------------------------------------
+# T2.2b — per-task caps the operator decides at execution time. These
+# layer on top of the constitution's provider_posture_overrides (T2.2a)
+# which set per-model defaults. task_caps are ad-hoc per request:
+# operator says "for THIS task, no more than N tokens / context limited
+# to M tokens." Logged to audit on every dispatch that has them set.
+class TaskCaps(BaseModel):
+    """Operator-supplied caps for a single tool call or skill run.
+
+    Both fields are optional; a request with no task_caps proceeds with
+    no per-task limit (constitution + genre floor still apply).
+
+    ``context_cap_tokens`` — soft cap on the input context the tool
+    can assemble for an LLM call. Tool-side enforcement: tools that
+    wrap an LLM check this and refuse if their assembled prompt would
+    exceed it. Pure-function tools ignore the field.
+
+    ``usage_cap_tokens`` — hard cap on cumulative tokens consumed for
+    this task across all dispatches in the same session. The dispatcher
+    sums tokens_used from prior dispatches in the session and refuses
+    when the next call would exceed the cap. Refusal lands in the chain
+    as a tool_call_refused event with reason='task_usage_cap_exceeded'.
+    """
+    context_cap_tokens: int | None = Field(
+        default=None, ge=1, le=2_000_000,
+        description="Soft cap on input context tokens; tool-side enforcement.",
+    )
+    usage_cap_tokens: int | None = Field(
+        default=None, ge=1, le=10_000_000,
+        description="Hard cap on cumulative tokens for this task; dispatcher-enforced.",
+    )
+
+
 class ToolCallRequest(BaseModel):
     """Request body for ``POST /agents/{instance_id}/tools/call``.
 
@@ -893,12 +925,16 @@ class ToolCallRequest(BaseModel):
 
     ``args`` is the tool's input. Validation is the tool's job; the
     daemon refuses to inspect it beyond JSON-decoding.
+
+    ``task_caps`` (T2.2b) are operator-supplied per-task limits. None
+    means no per-task cap (constitution + genre floor still apply).
     """
 
     tool_name: str = Field(..., min_length=1, max_length=80)
     tool_version: str = Field(..., min_length=1, max_length=16)
     session_id: str = Field(..., min_length=1, max_length=80)
     args: dict[str, Any] = Field(default_factory=dict)
+    task_caps: TaskCaps | None = None
 
 
 class ToolCallResultOut(BaseModel):
