@@ -496,28 +496,65 @@ def _chain_entry_to_parsed(entry: ChainEntry) -> ParsedAuditEntry:
 
 
 # ---------------------------------------------------------------------------
-# /birth — create a root agent
+# _perform_create — the shared body of /birth and /spawn (R2 refactor)
 # ---------------------------------------------------------------------------
-@router.post("/birth", response_model=AgentOut, status_code=status.HTTP_201_CREATED)
-def birth(
-    req: BirthRequest,
+# Pre-R2 history: birth() and spawn() were 218 LoC + 285 LoC of nearly
+# identical code. The /spawn-only behaviors (parent lookup, spawn-rule
+# enforcement, lineage construction with parent ancestry, three extra
+# event_data fields, two follow-on audit events when the spawn-rule
+# was overridden) were structural deltas, but everything else — profile
+# build, genre resolve, kit + constraint resolution, constitution build,
+# voice render, idempotency check, soul generation, hardware binding,
+# audit append, registry register, response cache — was duplicated
+# verbatim. R2 collapses the duplicate into this helper.
+#
+# The route handlers (`birth`, `spawn`) own only the work that genuinely
+# differs: spawn does parent lookup + spawn-rule check before delegating;
+# birth does nothing. Then both call _perform_create with a small set of
+# `mode` parameters that select the differing behavior:
+#
+#   endpoint     "/birth" or "/spawn" — used in idempotency request_hash
+#                and the response-cache key
+#   event_type   "agent_created" or "agent_spawned"
+#   parent_row   AgentRow when spawning, None when birthing — gates the
+#                three spawn-only event_data fields and the SoulGenerator
+#                parent_instance arg
+#   child_lineage  Lineage.root() for /birth; Lineage.from_parent(...) for
+#                  /spawn — caller computes both forms; the helper just
+#                  threads it through
+#   parent_genre, spawn_override_used  spawn-only context for the
+#                spawn_genre_override + governance_relaxed audit
+#                follow-ons; both are no-ops on /birth
+#
+# Every comment block from the pre-R2 code is preserved verbatim
+# because each one encodes ADR rationale (T3, T4, T5, T6, K6, R-track,
+# T2.1) and rephrasing those during a mechanical extraction is exactly
+# how rationale silently rots out of the codebase.
+def _perform_create(
+    *,
+    req,                          # BirthRequest or SpawnRequest
     request: Request,
-    registry: Registry = Depends(get_registry),
-    engine: TraitEngine = Depends(get_trait_engine),
-    audit: AuditChain = Depends(get_audit_chain),
-    lock: threading.Lock = Depends(get_write_lock),
-    settings: DaemonSettings = Depends(get_settings),
-    providers: ProviderRegistry = Depends(get_provider_registry),
-    tool_catalog: ToolCatalog = Depends(get_tool_catalog),
-    genre_engine: GenreEngine = Depends(get_genre_engine),
+    registry: Registry,
+    engine: TraitEngine,
+    audit: AuditChain,
+    lock: threading.Lock,
+    settings: DaemonSettings,
+    providers: ProviderRegistry,
+    tool_catalog: ToolCatalog,
+    genre_engine: GenreEngine,
+    endpoint: str,                # "/birth" or "/spawn"
+    event_type: str,              # "agent_created" or "agent_spawned"
+    parent_row,                   # AgentRow | None — None for birth
+    child_lineage: Lineage,       # Lineage.root() for birth, .from_parent(...) for spawn
+    parent_genre: str | None,     # spawn-only context for follow-on audit
+    spawn_override_used: bool,    # spawn-only — emit override audits
 ):
     idempotency_key = get_idempotency_key(request)
-    request_hash = compute_request_hash("/birth", req.model_dump(mode="json"))
+    request_hash = compute_request_hash(endpoint, req.model_dump(mode="json"))
     profile = _build_trait_profile(engine, req.profile)
 
     dna_hex = dna_full(profile)
     dna_s = dna_short(profile)
-    lineage = Lineage.root()
 
     # ADR-0021 T3: derive genre BEFORE kit resolution so the T4 fallback
     # has a chance to fire for unclaimed-archetype roles. None when the
@@ -578,7 +615,7 @@ def birth(
         providers=providers,
         profile=profile,
         engine=engine,
-        lineage=lineage,
+        lineage=child_lineage,
         settings=settings,
         genre_engine=genre_engine,
     )
@@ -588,7 +625,7 @@ def birth(
         # concurrent requests with the same key can't both execute the
         # write path. On hit: return the cached response verbatim.
         cached = _maybe_replay_cached(
-            registry, idempotency_key, "/birth", request_hash
+            registry, idempotency_key, endpoint, request_hash
         )
         if cached is not None:
             return cached
@@ -600,248 +637,10 @@ def birth(
         )
 
         generator = SoulGenerator(engine)
-        soul_doc = generator.generate(
-            profile=profile,
-            agent_name=req.agent_name,
-            agent_version=req.agent_version,
-            lineage=lineage,
-            constitution_hash=effective_hash,
-            constitution_file=const_path.name,
-            instance_id=instance_id,
-            sibling_index=sibling_index,
-            voice=voice,
-            tools=resolved_tools,
-            tool_catalog_version=tool_catalog.version,
-            genre=genre,
-            genre_description=genre_description,
-        )
-        constitution_yaml = constitution.to_yaml(generated_at=soul_doc.generated_at)
-        if req.constitution_override:
-            constitution_yaml = (
-                constitution_yaml
-                + "\n# --- override ---\n"
-                + req.constitution_override
-            )
-
-        # ADR-003X K6 — opt-in hardware binding. Append a block to the
-        # constitution YAML; outside canonical_body() so constitution_hash
-        # is unaffected. The lifespan quarantine check reads this back.
-        hardware_binding_value: str | None = None
-        hardware_source_value: str | None = None
-        if req.bind_to_hardware:
-            from forest_soul_forge.core.hardware import compute_hardware_fingerprint
-            fp = compute_hardware_fingerprint()
-            if fp.source == "hostname_fallback" and not req.allow_weak_binding:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "hardware binding refused: machine fingerprint source is "
-                        "'hostname_fallback' (no IOPlatformUUID/machine-id available). "
-                        "Pass allow_weak_binding=true to override."
-                    ),
-                )
-            hardware_binding_value = fp.fingerprint
-            hardware_source_value = fp.source
-            constitution_yaml += (
-                f"\n# --- hardware_binding (ADR-003X K6) ---\n"
-                f"hardware_binding:\n"
-                f"  fingerprint: {fp.fingerprint}\n"
-                f"  source: {fp.source}\n"
-                f"  bound_at: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
-            )
-
-        _write_artifacts(soul_path, soul_doc.markdown, const_path, constitution_yaml)
-
-        # ADR-003X K6 — emit hardware_bound event when binding was set.
-        if hardware_binding_value:
-            try:
-                audit.append(
-                    "hardware_bound",
-                    {
-                        "instance_id": instance_id,
-                        "fingerprint": hardware_binding_value,
-                        "source": hardware_source_value,
-                    },
-                    agent_dna=dna_hex,
-                )
-            except Exception:
-                # Don't fail birth on audit-event failure; binding is in
-                # the constitution YAML which is the source of truth.
-                pass
-
-        event_data = {
-            "instance_id": instance_id,
-            "agent_name": req.agent_name,
-            "role": profile.role,
-            "dna_full": dna_hex,
-            "sibling_index": sibling_index,
-            "twin_of": (
-                _instance_id_for(profile.role, dna_s, 1)
-                if sibling_index > 1
-                else None
-            ),
-            "constitution_source": (
-                "derived+override" if req.constitution_override else "derived"
-            ),
-            "constitution_hash": effective_hash,
-            "soul_path": str(soul_path),
-            "constitution_path": str(const_path),
-            "owner_id": req.owner_id,
-            "tools": list(tool_constraints),
-            "tool_catalog_version": tool_catalog.version,
-            "genre": genre,
-            **_voice_event_fields(voice),
-        }
-        try:
-            entry = audit.append("agent_created", event_data, agent_dna=dna_s)
-        except Exception as e:
-            _rollback_artifacts(soul_path, const_path)
-            raise HTTPException(
-                status_code=500, detail=f"audit append failed: {e}"
-            ) from e
-
-        parsed = _ingest.parse_soul_file(soul_path)
-        registry.register_birth(
-            parsed,
-            audit_entry=_chain_entry_to_parsed(entry),
-            instance_id=instance_id,
-            sibling_index=sibling_index,
-        )
-        out = _to_agent_out(registry.get_agent(instance_id))
-        _cache_response(
-            registry,
-            idempotency_key,
-            "/birth",
-            request_hash,
-            status.HTTP_201_CREATED,
-            out,
-        )
-        return out
-
-
-# ---------------------------------------------------------------------------
-# /spawn — child agent from an existing parent
-# ---------------------------------------------------------------------------
-@router.post("/spawn", response_model=AgentOut, status_code=status.HTTP_201_CREATED)
-def spawn(
-    req: SpawnRequest,
-    request: Request,
-    registry: Registry = Depends(get_registry),
-    engine: TraitEngine = Depends(get_trait_engine),
-    audit: AuditChain = Depends(get_audit_chain),
-    lock: threading.Lock = Depends(get_write_lock),
-    settings: DaemonSettings = Depends(get_settings),
-    providers: ProviderRegistry = Depends(get_provider_registry),
-    tool_catalog: ToolCatalog = Depends(get_tool_catalog),
-    genre_engine: GenreEngine = Depends(get_genre_engine),
-):
-    idempotency_key = get_idempotency_key(request)
-    request_hash = compute_request_hash("/spawn", req.model_dump(mode="json"))
-    profile = _build_trait_profile(engine, req.profile)
-    parent_row, parent_ancestors = _parent_lineage_from_registry(
-        registry, req.parent_instance_id
-    )
-
-    # ADR-0021 T3 + T4: same hoisting as /birth — genre is derived first
-    # so the kit resolver's T4 fallback can fire when the role has no
-    # archetype kit.
-    genre, genre_description = _resolve_genre(genre_engine, profile.role)
-
-    # Resolve tool kit before lock — same pattern as /birth.
-    resolved_tools = _resolve_tool_kit(
-        tool_catalog, profile.role, req.tools_add, req.tools_remove,
-        genre=genre,
-    )
-    # ADR-0021 T5: kit-tier enforcement, same as /birth.
-    _enforce_genre_kit_tier(genre_engine, tool_catalog, profile.role, resolved_tools)
-    tool_constraints = _resolve_tool_constraints(
-        tool_catalog, profile, resolved_tools
-    )
-
-    # ADR-0021 T6: spawn-compatibility check. Resolve the parent's genre
-    # and compare against the child's. The forbidden case returns 400
-    # unless the operator explicitly sets override_genre_spawn_rule;
-    # in the override path we record `spawn_genre_override` in the
-    # audit chain alongside the regular `agent_spawned` event so the
-    # violation is auditable after the fact. Forgiving behavior on
-    # missing genre data: if EITHER side is unclaimed by any genre
-    # (legacy artifacts, new role not yet in genres.yaml), skip the
-    # check entirely — the genre engine isn't authoritative for those
-    # roles and a hard refusal would be a false negative.
-    parent_genre, _ = _resolve_genre(genre_engine, parent_row.role)
-    spawn_override_used = False
-    if parent_genre is not None and genre is not None:
-        # Both sides have a claim; can_spawn never raises here because
-        # we just confirmed parent_genre exists in the engine.
-        if not genre_engine.can_spawn(parent_genre, genre):
-            if not req.override_genre_spawn_rule:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"genre spawn-rule violation: parent genre "
-                        f"{parent_genre!r} does not allow spawning child "
-                        f"genre {genre!r}. Set override_genre_spawn_rule "
-                        f"to true to bypass (the override emits a "
-                        f"spawn_genre_override audit event)."
-                    ),
-                )
-            spawn_override_used = True
-
-    dna_hex = dna_full(profile)
-    dna_s = dna_short(profile)
-    parent_lineage = Lineage(
-        parent_dna=parent_row.dna,
-        ancestors=parent_ancestors,
-        spawned_by=parent_row.agent_name,
-    )
-    child_lineage = Lineage.from_parent(
-        parent_dna=parent_row.dna,
-        parent_lineage=parent_lineage,
-        parent_agent_name=parent_row.agent_name,
-    )
-
-    try:
-        constitution = build_constitution(
-            profile, engine, agent_name=req.agent_name,
-            tools=tool_constraints,
-            genre=genre,
-            genre_description=genre_description,
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=400, detail=f"constitution build failed: {e}"
-        ) from e
-
-    effective_hash = _derive_constitution_hash(
-        constitution.constitution_hash, req.constitution_override
-    )
-
-    enrich = _resolve_enrich(req.enrich_narrative, settings)
-    voice = _maybe_render_voice(
-        enrich=enrich,
-        providers=providers,
-        profile=profile,
-        engine=engine,
-        lineage=child_lineage,
-        settings=settings,
-        genre_engine=genre_engine,
-    )
-
-    with lock:
-        cached = _maybe_replay_cached(
-            registry, idempotency_key, "/spawn", request_hash
-        )
-        if cached is not None:
-            return cached
-
-        sibling_index = registry.next_sibling_index(dna_s)
-        instance_id = _instance_id_for(profile.role, dna_s, sibling_index)
-        soul_path, const_path = _soul_path_for(
-            settings.soul_output_dir, req.agent_name, instance_id
-        )
-
-        generator = SoulGenerator(engine)
-        soul_doc = generator.generate(
+        # Pass parent_instance only when there is one — SoulGenerator
+        # signs the parent linkage into the soul markdown so it has to
+        # see None for /birth and the real parent_instance for /spawn.
+        gen_kwargs = dict(
             profile=profile,
             agent_name=req.agent_name,
             agent_version=req.agent_version,
@@ -849,7 +648,6 @@ def spawn(
             constitution_hash=effective_hash,
             constitution_file=const_path.name,
             instance_id=instance_id,
-            parent_instance=parent_row.instance_id,
             sibling_index=sibling_index,
             voice=voice,
             tools=resolved_tools,
@@ -857,6 +655,10 @@ def spawn(
             genre=genre,
             genre_description=genre_description,
         )
+        if parent_row is not None:
+            gen_kwargs["parent_instance"] = parent_row.instance_id
+        soul_doc = generator.generate(**gen_kwargs)
+
         constitution_yaml = constitution.to_yaml(generated_at=soul_doc.generated_at)
         if req.constitution_override:
             constitution_yaml = (
@@ -926,9 +728,6 @@ def spawn(
                 "derived+override" if req.constitution_override else "derived"
             ),
             "constitution_hash": effective_hash,
-            "parent_instance": parent_row.instance_id,
-            "parent_dna": parent_row.dna,
-            "lineage_depth": child_lineage.depth,
             "soul_path": str(soul_path),
             "constitution_path": str(const_path),
             "owner_id": req.owner_id,
@@ -937,8 +736,16 @@ def spawn(
             "genre": genre,
             **_voice_event_fields(voice),
         }
+        # Spawn-only event_data fields. Adding them only when there's an
+        # actual parent keeps /birth event_data shape stable — no None
+        # parent_instance / parent_dna / lineage_depth=0 leakage.
+        if parent_row is not None:
+            event_data["parent_instance"] = parent_row.instance_id
+            event_data["parent_dna"] = parent_row.dna
+            event_data["lineage_depth"] = child_lineage.depth
+
         try:
-            entry = audit.append("agent_spawned", event_data, agent_dna=dna_s)
+            entry = audit.append(event_type, event_data, agent_dna=dna_s)
         except Exception as e:
             _rollback_artifacts(soul_path, const_path)
             raise HTTPException(
@@ -1002,12 +809,159 @@ def spawn(
         _cache_response(
             registry,
             idempotency_key,
-            "/spawn",
+            endpoint,
             request_hash,
             status.HTTP_201_CREATED,
             out,
         )
         return out
+
+
+# ---------------------------------------------------------------------------
+# /birth — create a root agent
+# ---------------------------------------------------------------------------
+@router.post("/birth", response_model=AgentOut, status_code=status.HTTP_201_CREATED)
+def birth(
+    req: BirthRequest,
+    request: Request,
+    registry: Registry = Depends(get_registry),
+    engine: TraitEngine = Depends(get_trait_engine),
+    audit: AuditChain = Depends(get_audit_chain),
+    lock: threading.Lock = Depends(get_write_lock),
+    settings: DaemonSettings = Depends(get_settings),
+    providers: ProviderRegistry = Depends(get_provider_registry),
+    tool_catalog: ToolCatalog = Depends(get_tool_catalog),
+    genre_engine: GenreEngine = Depends(get_genre_engine),
+):
+    """Create a new root agent.
+
+    Post-R2: this handler owns nothing beyond the birth-specific mode
+    settings — root lineage, agent_created event type, no parent. The
+    actual artifact + chain + registry work happens in
+    :func:`_perform_create`, which is shared with /spawn.
+    """
+    return _perform_create(
+        req=req,
+        request=request,
+        registry=registry,
+        engine=engine,
+        audit=audit,
+        lock=lock,
+        settings=settings,
+        providers=providers,
+        tool_catalog=tool_catalog,
+        genre_engine=genre_engine,
+        endpoint="/birth",
+        event_type="agent_created",
+        parent_row=None,
+        child_lineage=Lineage.root(),
+        parent_genre=None,
+        spawn_override_used=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# /spawn — child agent from an existing parent
+# ---------------------------------------------------------------------------
+@router.post("/spawn", response_model=AgentOut, status_code=status.HTTP_201_CREATED)
+def spawn(
+    req: SpawnRequest,
+    request: Request,
+    registry: Registry = Depends(get_registry),
+    engine: TraitEngine = Depends(get_trait_engine),
+    audit: AuditChain = Depends(get_audit_chain),
+    lock: threading.Lock = Depends(get_write_lock),
+    settings: DaemonSettings = Depends(get_settings),
+    providers: ProviderRegistry = Depends(get_provider_registry),
+    tool_catalog: ToolCatalog = Depends(get_tool_catalog),
+    genre_engine: GenreEngine = Depends(get_genre_engine),
+):
+    """Create a child agent under an existing parent.
+
+    Post-R2: this handler does only the spawn-specific work — parent
+    lookup, ADR-0021 T6 genre spawn-rule check, child lineage
+    construction. Then it hands off to :func:`_perform_create` with the
+    spawn-mode parameters (parent_row, lineage from_parent, agent_spawned
+    event_type, spawn_override flag for the follow-on audit events).
+
+    The spawn-rule check has to live HERE rather than in the shared
+    helper because it depends on the child's profile being known AND on
+    the parent's row being looked up — both done before _perform_create
+    is called. Pulling it into _perform_create would mean threading
+    parent_row + parent_genre through the whole helper just for the
+    single 400-or-set-flag decision; cleaner to leave the check at the
+    boundary where the caller already has both pieces of context.
+    """
+    profile = _build_trait_profile(engine, req.profile)
+    parent_row, parent_ancestors = _parent_lineage_from_registry(
+        registry, req.parent_instance_id
+    )
+
+    # ADR-0021 T3 + T4: same hoisting as /birth — genre is derived first
+    # so the kit resolver's T4 fallback can fire when the role has no
+    # archetype kit. The shared helper will also call _resolve_genre on
+    # the child's role (purely; same answer) — accepting that double
+    # call is the price of keeping the spawn-rule check at this layer.
+    child_genre, _ = _resolve_genre(genre_engine, profile.role)
+
+    # ADR-0021 T6: spawn-compatibility check. Resolve the parent's genre
+    # and compare against the child's. The forbidden case returns 400
+    # unless the operator explicitly sets override_genre_spawn_rule;
+    # in the override path we record `spawn_genre_override` in the
+    # audit chain alongside the regular `agent_spawned` event so the
+    # violation is auditable after the fact. Forgiving behavior on
+    # missing genre data: if EITHER side is unclaimed by any genre
+    # (legacy artifacts, new role not yet in genres.yaml), skip the
+    # check entirely — the genre engine isn't authoritative for those
+    # roles and a hard refusal would be a false negative.
+    parent_genre, _ = _resolve_genre(genre_engine, parent_row.role)
+    spawn_override_used = False
+    if parent_genre is not None and child_genre is not None:
+        # Both sides have a claim; can_spawn never raises here because
+        # we just confirmed parent_genre exists in the engine.
+        if not genre_engine.can_spawn(parent_genre, child_genre):
+            if not req.override_genre_spawn_rule:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"genre spawn-rule violation: parent genre "
+                        f"{parent_genre!r} does not allow spawning child "
+                        f"genre {child_genre!r}. Set override_genre_spawn_rule "
+                        f"to true to bypass (the override emits a "
+                        f"spawn_genre_override audit event)."
+                    ),
+                )
+            spawn_override_used = True
+
+    parent_lineage = Lineage(
+        parent_dna=parent_row.dna,
+        ancestors=parent_ancestors,
+        spawned_by=parent_row.agent_name,
+    )
+    child_lineage = Lineage.from_parent(
+        parent_dna=parent_row.dna,
+        parent_lineage=parent_lineage,
+        parent_agent_name=parent_row.agent_name,
+    )
+
+    return _perform_create(
+        req=req,
+        request=request,
+        registry=registry,
+        engine=engine,
+        audit=audit,
+        lock=lock,
+        settings=settings,
+        providers=providers,
+        tool_catalog=tool_catalog,
+        genre_engine=genre_engine,
+        endpoint="/spawn",
+        event_type="agent_spawned",
+        parent_row=parent_row,
+        child_lineage=child_lineage,
+        parent_genre=parent_genre,
+        spawn_override_used=spawn_override_used,
+    )
 
 
 # ---------------------------------------------------------------------------
