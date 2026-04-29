@@ -112,6 +112,19 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # event records caller, target, skill ref, and a one-line reason
     # so the chain captures every tier-crossing in the swarm.
     "agent_delegated",
+    # ADR-003X Phase C1 — per-agent encrypted secrets store. Four
+    # event types track the secret lifecycle without ever exposing
+    # the value:
+    #   - secret_set: operator wrote a new secret for an agent
+    #   - secret_revealed: a tool decrypted a secret for use; pairs
+    #     with the next tool_call_dispatched to show where it went
+    #   - secret_blocked: agent tried to read a name not on its
+    #     constitutional allowlist; structural refusal
+    #   - secret_revoked: operator deleted a secret
+    "secret_set",
+    "secret_revealed",
+    "secret_blocked",
+    "secret_revoked",
 })
 
 

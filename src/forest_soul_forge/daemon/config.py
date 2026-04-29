@@ -195,6 +195,26 @@ class DaemonSettings(BaseSettings):
     frontier_model_tool_use: str | None = None
     frontier_timeout_s: float = Field(default=60.0, gt=0)
 
+    # ----- per-agent encrypted secrets (ADR-003X Phase C1) ---------------
+    # Master key for the agent_secrets table. 32-byte base64-encoded
+    # value (urlsafe alphabet OK; padding optional). When unset, the
+    # secrets subsystem is DISABLED — get_secret/set_secret raise
+    # SecretsUnavailableError. The daemon stays up; defensive plane
+    # unaffected. When set, the daemon loads it once at lifespan and
+    # holds it in process memory; never written to disk.
+    #
+    # Generate one with:
+    #   .venv/bin/python -c "from forest_soul_forge.core.secrets \
+    #     import generate_master_key_b64; print(generate_master_key_b64())"
+    secrets_master_key: str | None = Field(
+        default=None,
+        description=(
+            "32-byte base64-encoded AES-256 key for the agent_secrets "
+            "table. Unset = secrets subsystem disabled (open-web tools "
+            "that need a secret refuse cleanly)."
+        ),
+    )
+
     # ----- privileged operations (ADR-0033 A6 + B3) ----------------------
     # Off by default so a fresh clone boots cleanly without the sudo
     # helper installed. Operators flip this on AFTER running

@@ -39,6 +39,11 @@ daemon = [
     "pydantic>=2.5",
     "pydantic-settings>=2.1",
     "httpx>=0.26",
+    # ADR-003X Phase C1 — per-agent encrypted secrets store. AES-256-GCM
+    # via the standard `cryptography` package. ~3 MB wheel; only needed
+    # when secrets are actually configured (the import is lazy in
+    # core/secrets.py so daemon boots fine without it for now).
+    "cryptography>=42.0",
 ]
 
 [project.urls]

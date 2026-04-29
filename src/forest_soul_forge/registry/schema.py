@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 7
+SCHEMA_VERSION: int = 8
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -272,6 +272,20 @@ DDL_STATEMENTS: tuple[str, ...] = (
         value TEXT NOT NULL
     );
     """,
+    # --- per-agent encrypted secrets (ADR-003X Phase C1) -----------------
+    """
+    CREATE TABLE IF NOT EXISTS agent_secrets (
+        instance_id      TEXT NOT NULL,
+        name             TEXT NOT NULL,
+        ciphertext       BLOB NOT NULL,
+        nonce            BLOB NOT NULL,
+        created_at       TEXT NOT NULL,
+        last_revealed_at TEXT,
+        PRIMARY KEY (instance_id, name),
+        FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_agent_secrets_instance ON agent_secrets(instance_id);",
 )
 
 # Metadata rows written on bootstrap. ``canonical_contract`` is a tripwire —
@@ -299,6 +313,12 @@ REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     # memory_consents references memory_entries(entry_id) — clear first.
     "memory_consents",
     "memory_entries",
+    # ADR-003X C1: agent_secrets references agents(instance_id) — clear
+    # first. Note: rebuild-from-artifacts will NOT recover secrets
+    # (they're not in the artifact tree by design — encrypted blobs in
+    # the registry are not canonical). Operator re-sets secrets after
+    # rebuild via set_secret() calls.
+    "agent_secrets",
     "tools",
     "agent_capabilities",
     "agents",
@@ -468,5 +488,28 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         );
         """,
         "CREATE INDEX IF NOT EXISTS idx_memory_consents_recipient ON memory_consents(recipient_instance);",
+    ),
+    # v7 → v8: per-agent encrypted secrets store (ADR-003X Phase C1).
+    # Foundation for the open-web tool family — web_fetch, browser_action,
+    # mcp_call all read API tokens / cookies from here. AES-256-GCM
+    # encryption is per-row; AAD pins (instance_id, name) so a stolen
+    # ciphertext can't be re-attached to a different row. Master key
+    # comes from FSF_SECRETS_MASTER_KEY env var; subsystem disables
+    # cleanly when unset (tools refuse with SecretsUnavailableError).
+    # Pure addition — no impact on existing agents that don't use it.
+    8: (
+        """
+        CREATE TABLE IF NOT EXISTS agent_secrets (
+            instance_id      TEXT NOT NULL,
+            name             TEXT NOT NULL,
+            ciphertext       BLOB NOT NULL,
+            nonce            BLOB NOT NULL,
+            created_at       TEXT NOT NULL,
+            last_revealed_at TEXT,
+            PRIMARY KEY (instance_id, name),
+            FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_agent_secrets_instance ON agent_secrets(instance_id);",
     ),
 }
