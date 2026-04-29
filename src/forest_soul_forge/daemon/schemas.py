@@ -197,6 +197,25 @@ class AuditListOut(BaseModel):
     events: list[AuditEventOut]
 
 
+# ADR-003X K2 — operator-emitted ceremony events. Distinct from
+# tool-emitted events because the EMITTER is a human, not an agent.
+# Used to mark milestones, identity events, governance decisions
+# that don't fit any tool call (Iron Gate ceremony, agent retirement,
+# operator-acknowledged transition, etc.).
+class CeremonyEmitRequest(BaseModel):
+    ceremony_name: str       # operator-chosen label; e.g. "iron_gate", "first_birth"
+    summary: str             # one-line human-readable description
+    operator_id: str         # who is emitting (handle, key fingerprint)
+    metadata: dict | None = None   # optional structured payload
+
+class CeremonyEmitResponse(BaseModel):
+    seq: int
+    timestamp: str
+    entry_hash: str
+    event_type: str
+    ceremony_name: str
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------

@@ -24,8 +24,18 @@ from dataclasses import asdict
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from forest_soul_forge.core.audit_chain import AuditChain, ChainEntry
-from forest_soul_forge.daemon.deps import get_audit_chain, get_registry
-from forest_soul_forge.daemon.schemas import AuditEventOut, AuditListOut
+from forest_soul_forge.daemon.deps import (
+    get_audit_chain,
+    get_registry,
+    get_write_lock,
+    require_writes_enabled,
+)
+from forest_soul_forge.daemon.schemas import (
+    AuditEventOut,
+    AuditListOut,
+    CeremonyEmitRequest,
+    CeremonyEmitResponse,
+)
 from forest_soul_forge.registry import Registry
 from forest_soul_forge.registry.registry import UnknownAgentError
 
@@ -101,3 +111,71 @@ async def audit_by_dna(
 ) -> AuditListOut:
     rows = registry.audit_for_agent(dna=dna)
     return AuditListOut(count=len(rows), events=[_to_out(r) for r in rows])
+
+
+# ADR-003X K2 — operator-emitted ceremony events. POST writes a
+# first-class `ceremony` event to the canonical chain. Distinct
+# from tool-emitted events because the EMITTER is a human, not an
+# agent — used to mark milestones, identity events, governance
+# decisions that don't fit any tool call. Examples: an Iron Gate
+# memory-promotion ceremony (Nexus pattern), an agent retirement,
+# a tier promotion, an operator-acknowledged transition.
+#
+# The ceremony_name is operator-chosen (free string); summary +
+# operator_id are required; metadata is an optional structured
+# payload that lands in event_data alongside the rest. Emission
+# is gated by writes_enabled — read-only daemons reject with 403.
+@router.post(
+    "/ceremony",
+    response_model=CeremonyEmitResponse,
+    dependencies=[Depends(require_writes_enabled)],
+)
+async def audit_ceremony(
+    body: CeremonyEmitRequest,
+    chain: AuditChain = Depends(get_audit_chain),
+    write_lock=Depends(get_write_lock),
+) -> CeremonyEmitResponse:
+    if not body.ceremony_name.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ceremony_name must be a non-empty string",
+        )
+    if not body.summary.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="summary must be a non-empty string",
+        )
+    if not body.operator_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="operator_id must be a non-empty string",
+        )
+
+    # Build event_data — operator's structured payload + the headline
+    # fields. Caller's metadata can shadow the headline fields if they
+    # set the same keys; that's their problem, we audit-trail what
+    # they sent.
+    event_data: dict = {
+        "ceremony_name": body.ceremony_name,
+        "summary": body.summary,
+        "operator_id": body.operator_id,
+    }
+    if body.metadata:
+        # Preserve operator's keys; if they collide with the headline
+        # fields, theirs win (we still log the merged shape).
+        event_data.update(body.metadata)
+
+    with write_lock:
+        entry = chain.append(
+            event_type="ceremony",
+            event_data=event_data,
+            agent_dna=None,  # operator events have no agent identity
+        )
+
+    return CeremonyEmitResponse(
+        seq=entry.seq,
+        timestamp=entry.timestamp,
+        entry_hash=entry.entry_hash,
+        event_type=entry.event_type,
+        ceremony_name=body.ceremony_name,
+    )
