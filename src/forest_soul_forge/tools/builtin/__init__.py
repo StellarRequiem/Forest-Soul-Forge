@@ -41,6 +41,7 @@ from forest_soul_forge.tools.builtin.ueba_track import UebaTrackTool
 from forest_soul_forge.tools.builtin.browser_action import BrowserActionTool
 from forest_soul_forge.tools.builtin.mcp_call import McpCallTool
 from forest_soul_forge.tools.builtin.memory_verify import MemoryVerifyTool
+from forest_soul_forge.tools.builtin.suggest_agent import SuggestAgentTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
 from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
 
@@ -80,6 +81,7 @@ __all__ = [
     "MemoryVerifyTool",
     "BrowserActionTool",
     "McpCallTool",
+    "SuggestAgentTool",
 ]
 
 
@@ -152,3 +154,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # Per-agent allowed_mcp_servers list + per-server allowlisted_tools
     # list keep the dispatch surface tight.
     registry.register(McpCallTool())
+    # ADR-003X Phase C6 — suggest_agent.v1. Operator-facing agent
+    # matcher. BM25 over (role + agent_name + genre) returns top-K
+    # ranked candidates. Reads from ctx.agent_registry; refuses
+    # cleanly when the dispatcher wasn't given a registry handle.
+    # Read-only; no audit gating.
+    registry.register(SuggestAgentTool())

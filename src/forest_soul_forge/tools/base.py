@@ -101,6 +101,12 @@ class ToolContext:
     # (FSF_SECRETS_MASTER_KEY unset) — tools refuse cleanly via
     # SecretsUnavailableError.
     secrets: Any = None
+    # ADR-003X Phase C6 — bound agent Registry instance for tools that
+    # need to enumerate or look up agents (suggest_agent.v1). None when
+    # the dispatcher wasn't given a registry (test contexts); tools
+    # refuse cleanly. Read-only use; writes still go through the
+    # daemon's write_lock + handler path.
+    agent_registry: Any = None
 
 
 @dataclass(frozen=True)

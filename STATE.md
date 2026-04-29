@@ -29,10 +29,10 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | Source LoC (Python) | ~44,000 across `src/forest_soul_forge/` |
 | Tests (LoC) | ~7,800 across 45 unit suites + 1 integration |
 | ADRs filed | 26 (`ADR-0001` → `ADR-0033`, with gaps) |
-| Builtin tools registered | 35 (5 core + delegate + 4 memory + 21 security swarm + 4 open-web/verify: web_fetch, browser_action, memory_verify, mcp_call) |
+| Builtin tools registered | 36 (5 core + delegate + 4 memory + 21 security swarm + 5 open-web/verify: web_fetch, browser_action, memory_verify, mcp_call, suggest_agent) |
 | Skill manifests shipped | 24 (4 chain + 17 supporting + 3 triune: consult/propose/critique) |
 | Schema version | v9 (v8: agent_secrets / v9: memory_verifications) |
-| Genres | 10 (7 original + 3 security tiers) |
+| Genres | 13 (7 original + 3 security tiers + 3 web tiers) |
 | Trait roles | 14 (5 original + 9 swarm) |
 | Audit event types | 30+ |
 | Frontend modules (vanilla JS) | 18 |
@@ -478,7 +478,7 @@ If you want to read code first, start with:
 | 0031 | Skill Forge | Proposed (T1, T2a/T2b, T5, T7, T8 implemented) |
 | 0032 | CLI architecture | Proposed |
 | 0033 | Security Swarm | **Accepted** (Phases A–E1 shipped + chain proven live 2026-04-28) |
-| 003X | Open-Web Tool Family (web_fetch + browser_action + mcp_call + secrets store + suggest_agent + 3 web genres) | Proposed — C1 (secrets), C2 (web_fetch), C3 (browser_action), C4 (mcp_call) shipped 2026-04-29; C6 (suggest_agent), C7 (genres), C8 (demo) in flight |
+| 003X | Open-Web Tool Family (web_fetch + browser_action + mcp_call + secrets store + suggest_agent + 3 web genres) | Proposed — C1 (secrets), C2 (web_fetch), C3 (browser_action), C4 (mcp_call), C6 (suggest_agent), C7 (3 web genres) shipped 2026-04-29; C8 (demo) in flight |
 | 003X K | K-track parallels (memory verification, ceremony events, SSE stream, triune spawn) | K1 (memory_verify), K2 (ceremony.v1), K3 (/audit/stream), K4 (triune bond + Heartwood/Branch/Leaf seeds + delegate.v1 enforcement) shipped 2026-04-29; K5 (chronicle CLI), K6 (hardware_binding) in flight |
 
 ADRs that are `Proposed` but have `(... implemented)` are Decision-record-paper-trail proposed: the design is in flight, parts are committed, the doc itself just hasn't been promoted to `Accepted` because a few tranches remain. ADR-0033 was promoted on 2026-04-28 once the canonical Security Swarm chain fired end-to-end through the smoke.

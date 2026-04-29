@@ -260,3 +260,71 @@ genres:
       - zero_zero
       - vault_warden
       - deception_duke
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Open-Web tier (ADR-003X §C7) — three genres for the open-web plane.
+  # Symmetric to the security tiers in escalation: observer → researcher
+  # → actuator. The role names below are RESERVED for G6b (when the role
+  # types land in trait_tree.yaml + their per-genre default kits ship).
+  # Genre engine doesn't validate that claimed roles exist in trait_engine
+  # (only the inverse) so claiming reserved names here is safe.
+  # ─────────────────────────────────────────────────────────────────────
+
+  web_observer:
+    description: |
+      Read-only web fetchers. Pull RFCs, status pages, public APIs, RSS
+      feeds. Cannot drive a browser, cannot call MCP servers that mutate
+      state. Findings flow to web_researcher via memory lineage scope.
+    risk_profile:
+      max_side_effects: network
+      provider_constraint: null
+      memory_ceiling: lineage
+    default_kit_pattern:
+      - web_fetch_only
+    trait_emphasis: [research_thoroughness, evidence_demand, suspicion]
+    memory_pattern: episodic_focused
+    spawn_compatibility: [web_observer, web_researcher]
+    roles:
+      - web_observer_root
+
+  web_researcher:
+    description: |
+      Multi-source synthesizers. Fetch from N allowlisted hosts,
+      cross-reference, summarize. Can call read-only MCP tools. Memory
+      ceiling is `consented` so research artifacts can be shared with
+      downstream agents on per-event grant. Cannot drive a browser;
+      cannot call mutating MCP tools.
+    risk_profile:
+      max_side_effects: network
+      provider_constraint: null
+      memory_ceiling: consented
+    default_kit_pattern:
+      - web_fetch_only
+      - mcp_read_only
+    trait_emphasis: [research_thoroughness, lateral_thinking, evidence_demand]
+    memory_pattern: long_consolidated
+    spawn_compatibility: [web_researcher, web_actuator]
+    roles:
+      - web_researcher_root
+
+  web_actuator:
+    description: |
+      Drive a real UI or call mutating MCP tools. Always gated: every
+      browser_action and every mutating mcp_call requires operator
+      approval per call. Headless by default; headful only via
+      FSF_BROWSER_HEADFUL=true (debug). Per-agent constitution pins
+      the allowlisted domains + the secret_names the agent may read
+      from the secrets store.
+    risk_profile:
+      max_side_effects: external
+      provider_constraint: null
+      memory_ceiling: consented   # CEILING, not default — see ADR-003X note
+    default_kit_pattern:
+      - web_fetch_only
+      - mcp_full
+      - browser_action_full
+    trait_emphasis: [caution, evidence_demand, double_checking]
+    memory_pattern: long_consolidated
+    spawn_compatibility: [web_actuator]
+    roles:
+      - web_actuator_root

@@ -202,6 +202,10 @@ def get_tool_dispatcher(request: Request):
         # threads this instance through every ToolContext.
         memory=memory,
         priv_client=priv_client,
+        # ADR-003X Phase C6: agent Registry handle. suggest_agent.v1
+        # enumerates agents from this; other tools that need to look
+        # up siblings/lineage by id will share it.
+        agent_registry=fsf_registry,
     )
     # ADR-0033 A3: build the cross-agent delegator factory now that
     # the dispatcher exists, then mutate the dispatcher to hold a

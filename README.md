@@ -30,8 +30,8 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 | **Source LoC (Python)** | ~44,000 across `src/` |
 | **Tests (lines)** | ~7,800 across 45 unit suites + 1 integration |
 | **ADRs filed** | 26 (`ADR-0001` → `ADR-0033`) |
-| **Built-in tools registered** | **35** (31 base + web_fetch + browser_action + memory_verify + mcp_call) |
-| **Genres** | **10** (7 original + 3 security tiers) |
+| **Built-in tools registered** | **36** (31 base + web_fetch + browser_action + memory_verify + mcp_call + suggest_agent) |
+| **Genres** | **13** (7 original + 3 security tiers + 3 web tiers) |
 | **Trait roles** | **14** (5 original + 9 swarm) |
 | **Skill manifests shipped** | **24** chain + supporting + triune (`examples/skills/`) |
 | **Audit event types** | 30+ (lifecycle, dispatch, memory, delegation, swarm) |

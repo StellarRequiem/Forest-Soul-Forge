@@ -1198,6 +1198,43 @@ tools:
     side_effects: network
     archetype_tags: [web_observer, web_researcher, web_actuator]
 
+  suggest_agent.v1:
+    name: suggest_agent
+    version: "1"
+    description: |
+      Operator-facing agent matcher. Given a natural-language task
+      description, returns the top-K agents whose role + name fit best.
+      v1 ranks via BM25 over (role, agent_name, genre). Future v2 adds
+      skill-history weighting once that telemetry is queryable.
+      Critical for catalog scaling once Phase I lands ~30 new role
+      types — operators can't keep them all in their head.
+      Reads from ctx.agent_registry; refuses cleanly if the dispatcher
+      wasn't given a registry handle. Read-only side effects.
+    input_schema:
+      type: object
+      required: [task]
+      properties:
+        task:
+          type: string
+          description: "Natural-language task description."
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 5
+        filter:
+          type: object
+          properties:
+            genre:
+              type: string
+              description: "Restrict to agents in this genre (e.g. 'observer')."
+            status:
+              type: string
+              description: "Restrict to agents with this status. Default 'active'."
+              default: active
+    side_effects: read_only
+    archetype_tags: [operator_companion, web_researcher]
+
   mcp_call.v1:
     name: mcp_call
     version: "1"

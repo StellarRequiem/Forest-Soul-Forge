@@ -256,6 +256,11 @@ class ToolDispatcher:
     # sudo helper isn't installed; the privileged tools refuse
     # cleanly in that case rather than crashing.
     priv_client: Any = None
+    # ADR-003X Phase C6: bound agent Registry. Read-only use by tools
+    # that need to enumerate or look up agents (suggest_agent.v1).
+    # None when the dispatcher wasn't given a registry (test contexts);
+    # the tool refuses cleanly with "no agent registry wired."
+    agent_registry: Any = None
 
     async def dispatch(
         self,
@@ -431,6 +436,7 @@ class ToolDispatcher:
             memory=self.memory,
             delegate=delegate_fn,
             priv_client=self.priv_client,
+            agent_registry=self.agent_registry,
         )
         try:
             result = await tool.execute(args, ctx)
