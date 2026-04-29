@@ -18,6 +18,7 @@ import * as toolRegistryPanel from "./tool-registry.js";
 import * as memoryPanel from "./memory.js";
 import * as welcome from "./welcome.js";
 import * as statusbar from "./statusbar.js";
+import * as tour from "./tour.js";
 import { toast } from "./toast.js";
 
 function wireTabs() {
@@ -42,6 +43,9 @@ async function boot() {
   // Status bar polls /healthz + /agents + /audit/tail every 10s.
   // Independent of every other module — degrades cell-by-cell if reads fail.
   statusbar.start();
+  // Tour overlay wires the "? tour" button + auto-shows the forge tour
+  // on first visit (one-shot per browser via localStorage).
+  tour.start();
 
   // Health + providers can run immediately — they don't depend on anything.
   health.start();

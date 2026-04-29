@@ -768,6 +768,92 @@ body { padding-bottom: 56px; }
 }
 
 /* ------------------------------------------------------------- */
+/* Tour overlay (F5) — guided per-tab walkthroughs                */
+/* ------------------------------------------------------------- */
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 200;
+}
+.tour-spotlight {
+  position: fixed;
+  z-index: 201;
+  pointer-events: none;
+  border-radius: 4px;
+  /* Inverted box-shadow creates the "spotlight" effect — the rect itself
+     is transparent, but the rest of the viewport is dimmed by the
+     enormous outer shadow. The inset highlight is the green ring. */
+  box-shadow:
+    0 0 0 9999px rgba(0, 0, 0, 0.55),
+    0 0 0 2px var(--accent),
+    0 0 16px 4px rgba(119, 212, 167, 0.4);
+  transition: left 0.18s ease, top 0.18s ease, width 0.18s ease, height 0.18s ease;
+}
+.tour-tooltip {
+  position: fixed;
+  z-index: 202;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-raised-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.tour-tooltip__counter {
+  color: var(--fg-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 2px;
+}
+.tour-tooltip__title {
+  margin: 0 0 var(--sp-2);
+  font-size: 15px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.tour-tooltip__body {
+  margin: 0 0 var(--sp-3);
+  color: var(--fg);
+}
+.tour-tooltip__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.tour-tooltip__btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.tour-tooltip__btn:hover { color: var(--fg); border-color: var(--border-strong); }
+.tour-tooltip__btn--ghost { border-color: transparent; color: var(--fg-faint); }
+.tour-tooltip__btn--ghost:hover { color: var(--fg-muted); }
+.tour-tooltip__btn--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.tour-tooltip__btn--primary:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  filter: brightness(1.1);
+}
+
+/* ------------------------------------------------------------- */
 /* Toasts                                                         */
 /* ------------------------------------------------------------- */
 .toasts {
