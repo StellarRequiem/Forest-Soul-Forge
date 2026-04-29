@@ -17,6 +17,7 @@ import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
 import * as memoryPanel from "./memory.js";
 import * as welcome from "./welcome.js";
+import * as statusbar from "./statusbar.js";
 import { toast } from "./toast.js";
 
 function wireTabs() {
@@ -38,6 +39,9 @@ async function boot() {
   // Welcome banner is independent of everything else — render it before
   // any network call so first-time users see context immediately.
   welcome.start();
+  // Status bar polls /healthz + /agents + /audit/tail every 10s.
+  // Independent of every other module — degrades cell-by-cell if reads fail.
+  statusbar.start();
 
   // Health + providers can run immediately — they don't depend on anything.
   health.start();

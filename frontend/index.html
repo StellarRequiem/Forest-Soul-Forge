@@ -11,7 +11,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>Forest Soul Forge</title>
-  <link rel="stylesheet" href="css/style.css?v=20260428b" />
+  <link rel="stylesheet" href="css/style.css?v=20260428c" />
 </head>
 <body>
   <header class="top-bar">
@@ -427,10 +427,45 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
+  <!--
+    Status bar — bottom-anchored at-a-glance health.
+    Demo-friction audit P1 #14. Click the row to expand the diagnostic
+    popover (statusbar.js renders /healthz components inline).
+  -->
+  <footer id="statusbar" class="statusbar" aria-label="Stack status">
+    <div class="statusbar__left">
+      <span class="statusbar__cell" id="sb-daemon" title="Daemon process health">
+        <span class="statusbar__dot statusbar__dot--ok"></span>
+        <span class="statusbar__label">daemon</span>
+        <span class="statusbar__value" id="sb-daemon-value">—</span>
+      </span>
+      <span class="statusbar__cell" id="sb-agents" title="Agents in the registry">
+        <span class="statusbar__label">agents</span>
+        <span class="statusbar__value" id="sb-agents-value">—</span>
+      </span>
+      <span class="statusbar__cell" id="sb-chain" title="Most recent audit chain entry">
+        <span class="statusbar__label">chain</span>
+        <span class="statusbar__value" id="sb-chain-value">—</span>
+      </span>
+      <span class="statusbar__cell" id="sb-activity" title="Last activity timestamp">
+        <span class="statusbar__label">last activity</span>
+        <span class="statusbar__value" id="sb-activity-value">—</span>
+      </span>
+    </div>
+    <div class="statusbar__right">
+      <button class="statusbar__diag-btn" id="sb-diag-btn" type="button"
+              title="Show daemon startup diagnostics">
+        diagnostics
+      </button>
+    </div>
+    <!-- Diagnostics popover — populated on demand by statusbar.js. -->
+    <div class="statusbar__popover" id="sb-diag-popover" hidden></div>
+  </footer>
+
   <!-- Asset version stamp — bump when shipping a frontend change so
        returning visitors don't run stale JS. The same query is forwarded
        to ES module imports because the import specifiers in app.js
        resolve relative to this script URL. Demo-friction audit P0 #2. -->
-  <script type="module" src="js/app.js?v=20260428b"></script>
+  <script type="module" src="js/app.js?v=20260428c"></script>
 </body>
 </html>

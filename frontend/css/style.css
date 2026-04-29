@@ -544,14 +544,22 @@ input[type="range"] {
 }
 .audit-entry {
   display: grid;
-  grid-template-columns: 60px 160px 140px 1fr;
+  grid-template-columns: 60px 160px 140px 1fr 16px;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border);
 }
 .audit-entry:hover { background: var(--bg-raised-2); }
+.audit-entry--clickable { cursor: pointer; }
+.audit-entry--expanded { background: var(--bg-raised-2); }
 .audit-seq { color: var(--fg-faint); }
 .audit-time { color: var(--fg-muted); }
+.audit-chevron {
+  color: var(--fg-faint);
+  font-size: 10px;
+  align-self: center;
+  text-align: center;
+}
 .audit-event {
   color: var(--accent);
   padding: 1px 6px;
@@ -576,12 +584,196 @@ input[type="range"] {
   white-space: nowrap;
 }
 
+/* Drill-down detail panel — P1 #11. The "trust the chain" view:
+   shows entry_hash + agent_dna + full event_data JSON for one chain
+   entry. Demo audience can SEE the cryptographic linkage. */
+.audit-row-wrap { border-bottom: 1px solid var(--border); }
+.audit-row-wrap .audit-entry { border-bottom: none; }
+.audit-detail {
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  background: var(--bg);
+  border-top: 1px dashed var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.audit-detail__grid {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0 0 var(--sp-3);
+}
+.audit-detail__grid dt {
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 2px;
+}
+.audit-detail__grid dd {
+  margin: 0;
+  color: var(--fg);
+  word-break: break-all;
+}
+.audit-detail__heading {
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--sp-1);
+}
+.audit-detail__json {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  margin: 0;
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* ------------------------------------------------------------- */
+/* Status bar (P1 #14) — bottom-anchored at-a-glance health        */
+/* ------------------------------------------------------------- */
+.statusbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 6px var(--sp-5);
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+/* Bottom padding on body so the fixed footer doesn't overlap content
+   when the page scrolls to its end. Two rows' worth covers any audit
+   detail panel that's been expanded right against the bottom edge. */
+body { padding-bottom: 56px; }
+
+.statusbar__left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+.statusbar__cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.statusbar__label {
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.statusbar__value {
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.statusbar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  display: inline-block;
+}
+.statusbar__dot--ok { background: var(--ok); box-shadow: 0 0 4px var(--ok); }
+.statusbar__dot--warn { background: var(--warn); box-shadow: 0 0 4px var(--warn); }
+.statusbar__dot--down { background: var(--danger); box-shadow: 0 0 4px var(--danger); }
+
+.statusbar__right { display: flex; align-items: center; gap: var(--sp-3); }
+.statusbar__diag-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.statusbar__diag-btn:hover { color: var(--fg); border-color: var(--border-strong); }
+
+.statusbar__popover {
+  position: fixed;
+  bottom: 44px;
+  right: var(--sp-5);
+  z-index: 60;
+  min-width: 320px;
+  max-width: 460px;
+  max-height: 360px;
+  overflow: auto;
+  background: var(--bg-raised-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--sp-3) var(--sp-4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+}
+.statusbar__popover-heading {
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: var(--sp-2);
+}
+.statusbar__popover-empty {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+.statusbar__popover-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.statusbar__popover-item {
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+  font-family: var(--font-mono);
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+.statusbar__popover-item:last-child { border-bottom: none; }
+.statusbar__popover-status { color: var(--fg-muted); font-size: 11px; }
+.statusbar__popover-item--ok .statusbar__popover-status { color: var(--ok); }
+.statusbar__popover-item--disabled .statusbar__popover-status { color: var(--fg-faint); }
+.statusbar__popover-item--degraded .statusbar__popover-status { color: var(--warn); }
+.statusbar__popover-item--failed .statusbar__popover-status { color: var(--danger); }
+.statusbar__popover-comp { color: var(--fg); font-size: 12px; }
+.statusbar__popover-err {
+  grid-column: 1 / -1;
+  color: var(--danger);
+  font-size: 11px;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
 /* ------------------------------------------------------------- */
 /* Toasts                                                         */
 /* ------------------------------------------------------------- */
 .toasts {
   position: fixed;
-  bottom: var(--sp-5);
+  /* Sit above the status bar (P1 #14) so toasts don't overlap it. */
+  bottom: 56px;
   right: var(--sp-5);
   display: flex;
   flex-direction: column;
