@@ -477,6 +477,7 @@ If you want to read code first, start with:
 | 0031 | Skill Forge | Proposed (T1, T2a/T2b, T5, T7, T8 implemented) |
 | 0032 | CLI architecture | Proposed |
 | 0033 | Security Swarm | **Accepted** (Phases A–E1 shipped + chain proven live 2026-04-28) |
+| 003X | Open-Web Tool Family (web_fetch + browser_action + mcp_call + secrets store + suggest_agent + 3 web genres) | Proposed (filed 2026-04-28; phases C1-C8 queued, est. 5-7 weeks) |
 
 ADRs that are `Proposed` but have `(... implemented)` are Decision-record-paper-trail proposed: the design is in flight, parts are committed, the doc itself just hasn't been promoted to `Accepted` because a few tranches remain. ADR-0033 was promoted on 2026-04-28 once the canonical Security Swarm chain fired end-to-end through the smoke.
 

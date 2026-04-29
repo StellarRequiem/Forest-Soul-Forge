@@ -374,6 +374,7 @@ Every non-trivial design choice has its own ADR. Files live in [`docs/decisions/
 | 0031 | Skill Forge (T1, T2a/T2b, T5, T7, T8 implemented)       | Proposed |
 | 0032 | CLI architecture                                        | Proposed |
 | 0033 | **Security Swarm** (Phases A–E1 shipped + chain proven live 2026-04-28) | **Accepted** |
+| 003X | **Open-Web Tool Family** (web_fetch + browser_action + mcp_call + secrets + suggest_agent + 3 web genres) | Proposed |
 
 Don't trust the doc — trust the code. Every Accepted ADR has a corresponding implementation; every Proposed ADR is in flight or queued.
 
