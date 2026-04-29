@@ -139,12 +139,23 @@ Added to `config/genres.yaml`:
       may read from the secrets store.
     risk_profile:
       max_side_effects: external
-      memory_ceiling: consented
+      memory_ceiling: consented      # CEILING, not default — see note
       provider_constraint: null
     default_kit_pattern: actuator
     trait_emphasis: [caution, evidence_demand, double_checking]
     spawn_compatibility: [web_actuator]
 ```
+
+**Note on memory_ceiling.** Per the existing genre engine contract,
+`memory_ceiling` is a maximum the genre permits — individual agents can
+self-tighten via their constitution. So `consented` for `web_actuator`
+means the agent *may* default to consented if its constitution doesn't
+say otherwise; an operator who wants a paranoia-mode actuator can set
+the agent's `memory_default: private` in its constitution and the
+engine enforces it. Same pattern as `security_high` (which has ceiling
+`private` as the strictest possible) — the ceiling exists to prevent
+*expansion*, not to mandate a single value. This applies to all three
+new genres.
 
 ### Per-agent encrypted secrets store (C1)
 
@@ -269,14 +280,19 @@ audit:
 ```yaml
   github:
     url: stdio:./mcp-servers/github
+    sha256: 9e3c1...                 # operator-pinned binary hash (C4)
     side_effects: external
     requires_human_approval: true
     allowlisted_tools: [list_issues, get_pull_request, search_code]
 ```
 
 Auto-discovery is explicitly out of scope. The operator types the
-server config; Forest verifies the manifest signature (Phase C5,
-deferred) before letting agents call it.
+server config; the daemon refuses to launch a server whose SHA256
+doesn't match the pinned hash. This is the v1 trust boundary —
+operator-pinned hash, no PKI, no third-party trust. Defends against
+the typosquatted-MCP-server class of attack at near-zero
+implementation cost. A future ADR can layer Sigstore-style
+provenance on top once the operator-pinned contract is stable.
 
 ### `suggest_agent.v1`
 
@@ -312,14 +328,14 @@ tab-completion equivalent.
 |---|---|---|
 | C1 | Per-agent encrypted secrets store | Foundation. Everything else depends on this. |
 | C2 | `web_fetch.v1` + tests | Smallest primitive. Lowest risk. Useful on its own. |
-| C3 | `browser_action.v1` + Playwright bring-up | Heaviest. Pulls Playwright into the install path; bumps .zip size. |
-| C4 | `mcp_call.v1` + `config/mcp_servers.yaml` | The integration multiplier. |
-| C5 | MCP server signature verification | Defer; out of scope for the first cut. |
+| C3 | `browser_action.v1` + Playwright bring-up (chromium only) | Heaviest. Pulls Playwright + chromium (~150MB) into the install path; bumps .zip size. Firefox/webkit deliberately excluded to keep surface small. |
+| C4 | `mcp_call.v1` + `config/mcp_servers.yaml` + operator-pinned SHA256 | The integration multiplier. SHA256 verification is the v1 trust boundary — daemon refuses to launch a server whose hash doesn't match. No PKI required. |
+| C5 | Sigstore-style provenance for MCP servers | Deferred to a follow-up ADR. The C4 SHA256 pinning covers the typosquatting attack; Sigstore adds rotation + signer identity. Worth doing later, not blocking. |
 | C6 | `suggest_agent.v1` | Ships once two new roles exist to rank between. |
 | C7 | Three new genres + per-genre default kits | Wires the primitives into the genre engine. |
 | C8 | Synthetic-incident demo | Mirror of Phase E for the open-web plane: a `web_researcher` agent fetches an RFC, correlates against a local config, escalates to a `web_actuator` that opens a Linear ticket via mcp_call. |
 
-C1 → C2 → C3 → C4 → C6 → C7 → C8. C5 deferred. Estimated 5-7 weeks.
+C1 → C2 → C3 → C4 → C6 → C7 → C8. C5 follow-up. Estimated 5-7 weeks.
 
 ## Threat model addendum
 
@@ -381,11 +397,20 @@ question, addressed by design.
 ### What we don't defend against (consistent with ADR-0025)
 
 - Compromised LLM provider (the model itself adversarial).
-- Operator-provided malicious MCP server (operator approves the
-  config; trust boundary is at registration).
-- Browser zero-days in Playwright (defense in depth: per-agent
-  allowlist + ephemeral context limit blast radius, but a Playwright
-  CVE is operator's patching responsibility).
+- Operator-provided malicious MCP server where the operator has
+  *intentionally* pinned its hash. SHA256 verification (C4) defends
+  against the typosquat / supply-chain-swap attack — an operator who
+  pins `9e3c1...` for `github` is protected against `npm install`
+  silently swapping the binary. It does not defend against the
+  operator pinning a hash for a server that genuinely is malicious.
+  Trust boundary remains at the operator's pin, not the server's
+  identity.
+- Browser zero-days in Playwright. Defense in depth: per-agent
+  allowlist + ephemeral context per call (one fresh browser context,
+  thrown away after) limit blast radius. Chromium-only reduces the
+  CVE surface vs shipping all three Playwright browsers. Playwright
+  CVE patching is operator's responsibility (caught by the
+  `pip install --upgrade` cycle in start.command).
 
 ## Consequences
 
