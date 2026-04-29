@@ -1,0 +1,72 @@
+# MCP server registry — operator-curated.
+#
+# ADR-003X Phase C4 (mcp_call.v1). Each entry pre-authorizes one MCP
+# server for use by Forest agents. The daemon reads this at lifespan;
+# mcp_call.v1 dispatches by server_name + tool_name. SHA256 of the
+# binary is verified against the operator-pinned hash before each
+# launch — typosquat / supply-chain-swap defense per the ADR's
+# threat-model addendum.
+#
+# Copy this file to config/mcp_servers.yaml and edit. Empty / missing
+# file = mcp_call.v1 disabled (refuses cleanly with "no MCP server
+# registry configured").
+#
+# Trust boundary reminder (ADR-003X §"What this ADR is NOT"):
+# Forest verifies the binary at the path matches the pinned sha256.
+# This defends against the typosquatted-MCP-server / silent-supply-
+# chain-swap attack. It does NOT defend against the operator pinning
+# the hash of a server they shouldn't have trusted in the first place.
+# Trust boundary remains at the operator's pin, not the server's
+# identity.
+
+servers:
+
+  # Example: GitHub MCP server (read-only tools).
+  # Sha256 here is a placeholder — generate via:
+  #   shasum -a 256 ./mcp-servers/github
+  # then paste the value in.
+  github:
+    url: stdio:./mcp-servers/github
+    sha256: 0000000000000000000000000000000000000000000000000000000000000000
+    side_effects: external          # default; per-server can override
+    requires_human_approval: true   # gated per call
+    allowlisted_tools:
+      - list_issues
+      - get_issue
+      - get_pull_request
+      - search_code
+      - search_issues
+    description: |
+      GitHub read access. Authentication via FSF_MCP_AUTH env var
+      (operator stores a personal access token in the agent's
+      secrets store and passes auth_secret_name).
+
+  # Example: Linear MCP server (mixed read + write tools).
+  linear:
+    url: stdio:./mcp-servers/linear
+    sha256: 0000000000000000000000000000000000000000000000000000000000000000
+    side_effects: external
+    requires_human_approval: true
+    allowlisted_tools:
+      - list_issues
+      - get_issue
+      - create_issue
+      - update_issue
+    description: |
+      Linear issue tracker. The create_issue and update_issue tools
+      are mutating — every call hits the approvals queue.
+
+  # Example: read-only MCP server that DOESN'T require per-call approval
+  # (set side_effects: network instead of external — still audited but
+  # not gated).
+  rfc_lookup:
+    url: stdio:./mcp-servers/rfc-lookup
+    sha256: 0000000000000000000000000000000000000000000000000000000000000000
+    side_effects: network           # not external — skip the gate
+    requires_human_approval: false
+    allowlisted_tools:
+      - get_rfc
+      - search_rfcs
+    description: |
+      RFC lookup tool. Read-only; safe for agents that need IETF
+      reference material without per-call operator approval.

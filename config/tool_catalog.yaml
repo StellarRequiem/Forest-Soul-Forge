@@ -1198,6 +1198,46 @@ tools:
     side_effects: network
     archetype_tags: [web_observer, web_researcher, web_actuator]
 
+  mcp_call.v1:
+    name: mcp_call
+    version: "1"
+    description: |
+      Call an operator-registered MCP server via stdio JSON-RPC.
+      Server registry lives in config/mcp_servers.yaml — operator
+      pre-registers each server with binary path + sha256 + allowed
+      tool list + side-effect classification. SHA256 verified before
+      each launch (typosquat / supply-chain-swap defense). Per-agent
+      constitution lists allowed_mcp_servers; per-server config lists
+      allowlisted_tools. Optional auth via the per-agent secrets
+      store (auth_secret_name → FSF_MCP_AUTH env var on the server
+      subprocess). v1 supports stdio: transport only; ws:// + http://
+      are future additions. Auto-discovery is explicitly out of scope
+      (operator types the config). Result is passthrough from the MCP
+      server; isError indicates JSON-RPC-level error vs success.
+    input_schema:
+      type: object
+      required: [server_name, tool_name]
+      properties:
+        server_name:
+          type: string
+          description: "Name from config/mcp_servers.yaml; must be in agent's allowed_mcp_servers."
+        tool_name:
+          type: string
+          description: "Tool to call; must be in server's allowlisted_tools."
+        args:
+          type: object
+          description: "Tool-specific arguments. Empty if omitted."
+        auth_secret_name:
+          type: string
+          description: "Name in agent's secrets store; passed as FSF_MCP_AUTH env var."
+        timeout_s:
+          type: number
+          minimum: 0.1
+          maximum: 300
+          default: 30
+    side_effects: external
+    archetype_tags: [web_actuator, web_researcher]
+
   browser_action.v1:
     name: browser_action
     version: "1"
