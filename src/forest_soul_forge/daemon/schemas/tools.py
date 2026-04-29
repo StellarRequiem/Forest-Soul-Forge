@@ -13,6 +13,13 @@ from pydantic import BaseModel, Field
 
 from forest_soul_forge.daemon.providers import ProviderStatus, TaskKind
 
+# Cross-sub-module reference: ArchetypeBundleOut.standard_tools is
+# annotated as ``list[ToolRefIn]`` — that name lives in agents.py.
+# With ``from __future__ import annotations`` Pydantic resolves
+# annotations against this module's globals at validation time, so the
+# symbol must be importable here. Discovered post-R1 split — see R1.1.
+from forest_soul_forge.daemon.schemas.agents import ToolRefIn
+
 
 class ToolDefOut(BaseModel):
     """One catalog entry as exposed to the frontend.

@@ -13,6 +13,17 @@ from pydantic import BaseModel, Field
 
 from forest_soul_forge.daemon.providers import ProviderStatus, TaskKind
 
+# Cross-sub-module references — these names appear in PreviewRequest /
+# PreviewResponse field annotations. With ``from __future__ import
+# annotations`` in effect, Pydantic resolves the annotations lazily by
+# looking them up in *this* module's globals, so each referenced type
+# must be importable here. Without these imports the model is "not
+# fully defined" and any /preview call dies with PydanticUserError.
+# Discovered post-R1 split — see R1.1.
+from forest_soul_forge.daemon.schemas.agents import TraitProfileIn, ToolRefIn
+from forest_soul_forge.daemon.schemas.traits import FlaggedCombinationOut
+from forest_soul_forge.daemon.schemas.tools import ResolvedToolOut
+
 
 class DomainGradeOut(BaseModel):
     domain: str
