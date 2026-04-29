@@ -18,10 +18,13 @@ upcoming ``/audit/verify`` endpoint (Phase 3 write tier).
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 
 from forest_soul_forge.core.audit_chain import AuditChain, ChainEntry
 from forest_soul_forge.daemon.deps import (
@@ -179,3 +182,136 @@ async def audit_ceremony(
         event_type=entry.event_type,
         ceremony_name=body.ceremony_name,
     )
+
+
+# ADR-003X K3 — server-sent-events stream of new audit chain entries.
+# Replaces the F6 status-bar polling pattern with push semantics:
+# clients subscribe once, get every new chain entry as a server-sent
+# event, and reconnect with a Last-Event-ID header to resume from
+# where they left off.
+#
+# Implementation: tail the canonical JSONL by polling its size at a
+# small interval. When the file grows, read the new bytes, parse them
+# line-by-line, emit each as an SSE event with id=<seq>. Keeps the
+# AuditChain.append signature unchanged (no async event bus) and
+# tolerates a daemon restart cleanly (Last-Event-ID resumes the tail
+# at the right position).
+#
+# Heartbeat every 30s prevents intermediate proxies from closing an
+# idle connection. Disconnect detection via Request.is_disconnected()
+# stops the polling loop within one tick of the client going away.
+SSE_POLL_INTERVAL_S = 0.5
+SSE_HEARTBEAT_INTERVAL_S = 30.0
+
+
+@router.get("/stream")
+async def audit_stream(
+    request: Request,
+    chain: AuditChain = Depends(get_audit_chain),
+):
+    """SSE: stream new audit chain entries as they land.
+
+    Replays from ``Last-Event-ID`` header (the seq of the last event
+    the client saw) so reconnects resume cleanly. When the header is
+    absent, the stream starts from the current tail position — the
+    client gets future events, not a backfill (that's what
+    /audit/tail is for).
+    """
+    # Initial cursor: client-provided Last-Event-ID, else current EOF.
+    # We store it as a byte offset into the file because seq alone
+    # would require a full chain scan to translate. The trade-off:
+    # if the file is rotated or compacted we'd miss entries, but
+    # the current chain is append-only with no rotation.
+    chain_path = chain.path
+    last_id = request.headers.get("last-event-id")
+    if last_id is not None:
+        # Map seq → byte offset. Cheap because the chain is append-only
+        # and tail-friendly: scan forward from start collecting offsets
+        # until we find seq > last_id.
+        try:
+            target_seq = int(last_id)
+        except ValueError:
+            target_seq = -1
+        offset = _seq_to_offset(chain_path, target_seq)
+    else:
+        offset = chain_path.stat().st_size if chain_path.exists() else 0
+
+    async def event_stream():
+        nonlocal offset
+        last_heartbeat = asyncio.get_event_loop().time()
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                size = chain_path.stat().st_size if chain_path.exists() else 0
+            except OSError:
+                size = 0
+            if size > offset:
+                # New bytes — read them, parse JSONL line by line.
+                with chain_path.open("rb") as f:
+                    f.seek(offset)
+                    new_bytes = f.read(size - offset)
+                offset = size
+                buf = new_bytes.decode("utf-8", errors="replace")
+                # Yield one SSE message per complete line. Partial last
+                # line (if write was mid-flush) waits for the next tick.
+                lines = buf.split("\n")
+                # If the buffer didn't end with newline, the last
+                # element is partial — push the offset back so we re-read
+                # it on the next tick.
+                if buf and not buf.endswith("\n"):
+                    partial = lines.pop()
+                    offset -= len(partial.encode("utf-8"))
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        # Malformed line — skip; verify() reports the break.
+                        continue
+                    seq = obj.get("seq")
+                    payload = json.dumps(obj, separators=(",", ":"))
+                    yield f"id: {seq}\nevent: chain_entry\ndata: {payload}\n\n"
+                last_heartbeat = asyncio.get_event_loop().time()
+            else:
+                # No new entries this tick — heartbeat if it's been a while.
+                now = asyncio.get_event_loop().time()
+                if now - last_heartbeat >= SSE_HEARTBEAT_INTERVAL_S:
+                    yield ": heartbeat\n\n"
+                    last_heartbeat = now
+            await asyncio.sleep(SSE_POLL_INTERVAL_S)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # nginx — disable response buffering
+        },
+    )
+
+
+def _seq_to_offset(path, target_seq: int) -> int:
+    """Return the byte offset of the line just AFTER ``target_seq``.
+
+    Used to resume an SSE stream from a Last-Event-ID. Linear scan;
+    chains stay tail-friendly because we're looking for a specific
+    seq from the end. For very large chains this is O(N) bytes —
+    acceptable for v1, can be replaced with an offset index later.
+    """
+    if not path.exists() or target_seq < 0:
+        return 0
+    offset = 0
+    with path.open("rb") as f:
+        for raw in f:
+            try:
+                obj = json.loads(raw)
+                if obj.get("seq", -1) > target_seq:
+                    return offset
+            except json.JSONDecodeError:
+                pass
+            offset += len(raw)
+    # Asked for a seq beyond the current EOF — start at EOF.
+    return offset
