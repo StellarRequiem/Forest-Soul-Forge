@@ -8,14 +8,21 @@ quickly after a `reset.command` clears your working state.
 ## Loading a scenario
 
 ```bash
-./scenarios/load-scenario.command                         # interactive picker
-./scenarios/load-scenario.command synthetic-incident      # direct
+./scenarios/load-scenario.command                          # interactive picker
+./scenarios/load-scenario.command synthetic-incident       # default = prod target
+./scenarios/load-scenario.command synthetic-incident demo  # isolated demo/ target (F7)
 ```
 
 The launcher stops the running daemon, archives your current state
 (same `.bak.<timestamp>` rename pattern as `reset.command`), copies
-the scenario into place, then prompts you to double-click
-`start.command` to bring the stack up.
+the scenario into place, then prompts you to double-click `start.command`
+(prod target) or `start-demo.command` (demo target) to bring the stack up.
+
+**Targets:**
+- `prod` (default) — replaces top-level `audit_chain.jsonl` + `registry.sqlite`
+  + `data/soul_generated`. Archives your existing state first.
+- `demo` — installs into `demo/` and leaves prod state untouched. Pair
+  with `start-demo.command`. The cleanest path for repeatable rehearsals.
 
 ## Available scenarios
 

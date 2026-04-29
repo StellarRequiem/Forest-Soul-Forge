@@ -113,10 +113,23 @@ archive_one "data/soul_generated"
 archive_one "data/forge/skills/installed"
 archive_one "data/plugins"
 
-# Re-create the empty data/ scaffolding so the next run doesn't hit
-# missing-directory errors.
+# F7: also archive the demo/ subtree so reset wipes both production
+# and demo state in one shot. (Skipping demo/ would leave a leftover
+# scenario from a previous rehearsal that the next start-demo.command
+# would silently inherit.)
+archive_one "demo/audit_chain.jsonl"
+archive_one "demo/registry.sqlite"
+archive_one "demo/registry.sqlite-wal"
+archive_one "demo/registry.sqlite-shm"
+archive_one "demo/soul_generated"
+archive_one "demo/forge/skills/installed"
+archive_one "demo/plugins"
+
+# Re-create the empty data/ + demo/ scaffolding so the next run doesn't
+# hit missing-directory errors.
 mkdir -p data/soul_generated data/forge/skills/installed data/plugins
-ok "Re-created empty data/ scaffolding."
+mkdir -p demo/soul_generated demo/forge/skills/installed demo/plugins
+ok "Re-created empty data/ + demo/ scaffolding."
 
 echo ""
 ok "Reset complete. Double-click start.command to bring the stack up clean."

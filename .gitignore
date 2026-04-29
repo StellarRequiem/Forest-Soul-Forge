@@ -83,3 +83,13 @@ docker-compose.override.yml
 # Keep the directory itself (via data/.gitkeep) but ignore everything in it.
 data/*
 !data/.gitkeep
+
+# F7: isolated demo state (start-demo.command points the daemon here).
+# load-scenario.command --target=demo unpacks scenarios into this dir.
+# We never commit this — the canonical scenarios live in scenarios/.
+demo/
+
+# F4 + F7: backup files from reset.command + load-scenario.command.
+# These accumulate as you rehearse; clean them out manually when you
+# don't need them anymore.
+*.bak.[0-9]*

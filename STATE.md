@@ -35,8 +35,9 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | Trait roles | 14 (5 original + 9 swarm) |
 | Audit event types | 30+ |
 | Frontend modules (vanilla JS) | 18 |
-| `.command` operator scripts | 17 (start/stop/reset + load-scenario + 13 ops) |
+| `.command` operator scripts | 18 (start/stop/reset + start-demo + load-scenario + 13 ops) |
 | Demo scenarios | 2 (synthetic-incident + fresh-forge, both with presenter scripts) |
+| Data dirs | 2 (top-level prod via start.command + isolated demo/ via start-demo.command) |
 | Total commits on `main` | 130 |
 | Audit docs filed | 1 (`docs/audits/2026-04-28-phase-d-e-review.md`) |
 
@@ -352,8 +353,12 @@ Mutating endpoints accept `X-Idempotency-Key`. Repeat with the same key + same b
 ./reset.command
 
 # Load a demo scenario (pre-built data state — see scenarios/README.md):
-./scenarios/load-scenario.command synthetic-incident
-./scenarios/load-scenario.command fresh-forge
+./scenarios/load-scenario.command synthetic-incident          # default = prod target
+./scenarios/load-scenario.command synthetic-incident demo     # isolated demo/ target
+
+# Run the daemon against the isolated demo/ dir (F7) — production
+# state at top-level audit_chain.jsonl + registry.sqlite is untouched:
+./start-demo.command
 
 # Docker alternative (any OS):
 docker compose --profile llm up -d

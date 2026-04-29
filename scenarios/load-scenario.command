@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 # Forest Soul Forge — load a pre-built demo scenario.
 #
-# Wraps reset.command + a copy step. Scenarios live in scenarios/<name>/
-# and ship with the repo so a fresh checkout has demo-ready state without
-# needing to run swarm-bringup.
+# Scenarios live in scenarios/<name>/ and ship with the repo so a fresh
+# checkout has demo-ready state without needing to run swarm-bringup.
 #
-# Usage (interactive):
-#   ./scenarios/load-scenario.command
-#       Prompts for which scenario to load.
+# Usage:
+#   ./scenarios/load-scenario.command                              # interactive picker
+#   ./scenarios/load-scenario.command synthetic-incident           # default target = prod
+#   ./scenarios/load-scenario.command synthetic-incident demo      # isolated demo/ dir
+#   ./scenarios/load-scenario.command synthetic-incident prod      # explicit production
 #
-# Usage (scripted):
-#   ./scenarios/load-scenario.command synthetic-incident
-#   ./scenarios/load-scenario.command fresh-forge
+# Targets (F7):
+#   prod (default) — replaces the top-level audit_chain.jsonl + registry.sqlite +
+#                    data/soul_generated, the same state that start.command serves.
+#                    Current state is archived to .bak.<timestamp> first.
+#   demo           — installs into demo/ dir without touching prod state.
+#                    Pair with start-demo.command to serve from there.
+#                    Demo state never overwrites production.
 #
 # What this script does:
 #   1. Stops any running daemon  (calls stop.command)
-#   2. Archives current state    (calls reset.command non-interactively)
-#   3. Copies scenarios/<name>/* into the project root + data/
-#   4. Tells the user to start.command
-#
-# Per-scenario contents:
-#   audit_chain.jsonl     — top-level (daemon's default FSF_AUDIT_CHAIN_PATH)
-#   registry.sqlite       — top-level (the derived index)
-#   data/soul_generated/  — every birthed agent's soul.md + constitution.yaml
+#   2. Archives current state for the chosen target (.bak.<timestamp>)
+#   3. Copies scenarios/<name>/* into the target paths
+#   4. Tells the user which start command to run next
 
 set -uo pipefail
 
@@ -58,6 +58,7 @@ list_scenarios() {
 }
 
 NAME="${1:-}"
+TARGET="${2:-prod}"
 
 if [ -z "$NAME" ]; then
   echo ""
@@ -72,6 +73,12 @@ if [ -z "$NAME" ]; then
   fi
 fi
 
+if [ "$TARGET" != "prod" ] && [ "$TARGET" != "demo" ]; then
+  err "Unknown target '$TARGET'. Use 'prod' (default) or 'demo'."
+  press_to_close
+  exit 1
+fi
+
 SCENARIO_DIR="scenarios/$NAME"
 if [ ! -d "$SCENARIO_DIR" ]; then
   err "Scenario '$NAME' not found at $SCENARIO_DIR."
@@ -81,7 +88,7 @@ if [ ! -d "$SCENARIO_DIR" ]; then
   press_to_close
   exit 1
 fi
-say "Loading scenario: $NAME"
+say "Loading scenario: $NAME (target: $TARGET)"
 
 # ---------- stop daemon if running ---------------------------------------
 
@@ -105,35 +112,60 @@ archive_one() {
     ok "  archived $target"
   fi
 }
-archive_one "audit_chain.jsonl"
-archive_one "registry.sqlite"
-archive_one "registry.sqlite-wal"
-archive_one "registry.sqlite-shm"
-archive_one "data/audit_chain.jsonl"
-archive_one "data/registry.sqlite"
-archive_one "data/soul_generated"
 
-mkdir -p data/soul_generated data/forge/skills/installed data/plugins
+if [ "$TARGET" = "demo" ]; then
+  # Isolated demo target — only touch demo/ paths.
+  archive_one "demo/audit_chain.jsonl"
+  archive_one "demo/registry.sqlite"
+  archive_one "demo/registry.sqlite-wal"
+  archive_one "demo/registry.sqlite-shm"
+  archive_one "demo/soul_generated"
+  mkdir -p demo/soul_generated demo/forge/skills/installed demo/plugins
+else
+  # Production target — same as the F4 behavior, replaces top-level state.
+  archive_one "audit_chain.jsonl"
+  archive_one "registry.sqlite"
+  archive_one "registry.sqlite-wal"
+  archive_one "registry.sqlite-shm"
+  archive_one "data/audit_chain.jsonl"
+  archive_one "data/registry.sqlite"
+  archive_one "data/soul_generated"
+  mkdir -p data/soul_generated data/forge/skills/installed data/plugins
+fi
 
 # ---------- copy scenario into place -------------------------------------
 
-say "Installing scenario contents..."
+say "Installing scenario contents into $TARGET target..."
 
-# Top-level files (daemon defaults: FSF_AUDIT_CHAIN_PATH=examples/audit_chain.jsonl
-# would override these, but the canonical fresh-checkout layout puts the
-# chain + registry at repo root). We copy what the scenario provides.
-for f in audit_chain.jsonl registry.sqlite registry.sqlite-wal registry.sqlite-shm; do
-  if [ -e "$SCENARIO_DIR/$f" ]; then
-    cp "$SCENARIO_DIR/$f" "./$f"
-    ok "  copied $f"
-  fi
-done
+# Map scenario files to target paths. For prod, top-level + data/ —
+# matches the daemon's default config. For demo, everything goes under
+# demo/ — matches start-demo.command's env-var overrides.
+if [ "$TARGET" = "demo" ]; then
+  CHAIN_DST="demo/audit_chain.jsonl"
+  REG_DST="demo/registry.sqlite"
+  REG_WAL_DST="demo/registry.sqlite-wal"
+  REG_SHM_DST="demo/registry.sqlite-shm"
+  SOUL_DST="demo/soul_generated"
+else
+  CHAIN_DST="audit_chain.jsonl"
+  REG_DST="registry.sqlite"
+  REG_WAL_DST="registry.sqlite-wal"
+  REG_SHM_DST="registry.sqlite-shm"
+  SOUL_DST="data/soul_generated"
+fi
 
-# data/ subtree
-if [ -d "$SCENARIO_DIR/data" ]; then
-  # Walk the scenario's data/ tree and mirror into the live data/.
-  ( cd "$SCENARIO_DIR" && tar cf - data ) | tar xf - -C .
-  ok "  copied data/ subtree"
+# Top-level chain + registry files from the scenario root.
+[ -e "$SCENARIO_DIR/audit_chain.jsonl" ]      && cp "$SCENARIO_DIR/audit_chain.jsonl"      "$CHAIN_DST"   && ok "  copied → $CHAIN_DST"
+[ -e "$SCENARIO_DIR/registry.sqlite" ]        && cp "$SCENARIO_DIR/registry.sqlite"        "$REG_DST"     && ok "  copied → $REG_DST"
+[ -e "$SCENARIO_DIR/registry.sqlite-wal" ]    && cp "$SCENARIO_DIR/registry.sqlite-wal"    "$REG_WAL_DST" && ok "  copied → $REG_WAL_DST"
+[ -e "$SCENARIO_DIR/registry.sqlite-shm" ]    && cp "$SCENARIO_DIR/registry.sqlite-shm"    "$REG_SHM_DST" && ok "  copied → $REG_SHM_DST"
+
+# Soul artifacts — the scenario stores them at data/soul_generated/, we
+# unpack them to the target soul dir.
+if [ -d "$SCENARIO_DIR/data/soul_generated" ]; then
+  mkdir -p "$SOUL_DST"
+  cp -R "$SCENARIO_DIR/data/soul_generated/"* "$SOUL_DST/" 2>/dev/null || true
+  ok "  copied → $SOUL_DST/"
 fi
 
 # ---------- presenter script pointer -------------------------------------
@@ -145,5 +177,9 @@ if [ -f "scenarios/scripts/$NAME.md" ]; then
 fi
 
 echo ""
-ok "Scenario '$NAME' loaded. Double-click start.command to bring the stack up."
+if [ "$TARGET" = "demo" ]; then
+  ok "Scenario '$NAME' loaded into demo/. Double-click start-demo.command."
+else
+  ok "Scenario '$NAME' loaded. Double-click start.command to bring the stack up."
+fi
 press_to_close

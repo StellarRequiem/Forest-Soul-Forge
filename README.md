@@ -36,8 +36,9 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 | **Skill manifests shipped** | **21** chain + supporting (`examples/skills/`) |
 | **Audit event types** | 30+ (lifecycle, dispatch, memory, delegation, swarm) |
 | **Frontend modules (vanilla JS)** | 18 (`frontend/js/`) |
-| **Operator `.command` scripts** | 17 (start/stop/reset/load-scenario + 13 ops) |
+| **Operator `.command` scripts** | 18 (start/stop/reset/start-demo/load-scenario + 13 ops) |
 | **Demo scenarios** | 2 (synthetic-incident + fresh-forge, with presenter scripts) |
+| **Isolated demo dir** | `demo/` (start-demo.command points here; prod state untouched) |
 
 ---
 
@@ -230,11 +231,13 @@ the operator scripts:
 
 ```
 start.command                bootstrap + launch (recommended first run)
+start-demo.command           same as start.command but reads/writes the isolated demo/ dir
 stop.command                 kill any process on ports 7423 + 5173
 reset.command                archive all generated state, back to clean slate
-                             (renames data/audit_chain.jsonl etc. to .bak)
+                             (renames data/audit_chain.jsonl + demo/* etc. to .bak)
 
 scenarios/load-scenario.command   load a pre-built demo scenario (interactive picker)
+                                  optional 2nd arg: prod (default) or demo
 
 run.command                  launch daemon + frontend directly (skips bootstrap)
 swarm-bringup.command        ADR-0033 Phase D+E one-shot bring-up + smoke
@@ -252,12 +255,20 @@ push.command                 git push origin main
 For a clean demo without running swarm-bringup from scratch:
 
 ```bash
+# Replace your top-level state (gets archived to .bak.<timestamp> first):
 ./scenarios/load-scenario.command synthetic-incident   # the headline 47-event chain
 ./scenarios/load-scenario.command fresh-forge          # empty slate, drive Forge from scratch
 ./start.command
+
+# OR isolated demo path — load into demo/, leave prod state untouched:
+./scenarios/load-scenario.command synthetic-incident demo
+./start-demo.command
 ```
 
-Each scenario ships with a presenter script — see [`scenarios/README.md`](scenarios/README.md).
+The `demo` target is the cleanest path for rehearsals — your real
+agents/audit chain stay put while you demo against an isolated
+`demo/` directory. Each scenario ships with a presenter script —
+see [`scenarios/README.md`](scenarios/README.md).
 
 ### CLI for power users
 
