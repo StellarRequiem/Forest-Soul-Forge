@@ -36,7 +36,8 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 | **Skill manifests shipped** | **21** chain + supporting (`examples/skills/`) |
 | **Audit event types** | 30+ (lifecycle, dispatch, memory, delegation, swarm) |
 | **Frontend modules (vanilla JS)** | 18 (`frontend/js/`) |
-| **Operator `.command` scripts** | 16 (start/stop/reset + 13 ops) |
+| **Operator `.command` scripts** | 17 (start/stop/reset/load-scenario + 13 ops) |
+| **Demo scenarios** | 2 (synthetic-incident + fresh-forge, with presenter scripts) |
 
 ---
 
@@ -233,6 +234,8 @@ stop.command                 kill any process on ports 7423 + 5173
 reset.command                archive all generated state, back to clean slate
                              (renames data/audit_chain.jsonl etc. to .bak)
 
+scenarios/load-scenario.command   load a pre-built demo scenario (interactive picker)
+
 run.command                  launch daemon + frontend directly (skips bootstrap)
 swarm-bringup.command        ADR-0033 Phase D+E one-shot bring-up + smoke
 docker-up.command            daemon + frontend via Docker (add --profile llm for Ollama)
@@ -243,6 +246,18 @@ live-fire-voice.command      birth a real agent end-to-end
 run-tests / t4-tests         dockerized pytest harness
 push.command                 git push origin main
 ```
+
+### Pre-built demo scenarios
+
+For a clean demo without running swarm-bringup from scratch:
+
+```bash
+./scenarios/load-scenario.command synthetic-incident   # the headline 47-event chain
+./scenarios/load-scenario.command fresh-forge          # empty slate, drive Forge from scratch
+./start.command
+```
+
+Each scenario ships with a presenter script — see [`scenarios/README.md`](scenarios/README.md).
 
 ### CLI for power users
 

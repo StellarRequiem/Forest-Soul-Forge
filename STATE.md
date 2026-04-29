@@ -35,7 +35,8 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | Trait roles | 14 (5 original + 9 swarm) |
 | Audit event types | 30+ |
 | Frontend modules (vanilla JS) | 18 |
-| `.command` operator scripts | 16 (+ start/stop/reset for the demo edition) |
+| `.command` operator scripts | 17 (start/stop/reset + load-scenario + 13 ops) |
+| Demo scenarios | 2 (synthetic-incident + fresh-forge, both with presenter scripts) |
 | Total commits on `main` | 130 |
 | Audit docs filed | 1 (`docs/audits/2026-04-28-phase-d-e-review.md`) |
 
@@ -350,6 +351,10 @@ Mutating endpoints accept `X-Idempotency-Key`. Repeat with the same key + same b
 # Reset to clean state (archives audit chain + registry + soul artifacts):
 ./reset.command
 
+# Load a demo scenario (pre-built data state — see scenarios/README.md):
+./scenarios/load-scenario.command synthetic-incident
+./scenarios/load-scenario.command fresh-forge
+
 # Docker alternative (any OS):
 docker compose --profile llm up -d
 open "http://127.0.0.1:5173/?api=http://127.0.0.1:7423"
@@ -358,7 +363,9 @@ open "http://127.0.0.1:5173/?api=http://127.0.0.1:7423"
 `start.command` is the safe entry point for first-time contributors —
 checks Python ≥3.11, makes the .venv, pip-installs editable, then
 delegates to `run.command`. Repeat invocations skip the work that's
-already done.
+already done. `scenarios/load-scenario.command` archives current state
+and copies a frozen snapshot into place — useful for repeatable demos
+or recovering quickly after a `reset`.
 
 ### Run tests
 
