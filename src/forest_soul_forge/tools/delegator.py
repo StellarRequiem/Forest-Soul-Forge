@@ -212,16 +212,48 @@ def build_delegator_factory(
             #    target is a triune sister (sisters are peers by design;
             #    requiring the operator to pass allow_out_of_lineage on
             #    every triune call would be ceremony without value).
-            if not allow_out_of_lineage and not triune_internal:
+            #
+            # T2.1: emit a governance_relaxed event when the override
+            # actually MATTERED — i.e. target wasn't in the chain AND
+            # the caller used allow_out_of_lineage to bypass. This makes
+            # operator-bypass visible as its own filterable event type
+            # (Discord cross-check item #1: "everyone ends up with YOLO
+            # mode toggled on eventually" is the failure mode this
+            # closes — silent relaxations were the previous gap).
+            if not triune_internal:
                 conn = registry._conn  # noqa: SLF001 — internal access by design
                 chain = _compute_lineage_chain(conn, caller_instance_id)
-                if target_instance_id not in chain:
+                target_in_chain = target_instance_id in chain
+                if not target_in_chain and not allow_out_of_lineage:
                     raise DelegateError(
                         f"target {target_instance_id!r} is not in caller's "
                         "lineage chain. Pass allow_out_of_lineage=True to "
                         "override (the override is recorded in the audit "
                         "chain)."
                     )
+                if not target_in_chain and allow_out_of_lineage:
+                    # The override was load-bearing — emit governance_relaxed
+                    # so chronicles surface this as a warn-class event,
+                    # not a routine call.
+                    try:
+                        audit_chain.append(
+                            "governance_relaxed",
+                            {
+                                "relaxation_type":  "out_of_lineage_delegate",
+                                "caller_instance":  caller_instance_id,
+                                "target_instance":  target_instance_id,
+                                "skill_name":       skill_name,
+                                "skill_version":    skill_version,
+                                "reason":           reason,
+                                "session_id":       session_id,
+                            },
+                            agent_dna=caller_dna,
+                        )
+                    except Exception:
+                        # Don't let audit failure mask the delegation —
+                        # the agent_delegated event will still land below
+                        # with allow_out_of_lineage=True visible.
+                        pass
 
             # 3. Resolve target's skill manifest from disk. Two install
             #    patterns are supported, matching skills_run.py's flat

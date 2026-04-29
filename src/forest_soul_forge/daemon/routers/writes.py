@@ -968,6 +968,23 @@ def spawn(
                     },
                     agent_dna=dna_s,
                 )
+                # T2.1: also emit the meta-event governance_relaxed so
+                # operators can filter on a single event type across all
+                # relaxation kinds. The dedicated spawn_genre_override
+                # event stays for back-compat with anything that already
+                # filters on it; this is additive.
+                audit.append(
+                    "governance_relaxed",
+                    {
+                        "relaxation_type": "spawn_genre_override",
+                        "instance_id":     instance_id,
+                        "parent_instance": parent_row.instance_id,
+                        "parent_genre":    parent_genre,
+                        "child_genre":     genre,
+                        "rationale":       "operator set override_genre_spawn_rule=true",
+                    },
+                    agent_dna=dna_s,
+                )
             except Exception:
                 # Override audit failure is non-fatal — the spawn itself
                 # is already on the chain; the missing override entry

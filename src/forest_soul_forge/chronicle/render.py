@@ -56,6 +56,11 @@ MILESTONE_EVENT_TYPES: frozenset[str] = frozenset({
     "out_of_triune_attempt",
     "secret_set",
     "secret_revoked",
+    "governance_relaxed",
+    "spawn_genre_override",
+    "hardware_bound",
+    "hardware_mismatch",
+    "hardware_unbound",
 })
 
 
@@ -124,6 +129,52 @@ def _san_out_of_triune_attempt(d: dict) -> str:
     target = _short(d.get("target_instance"))
     bond = d.get("bond_name") or "<unnamed>"
     return f"⚠ {caller} attempted out-of-bond delegate to {target} (triune {bond!r})"
+
+
+def _san_governance_relaxed(d: dict) -> str:
+    """T2.1 — dispatched per-relaxation, with relaxation_type indicating
+    which kind. Operators filtering on this single event type get every
+    constraint-bypass regardless of underlying event."""
+    rt = d.get("relaxation_type") or "<unknown>"
+    if rt == "out_of_lineage_delegate":
+        caller = _short(d.get("caller_instance"))
+        target = _short(d.get("target_instance"))
+        skill = d.get("skill_name") or "<?>"
+        return f"⚠ Governance relaxed: {caller} → {target} ({skill}) bypassed lineage gate"
+    if rt == "spawn_genre_override":
+        inst = _short(d.get("instance_id"))
+        pg = d.get("parent_genre") or "?"
+        cg = d.get("child_genre") or "?"
+        return f"⚠ Governance relaxed: spawn {inst} crossed genre {pg}→{cg}"
+    return f"⚠ Governance relaxed: {rt}"
+
+
+def _san_spawn_genre_override(d: dict) -> str:
+    inst = _short(d.get("instance_id"))
+    pg = d.get("parent_genre") or "?"
+    cg = d.get("child_genre") or "?"
+    return f"Spawn override: {inst} crossed genre {pg}→{cg}"
+
+
+def _san_hardware_bound(d: dict) -> str:
+    inst = _short(d.get("instance_id"))
+    fp = (d.get("fingerprint") or "")[:8]
+    src = d.get("source") or "?"
+    return f"Agent {inst} hardware-bound (fp={fp}… via {src})"
+
+
+def _san_hardware_mismatch(d: dict) -> str:
+    inst = _short(d.get("instance_id"))
+    tool = d.get("tool_key") or "?"
+    expected = (d.get("expected_machine_fingerprint") or "")[:8]
+    binding = (d.get("constitution_binding") or "")[:8]
+    return f"⚠ Hardware mismatch on {inst} ({tool}); machine={expected}… binding={binding}…"
+
+
+def _san_hardware_unbound(d: dict) -> str:
+    inst = _short(d.get("instance_id"))
+    op = d.get("operator_id") or "?"
+    return f"Agent {inst} unbound by {op}"
 
 
 def _san_secret_set(d: dict) -> str:
@@ -199,6 +250,11 @@ SANITIZERS: dict[str, Any] = {
     "memory_verified":             _san_memory_verified,
     "memory_verification_revoked": _san_memory_verification_revoked,
     "out_of_triune_attempt":       _san_out_of_triune_attempt,
+    "governance_relaxed":          _san_governance_relaxed,        # T2.1
+    "spawn_genre_override":        _san_spawn_genre_override,
+    "hardware_bound":              _san_hardware_bound,
+    "hardware_mismatch":           _san_hardware_mismatch,
+    "hardware_unbound":            _san_hardware_unbound,
     "secret_set":                  _san_secret_set,
     "secret_revoked":              _san_secret_revoked,
     "secret_revealed":             _san_secret_revealed,
@@ -383,8 +439,13 @@ def _event_classes(entry: ChainEntry) -> str:
     cls = ["event"]
     if is_milestone(entry):
         cls.append("milestone")
-    if entry.event_type in ("out_of_triune_attempt", "tool_call_failed",
-                            "tool_call_refused", "secret_blocked"):
+    if entry.event_type in (
+        "out_of_triune_attempt", "tool_call_failed",
+        "tool_call_refused", "secret_blocked",
+        "governance_relaxed",          # T2.1: operator constraint-relaxation
+        "spawn_genre_override",        # the dedicated subset
+        "hardware_mismatch",           # K6 quarantine fire
+    ):
         cls.append("warn")
     return " ".join(cls)
 

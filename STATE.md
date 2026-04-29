@@ -34,7 +34,7 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | Schema version | v9 (v8: agent_secrets / v9: memory_verifications) |
 | Genres | 13 (7 original + 3 security tiers + 3 web tiers) |
 | Trait roles | 14 (5 original + 9 swarm) |
-| Audit event types | 35+ (incl. K-track: ceremony, memory_verified, out_of_triune_attempt, hardware_bound/mismatch/unbound) |
+| Audit event types | 36+ (incl. K-track: ceremony, memory_verified, out_of_triune_attempt, hardware_bound/mismatch/unbound; T2.1: governance_relaxed) |
 | Frontend modules (vanilla JS) | 18 |
 | `.command` operator scripts | 19 (start/stop/reset + start-demo + load-scenario + dist/build + 13 ops) |
 | Demo scenarios | 2 (synthetic-incident + fresh-forge, both with presenter scripts) |
