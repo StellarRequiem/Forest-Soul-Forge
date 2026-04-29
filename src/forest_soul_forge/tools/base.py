@@ -91,6 +91,16 @@ class ToolContext:
     # privileged tools refuse cleanly with "helper not wired" so the
     # daemon stays up and only those tools degrade.
     priv_client: Any = None
+    # ADR-003X Phase C1 — per-call SecretsAccessor pre-bound with the
+    # agent's instance_id, master key, and constitutional allowlist.
+    # Tools that need a credential call ``ctx.secrets.get("name")`` and
+    # get either the plaintext or one of three distinct error types
+    # (Unavailable / AccessDenied / Unknown). The dispatcher emits
+    # secret_revealed / secret_blocked audit events via the accessor's
+    # callback. None when the secrets subsystem is disabled
+    # (FSF_SECRETS_MASTER_KEY unset) — tools refuse cleanly via
+    # SecretsUnavailableError.
+    secrets: Any = None
 
 
 @dataclass(frozen=True)

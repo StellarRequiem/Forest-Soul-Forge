@@ -39,6 +39,7 @@ from forest_soul_forge.tools.builtin.traffic_flow_local import TrafficFlowLocalT
 from forest_soul_forge.tools.builtin.triage import TriageTool
 from forest_soul_forge.tools.builtin.ueba_track import UebaTrackTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
+from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
 
 __all__ = [
     "TimestampWindowTool",
@@ -72,6 +73,7 @@ __all__ = [
     "TamperDetectTool",
     "CanaryTokenTool",
     "HoneypotLocalTool",
+    "WebFetchTool",
 ]
 
 
@@ -122,3 +124,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # ADR-0033 Phase B3 — security_high deception layer.
     registry.register(CanaryTokenTool())
     registry.register(HoneypotLocalTool())
+    # ADR-003X Phase C2 — open-web fetch primitive. Per-agent host
+    # allowlist + optional secrets-store auth. The cheapest path off
+    # 127.0.0.1 for an agent that needs to read a public API or pull
+    # an RFC. Side effects: network. Approval gating is up to the
+    # agent's constitution; the host allowlist IS the structural gate.
+    registry.register(WebFetchTool())

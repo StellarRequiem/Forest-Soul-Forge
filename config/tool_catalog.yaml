@@ -1157,6 +1157,47 @@ tools:
     side_effects: network
     archetype_tags: [security_high, observer]
 
+  # ----- ADR-003X open-web tool family --------------------------------------
+  web_fetch.v1:
+    name: web_fetch
+    version: "1"
+    description: |
+      HTTP GET/POST against a per-agent host allowlist. Optional
+      auth via the per-agent secrets store (pass auth_secret_name;
+      tool reads via ctx.secrets.get and attaches as Authorization:
+      Bearer). The agent's constitution must list allowed_hosts;
+      hosts NOT on the list are refused before any network activity.
+      Each redirect re-checks the allowlist so a 302 to an off-list
+      host fails cleanly. Body is truncated to 32 KB; the metadata
+      flags whether truncation happened. Audit captures host +
+      method + status — never the body (privacy + noise). Future
+      web_researcher / web_actuator genres pull this tool by default.
+    input_schema:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: "http or https URL. Host must be in allowed_hosts."
+        method:
+          type: string
+          enum: [GET, POST, HEAD]
+          default: GET
+        body:
+          type: string
+          description: "Request body for POST. JSON content gets application/json."
+        auth_secret_name:
+          type: string
+          description: "Name in agent's secrets store; sent as Bearer token."
+        timeout_s:
+          type: number
+          minimum: 0.1
+          maximum: 60
+          default: 15
+    side_effects: network
+    archetype_tags: [web_observer, web_researcher, web_actuator]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.

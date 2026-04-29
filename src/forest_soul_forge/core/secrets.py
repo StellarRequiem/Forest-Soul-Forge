@@ -166,3 +166,115 @@ def aad_for(instance_id: str, name: str) -> bytes:
     AEAD tag check fails because the AAD doesn't match.
     """
     return f"fsf:secret:{instance_id}:{name}".encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Per-call accessor handed to tools via ToolContext.secrets
+# ---------------------------------------------------------------------------
+class SecretsAccessor:
+    """The view a tool gets of the secrets store.
+
+    The dispatcher constructs one per ToolContext, pre-bound with:
+      - the registry (for the actual SQL + crypto)
+      - the loaded MasterKey
+      - the agent's instance_id (so the tool can't fish in another agent's row)
+      - the agent's allowed_secret_names (the constitutional allowlist)
+
+    Tools call ``ctx.secrets.get("openai_key")`` and either receive the
+    plaintext or get a clear refusal. The accessor enforces the allowlist
+    BEFORE touching the registry; an unlisted name raises
+    :class:`SecretsAccessDeniedError` and the runtime can audit
+    ``secret_blocked`` without ever decrypting anything.
+
+    Audit emission for ``secret_revealed`` / ``secret_blocked`` is the
+    accessor's responsibility — pass an ``audit_callback`` that fires
+    once per call. The dispatcher wires this; tests can pass a no-op.
+    """
+
+    def __init__(
+        self,
+        registry,
+        master_key: Optional["MasterKey"],
+        instance_id: str,
+        agent_dna: Optional[str],
+        allowed_names: tuple[str, ...] = (),
+        audit_callback=None,
+    ) -> None:
+        self._registry = registry
+        self._master_key = master_key
+        self._instance_id = instance_id
+        self._agent_dna = agent_dna
+        self._allowed = frozenset(allowed_names)
+        self._audit = audit_callback
+
+    def get(self, name: str) -> str:
+        """Return the plaintext for ``name`` or raise.
+
+        Raises:
+          - :class:`SecretsUnavailableError` if no master key configured
+          - :class:`SecretsAccessDeniedError` if name not in allowlist
+          - :class:`UnknownSecretError` if name has no row in the store
+
+        Fires the audit callback exactly once per call:
+          - ``secret_blocked`` if access denied
+          - ``secret_revealed`` if access granted (regardless of whether
+             the row exists — UnknownSecretError still fires the
+             reveal-attempt event so an operator sees the agent tried)
+        """
+        if self._master_key is None:
+            raise SecretsUnavailableError(
+                "secrets subsystem disabled — set FSF_SECRETS_MASTER_KEY"
+            )
+        if name not in self._allowed:
+            self._emit("secret_blocked", name, reason="not_in_allowlist")
+            raise SecretsAccessDeniedError(
+                f"agent {self._instance_id} not permitted to read secret {name!r}"
+            )
+        try:
+            value = self._registry.get_secret(
+                self._instance_id, name, master_key=self._master_key,
+            )
+        finally:
+            # Emit BEFORE returning so a tool-side crash mid-handling
+            # still leaves the trail. Safe even if get_secret raised.
+            self._emit("secret_revealed", name)
+        return value
+
+    def list_allowed(self) -> tuple[str, ...]:
+        """Return the names this agent is allowed to read (the allowlist)."""
+        return tuple(sorted(self._allowed))
+
+    def _emit(self, event_type: str, name: str, **extra) -> None:
+        if self._audit is None:
+            return
+        try:
+            self._audit({
+                "event_type": event_type,
+                "instance_id": self._instance_id,
+                "agent_dna": self._agent_dna,
+                "secret_name": name,  # name only, NEVER the value
+                **extra,
+            })
+        except Exception:
+            # Audit emission failures should not break the tool call.
+            # The operator's observability degrades silently; the tool
+            # does what was asked.
+            pass
+
+
+def make_disabled_accessor(instance_id: str, agent_dna: Optional[str] = None) -> "SecretsAccessor":
+    """Helper for the daemon when the secrets subsystem is disabled.
+
+    Returns an accessor that raises :class:`SecretsUnavailableError`
+    on every read. Tools that call ``ctx.secrets.get(...)`` get a
+    consistent error type regardless of whether the operator forgot
+    to configure FSF_SECRETS_MASTER_KEY or hit an actual access denial.
+    """
+    return SecretsAccessor(
+        registry=None,
+        master_key=None,
+        instance_id=instance_id,
+        agent_dna=agent_dna,
+        allowed_names=(),
+        audit_callback=None,
+    )
