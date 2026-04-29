@@ -54,26 +54,34 @@ async function refresh() {
     api.get("/audit/tail?n=1"),
   ]);
 
-  // Daemon cell — green if /healthz returned and reports ok, gray
-  // (unknown) if it errored, amber if it reported anything other than ok.
+  // Daemon cell. The /healthz schema reports liveness as `ok: true` plus
+  // a startup_diagnostics array of {component, status, error}. Derive a
+  // single "ok / degraded / down" label from those: ok if everything is
+  // ok-or-disabled, degraded if anything failed/degraded but the daemon
+  // still answered, down only when the request itself failed.
   const daemonCell = document.getElementById("sb-daemon");
   const daemonDot = daemonCell?.querySelector(".statusbar__dot");
   const daemonValue = document.getElementById("sb-daemon-value");
   if (healthRes.status === "fulfilled") {
-    const status = healthRes.value?.status || "unknown";
-    daemonValue.textContent = status;
+    const h = healthRes.value || {};
+    const diags = Array.isArray(h.startup_diagnostics) ? h.startup_diagnostics : [];
+    const anyBad = diags.some((d) => d.status === "failed" || d.status === "degraded");
+    const ok = h.ok === true && !anyBad;
+    const label = !h.ok ? "down" : anyBad ? "degraded" : "ok";
+    daemonValue.textContent = label;
     daemonDot.classList.remove("statusbar__dot--ok", "statusbar__dot--warn", "statusbar__dot--down");
     daemonDot.classList.add(
-      status === "ok" ? "statusbar__dot--ok"
-      : status === "degraded" ? "statusbar__dot--warn"
+      ok ? "statusbar__dot--ok"
+      : !h.ok ? "statusbar__dot--down"
       : "statusbar__dot--warn",
     );
     // Stash diagnostics for the popover.
-    daemonCell.dataset.diagnostics = JSON.stringify(healthRes.value?.startup_diagnostics || []);
+    daemonCell.dataset.diagnostics = JSON.stringify(diags);
   } else {
     daemonValue.textContent = "down";
     daemonDot.classList.remove("statusbar__dot--ok", "statusbar__dot--warn");
     daemonDot.classList.add("statusbar__dot--down");
+    daemonCell.dataset.diagnostics = "[]";
   }
 
   // Agents cell.
