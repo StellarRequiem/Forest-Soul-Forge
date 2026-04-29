@@ -131,6 +131,20 @@ def _san_out_of_triune_attempt(d: dict) -> str:
     return f"⚠ {caller} attempted out-of-bond delegate to {target} (triune {bond!r})"
 
 
+def _san_posture_override_applied(d: dict) -> str:
+    """T2.2a — per-model posture override fired (tightening, not loosening)."""
+    inst = _short(d.get("instance_id"))
+    tool = d.get("tool_key") or "?"
+    model = d.get("active_model") or "?"
+    tightenings = d.get("tightenings") or []
+    if not tightenings:
+        return f"Posture override applied: {inst} on {tool} (model:{model})"
+    summary = "; ".join(str(t) for t in tightenings[:2])
+    if len(tightenings) > 2:
+        summary += f" (+{len(tightenings) - 2} more)"
+    return f"Posture override (model:{model}) on {tool}: {summary}"
+
+
 def _san_governance_relaxed(d: dict) -> str:
     """T2.1 — dispatched per-relaxation, with relaxation_type indicating
     which kind. Operators filtering on this single event type get every
@@ -251,6 +265,7 @@ SANITIZERS: dict[str, Any] = {
     "memory_verification_revoked": _san_memory_verification_revoked,
     "out_of_triune_attempt":       _san_out_of_triune_attempt,
     "governance_relaxed":          _san_governance_relaxed,        # T2.1
+    "posture_override_applied":    _san_posture_override_applied,  # T2.2a
     "spawn_genre_override":        _san_spawn_genre_override,
     "hardware_bound":              _san_hardware_bound,
     "hardware_mismatch":           _san_hardware_mismatch,

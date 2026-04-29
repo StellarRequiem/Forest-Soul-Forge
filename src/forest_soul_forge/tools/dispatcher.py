@@ -363,6 +363,34 @@ class ToolDispatcher:
                 session_id=session_id,
             )
 
+        # ---- 3b. apply per-model posture overrides (T2.2a) ---------------
+        # Constitution-level provider_posture_overrides let operators
+        # codify per-model wisdom (e.g. "qwen3.6 too eager → require
+        # approval for filesystem"). Overrides can ONLY tighten — they
+        # raise approval gates and lower call caps, never the reverse.
+        # No-op when the constitution has no overrides block, OR the
+        # active model isn't in the overrides map.
+        active_model = _resolve_active_model_name(provider)
+        resolved, posture_notes = _apply_provider_posture_overrides(
+            resolved, constitution_path, active_model
+        )
+        if posture_notes:
+            try:
+                self.audit.append(
+                    "posture_override_applied",
+                    {
+                        "instance_id":   instance_id,
+                        "tool_key":      key,
+                        "session_id":    session_id,
+                        "active_model":  active_model,
+                        "tightenings":   posture_notes,
+                    },
+                    agent_dna=agent_dna,
+                )
+            except Exception:
+                # Audit-emit failure shouldn't mask the actual dispatch.
+                pass
+
         # ---- 4. genre runtime enforcement (ADR-0019 T6) ----------------
         # Symmetric with ADR-0021 T5 (build-time kit-tier check): T5
         # catches what's in the constitution at birth; T6 catches what
@@ -1060,6 +1088,125 @@ def _canonical_json(obj: Any) -> str:
     re-loaded dict round-trips byte-for-byte."""
     import json
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _resolve_active_model_name(provider: Any) -> str | None:
+    """Return the model name the provider would use for GENERATE-class tasks.
+
+    GENERATE is the most consequential task kind (it's where reasoning +
+    output happen). Other kinds (CLASSIFY, EMBED) are usually small/cheap
+    and don't need posture-override scrutiny in v1. If the provider has
+    no models map, returns None and the override layer is a no-op.
+    """
+    if provider is None:
+        return None
+    try:
+        from forest_soul_forge.daemon.providers.base import TaskKind
+        models = getattr(provider, "models", None) or {}
+        # models may be keyed by TaskKind enum or by string — handle both
+        for key, value in models.items():
+            if (key == TaskKind.GENERATE) or (str(key) == "TaskKind.GENERATE") or (str(key).lower() == "generate"):
+                return str(value) if value else None
+    except Exception:
+        pass
+    return None
+
+
+def _apply_provider_posture_overrides(
+    resolved: _ResolvedToolConstraints,
+    constitution_path: Path,
+    active_model: str | None,
+) -> tuple[_ResolvedToolConstraints, list[str]]:
+    """Layer per-model posture overrides on top of resolved constraints.
+
+    T2.2a. Reads the constitution's ``provider_posture_overrides`` block.
+    Overrides can ONLY tighten — they may force requires_human_approval
+    to True and lower max_calls_per_session, never the reverse. No-op when:
+
+    * constitution has no provider_posture_overrides block
+    * active_model is None (no provider, or no GENERATE model configured)
+    * active_model isn't a key in the overrides map
+
+    Schema (in constitution YAML, OUTSIDE canonical_body):
+
+      provider_posture_overrides:
+        qwen3.6:
+          requires_approval_filesystem: true
+          requires_approval_external: true
+          max_calls_per_session_cap: 30
+        gpt120b:
+          requires_approval_filesystem: true
+
+    Trait-delta dimensions (caution_delta, suspicion_delta) are NOT
+    enforceable per-dispatch in v1 — traits are baked into the
+    constitution at birth via tool_policy resolution rules; the
+    dispatcher reads constraints, not traits. Trait-delta enforcement
+    would require per-dispatch trait re-evaluation; deferred to v2.
+
+    Returns (modified_resolved, list of human-readable tightening notes).
+    Empty notes list = no-op.
+    """
+    if not active_model or not constitution_path.exists():
+        return resolved, []
+    try:
+        import yaml
+        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return resolved, []
+    block = data.get("provider_posture_overrides") if isinstance(data, dict) else None
+    if not isinstance(block, dict):
+        return resolved, []
+    overrides_for_model = block.get(active_model)
+    if not isinstance(overrides_for_model, dict):
+        return resolved, []
+
+    notes: list[str] = []
+    new_constraints = dict(resolved.constraints)
+
+    # max_calls_per_session_cap: only TIGHTENS (caps lower, never raises)
+    if "max_calls_per_session_cap" in overrides_for_model:
+        try:
+            cap = int(overrides_for_model["max_calls_per_session_cap"])
+        except (TypeError, ValueError):
+            cap = None
+        if cap is not None and cap > 0:
+            existing = int(new_constraints.get("max_calls_per_session", 1000))
+            if cap < existing:
+                new_constraints["max_calls_per_session"] = cap
+                notes.append(f"max_calls_per_session reduced {existing}→{cap}")
+
+    # requires_approval_filesystem: forces approval ON for filesystem-class tools
+    if (
+        bool(overrides_for_model.get("requires_approval_filesystem"))
+        and resolved.side_effects == "filesystem"
+        and not bool(new_constraints.get("requires_human_approval"))
+    ):
+        new_constraints["requires_human_approval"] = True
+        notes.append("requires_human_approval=true forced (filesystem tool)")
+
+    # requires_approval_external: forces approval ON for external-class tools
+    if (
+        bool(overrides_for_model.get("requires_approval_external"))
+        and resolved.side_effects == "external"
+        and not bool(new_constraints.get("requires_human_approval"))
+    ):
+        new_constraints["requires_human_approval"] = True
+        notes.append("requires_human_approval=true forced (external tool)")
+
+    if not notes:
+        return resolved, []
+
+    # Append a synthetic applied_rules tag so the audit chain shows
+    # the override layer fired. Keeps backward-compat with anything
+    # filtering on applied_rules.
+    applied_rules = list(resolved.applied_rules) + [f"provider_posture:{active_model}"]
+    return _ResolvedToolConstraints(
+        name=resolved.name,
+        version=resolved.version,
+        side_effects=resolved.side_effects,
+        constraints=new_constraints,
+        applied_rules=tuple(applied_rules),
+    ), notes
 
 
 def _hardware_quarantine_reason(constitution_path: Path) -> dict[str, str] | None:
