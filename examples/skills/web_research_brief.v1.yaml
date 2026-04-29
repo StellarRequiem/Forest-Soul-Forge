@@ -1,0 +1,75 @@
+schema_version: 1
+name: web_research_brief
+version: '1'
+description: |
+  ADR-003X C8 — open-web research skill. Fetches a single URL via
+  web_fetch.v1, persists a brief to memory, and delegates the brief
+  to a downstream actuator agent for any external action.
+
+  Designed for the C8 synthetic-incident demo. The url is supplied
+  per-call by the operator (or a calling agent); the host must already
+  be in the researcher's web_fetch allowed_hosts allowlist.
+
+  Production swap: this skill is the template for any
+  fetch → summarize → delegate flow. Replace the synthetic url with
+  an allowlisted production endpoint, replace the downstream agent
+  with whichever actuator owns the next step.
+
+requires:
+  - web_fetch.v1
+  - memory_write.v1
+  - delegate.v1
+
+inputs:
+  type: object
+  required: [url, downstream_agent_id, brief_topic]
+  properties:
+    url:
+      type: string
+      description: "URL to fetch. Must be in the researcher's allowed_hosts."
+    downstream_agent_id:
+      type: string
+      description: "instance_id of the actuator to delegate to."
+    brief_topic:
+      type: string
+      description: "Short label for the brief (e.g. 'rfc-foo-001')."
+
+steps:
+  - id: fetch
+    tool: web_fetch.v1
+    args:
+      url:    ${inputs.url}
+      method: GET
+
+  - id: persist_brief
+    tool: memory_write.v1
+    args:
+      layer: episodic
+      scope: lineage
+      tags:
+        - web_research
+        - brief
+        - ${inputs.brief_topic}
+      content: "web_research_brief topic=${inputs.brief_topic} url=${inputs.url} status=${fetch.status} content_type=${fetch.content_type} body_len=${fetch.body}"
+
+  - id: handoff
+    tool: delegate.v1
+    args:
+      target_instance_id: ${inputs.downstream_agent_id}
+      skill_name:         web_actuator_handoff
+      skill_version:      "1"
+      inputs:
+        brief_topic:    ${inputs.brief_topic}
+        source_url:     ${inputs.url}
+        upstream_status: ${fetch.status}
+      reason: "C8 demo: researcher delegating brief to actuator for downstream action"
+      # Cross-tier handoff is intentional — researcher and actuator
+      # are peer roots in the demo. Sets the override so the audit
+      # event records that the operator-side script accepted this.
+      allow_out_of_lineage: true
+
+output:
+  brief_topic: ${inputs.brief_topic}
+  source_url:  ${inputs.url}
+  fetch_status: ${fetch.status}
+  fetch_content_type: ${fetch.content_type}

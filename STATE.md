@@ -478,7 +478,7 @@ If you want to read code first, start with:
 | 0031 | Skill Forge | Proposed (T1, T2a/T2b, T5, T7, T8 implemented) |
 | 0032 | CLI architecture | Proposed |
 | 0033 | Security Swarm | **Accepted** (Phases A–E1 shipped + chain proven live 2026-04-28) |
-| 003X | Open-Web Tool Family (web_fetch + browser_action + mcp_call + secrets store + suggest_agent + 3 web genres) | Proposed — C1 (secrets), C2 (web_fetch), C3 (browser_action), C4 (mcp_call), C6 (suggest_agent), C7 (3 web genres) shipped 2026-04-29; C8 (demo) in flight |
+| 003X | Open-Web Tool Family (web_fetch + browser_action + mcp_call + secrets store + suggest_agent + 3 web genres + C8 demo) | C1 (secrets), C2 (web_fetch), C3 (browser_action), C4 (mcp_call), C6 (suggest_agent), C7 (3 web genres), C8 (open-web demo via local HTTP + 2 skills + ceremony emit) all shipped 2026-04-29 — only C5 (Sigstore provenance) deferred |
 | 003X K | K-track parallels (memory verification, ceremony events, SSE stream, triune spawn, chronicle export, hardware binding) | K1 (memory_verify), K2 (ceremony.v1), K3 (/audit/stream), K4 (triune bond + Heartwood/Branch/Leaf seeds + delegate.v1 enforcement), K5 (fsf chronicle CLI + per-agent/per-bond/full-chain HTML+MD export with sanitized-by-default payloads), K6 (opt-in hardware_binding constitution field + dispatcher quarantine + /agents/{id}/hardware/unbind operator endpoint) all shipped 2026-04-29 |
 
 ADRs that are `Proposed` but have `(... implemented)` are Decision-record-paper-trail proposed: the design is in flight, parts are committed, the doc itself just hasn't been promoted to `Accepted` because a few tranches remain. ADR-0033 was promoted on 2026-04-28 once the canonical Security Swarm chain fired end-to-end through the smoke.

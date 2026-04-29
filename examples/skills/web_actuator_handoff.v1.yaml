@@ -1,0 +1,60 @@
+schema_version: 1
+name: web_actuator_handoff
+version: '1'
+description: |
+  ADR-003X C8 — open-web actuator handoff skill. Receives a research
+  brief from an upstream researcher (via delegate.v1) and persists a
+  "would have called external service" memory entry.
+
+  In the demo, this skill stops at the memory_write — no real external
+  action fires. In production, the next step would be:
+
+    - id: open_ticket
+      tool: mcp_call.v1
+      args:
+        server_name: linear
+        tool_name:   create_issue
+        args:
+          title: "Brief: ${inputs.brief_topic}"
+          body:  "Source: ${inputs.source_url}\n..."
+
+  Operators wire that step in once they have an MCP server registered
+  in config/mcp_servers.yaml + the per-agent secrets store entry for
+  the auth token.
+
+  This is the simplest possible actuator skill — single step, no
+  external mutation. Real actuators will compose with other tools
+  (browser_action.v1, mcp_call.v1) and will gate every external
+  action through requires_human_approval.
+
+requires:
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [brief_topic, source_url, upstream_status]
+  properties:
+    brief_topic:
+      type: string
+    source_url:
+      type: string
+    upstream_status:
+      type: integer
+      description: "HTTP status the upstream researcher saw on the fetch."
+
+steps:
+  - id: persist_handoff
+    tool: memory_write.v1
+    args:
+      layer: episodic
+      scope: lineage
+      tags:
+        - web_actuator
+        - simulated_external_action
+        - ${inputs.brief_topic}
+      content: "web_actuator_handoff received_brief=${inputs.brief_topic} source_url=${inputs.source_url} upstream_status=${inputs.upstream_status} would_call=mcp_call.v1(server=linear, tool=create_issue) [SIMULATED — no real external action]"
+
+output:
+  brief_topic:           ${inputs.brief_topic}
+  simulated_external:    "mcp_call.v1(server=linear, tool=create_issue)"
+  upstream_status:       ${inputs.upstream_status}
