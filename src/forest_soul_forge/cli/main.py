@@ -249,6 +249,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     install_tool.set_defaults(_run=_run_install_tool)
 
+    # `fsf triune ...` — bond peer-root agents into a triune (ADR-003X K4).
+    from forest_soul_forge.cli.triune import add_subparser as _triune_add_subparser
+    _triune_add_subparser(sub)
+
     return parser
 
 

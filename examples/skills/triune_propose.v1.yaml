@@ -1,0 +1,51 @@
+schema_version: 1
+name: triune_propose
+version: '1'
+description: |
+  Branch's proposal skill. Receives a question; emits N candidate
+  answers (no delegation, no external side effects — Branch's role
+  contract forbids them). The output goes to Heartwood's
+  triune_consult, which forwards it to Leaf for critique.
+
+  Branch SHOULD over-produce — three to five distinct candidates
+  rather than one polished answer. Polish is Heartwood's job;
+  coverage is Branch's. Empty proposal output is treated by Leaf as
+  a degraded review (the bond will likely halt).
+
+  ADR-003X K4. Intended for the Aurora-style triune; the operator
+  may swap names, but the role contract (proposer / role-level
+  forbid on external_side_effect) must remain.
+
+requires:
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [question]
+  properties:
+    question:
+      type: string
+      description: "The prompt Heartwood is deliberating on."
+
+steps:
+  # v1 is a recipe stub — a real provider-backed Branch would call
+  # an LLM here (a separate triune_propose.v1 implementation would
+  # use a model_call.v1 step). The stub persists the question to
+  # memory and returns a placeholder; the consult loop wires up
+  # cleanly so a Branch agent can swap in real proposal logic.
+  - id: persist_question
+    tool: memory_write.v1
+    args:
+      layer: episodic
+      scope: lineage
+      tags:
+        - triune.propose
+        - proposer
+      content: "branch_received_question: ${inputs.question}"
+
+output:
+  candidates:
+    - "stub-proposal-1: <Branch reasoning would go here>"
+    - "stub-proposal-2: <Branch alternative>"
+    - "stub-proposal-3: <Branch fallback>"
+  question: ${inputs.question}

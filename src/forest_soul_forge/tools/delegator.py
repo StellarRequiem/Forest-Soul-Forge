@@ -44,6 +44,42 @@ class DelegateError(Exception):
     returns a refusal rather than a runtime crash."""
 
 
+def _load_caller_triune(registry, caller_instance_id: str) -> dict | None:
+    """Return the caller's ``triune`` constitution block, or None.
+
+    ADR-003X K4. The triune block is an optional constitution
+    extension declaring the caller's bonded sisters:
+
+        triune:
+          bond_name: aurora
+          partners: [<instance_id>, <instance_id>]
+          restrict_delegations: true
+
+    When ``restrict_delegations`` is true, ``delegate.v1`` refuses
+    any target outside ``partners`` regardless of lineage or
+    ``allow_out_of_lineage``. Returns None if the constitution has
+    no triune block (caller is a normal agent), or if the file
+    cannot be read (treated as "no enforcement" — the read failure
+    surfaces elsewhere in the dispatcher's constitution-hash check).
+    """
+    try:
+        agent = registry.get_agent(caller_instance_id)
+    except Exception:
+        return None
+    if agent is None:
+        return None
+    try:
+        import yaml  # local import — yaml is already a hard dep
+        text = Path(agent.constitution_path).read_text(encoding="utf-8")
+        data = yaml.safe_load(text) or {}
+    except Exception:
+        return None
+    block = data.get("triune") if isinstance(data, dict) else None
+    if not isinstance(block, dict):
+        return None
+    return block
+
+
 def _compute_lineage_chain(conn, instance_id: str) -> set[str]:
     """Return the set of agent ids in the reader's lineage chain
     (self ∪ ancestors ∪ descendants). Mirrors the helper in
@@ -128,9 +164,55 @@ def build_delegator_factory(
                     "self-delegation is meaningless"
                 )
 
+            # 1b. Triune enforcement (ADR-003X K4). When the caller's
+            #     constitution has triune.restrict_delegations=true, the
+            #     ONLY permitted targets are sisters in triune.partners.
+            #     This refuses BEFORE lineage gating because triune
+            #     restriction is the stronger constraint — it cannot be
+            #     bypassed by allow_out_of_lineage.
+            triune_block = _load_caller_triune(registry, caller_instance_id)
+            triune_internal = False
+            triune_bond_name: str | None = None
+            if triune_block and triune_block.get("restrict_delegations"):
+                partners = tuple(triune_block.get("partners") or ())
+                triune_bond_name = triune_block.get("bond_name") or "<unnamed>"
+                if target_instance_id not in partners:
+                    # Audit the rejection so operators see attempted
+                    # out-of-triune calls — silent refusals would mask
+                    # a misconfigured agent or a hostile prompt steering
+                    # the agent off-bond.
+                    try:
+                        audit_chain.append(
+                            "out_of_triune_attempt",
+                            {
+                                "caller_instance":  caller_instance_id,
+                                "target_instance":  target_instance_id,
+                                "skill_name":       skill_name,
+                                "skill_version":    skill_version,
+                                "bond_name":        triune_bond_name,
+                                "allowed_partners": list(partners),
+                                "reason":           reason,
+                            },
+                            agent_dna=caller_dna,
+                        )
+                    except Exception:
+                        # Don't let audit failure mask the refusal.
+                        pass
+                    raise DelegateError(
+                        f"triune restriction: target {target_instance_id!r} "
+                        f"is not in caller's triune {triune_bond_name!r} "
+                        f"partners {list(partners)}. allow_out_of_lineage "
+                        "does NOT bypass triune restriction — the bond is "
+                        "sealed by the constitution."
+                    )
+                triune_internal = True
+
             # 2. Lineage gating. The caller's lineage chain must include
-            #    the target unless allow_out_of_lineage is set.
-            if not allow_out_of_lineage:
+            #    the target unless allow_out_of_lineage is set, OR the
+            #    target is a triune sister (sisters are peers by design;
+            #    requiring the operator to pass allow_out_of_lineage on
+            #    every triune call would be ceremony without value).
+            if not allow_out_of_lineage and not triune_internal:
                 conn = registry._conn  # noqa: SLF001 — internal access by design
                 chain = _compute_lineage_chain(conn, caller_instance_id)
                 if target_instance_id not in chain:
@@ -177,17 +259,26 @@ def build_delegator_factory(
             #    event with the CALLER's dna because the swarm reader
             #    wants to find delegations under the originating
             #    agent's lineage.
+            agent_delegated_payload: dict[str, Any] = {
+                "caller_instance":     caller_instance_id,
+                "target_instance":     target_instance_id,
+                "skill_name":          skill_name,
+                "skill_version":       skill_version,
+                "reason":              reason,
+                "allow_out_of_lineage": bool(allow_out_of_lineage),
+                "session_id":          session_id,
+            }
+            if triune_internal:
+                # Make triune-internal calls visible in the audit chain
+                # without inventing a new event type. The bond_name is
+                # stable across the triune's lifetime so an operator can
+                # filter "show me everything Aurora's sisters did to
+                # each other."
+                agent_delegated_payload["triune_bond_name"] = triune_bond_name
+                agent_delegated_payload["triune_internal"] = True
             audit_chain.append(
                 "agent_delegated",
-                {
-                    "caller_instance":     caller_instance_id,
-                    "target_instance":     target_instance_id,
-                    "skill_name":          skill_name,
-                    "skill_version":       skill_version,
-                    "reason":              reason,
-                    "allow_out_of_lineage": bool(allow_out_of_lineage),
-                    "session_id":          session_id,
-                },
+                agent_delegated_payload,
                 agent_dna=caller_dna,
             )
 

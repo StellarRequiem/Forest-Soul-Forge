@@ -1,0 +1,97 @@
+schema_version: 1
+name: triune_consult
+version: '1'
+description: |
+  Heartwood's three-way deliberation skill. Runs ON Heartwood (the
+  synthesizer); uses delegate.v1 to consult Branch (proposer) and
+  Leaf (critic) in sequence, then writes a reconciliation memory
+  with both the answer and the dissent record attached.
+
+  Flow:
+    1. delegate Branch → propose: returns N candidate answers
+    2. delegate Leaf  → critique: returns dissent on the proposals
+    3. memory_write    → persist {answer, proposals, dissent} as one
+                          episodic entry tagged 'triune.consultation'
+
+  The bond's safety property: because Heartwood's constitution sets
+  triune.restrict_delegations=true with branch_id+leaf_id as the
+  ONLY allowed targets, this skill cannot escape the triune. Any
+  attempt to call a non-sister target via delegate.v1 raises
+  "triune restriction" and emits an out_of_triune_attempt audit
+  event. ADR-003X K4.
+
+  Designed to be called by an operator (POST /skills/run with
+  target=Heartwood). Branch and Leaf are addressed by their
+  bonded instance_ids, which the operator passes as inputs.
+
+requires:
+  - delegate.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [question, branch_instance_id, leaf_instance_id]
+  properties:
+    question:
+      type: string
+      description: "The deliberation prompt — what the bond is reasoning about."
+    branch_instance_id:
+      type: string
+      description: "Branch's instance_id — must be a triune partner."
+    leaf_instance_id:
+      type: string
+      description: "Leaf's instance_id — must be a triune partner."
+    propose_skill:
+      type: string
+      default: triune_propose
+      description: "Skill name to invoke on Branch."
+    propose_version:
+      type: string
+      default: '1'
+    critique_skill:
+      type: string
+      default: triune_critique
+      description: "Skill name to invoke on Leaf."
+    critique_version:
+      type: string
+      default: '1'
+
+steps:
+  - id: propose
+    tool: delegate.v1
+    args:
+      target_instance_id: ${inputs.branch_instance_id}
+      skill_name: ${inputs.propose_skill}
+      skill_version: ${inputs.propose_version}
+      inputs:
+        question: ${inputs.question}
+      reason: "triune_consult: ask Branch for proposals"
+      # No allow_out_of_lineage — Branch is a triune partner; the
+      # delegator auto-bypasses lineage gating for sisters.
+
+  - id: critique
+    tool: delegate.v1
+    args:
+      target_instance_id: ${inputs.leaf_instance_id}
+      skill_name: ${inputs.critique_skill}
+      skill_version: ${inputs.critique_version}
+      inputs:
+        question: ${inputs.question}
+        proposals: ${propose.output}
+      reason: "triune_consult: ask Leaf to critique Branch's proposals"
+
+  - id: persist
+    tool: memory_write.v1
+    args:
+      layer: episodic
+      scope: lineage
+      tags:
+        - triune.consultation
+        - synthesizer
+      content: "triune_consultation question=${inputs.question} proposals=${propose.output} dissent=${critique.output}"
+
+output:
+  question: ${inputs.question}
+  proposals: ${propose.output}
+  dissent: ${critique.output}
+  consultation_memory_id: ${persist.entry_id}

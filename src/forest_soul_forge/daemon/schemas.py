@@ -216,6 +216,32 @@ class CeremonyEmitResponse(BaseModel):
     ceremony_name: str
 
 
+# ADR-003X K4 — seal three peer-root agents into a triune.
+# The three agents must already exist (operator runs /birth × 3 first).
+# This endpoint patches each agent's constitution YAML with a `triune`
+# block containing bond_name, partners (the OTHER two instance_ids),
+# and restrict_delegations: true. delegate.v1 then refuses any call to
+# a target outside the partners list.
+#
+# constitution_hash is intentionally NOT recomputed — the triune block
+# sits OUTSIDE Constitution.canonical_body() (which defines the hash).
+# That keeps existing hash verification stable across bond/un-bond and
+# avoids cascading rebuild work for every existing agent.
+class TriuneBondRequest(BaseModel):
+    bond_name: str = Field(..., min_length=1, max_length=64)
+    instance_ids: list[str] = Field(..., min_length=3, max_length=3)
+    operator_id: str = Field(..., min_length=1, max_length=120)
+    restrict_delegations: bool = True   # SAFETY DEFAULT
+
+
+class TriuneBondResponse(BaseModel):
+    bond_name: str
+    instance_ids: list[str]
+    restrict_delegations: bool
+    ceremony_seq: int
+    ceremony_timestamp: str
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------

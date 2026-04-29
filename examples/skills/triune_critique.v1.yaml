@@ -1,0 +1,49 @@
+schema_version: 1
+name: triune_critique
+version: '1'
+description: |
+  Leaf's critique skill. Receives Branch's proposals; emits dissent
+  records (objections, edge cases, hidden assumptions). Returns to
+  Heartwood for reconciliation. Leaf NEVER touches the world — its
+  only output channel is the dissent record.
+
+  Leaf SHOULD return at least one substantive objection per
+  proposal, OR an explicit "no objection found after checking
+  X, Y, Z" — empty critique is treated as a degraded review.
+
+  ADR-003X K4.
+
+requires:
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [question, proposals]
+  properties:
+    question:
+      type: string
+    proposals:
+      type: object
+      description: "Branch's output — typically {candidates: [...], question: '...'}"
+
+steps:
+  # v1 is a recipe stub. A real provider-backed Leaf would call an
+  # LLM to actually critique. The stub persists the proposals to
+  # episodic memory tagged 'triune.critique' so the operator can
+  # see what was reviewed even when no LLM is wired.
+  - id: persist_review
+    tool: memory_write.v1
+    args:
+      layer: episodic
+      scope: lineage
+      tags:
+        - triune.critique
+        - critic
+      content: "leaf_reviewing_proposals_for_question: ${inputs.question}"
+
+output:
+  question: ${inputs.question}
+  proposals_reviewed: ${inputs.proposals}
+  dissents:
+    - "stub-dissent-1: <Leaf would surface a concrete objection here>"
+    - "stub-dissent-2: <or explicitly 'no objection found after checking X, Y, Z'>"
