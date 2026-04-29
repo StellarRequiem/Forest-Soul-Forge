@@ -6,7 +6,10 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+# F8: dist/ used to be a blanket ignore (Python sdist convention). We
+# now ship a build.command + README.md from there, so keep the dir
+# tracked and only ignore the actual built archives (handled below).
+# dist/                 ← removed
 downloads/
 eggs/
 .eggs/
@@ -93,3 +96,7 @@ demo/
 # These accumulate as you rehearse; clean them out manually when you
 # don't need them anymore.
 *.bak.[0-9]*
+
+# F8: built distribution archives. Keep dist/ + dist/build.command +
+# dist/README.md tracked, but never commit the actual .zip outputs.
+dist/forest-soul-forge-*.zip

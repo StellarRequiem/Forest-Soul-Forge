@@ -35,9 +35,10 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | Trait roles | 14 (5 original + 9 swarm) |
 | Audit event types | 30+ |
 | Frontend modules (vanilla JS) | 18 |
-| `.command` operator scripts | 18 (start/stop/reset + start-demo + load-scenario + 13 ops) |
+| `.command` operator scripts | 19 (start/stop/reset + start-demo + load-scenario + dist/build + 13 ops) |
 | Demo scenarios | 2 (synthetic-incident + fresh-forge, both with presenter scripts) |
 | Data dirs | 2 (top-level prod via start.command + isolated demo/ via start-demo.command) |
+| Distribution | `dist/build.command` produces `forest-soul-forge-<sha>-<date>.zip` via git archive |
 | Total commits on `main` | 130 |
 | Audit docs filed | 1 (`docs/audits/2026-04-28-phase-d-e-review.md`) |
 

@@ -36,9 +36,10 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 | **Skill manifests shipped** | **21** chain + supporting (`examples/skills/`) |
 | **Audit event types** | 30+ (lifecycle, dispatch, memory, delegation, swarm) |
 | **Frontend modules (vanilla JS)** | 18 (`frontend/js/`) |
-| **Operator `.command` scripts** | 18 (start/stop/reset/start-demo/load-scenario + 13 ops) |
+| **Operator `.command` scripts** | 19 (start/stop/reset/start-demo/load-scenario/dist-build + 13 ops) |
 | **Demo scenarios** | 2 (synthetic-incident + fresh-forge, with presenter scripts) |
 | **Isolated demo dir** | `demo/` (start-demo.command points here; prod state untouched) |
+| **Distribution** | `dist/build.command` → `forest-soul-forge-<sha>-<date>.zip` |
 
 ---
 
@@ -238,6 +239,9 @@ reset.command                archive all generated state, back to clean slate
 
 scenarios/load-scenario.command   load a pre-built demo scenario (interactive picker)
                                   optional 2nd arg: prod (default) or demo
+
+dist/build.command           build a distributable .zip via git archive
+                             (ships as forest-soul-forge-<sha>-<date>.zip)
 
 run.command                  launch daemon + frontend directly (skips bootstrap)
 swarm-bringup.command        ADR-0033 Phase D+E one-shot bring-up + smoke
