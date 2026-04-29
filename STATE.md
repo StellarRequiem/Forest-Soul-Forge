@@ -34,7 +34,7 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | Schema version | v9 (v8: agent_secrets / v9: memory_verifications) |
 | Genres | 13 (7 original + 3 security tiers + 3 web tiers) |
 | Trait roles | 14 (5 original + 9 swarm) |
-| Audit event types | 30+ |
+| Audit event types | 35+ (incl. K-track: ceremony, memory_verified, out_of_triune_attempt, hardware_bound/mismatch/unbound) |
 | Frontend modules (vanilla JS) | 18 |
 | `.command` operator scripts | 19 (start/stop/reset + start-demo + load-scenario + dist/build + 13 ops) |
 | Demo scenarios | 2 (synthetic-incident + fresh-forge, both with presenter scripts) |
@@ -479,7 +479,7 @@ If you want to read code first, start with:
 | 0032 | CLI architecture | Proposed |
 | 0033 | Security Swarm | **Accepted** (Phases A–E1 shipped + chain proven live 2026-04-28) |
 | 003X | Open-Web Tool Family (web_fetch + browser_action + mcp_call + secrets store + suggest_agent + 3 web genres) | Proposed — C1 (secrets), C2 (web_fetch), C3 (browser_action), C4 (mcp_call), C6 (suggest_agent), C7 (3 web genres) shipped 2026-04-29; C8 (demo) in flight |
-| 003X K | K-track parallels (memory verification, ceremony events, SSE stream, triune spawn, chronicle export) | K1 (memory_verify), K2 (ceremony.v1), K3 (/audit/stream), K4 (triune bond + Heartwood/Branch/Leaf seeds + delegate.v1 enforcement), K5 (fsf chronicle CLI + per-agent/per-bond/full-chain HTML+MD export with sanitized-by-default payloads) shipped 2026-04-29; K6 (hardware_binding) in flight |
+| 003X K | K-track parallels (memory verification, ceremony events, SSE stream, triune spawn, chronicle export, hardware binding) | K1 (memory_verify), K2 (ceremony.v1), K3 (/audit/stream), K4 (triune bond + Heartwood/Branch/Leaf seeds + delegate.v1 enforcement), K5 (fsf chronicle CLI + per-agent/per-bond/full-chain HTML+MD export with sanitized-by-default payloads), K6 (opt-in hardware_binding constitution field + dispatcher quarantine + /agents/{id}/hardware/unbind operator endpoint) all shipped 2026-04-29 |
 
 ADRs that are `Proposed` but have `(... implemented)` are Decision-record-paper-trail proposed: the design is in flight, parts are committed, the doc itself just hasn't been promoted to `Accepted` because a few tranches remain. ADR-0033 was promoted on 2026-04-28 once the canonical Security Swarm chain fired end-to-end through the smoke.
 

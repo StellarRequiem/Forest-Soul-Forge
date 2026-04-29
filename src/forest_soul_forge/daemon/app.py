@@ -45,6 +45,7 @@ from forest_soul_forge.daemon.routers import skills_reload as skills_reload_rout
 from forest_soul_forge.daemon.routers import skills_run as skills_run_router
 from forest_soul_forge.daemon.routers import tool_dispatch as tool_dispatch_router
 from forest_soul_forge.daemon.routers import tools as tools_router
+from forest_soul_forge.daemon.routers import hardware as hardware_router
 from forest_soul_forge.daemon.routers import tools_reload as tools_reload_router
 from forest_soul_forge.daemon.routers import traits as traits_router
 from forest_soul_forge.daemon.routers import triune as triune_router
@@ -441,6 +442,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(preview_router.router)
     app.include_router(writes_router.router)
     app.include_router(triune_router.router)
+    app.include_router(hardware_router.router)
     return app
 
 

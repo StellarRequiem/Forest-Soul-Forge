@@ -623,7 +623,51 @@ def birth(
                 + req.constitution_override
             )
 
+        # ADR-003X K6 — opt-in hardware binding. Append a block to the
+        # constitution YAML; outside canonical_body() so constitution_hash
+        # is unaffected. The lifespan quarantine check reads this back.
+        hardware_binding_value: str | None = None
+        hardware_source_value: str | None = None
+        if req.bind_to_hardware:
+            from forest_soul_forge.core.hardware import compute_hardware_fingerprint
+            fp = compute_hardware_fingerprint()
+            if fp.source == "hostname_fallback" and not req.allow_weak_binding:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "hardware binding refused: machine fingerprint source is "
+                        "'hostname_fallback' (no IOPlatformUUID/machine-id available). "
+                        "Pass allow_weak_binding=true to override."
+                    ),
+                )
+            hardware_binding_value = fp.fingerprint
+            hardware_source_value = fp.source
+            constitution_yaml += (
+                f"\n# --- hardware_binding (ADR-003X K6) ---\n"
+                f"hardware_binding:\n"
+                f"  fingerprint: {fp.fingerprint}\n"
+                f"  source: {fp.source}\n"
+                f"  bound_at: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
+            )
+
         _write_artifacts(soul_path, soul_doc.markdown, const_path, constitution_yaml)
+
+        # ADR-003X K6 — emit hardware_bound event when binding was set.
+        if hardware_binding_value:
+            try:
+                audit.append(
+                    "hardware_bound",
+                    {
+                        "instance_id": instance_id,
+                        "fingerprint": hardware_binding_value,
+                        "source": hardware_source_value,
+                    },
+                    agent_dna=dna_hex,
+                )
+            except Exception:
+                # Don't fail birth on audit-event failure; binding is in
+                # the constitution YAML which is the source of truth.
+                pass
 
         event_data = {
             "instance_id": instance_id,
@@ -821,7 +865,51 @@ def spawn(
                 + req.constitution_override
             )
 
+        # ADR-003X K6 — opt-in hardware binding. Append a block to the
+        # constitution YAML; outside canonical_body() so constitution_hash
+        # is unaffected. The lifespan quarantine check reads this back.
+        hardware_binding_value: str | None = None
+        hardware_source_value: str | None = None
+        if req.bind_to_hardware:
+            from forest_soul_forge.core.hardware import compute_hardware_fingerprint
+            fp = compute_hardware_fingerprint()
+            if fp.source == "hostname_fallback" and not req.allow_weak_binding:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "hardware binding refused: machine fingerprint source is "
+                        "'hostname_fallback' (no IOPlatformUUID/machine-id available). "
+                        "Pass allow_weak_binding=true to override."
+                    ),
+                )
+            hardware_binding_value = fp.fingerprint
+            hardware_source_value = fp.source
+            constitution_yaml += (
+                f"\n# --- hardware_binding (ADR-003X K6) ---\n"
+                f"hardware_binding:\n"
+                f"  fingerprint: {fp.fingerprint}\n"
+                f"  source: {fp.source}\n"
+                f"  bound_at: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
+            )
+
         _write_artifacts(soul_path, soul_doc.markdown, const_path, constitution_yaml)
+
+        # ADR-003X K6 — emit hardware_bound event when binding was set.
+        if hardware_binding_value:
+            try:
+                audit.append(
+                    "hardware_bound",
+                    {
+                        "instance_id": instance_id,
+                        "fingerprint": hardware_binding_value,
+                        "source": hardware_source_value,
+                    },
+                    agent_dna=dna_hex,
+                )
+            except Exception:
+                # Don't fail birth on audit-event failure; binding is in
+                # the constitution YAML which is the source of truth.
+                pass
 
         event_data = {
             "instance_id": instance_id,

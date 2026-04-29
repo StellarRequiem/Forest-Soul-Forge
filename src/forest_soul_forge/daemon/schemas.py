@@ -135,6 +135,45 @@ class BirthRequest(BaseModel):
             "names return 400."
         ),
     )
+    # ADR-003X K6 — opt-in hardware binding. Default False so existing
+    # operators don't get surprised; True writes this machine's
+    # fingerprint into the constitution YAML and the agent will be
+    # quarantined at lifespan if moved to a different machine. See
+    # /agents/{id}/hardware/unbind for the operator-driven release.
+    bind_to_hardware: bool = Field(
+        default=False,
+        description=(
+            "When True, embed this machine's hardware fingerprint into "
+            "the agent's constitution. Subsequent loads on a different "
+            "machine quarantine the agent. Operator unbinds via "
+            "POST /agents/{id}/hardware/unbind to permit migration."
+        ),
+    )
+    allow_weak_binding: bool = Field(
+        default=False,
+        description=(
+            "When True, allow hardware binding even when the fingerprint "
+            "source is the hostname fallback (no IOPlatformUUID, no "
+            "machine-id). Hostnames can change without notification, so "
+            "this binding is weaker than IOPlatformUUID/machine-id."
+        ),
+    )
+
+
+# ADR-003X K6 — operator-driven hardware unbind. Distinct from bind
+# because unbind is a deliberate governance act (the operator is
+# saying "this agent is migrating; clear the fingerprint so the next
+# machine accepts it"). Audited as a hardware_unbound ceremony.
+class HardwareUnbindRequest(BaseModel):
+    operator_id: str = Field(..., min_length=1, max_length=120)
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class HardwareUnbindResponse(BaseModel):
+    instance_id: str
+    previous_binding: str | None
+    seq: int
+    timestamp: str
 
 
 class SpawnRequest(BirthRequest):

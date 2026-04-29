@@ -286,6 +286,39 @@ class ToolDispatcher:
         """
         key = _tool_key(tool_name, tool_version)
 
+        # ---- 0. hardware quarantine (ADR-003X K6) -----------------------
+        # Refuse BEFORE tool lookup so a quarantined agent's call doesn't
+        # even produce an unknown_tool false-positive when the registry
+        # has stale state. Reads the constitution once per dispatch; the
+        # check is cheap (yaml load + 16-char string compare).
+        quarantine_reason = _hardware_quarantine_reason(constitution_path)
+        if quarantine_reason is not None:
+            try:
+                self.audit.append(
+                    "hardware_mismatch",
+                    {
+                        "instance_id": instance_id,
+                        "tool_key": key,
+                        "session_id": session_id,
+                        "expected_machine_fingerprint": quarantine_reason["expected"],
+                        "constitution_binding": quarantine_reason["binding"],
+                    },
+                    agent_dna=agent_dna,
+                )
+            except Exception:
+                pass
+            return self._refuse(
+                key, "hardware_quarantined",
+                (
+                    f"agent {instance_id} is hardware-bound to "
+                    f"{quarantine_reason['binding'][:8]}… but this machine is "
+                    f"{quarantine_reason['expected'][:8]}…. "
+                    "Operator must POST /agents/{id}/hardware/unbind to release."
+                ),
+                instance_id=instance_id, agent_dna=agent_dna,
+                session_id=session_id,
+            )
+
         # ---- 1. lookup ---------------------------------------------------
         tool = self.registry.get(tool_name, tool_version)
         if tool is None:
@@ -1027,3 +1060,49 @@ def _canonical_json(obj: Any) -> str:
     re-loaded dict round-trips byte-for-byte."""
     import json
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _hardware_quarantine_reason(constitution_path: Path) -> dict[str, str] | None:
+    """Return a quarantine descriptor dict (with 'expected' + 'binding' keys)
+    when the agent's constitution is hardware-bound to a different machine,
+    else None (no binding OR binding matches this machine).
+
+    Reads the constitution YAML each call. The cost is a single yaml.safe_load
+    + a 16-char string compare — well under the noise floor of any tool
+    dispatch. We deliberately do NOT cache the result because operator
+    /hardware/unbind needs the next dispatch to see the cleared file.
+
+    Returns None on any read/parse failure — a malformed constitution is a
+    bigger problem the dispatcher will catch downstream; we don't want
+    quarantine to mask the underlying error.
+    """
+    try:
+        import yaml
+        text = constitution_path.read_text(encoding="utf-8")
+        data = yaml.safe_load(text) or {}
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    block = data.get("hardware_binding")
+    if not block:
+        return None
+    if isinstance(block, dict):
+        binding = block.get("fingerprint")
+    elif isinstance(block, str):
+        binding = block
+    else:
+        return None
+    if not isinstance(binding, str) or not binding:
+        return None
+    try:
+        from forest_soul_forge.core.hardware import compute_hardware_fingerprint
+        here = compute_hardware_fingerprint().fingerprint
+    except Exception:
+        # If the fingerprint subsystem itself errored, refuse-by-default
+        # would be too aggressive — fall back to no quarantine. The
+        # operator will see the underlying error in /healthz instead.
+        return None
+    if binding == here:
+        return None
+    return {"expected": here, "binding": binding}
