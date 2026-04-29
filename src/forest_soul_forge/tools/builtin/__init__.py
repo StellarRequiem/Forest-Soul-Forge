@@ -38,6 +38,7 @@ from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
 from forest_soul_forge.tools.builtin.traffic_flow_local import TrafficFlowLocalTool
 from forest_soul_forge.tools.builtin.triage import TriageTool
 from forest_soul_forge.tools.builtin.ueba_track import UebaTrackTool
+from forest_soul_forge.tools.builtin.browser_action import BrowserActionTool
 from forest_soul_forge.tools.builtin.memory_verify import MemoryVerifyTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
 from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
@@ -76,6 +77,7 @@ __all__ = [
     "HoneypotLocalTool",
     "WebFetchTool",
     "MemoryVerifyTool",
+    "BrowserActionTool",
 ]
 
 
@@ -137,3 +139,8 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # status. Reuses memory_consents table via 'operator:verified'
     # sentinel — no schema bump.
     registry.register(MemoryVerifyTool())
+    # ADR-003X Phase C3 — browser_action.v1. Drives a chromium browser
+    # via Playwright. Heaviest open-web primitive; always gated
+    # (side_effects=external triggers requires_human_approval). Lazy
+    # playwright import so daemon boots without the browser extra.
+    registry.register(BrowserActionTool())

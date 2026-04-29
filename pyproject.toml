@@ -46,6 +46,19 @@ daemon = [
     "cryptography>=42.0",
 ]
 
+# ADR-003X Phase C3 — browser_action.v1 wraps Playwright. Heaviest
+# of the open-web primitives: Playwright Python bindings + a chromium
+# binary. Operator runs `python -m playwright install chromium`
+# after the editable install to download the browser (~150 MB; one
+# time per major version). Firefox + webkit deliberately excluded
+# to keep CVE surface small; agents that need cross-browser testing
+# can install those manually. Lazy import in tools/builtin/browser_action.py
+# so the daemon boots fine without playwright until an agent
+# actually dispatches a browser_action call.
+browser = [
+    "playwright>=1.40",
+]
+
 [project.urls]
 Repository = "https://github.com/StellarRequiem/Forest-Soul-Forge"
 

@@ -1198,6 +1198,48 @@ tools:
     side_effects: network
     archetype_tags: [web_observer, web_researcher, web_actuator]
 
+  browser_action.v1:
+    name: browser_action
+    version: "1"
+    description: |
+      Drive a chromium browser via Playwright through a sequence of
+      UI actions (click, type, wait, press, hover, select_option).
+      Per-agent host allowlist enforced before navigation AND
+      re-checked on every framenavigated event so a redirect to an
+      off-list host fails cleanly. Ephemeral browser context per
+      call — cookies, localStorage, cache do NOT bleed across
+      calls. Headless by default; FSF_BROWSER_HEADFUL=true makes
+      it headful for debugging. Optional screenshot saved to
+      data/browser_screenshots/<uuid>.png; the path is returned in
+      the output. Console messages from the page are captured and
+      surfaced. Heaviest of the open-web primitives — requires
+      Playwright + chromium (~150 MB binary). Always gated:
+      side_effects=external triggers requires_human_approval per
+      the constraint resolver. Per-agent constitution must list
+      allowed_hosts.
+    input_schema:
+      type: object
+      required: [url]
+      properties:
+        url: {type: string, format: uri}
+        actions:
+          type: array
+          items:
+            type: object
+            required: [type]
+            properties:
+              type: {enum: [click, type, wait, press, hover, select_option]}
+              selector: {type: string}
+              text: {type: string}
+              key: {type: string}
+              ms: {type: integer, minimum: 0}
+              value: {type: string}
+        screenshot: {type: boolean, default: true}
+        timeout_ms: {type: integer, minimum: 100, maximum: 60000, default: 5000}
+        headful: {type: boolean, default: false}
+    side_effects: external
+    archetype_tags: [web_actuator]
+
   memory_verify.v1:
     name: memory_verify
     version: "1"
