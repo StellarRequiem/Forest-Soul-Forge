@@ -38,6 +38,7 @@ from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
 from forest_soul_forge.tools.builtin.traffic_flow_local import TrafficFlowLocalTool
 from forest_soul_forge.tools.builtin.triage import TriageTool
 from forest_soul_forge.tools.builtin.ueba_track import UebaTrackTool
+from forest_soul_forge.tools.builtin.memory_verify import MemoryVerifyTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
 from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
 
@@ -74,6 +75,7 @@ __all__ = [
     "CanaryTokenTool",
     "HoneypotLocalTool",
     "WebFetchTool",
+    "MemoryVerifyTool",
 ]
 
 
@@ -130,3 +132,8 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # an RFC. Side effects: network. Approval gating is up to the
     # agent's constitution; the host allowlist IS the structural gate.
     registry.register(WebFetchTool())
+    # ADR-003X Phase K1 — verified-memory tier (Iron Gate equivalent).
+    # External human verifier promotes a memory entry to verified
+    # status. Reuses memory_consents table via 'operator:verified'
+    # sentinel — no schema bump.
+    registry.register(MemoryVerifyTool())

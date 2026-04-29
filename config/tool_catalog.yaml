@@ -1198,6 +1198,39 @@ tools:
     side_effects: network
     archetype_tags: [web_observer, web_researcher, web_actuator]
 
+  memory_verify.v1:
+    name: memory_verify
+    version: "1"
+    description: |
+      Promote a memory entry to verified status via an external
+      human verifier (Iron Gate equivalent — ADR-003X K1). Layered
+      on the existing consent-grant table via the
+      'operator:verified' sentinel recipient — no schema bump.
+      Verifier_id is the human's identifier (operator handle, public
+      key, signing key); recorded in granted_by on the consent row
+      and in the memory_verified audit event. Re-verification
+      updates the timestamp and clears any prior revocation.
+      Verification can be queried via Memory.is_verified(entry_id)
+      and revoked via Memory.unmark_verified(entry_id).
+      Refuses to verify entries the calling agent can't see (private
+      to a different agent).
+    input_schema:
+      type: object
+      required: [entry_id, verifier_id]
+      properties:
+        entry_id:
+          type: string
+          description: "ID of the memory entry to verify."
+        verifier_id:
+          type: string
+          description: "Identifier of the human verifier (operator handle, key fingerprint)."
+        seal_note:
+          type: string
+          maxLength: 500
+          description: "Optional free-text reason for verification."
+    side_effects: filesystem
+    archetype_tags: [observer, guardian, security_high]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.

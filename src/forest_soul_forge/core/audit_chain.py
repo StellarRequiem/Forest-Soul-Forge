@@ -125,6 +125,21 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "secret_revealed",
     "secret_blocked",
     "secret_revoked",
+    # ADR-003X K1 — verified-memory tier (Iron Gate equivalent).
+    # Memory entries can be promoted from unverified to verified by
+    # an external human verifier. Layered on consent grants via the
+    # 'operator:verified' sentinel recipient — no schema change.
+    #   - memory_verified: an entry was promoted to verified status
+    #   - memory_verification_revoked: verification was withdrawn
+    "memory_verified",
+    "memory_verification_revoked",
+    # ADR-003X K2 — operator-emitted ceremony events. Distinct from
+    # tool-emitted events because the EMITTER is a human, not an
+    # agent. Used to mark milestones, identity events, governance
+    # decisions that don't fit any tool call. The 'ceremony_name' in
+    # event_data is the operator-chosen label (e.g. 'iron_gate',
+    # 'first_birth', 'tier_promotion').
+    "ceremony",
 })
 
 

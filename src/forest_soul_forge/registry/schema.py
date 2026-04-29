@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 8
+SCHEMA_VERSION: int = 9
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -286,6 +286,25 @@ DDL_STATEMENTS: tuple[str, ...] = (
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_agent_secrets_instance ON agent_secrets(instance_id);",
+    # --- per-entry verification (ADR-003X K1 — Iron Gate equivalent) -----
+    # Reuses the consent-grant SEMANTIC (idempotent grant + revoke,
+    # external party stamps standing on an entry) but stores it in a
+    # dedicated table because memory_consents.recipient_instance has
+    # an FK on agents and the verifier identifier (operator handle,
+    # public key fingerprint) isn't a registered agent. One row per
+    # entry — re-verification updates in place, revocation sets
+    # revoked_at + records who revoked.
+    """
+    CREATE TABLE IF NOT EXISTS memory_verifications (
+        entry_id      TEXT PRIMARY KEY,
+        verifier_id   TEXT NOT NULL,
+        verified_at   TEXT NOT NULL,
+        seal_note     TEXT,
+        revoked_at    TEXT,
+        revoked_by    TEXT,
+        FOREIGN KEY (entry_id) REFERENCES memory_entries(entry_id)
+    );
+    """,
 )
 
 # Metadata rows written on bootstrap. ``canonical_contract`` is a tripwire —
@@ -319,6 +338,11 @@ REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     # the registry are not canonical). Operator re-sets secrets after
     # rebuild via set_secret() calls.
     "agent_secrets",
+    # ADR-003X K1: memory_verifications references memory_entries —
+    # clear before memory_entries. Like secrets, verifications are
+    # not in the artifact tree; operator re-verifies after rebuild
+    # via memory_verify.v1 calls.
+    "memory_verifications",
     "tools",
     "agent_capabilities",
     "agents",
@@ -511,5 +535,26 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         );
         """,
         "CREATE INDEX IF NOT EXISTS idx_agent_secrets_instance ON agent_secrets(instance_id);",
+    ),
+    # v8 → v9: per-entry memory verification (ADR-003X K1 — Iron Gate
+    # equivalent). Reuses the consent-grant SEMANTIC (idempotent
+    # promote + revoke; external party stamps standing on an entry)
+    # but stores it in a dedicated table because
+    # memory_consents.recipient_instance has an FK on agents — the
+    # verifier identifier (operator handle, public key fingerprint)
+    # isn't a registered agent. One row per entry; re-verification
+    # updates in place; revocation sets revoked_at + revoked_by.
+    9: (
+        """
+        CREATE TABLE IF NOT EXISTS memory_verifications (
+            entry_id      TEXT PRIMARY KEY,
+            verifier_id   TEXT NOT NULL,
+            verified_at   TEXT NOT NULL,
+            seal_note     TEXT,
+            revoked_at    TEXT,
+            revoked_by    TEXT,
+            FOREIGN KEY (entry_id) REFERENCES memory_entries(entry_id)
+        );
+        """,
     ),
 }
