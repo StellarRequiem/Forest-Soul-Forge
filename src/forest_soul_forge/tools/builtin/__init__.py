@@ -41,7 +41,10 @@ from forest_soul_forge.tools.builtin.ueba_track import UebaTrackTool
 from forest_soul_forge.tools.builtin.browser_action import BrowserActionTool
 from forest_soul_forge.tools.builtin.mcp_call import McpCallTool
 from forest_soul_forge.tools.builtin.memory_verify import MemoryVerifyTool
+from forest_soul_forge.tools.builtin.code_edit import CodeEditTool
+from forest_soul_forge.tools.builtin.code_read import CodeReadTool
 from forest_soul_forge.tools.builtin.llm_think import LlmThinkTool
+from forest_soul_forge.tools.builtin.shell_exec import ShellExecTool
 from forest_soul_forge.tools.builtin.suggest_agent import SuggestAgentTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
 from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
@@ -84,6 +87,9 @@ __all__ = [
     "McpCallTool",
     "SuggestAgentTool",
     "LlmThinkTool",
+    "CodeReadTool",
+    "CodeEditTool",
+    "ShellExecTool",
 ]
 
 
@@ -170,3 +176,14 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # (Reviewer) agents without per-call human approval. Honors the
     # T2.2b usage_cap_tokens task_cap (clips max_tokens down).
     registry.register(LlmThinkTool())
+    # SW-track A.5 — code-side tools so the coding triune can DO work
+    # on this repo, not just discuss it.
+    #   code_read.v1   — read_only;  Architect+Engineer+Reviewer
+    #   code_edit.v1   — filesystem; Engineer only (gated by genre rule)
+    #   shell_exec.v1  — external;   Engineer only (gated by genre rule)
+    # Per-agent allowed_paths + allowed_commands constraints (in the
+    # constitution YAML's tool constraints block) cap blast radius;
+    # see each tool's docstring for the safety semantics.
+    registry.register(CodeReadTool())
+    registry.register(CodeEditTool())
+    registry.register(ShellExecTool())

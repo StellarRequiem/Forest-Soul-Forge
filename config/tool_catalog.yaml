@@ -1398,6 +1398,95 @@ tools:
     side_effects: read_only
     archetype_tags: [system_architect, software_engineer, code_reviewer, companion, researcher, investigator, guardian]
 
+  code_read.v1:
+    name: code_read
+    version: "1"
+    description: |
+      Read a file from the local filesystem. Side_effects=read_only,
+      so runnable inside Guardian-genre agents without per-call human
+      approval. Per-agent constitution must populate
+      constraints.allowed_paths (list of absolute roots); the agent
+      cannot read files outside those roots even via symlink or
+      relative-path tricks (Path.resolve() applied before allowlist
+      check). Output is utf-8 text only; binary files refuse cleanly.
+      Cap on returned bytes (default 100 KB, max 2 MB) keeps a single
+      tool result from sucking the whole repo into the audit chain.
+    input_schema:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: "Absolute or relative path; resolved before allowlist check."
+        max_bytes:
+          type: integer
+          minimum: 1
+          maximum: 2000000
+          default: 100000
+    side_effects: read_only
+    archetype_tags: [system_architect, software_engineer, code_reviewer]
+
+  code_edit.v1:
+    name: code_edit
+    version: "1"
+    description: |
+      Write a file to the local filesystem. Side_effects=filesystem,
+      so the constraint resolver lands requires_human_approval=true on
+      Engineer's actuator-genre kit (every dispatch gates through the
+      operator queue). Per-agent constitution must populate
+      constraints.allowed_paths; same Path.resolve() defense as
+      code_read.v1. Modes: "write" (default — replaces content,
+      atomic via temp+rename) or "append". Refuses if parent
+      directory doesn't exist (won't create dirs; use shell_exec for
+      mkdir). Content cap 5 MB.
+    input_schema:
+      type: object
+      required: [path, content]
+      properties:
+        path: {type: string}
+        content: {type: string, maxLength: 5000000}
+        mode:
+          type: string
+          enum: [write, append]
+          default: write
+    side_effects: filesystem
+    archetype_tags: [software_engineer]
+
+  shell_exec.v1:
+    name: shell_exec
+    version: "1"
+    description: |
+      Run a command via argv-list (NEVER shell=True). Side_effects=
+      external, so this gates through human approval on every call
+      for Engineer (actuator genre). Strict safety: argv must be a
+      list of strings; argv[0] must be a bare command name (no
+      slashes — absolute paths refused) and must be in
+      constraints.allowed_commands; cwd (if supplied) must be inside
+      constraints.allowed_paths; mandatory subprocess timeout
+      (default 30s, max 300s). Stdout/stderr captured + truncated
+      (100 KB / 50 KB) so verbose tools don't blow the audit chain.
+      Subprocess inherits the daemon's environment — operators
+      should run the daemon under a restricted user account if env-
+      leakage is a concern.
+    input_schema:
+      type: object
+      required: [argv]
+      properties:
+        argv:
+          type: array
+          minItems: 1
+          items: {type: string}
+        cwd:
+          type: string
+          description: "Working directory; defaults to first allowed_path."
+        timeout_s:
+          type: integer
+          minimum: 1
+          maximum: 300
+          default: 30
+    side_effects: external
+    archetype_tags: [software_engineer]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
@@ -1536,6 +1625,7 @@ archetypes:
       - memory_write.v1
       - memory_recall.v1
       - delegate.v1
+      - code_read.v1            # SW.A.5 — read code to design against it
 
   software_engineer:
     standard_tools:
@@ -1543,6 +1633,9 @@ archetypes:
       - memory_write.v1
       - memory_recall.v1
       - delegate.v1
+      - code_read.v1            # SW.A.5 — read what's there
+      - code_edit.v1            # SW.A.5 — write changes (gated by genre)
+      - shell_exec.v1           # SW.A.5 — run tests / git (gated by genre)
 
   code_reviewer:
     standard_tools:
@@ -1550,6 +1643,7 @@ archetypes:
       - memory_write.v1
       - memory_recall.v1
       - delegate.v1
+      - code_read.v1            # SW.A.5 — read diffs to review them
 
 # Per-genre fallback kits (ADR-0021 T4). Used by the kit resolver as
 # the LAST step in the chain when a role has no archetype-specific
