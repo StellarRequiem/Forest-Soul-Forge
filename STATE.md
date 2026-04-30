@@ -4,7 +4,7 @@ A self-contained snapshot for a developer joining the project. What's implemente
 
 > **Refresh cadence:** this doc + [`README.md`](README.md) update together at every phase boundary (Phase A close, Phase B close, Phase D close, etc.) and after any meaningful architectural finding. The two are designed to stay in sync; STATE.md is the developer-facing current-reality view, README.md is the product-and-mission view.
 
-Last updated: 2026-04-28, after Phase D + E closed live (47-event canonical chain, see [`docs/audits/2026-04-28-phase-d-e-review.md`](docs/audits/2026-04-28-phase-d-e-review.md)).
+Last updated: 2026-04-30, after the v0.1.0 release session shipped SW-track + R3 governance pipeline + ADR-003Y Y1-Y7 conversation runtime end-to-end. See [CHANGELOG.md](CHANGELOG.md) for the commit-by-commit ledger.
 
 ---
 
@@ -12,13 +12,14 @@ Last updated: 2026-04-28, after Phase D + E closed live (47-event canonical chai
 
 Forest Soul Forge is a **local-first agent foundry**. You drag trait sliders → forge produces a content-addressed agent (soul.md narrative + constitution.yaml policy + audit-chain provenance + registry row, all four agreeing on the same hash) → that agent dispatches versioned tools, runs YAML skill manifests, persists memory across sessions, and (in theory) delegates work to other agents in its lineage.
 
-Three big things are true today:
+Four big things are true today:
 
-1. **The runtime is real** — 31 builtin tools registered, 21 skill manifests installed, 9 swarm agents born live, daemon serving FastAPI on `127.0.0.1:7423`, frontend on `127.0.0.1:5173`. Single-skill execution end-to-end works.
-2. **The cross-agent chain fires end-to-end** — the canonical Security Swarm chain (`LogLurker → AnomalyAce → ResponseRogue → VaultWarden`) was verified live 2026-04-28 against a real daemon: 47 audit events, four levels of `delegate.v1` nesting, ordered correctly. Phase E **passes**.
-3. **Audit + privacy are the spine** — every state-changing action lands in a hash-chained JSONL. Memory has four scopes (private / lineage / consented / realm) with explicit cross-agent disclosure. No telemetry, no phone-home.
+1. **The runtime is real** — 40 builtin tools registered, 26 skill manifests installed, 9 swarm agents + Atlas/Forge/Sentinel coding triune born live, daemon serving FastAPI on `127.0.0.1:7423`, frontend on `127.0.0.1:5173`. Tool dispatch routes through the R3-extracted `GovernancePipeline` (composable pre-execute steps).
+2. **The cross-agent chain fires end-to-end** — the canonical Security Swarm chain (`LogLurker → AnomalyAce → ResponseRogue → VaultWarden`) was verified live 2026-04-28: 47 audit events, four levels of `delegate.v1` nesting. The SW-track triune followed (2026-04-30): 21-event audit chain proving the foundry can do software work on itself.
+3. **Operator + agents talk in real conversations** — ADR-003Y conversation runtime Y1-Y7 all shipped. Multi-room, multi-turn, `@mention` chain passes, cross-domain bridges, opt-in ambient nudges, retention-window summarization, browser Chat tab. Every turn flows through the R3 governance pipeline; every dispatch + bridge + nudge is in the audit chain.
+4. **Audit + privacy are the spine** — every state-changing action lands in a hash-chained JSONL. Memory has four scopes (private / lineage / consented / realm) with explicit cross-agent disclosure. Conversation turn bodies have retention windows; `body_hash` (SHA-256) persists for tamper-evidence even after Y7 lazy summarization purges the body. No telemetry, no phone-home.
 
-If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](docs/decisions/ADR-0033-security-swarm.md) — it captures the design discipline the rest of the codebase follows.
+If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](docs/decisions/ADR-0033-security-swarm.md) (defensive plane) and [`docs/decisions/ADR-003Y-conversation-runtime.md`](docs/decisions/ADR-003Y-conversation-runtime.md) (interactive plane) — they capture the design discipline the rest of the codebase follows.
 
 ---
 
@@ -26,22 +27,22 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 
 | | |
 |---:|:---|
-| Source LoC (Python) | ~44,000 across `src/forest_soul_forge/` |
+| Source LoC (Python) | ~36,400 across `src/forest_soul_forge/` (post-R-track refactors split god-objects) |
 | Tests (LoC) | ~7,800 across 45 unit suites + 1 integration |
-| ADRs filed | 26 (`ADR-0001` → `ADR-0033`, with gaps) |
-| Builtin tools registered | 36 (5 core + delegate + 4 memory + 21 security swarm + 5 open-web/verify: web_fetch, browser_action, memory_verify, mcp_call, suggest_agent) |
-| Skill manifests shipped | 24 (4 chain + 17 supporting + 3 triune: consult/propose/critique) |
-| Schema version | v9 (v8: agent_secrets / v9: memory_verifications) |
+| ADRs filed | 29 (`ADR-0001` → `ADR-0034`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts in numerical order) |
+| Builtin tools registered | 40 (was 36 + code_read.v1 + code_edit.v1 + shell_exec.v1 + llm_think.v1 from SW-track) |
+| Skill manifests shipped | 26 (4 chain + 17 supporting + 3 triune + 2 from forge-CLI seeds) |
+| Schema version | v10 (v8: agent_secrets / v9: memory_verifications / v10: conversations + participants + turns from ADR-003Y Y1) |
 | Genres | 13 (7 original + 3 security tiers + 3 web tiers) |
-| Trait roles | 14 (5 original + 9 swarm) |
-| Audit event types | 36+ (incl. K-track: ceremony, memory_verified, out_of_triune_attempt, hardware_bound/mismatch/unbound; T2.1: governance_relaxed) |
-| Frontend modules (vanilla JS) | 18 |
-| `.command` operator scripts | 19 (start/stop/reset + start-demo + load-scenario + dist/build + 13 ops) |
+| Trait roles | 17 (5 original + 9 swarm + 3 SW-track: system_architect, software_engineer, code_reviewer) |
+| Audit event types | 54 (was 36+ added: 8 conversation_*, ambient_nudge, conversation_summarized, K-track ceremony/verify/hardware/triune, T-track governance_relaxed/posture_override, plus chain_depth metadata on conversation_turn) |
+| Frontend modules (vanilla JS) | 22 (was 18 + chat.js + cleanup) |
+| `.command` operator scripts | 36 (start/stop/reset + start-demo + load-scenario + dist/build + ~25 live-tests + a5-finalize/clean-git-locks/live-triune ops) |
 | Demo scenarios | 2 (synthetic-incident + fresh-forge, both with presenter scripts) |
 | Data dirs | 2 (top-level prod via start.command + isolated demo/ via start-demo.command) |
 | Distribution | `dist/build.command` produces `forest-soul-forge-<sha>-<date>.zip` via git archive |
-| Total commits on `main` | 130 |
-| Audit docs filed | 1 (`docs/audits/2026-04-28-phase-d-e-review.md`) |
+| Total commits on `main` | ~155 (was 130 at Phase E; +25 across SW-track + R-track + Y-track + post-marathon docs) |
+| Audit docs filed | 2 (`docs/audits/2026-04-28-phase-d-e-review.md` + `docs/audits/2026-04-30-load-bearing-survey.md`) |
 
 ---
 

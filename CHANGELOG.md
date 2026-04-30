@@ -6,6 +6,120 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-04-30
+
+The "agents you can actually talk to" milestone. Three new tracks shipped in
+one session: SW-track (the agent foundry can do software work on itself),
+ADR-003Y conversation runtime (operator + agents in multi-turn rooms with
+audit-trailed governance), and R3 governance pipeline extraction (tool
+dispatch refactored from a god-method into composable pre-execute steps).
+Nine commits, ~8,100 LoC net, every commit live-verified.
+
+### SW-track — Atlas/Forge/Sentinel coding triune
+
+- **`feat: SW.A.5 — code_read.v1 / code_edit.v1 / shell_exec.v1`** (commit `5ef6747`).
+  Three new built-in tools giving software_engineer agents real filesystem +
+  shell capability. `code_read` is read-only with `Path.resolve()` + allowlist
+  defense against `../../etc/passwd` and symlink escape; `code_edit` is
+  filesystem-tier with atomic temp+rename writes; `shell_exec` is external-tier
+  with argv-list-only dispatch (no `shell=True`), allowed_commands allowlist,
+  cwd allowlist, mandatory subprocess timeout. All three live-verified
+  end-to-end.
+- **`fix: SW.A.5 live-test driver — match actual response shape`** (commit
+  `82770b3`). Driver assertions now match the actual response schema
+  (`failure_exception_type`, not body-grep). Also fixed the
+  `a5-finalize.command` tools-registered curl path (`/tools` → `/tools/registered`).
+- **`feat: SW-track — file ADR-0034 + first real triune task harness`**
+  (commit `c7252e7`). Files **ADR-0034** retroactively (470 lines) capturing
+  the SW-track design: three roles claiming three existing genres
+  (system_architect → researcher, software_engineer → actuator,
+  code_reviewer → guardian). The `live-triune-file-adr-0034.command`
+  orchestration script is Phase B.2 — the meta-demo where the triune
+  participates in filing its own ADR. Live-verified: 21 audit events
+  documenting 3 births + 1 ceremony + 5 code_reads + 3 llm_thinks + 3 archives.
+
+### R3 — extract governance_pipeline from dispatcher
+
+- **`refactor: R3 — extract governance_pipeline from dispatcher.py`**
+  (commit `6ea59a0`). The 2026-04-30 morning load-bearing survey identified
+  `ToolDispatcher.dispatch()` as a god-method. This commit extracts the 8
+  pre-execute checks into `tools/governance_pipeline.py` (NEW, 533 LoC) with
+  `DispatchContext` + `StepResult` + `PipelineStep` protocol +
+  `GovernancePipeline` runner + 9 step classes. `dispatcher.py` shrinks
+  1368 → 1279 LoC; `dispatch()` becomes a clear orchestrator over named
+  steps. **ADR-003Y Y3's per-conversation rate-limit is now a 1-line
+  append** in `__post_init__` — the structural payoff. 84 tests pass across
+  tool_dispatcher + skill_runtime + delegate_tool + b1_tools. Public API of
+  `dispatch()` unchanged.
+
+### ADR-003Y — Conversation runtime (Y1-Y7 all phases)
+
+- **`feat: Y1 — schema v10 + conversations CRUD router`** (commit `af07582`).
+  Schema v10 migration (additive only): `conversations`,
+  `conversation_participants`, `conversation_turns` tables.
+  `ConversationsTable` accessor + `daemon/routers/conversations.py` (NEW)
+  with full CRUD endpoints. 8 new audit event types in `KNOWN_EVENT_TYPES`.
+  `body_hash` (SHA-256) persists for tamper-evidence even after Y7 purges
+  body content.
+- **`feat: Y2 — single-agent conversation orchestration`** (commit `3d83afb`).
+  `auto_respond=True` flag on `POST /turns` triggers the single-agent
+  orchestration: dispatch `llm_think.v1` with prior conversation history as
+  context, append the agent's response as a follow-up turn, return both
+  turns. Reuses the R3 governance pipeline unchanged.
+- **`feat: Y3 — multi-agent rooms with @mention chain`** (commit `7803084`).
+  Lifts Y2's "exactly 1 agent" cap. Resolution order: `addressed_to` →
+  `@AgentName` mentions → fallback to first agent. After each agent
+  response, `@mentions` parsed for next responder, capped at
+  `max_chain_depth` (default 4). Self-mentions filtered. New
+  `daemon/routers/conversation_resolver.py` extracts the resolution logic
+  as pure functions for testability.
+- **`feat: Y4+Y7+Y5 — bridge / retention sweep / ambient mode`** (commit
+  `ff5ef4d`). Three Y phases stacked. **Y4** `POST
+  /conversations/{id}/bridge` with operator attribution + same-domain
+  refusal. **Y7** `POST /admin/conversations/sweep_retention` walks turns
+  past their retention window, dispatches `llm_think.v1` for tight
+  summaries, atomically replaces body with summary via
+  `summarize_and_purge_body`. Operator-triggered with `dry_run` support.
+  **Y5** `POST /conversations/{id}/ambient/nudge` for proactive agent
+  turns. Two structural gates: constitution `interaction_modes.ambient_opt_in`
+  (default false) AND `FSF_AMBIENT_RATE` quota
+  (minimal=1/normal=3/heavy=10 per agent per conversation per day). Emits
+  `ambient_nudge` audit event BEFORE dispatch.
+- **`feat: Y6 — frontend Chat tab`** (commit `6ae0eb1`). Vanilla JS Chat
+  tab wired to all the Y1-Y3 endpoints. New `frontend/js/chat.js` (~330
+  LoC) with rooms list grouped by domain, participant chips, multi-line
+  composer with `max_chain_depth`/`max_response_tokens` controls,
+  @mention highlighting, archive button. localStorage stashes the active
+  conversation_id so a refresh resumes the operator in the same room.
+
+### Numbers (since 2026-04-28 Phase E close)
+
+| | 2026-04-28 | 2026-04-30 |
+|---|---:|---:|
+| Python LoC | ~44,000 | ~36,400 (after R-track refactors split god-objects) |
+| ADRs | 26 | 29 (ADR-0034 SW-track filed + 003X/003Y drafts) |
+| Builtin tools | 36 | 40 (+ code_read/edit/shell_exec/llm_think) |
+| Skill manifests | 24 | 26 |
+| Frontend JS modules | 18 | 22 (+ chat.js + cleanup) |
+| Audit event types | 36+ | 54 (+ Y-track + ambient + summarized + chain_depth) |
+| Trait roles | 14 | 17 (+ system_architect, software_engineer, code_reviewer) |
+| Genres | 10 | 13 (+ web_observer/researcher/actuator from ADR-003X) |
+| `.command` scripts | 19 | 36 |
+| Schema version | v9 | v10 (added conversations + participants + turns tables) |
+
+### What v0.1.0 makes demonstrable end-to-end
+
+1. Drag trait sliders → birth a content-addressed agent (deterministic DNA, hash-pinned constitution, LLM-rendered Voice section)
+2. Birth Atlas + Forge + Sentinel → bond into a triune via `ceremony.v1` with `restrict_delegations: true`
+3. Open Chat tab → create room → add agents as participants
+4. Type a turn with `@AgentName` → that agent responds via governed `llm_think`
+5. Agent's response `@mentions` another participant → chain extends, capped at `max_chain_depth`
+6. Cross-domain bridge invites an outside-domain agent with operator attribution
+7. Ambient nudge surfaces a proactive agent turn (opt-in + rate-gated)
+8. Retention sweep summarizes purged turn bodies (`body_hash` preserves tamper-evidence)
+9. Audit tab shows EVERY action — dispatched, succeeded, refused, bridged, summarized — hash-chained
+10. The "social layer through agentic cooperation" thesis runs in a single browser window
+
 ### Phase 4 — file ADR-0023 (Benchmark Suite) as Proposed — 2026-04-25
 
 - **`docs/decisions/ADR-0023-benchmark-suite.md`**, status Proposed. Per-genre benchmark battery + per-stat performance budget + cross-backend comparability. Closes the measurement gap: trait tuning becomes empirical, drift becomes detectable, the LM Studio swap path matures into a tuning tool. Completes the four-ADR vision quartet (0020 character sheet + 0021 genres + 0022 memory + 0023 benchmarks).
