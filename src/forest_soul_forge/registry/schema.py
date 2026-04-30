@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 9
+SCHEMA_VERSION: int = 10
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -305,6 +305,66 @@ DDL_STATEMENTS: tuple[str, ...] = (
         FOREIGN KEY (entry_id) REFERENCES memory_entries(entry_id)
     );
     """,
+    # --- conversations (ADR-003Y Y1) -------------------------------------
+    # First-class operator-driven multi-turn interaction. ``domain`` is
+    # operator-defined free-text (recommended seeds: therapy, coding,
+    # builders, admin). ``retention_policy`` governs how long raw
+    # ``conversation_turns.body`` lives before lazy summarization +
+    # body deletion (full_7d default, full_30d, or full_indefinite).
+    """
+    CREATE TABLE IF NOT EXISTS conversations (
+        conversation_id  TEXT PRIMARY KEY,
+        domain           TEXT NOT NULL,
+        operator_id      TEXT NOT NULL,
+        created_at       TEXT NOT NULL,
+        last_turn_at     TEXT,
+        status           TEXT NOT NULL DEFAULT 'active',
+        retention_policy TEXT NOT NULL DEFAULT 'full_7d'
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_conversations_domain    ON conversations(domain);",
+    "CREATE INDEX IF NOT EXISTS idx_conversations_operator  ON conversations(operator_id);",
+    "CREATE INDEX IF NOT EXISTS idx_conversations_status    ON conversations(status);",
+    "CREATE INDEX IF NOT EXISTS idx_conversations_last_turn ON conversations(last_turn_at);",
+    # Participants. ``bridged_from`` is the source domain when the agent
+    # was added via /conversations/{id}/bridge from another domain;
+    # NULL for same-domain joins. Composite PK collapses uniqueness.
+    """
+    CREATE TABLE IF NOT EXISTS conversation_participants (
+        conversation_id  TEXT NOT NULL,
+        instance_id      TEXT NOT NULL,
+        joined_at        TEXT NOT NULL,
+        bridged_from     TEXT,
+        PRIMARY KEY (conversation_id, instance_id),
+        FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id),
+        FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_participants_instance ON conversation_participants(instance_id);",
+    # Turns. ``body`` is NULL after the retention window expires (Y7
+    # background pass writes ``summary`` then deletes body).
+    # ``body_hash`` is SHA-256 over the original body and persists for
+    # tamper-evidence even after the body is purged. ``addressed_to``
+    # is a comma-joined string of instance_ids when the operator
+    # addresses specific agents; NULL means "whole room."
+    """
+    CREATE TABLE IF NOT EXISTS conversation_turns (
+        turn_id          TEXT PRIMARY KEY,
+        conversation_id  TEXT NOT NULL,
+        speaker          TEXT NOT NULL,
+        addressed_to     TEXT,
+        body             TEXT,
+        summary          TEXT,
+        body_hash        TEXT NOT NULL,
+        token_count      INTEGER,
+        timestamp        TEXT NOT NULL,
+        model_used       TEXT,
+        FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_turns_conversation ON conversation_turns(conversation_id);",
+    "CREATE INDEX IF NOT EXISTS idx_turns_timestamp    ON conversation_turns(timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_turns_speaker      ON conversation_turns(speaker);",
 )
 
 # Metadata rows written on bootstrap. ``canonical_contract`` is a tripwire —
@@ -343,6 +403,14 @@ REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     # not in the artifact tree; operator re-verifies after rebuild
     # via memory_verify.v1 calls.
     "memory_verifications",
+    # ADR-003Y Y1: conversation tables. ``conversation_turns`` and
+    # ``conversation_participants`` reference ``conversations`` so
+    # children clear first. Like secrets / verifications, conversations
+    # are runtime state and are not recovered by rebuild-from-artifacts
+    # — the operator re-creates rooms and re-issues turns after rebuild.
+    "conversation_turns",
+    "conversation_participants",
+    "conversations",
     "tools",
     "agent_capabilities",
     "agents",
@@ -556,5 +624,61 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
             FOREIGN KEY (entry_id) REFERENCES memory_entries(entry_id)
         );
         """,
+    ),
+    # v9 → v10: ADR-003Y Y1 conversation runtime substrate. Three new
+    # tables: ``conversations`` (operator-defined rooms with
+    # retention policy), ``conversation_participants`` (which agents
+    # are in which room, with optional bridged_from for cross-domain
+    # invitations), and ``conversation_turns`` (one row per turn;
+    # ``body`` is purged after retention window per Y7's lazy
+    # summarization, but ``body_hash`` persists for tamper-evidence).
+    # Pure addition — no impact on existing rows; old DBs gain three
+    # tables and the ability to host conversation-mode agents.
+    10: (
+        """
+        CREATE TABLE IF NOT EXISTS conversations (
+            conversation_id  TEXT PRIMARY KEY,
+            domain           TEXT NOT NULL,
+            operator_id      TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            last_turn_at     TEXT,
+            status           TEXT NOT NULL DEFAULT 'active',
+            retention_policy TEXT NOT NULL DEFAULT 'full_7d'
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_conversations_domain    ON conversations(domain);",
+        "CREATE INDEX IF NOT EXISTS idx_conversations_operator  ON conversations(operator_id);",
+        "CREATE INDEX IF NOT EXISTS idx_conversations_status    ON conversations(status);",
+        "CREATE INDEX IF NOT EXISTS idx_conversations_last_turn ON conversations(last_turn_at);",
+        """
+        CREATE TABLE IF NOT EXISTS conversation_participants (
+            conversation_id  TEXT NOT NULL,
+            instance_id      TEXT NOT NULL,
+            joined_at        TEXT NOT NULL,
+            bridged_from     TEXT,
+            PRIMARY KEY (conversation_id, instance_id),
+            FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id),
+            FOREIGN KEY (instance_id) REFERENCES agents(instance_id)
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_participants_instance ON conversation_participants(instance_id);",
+        """
+        CREATE TABLE IF NOT EXISTS conversation_turns (
+            turn_id          TEXT PRIMARY KEY,
+            conversation_id  TEXT NOT NULL,
+            speaker          TEXT NOT NULL,
+            addressed_to     TEXT,
+            body             TEXT,
+            summary          TEXT,
+            body_hash        TEXT NOT NULL,
+            token_count      INTEGER,
+            timestamp        TEXT NOT NULL,
+            model_used       TEXT,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_turns_conversation ON conversation_turns(conversation_id);",
+        "CREATE INDEX IF NOT EXISTS idx_turns_timestamp    ON conversation_turns(timestamp);",
+        "CREATE INDEX IF NOT EXISTS idx_turns_speaker      ON conversation_turns(speaker);",
     ),
 }

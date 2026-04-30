@@ -140,6 +140,18 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # event_data is the operator-chosen label (e.g. 'iron_gate',
     # 'first_birth', 'tier_promotion').
     "ceremony",
+    # ADR-003Y Y1 — conversation runtime CRUD lifecycle. Emitted by
+    # the conversations router. Domain isolation and bridge-visibility
+    # work depends on these being categorized — bridged turns are the
+    # main exfiltration risk per ADR-003Y §threat-model.
+    "conversation_started",
+    "conversation_archived",
+    "conversation_status_changed",
+    "conversation_bridged",
+    "conversation_participant_joined",
+    "conversation_participant_left",
+    "conversation_turn",
+    "retention_policy_changed",
 })
 
 

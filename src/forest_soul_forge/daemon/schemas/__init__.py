@@ -104,6 +104,19 @@ from forest_soul_forge.daemon.schemas.memory import (
     MemoryConsentOut,
     MemoryConsentListResponse,
 )
+from forest_soul_forge.daemon.schemas.conversations import (
+    ConversationCreateRequest,
+    ConversationOut,
+    ConversationListOut,
+    ConversationStatusUpdateRequest,
+    ParticipantAddRequest,
+    ParticipantOut,
+    ParticipantListOut,
+    RetentionPolicyUpdateRequest,
+    TurnAppendRequest,
+    TurnOut,
+    TurnListOut,
+)
 
 __all__ = [
     "AgentOut",
@@ -177,4 +190,16 @@ __all__ = [
     "MemoryConsentGrantResponse",
     "MemoryConsentOut",
     "MemoryConsentListResponse",
+    # ADR-003Y Y1
+    "ConversationCreateRequest",
+    "ConversationOut",
+    "ConversationListOut",
+    "ConversationStatusUpdateRequest",
+    "ParticipantAddRequest",
+    "ParticipantOut",
+    "ParticipantListOut",
+    "RetentionPolicyUpdateRequest",
+    "TurnAppendRequest",
+    "TurnOut",
+    "TurnListOut",
 ]

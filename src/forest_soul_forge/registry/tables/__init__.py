@@ -17,6 +17,13 @@ from forest_soul_forge.registry.tables.agents import (
     RebuildReport,
 )
 from forest_soul_forge.registry.tables.approvals import ApprovalsTable
+from forest_soul_forge.registry.tables.conversations import (
+    ConversationNotFoundError,
+    ConversationRow,
+    ConversationsTable,
+    ParticipantRow,
+    TurnRow,
+)
 from forest_soul_forge.registry.tables.idempotency import IdempotencyTable
 from forest_soul_forge.registry.tables.secrets import SecretsTable
 from forest_soul_forge.registry.tables.tool_counters import ToolCountersTable
@@ -24,12 +31,17 @@ from forest_soul_forge.registry.tables.tool_counters import ToolCountersTable
 __all__ = [
     "AgentsTable",
     "ApprovalsTable",
+    "ConversationsTable",
     "IdempotencyTable",
     "SecretsTable",
     "ToolCountersTable",
-    # Result dataclasses live on AgentsTable's module — re-export here
-    # too so callers don't have to know the exact file boundary.
+    # Result dataclasses re-exported so callers don't have to know
+    # the exact file boundary.
     "AgentRow",
     "AuditRow",
+    "ConversationNotFoundError",
+    "ConversationRow",
+    "ParticipantRow",
     "RebuildReport",
+    "TurnRow",
 ]

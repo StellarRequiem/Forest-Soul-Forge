@@ -51,6 +51,7 @@ from forest_soul_forge.registry.tables import (
     AgentRow,
     AgentsTable,
     ApprovalsTable,
+    ConversationsTable,
     AuditRow,
     IdempotencyTable,
     RebuildReport,
@@ -113,6 +114,8 @@ class Registry:
         self.tool_counters = ToolCountersTable(conn)
         self.approvals = ApprovalsTable(conn)
         self.secrets = SecretsTable(conn)
+        # ADR-003Y Y1: conversation runtime substrate.
+        self.conversations = ConversationsTable(conn)
 
     # ============ construction / teardown ===================================
     @classmethod
