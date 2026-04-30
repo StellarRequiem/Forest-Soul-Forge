@@ -50,6 +50,20 @@ from forest_soul_forge.tools.base import (
     ToolResult,
     ToolValidationError,
 )
+from forest_soul_forge.tools.governance_pipeline import (
+    ApprovalGateStep,
+    ArgsValidationStep,
+    CallCounterStep,
+    ConstraintResolutionStep,
+    DispatchContext,
+    GenreFloorStep,
+    GovernancePipeline,
+    HardwareQuarantineStep,
+    PostureOverrideStep,
+    StepResult,
+    TaskUsageCapStep,
+    ToolLookupStep,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +276,54 @@ class ToolDispatcher:
     # the tool refuses cleanly with "no agent registry wired."
     agent_registry: Any = None
 
+    # R3 (2026-04-30): the pipeline of pre-execute checks. Built
+    # once per dispatcher in __post_init__ from the dispatcher's
+    # injected dependencies. Walked once per dispatch(). Adding a
+    # new check (e.g. ADR-003Y per-conversation rate-limit) means
+    # appending a step here in the right position; dispatch() doesn't
+    # change.
+    _pipeline: GovernancePipeline = field(init=False)
+
+    def __post_init__(self) -> None:
+        # Lazy import to avoid a circular when genre_engine itself
+        # imports from the tools package.
+        from forest_soul_forge.core.genre_engine import genre_requires_approval
+
+        self._pipeline = GovernancePipeline(steps=[
+            HardwareQuarantineStep(
+                audit=self.audit,
+                quarantine_reason_fn=_hardware_quarantine_reason,
+            ),
+            TaskUsageCapStep(
+                audit=self.audit,
+                session_token_sum_fn=self._sum_session_tokens,
+                task_caps_set_fn=self._maybe_emit_task_caps_set,
+            ),
+            ToolLookupStep(registry=self.registry),
+            ArgsValidationStep(),
+            ConstraintResolutionStep(
+                load_resolved_constraints_fn=_load_resolved_constraints,
+            ),
+            PostureOverrideStep(
+                audit=self.audit,
+                resolve_active_model_fn=_resolve_active_model_name,
+                apply_overrides_fn=_apply_provider_posture_overrides,
+            ),
+            GenreFloorStep(
+                # Closure over self so a test (or the daemon's lifespan
+                # hot-reload) reassigning ``dispatcher.genre_engine``
+                # is visible immediately to the step. Capturing the
+                # engine reference at __post_init__ would freeze the
+                # initial value and break that pattern.
+                genre_engine_fn=lambda: self.genre_engine,
+                check_genre_floor_fn=_check_genre_floor,
+            ),
+            CallCounterStep(counter_get_fn=self.counter_get),
+            ApprovalGateStep(
+                genre_requires_approval_fn=genre_requires_approval,
+            ),
+        ])
+
     async def dispatch(
         self,
         *,
@@ -284,209 +346,58 @@ class ToolDispatcher:
         the approval/refusal decisions but BEFORE execute, so a tool that
         crashes mid-flight still costs the agent a call (otherwise an
         adversarial tool could DoS the budget by always raising).
+
+        R3 (2026-04-30): the 8 pre-execute checks live in
+        :class:`GovernancePipeline` (built in ``__post_init__``). The
+        body below is the orchestrator: build the call-scoped context,
+        run the pipeline, branch on the result, and on GO continue
+        into the execute leg.
         """
-        key = _tool_key(tool_name, tool_version)
-
-        # ---- 0. hardware quarantine (ADR-003X K6) -----------------------
-        # Refuse BEFORE tool lookup so a quarantined agent's call doesn't
-        # even produce an unknown_tool false-positive when the registry
-        # has stale state. Reads the constitution once per dispatch; the
-        # check is cheap (yaml load + 16-char string compare).
-        quarantine_reason = _hardware_quarantine_reason(constitution_path)
-        if quarantine_reason is not None:
-            try:
-                self.audit.append(
-                    "hardware_mismatch",
-                    {
-                        "instance_id": instance_id,
-                        "tool_key": key,
-                        "session_id": session_id,
-                        "expected_machine_fingerprint": quarantine_reason["expected"],
-                        "constitution_binding": quarantine_reason["binding"],
-                    },
-                    agent_dna=agent_dna,
-                )
-            except Exception:
-                pass
-            return self._refuse(
-                key, "hardware_quarantined",
-                (
-                    f"agent {instance_id} is hardware-bound to "
-                    f"{quarantine_reason['binding'][:8]}… but this machine is "
-                    f"{quarantine_reason['expected'][:8]}…. "
-                    "Operator must POST /agents/{id}/hardware/unbind to release."
-                ),
-                instance_id=instance_id, agent_dna=agent_dna,
-                session_id=session_id,
-            )
-
-        # ---- 0b. T2.2b: per-task usage_cap pre-check ---------------------
-        # Operator-supplied task_caps are checked BEFORE tool lookup so
-        # the operator's cap takes precedence over any tool that would
-        # have been the next dispatch. Sums tokens_used from prior
-        # dispatches in the same session — when next-call estimated
-        # tokens would push total over usage_cap_tokens, refuse.
-        # context_cap_tokens is tool-side enforcement (LLM-wrapping
-        # tools check ctx.constraints["context_cap_tokens"]); the
-        # dispatcher just passes it through via constraints.
-        if task_caps:
-            self._maybe_emit_task_caps_set(
-                task_caps, instance_id=instance_id,
-                agent_dna=agent_dna, session_id=session_id, key=key,
-            )
-            usage_cap = task_caps.get("usage_cap_tokens")
-            if usage_cap and isinstance(usage_cap, int) and usage_cap > 0:
-                used = self._sum_session_tokens(instance_id, session_id)
-                if used >= usage_cap:
-                    return self._refuse(
-                        key, "task_usage_cap_exceeded",
-                        (
-                            f"session {session_id} has consumed {used} tokens; "
-                            f"operator-supplied usage_cap_tokens={usage_cap} "
-                            "blocks further dispatches. Start a new session "
-                            "or raise the cap."
-                        ),
-                        instance_id=instance_id, agent_dna=agent_dna,
-                        session_id=session_id,
-                    )
-
-        # ---- 1. lookup ---------------------------------------------------
-        tool = self.registry.get(tool_name, tool_version)
-        if tool is None:
-            return self._refuse(
-                key, "unknown_tool",
-                f"no tool registered for {key} (registered: {list(self.registry.tools)})",
-                instance_id=instance_id, agent_dna=agent_dna,
-                session_id=session_id,
-            )
-
-        # ---- 2. validate args -------------------------------------------
-        try:
-            tool.validate(args)
-        except ToolValidationError as e:
-            return self._refuse(
-                key, "bad_args", str(e),
-                instance_id=instance_id, agent_dna=agent_dna,
-                session_id=session_id,
-            )
-        except ToolError as e:
-            return self._refuse(
-                key, "bad_args", str(e),
-                instance_id=instance_id, agent_dna=agent_dna,
-                session_id=session_id,
-            )
-
-        # ---- 3. load resolved constraints from constitution -------------
-        resolved = _load_resolved_constraints(constitution_path, tool_name, tool_version)
-        if resolved is None:
-            if not constitution_path.exists():
-                return self._refuse(
-                    key, "constitution_missing",
-                    f"constitution.yaml not found at {constitution_path}",
-                    instance_id=instance_id, agent_dna=agent_dna,
-                    session_id=session_id,
-                )
-            return self._refuse(
-                key, "tool_not_in_constitution",
-                f"agent's constitution does not list {key} — re-birth or "
-                f"add via tools_add to grant access",
-                instance_id=instance_id, agent_dna=agent_dna,
-                session_id=session_id,
-            )
-
-        # ---- 3b. apply per-model posture overrides (T2.2a) ---------------
-        # Constitution-level provider_posture_overrides let operators
-        # codify per-model wisdom (e.g. "qwen3.6 too eager → require
-        # approval for filesystem"). Overrides can ONLY tighten — they
-        # raise approval gates and lower call caps, never the reverse.
-        # No-op when the constitution has no overrides block, OR the
-        # active model isn't in the overrides map.
-        active_model = _resolve_active_model_name(provider)
-        resolved, posture_notes = _apply_provider_posture_overrides(
-            resolved, constitution_path, active_model
-        )
-        if posture_notes:
-            try:
-                self.audit.append(
-                    "posture_override_applied",
-                    {
-                        "instance_id":   instance_id,
-                        "tool_key":      key,
-                        "session_id":    session_id,
-                        "active_model":  active_model,
-                        "tightenings":   posture_notes,
-                    },
-                    agent_dna=agent_dna,
-                )
-            except Exception:
-                # Audit-emit failure shouldn't mask the actual dispatch.
-                pass
-
-        # ---- 4. genre runtime enforcement (ADR-0019 T6) ----------------
-        # Symmetric with ADR-0021 T5 (build-time kit-tier check): T5
-        # catches what's in the constitution at birth; T6 catches what
-        # the runtime is about to invoke. Belt-and-suspenders so a
-        # genre tightening or a tools_add slip doesn't let a Companion
-        # fire a network tool.
-        ok, detail = _check_genre_floor(
-            engine=self.genre_engine,
+        # ---- pipeline pre-execute checks --------------------------------
+        # Hardware quarantine, task_usage_cap, lookup, validate,
+        # constraint resolution, posture overrides, genre floor,
+        # counter pre-check, approval gate. See governance_pipeline.py
+        # for the per-step rationale.
+        dctx = DispatchContext(
+            instance_id=instance_id,
+            agent_dna=agent_dna,
             role=role,
-            tool_side_effects=resolved.side_effects or tool.side_effects,
+            genre=genre,
+            session_id=session_id,
+            constitution_path=constitution_path,
+            tool_name=tool_name,
+            tool_version=tool_version,
+            args=args,
             provider=provider,
+            task_caps=task_caps,
         )
-        if not ok:
+        verdict = self._pipeline.run(dctx)
+        if verdict.is_refuse:
             return self._refuse(
-                key, "genre_floor_violated", detail or "",
+                dctx.key,
+                verdict.reason or "unknown",
+                verdict.detail or "",
                 instance_id=instance_id, agent_dna=agent_dna,
                 session_id=session_id,
             )
-
-        # ---- 5. counter pre-check (read, not yet incremented) ----------
-        max_calls = int(resolved.constraints.get("max_calls_per_session", 0) or 0)
-        current = int(self.counter_get(instance_id, session_id))
-        if max_calls and current >= max_calls:
-            return self._refuse(
-                key, "max_calls_exceeded",
-                f"session {session_id} has {current}/{max_calls} calls "
-                f"used; further dispatches blocked until session reset",
-                instance_id=instance_id, agent_dna=agent_dna,
-                session_id=session_id,
-            )
-
-        # ---- 6. approval gate -------------------------------------------
-        # Two paths can elevate to pending_approval:
-        #   (a) the tool's resolved constitution constraint
-        #       (existing ADR-0019 T3 behavior)
-        #   (b) the agent's genre policy (ADR-0033 A4 graduation):
-        #         security_high  → any non-read_only call
-        #         security_mid   → filesystem/external
-        #         security_low   → no elevation (tool config wins)
-        # OR semantics: either path forces approval. Audit metadata
-        # records WHICH path fired so an operator inspecting a
-        # pending ticket can see "tool config" vs "genre policy".
-        constraint_requires = bool(resolved.constraints.get("requires_human_approval", False))
-        effective_side_effects = resolved.side_effects or tool.side_effects
-        from forest_soul_forge.core.genre_engine import genre_requires_approval
-        genre_requires = genre_requires_approval(genre, effective_side_effects)
-        if constraint_requires or genre_requires:
+        if verdict.is_pending:
             return self._pending_approval(
-                key,
+                dctx.key,
                 tool_name=tool_name, tool_version=tool_version,
                 args=args,
-                side_effects=effective_side_effects,
+                side_effects=verdict.side_effects or "",
                 instance_id=instance_id, agent_dna=agent_dna,
-                # Pass through the elevation reason so the ticket
-                # row + audit event record which gate fired. The
-                # _pending_approval method threads this into the
-                # event_data and the ticket payload.
-                gate_source=(
-                    "constraint+genre" if (constraint_requires and genre_requires)
-                    else ("genre" if genre_requires else "constraint")
-                ),
+                gate_source=verdict.gate_source or "",
                 session_id=session_id,
             )
 
-        # ---- 6. dispatched event + counter increment --------------------
+        # ---- GO — execute leg uses dctx-accumulated state ---------------
+        tool = dctx.tool
+        resolved = dctx.resolved
+        key = dctx.key
+        max_calls = int(resolved.constraints.get("max_calls_per_session", 0) or 0)
+
+        # ---- dispatched event + counter increment -----------------------
         # Order: emit `dispatched` BEFORE execute so a crash mid-execute
         # leaves a structured signal (the absence of `succeeded` /
         # `failed` after a `dispatched` is itself diagnostic). Counter
