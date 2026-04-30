@@ -46,6 +46,10 @@ from forest_soul_forge.daemon.schemas import (
     TurnListOut,
     TurnOut,
 )
+from forest_soul_forge.daemon.routers.conversation_resolver import (
+    resolve_chain_continuation,
+    resolve_initial_addressees,
+)
 from forest_soul_forge.registry import Registry
 from forest_soul_forge.registry.registry import UnknownAgentError
 from forest_soul_forge.registry.tables import ConversationNotFoundError
@@ -415,132 +419,153 @@ async def append_turn(
         if not body.auto_respond:
             return TurnDispatchResponse(operator_turn=_turn_out(op_row))
 
-        # ---- Y2 orchestration: dispatch the agent's response -------------
-        # Y2 requires exactly 1 agent participant. Multi-agent room
-        # resolution is Y3 work (@mention + suggest_agent.v1 fallback).
+        # ---- Y3 multi-agent orchestration --------------------------------
+        # Resolution: addressed_to → @mentions in body → fallback to
+        # first agent. Then walk the chain: each agent's response can
+        # @mention the next responder, capped at max_chain_depth.
         participants = registry.conversations.list_participants(conversation_id)
-        if len(participants) == 0:
-            # Operator turn already landed; we just don't dispatch a
-            # response. Operator-only rooms are valid (used as a
-            # journaling surface), so this isn't an error.
+        if not participants:
+            # Operator-only room. Valid (journaling surface).
             return TurnDispatchResponse(operator_turn=_turn_out(op_row))
-        if len(participants) > 1:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"auto_respond=True requires exactly 1 agent participant; "
-                    f"conversation {conversation_id} has {len(participants)}. "
-                    "Use Y3+ multi-agent endpoints once they ship."
-                ),
-            )
 
-        agent_participant = participants[0]
-        try:
-            agent = registry.get_agent(agent_participant.instance_id)
-        except UnknownAgentError:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"participant {agent_participant.instance_id!r} not in "
-                    "agents table — registry inconsistency"
-                ),
-            )
+        def _safe_get_agent(iid: str):
+            try:
+                return registry.get_agent(iid)
+            except UnknownAgentError:
+                return None
 
-        # Build the prompt from recent turn history. Older turns whose
-        # body has been purged by Y7 retention contribute their summary
-        # instead. The history is ordered oldest-first (chronological).
-        recent_turns = registry.conversations.list_turns(
-            conversation_id, limit=body.history_limit, offset=0,
-        )
-        prompt = _build_conversation_prompt(
-            agent_name=agent.agent_name,
-            agent_role=agent.role,
-            domain=registry.conversations.get_conversation(conversation_id).domain,
-            turns=recent_turns,
+        addressees = resolve_initial_addressees(
+            addressed_to=body.addressed_to,
+            body=body.body,
+            participants=participants,
+            agent_lookup_fn=_safe_get_agent,
         )
 
-        # Dispatch llm_think.v1 against the agent. Session id is the
-        # conversation_id so per-session counters scope to the room.
-        # Provider is whatever's currently active (provider_constraint
-        # check runs inside the pipeline's GenreFloorStep).
+        domain = registry.conversations.get_conversation(conversation_id).domain
         provider = _resolve_active_provider(request)
-        constitution_path = Path(agent.constitution_path)
-        try:
-            outcome = await tool_dispatcher.dispatch(
-                instance_id=agent.instance_id,
-                agent_dna=agent.dna,
-                role=agent.role,
-                genre=None,  # GenreFloorStep already resolves via engine
-                session_id=f"convy2-{conversation_id}",
-                constitution_path=constitution_path,
-                tool_name="llm_think",
-                tool_version="1",
-                args={
-                    "prompt":     prompt,
-                    "task_kind":  "conversation",
-                    "max_tokens": body.max_response_tokens,
-                },
-                provider=provider,
-            )
-        except Exception:
-            # Dispatcher itself crashed — we already persisted the
-            # operator turn, so return with agent_dispatch_failed=True.
-            return TurnDispatchResponse(
-                operator_turn=_turn_out(op_row),
-                agent_dispatch_failed=True,
-            )
 
         from forest_soul_forge.tools.dispatcher import (
             DispatchSucceeded as _DispatchSucceeded,
         )
-        if not isinstance(outcome, _DispatchSucceeded):
-            # Refused / pending / failed — operator turn lands but no
-            # agent turn appended. Audit chain has the diagnostic.
-            return TurnDispatchResponse(
-                operator_turn=_turn_out(op_row),
-                agent_dispatch_failed=True,
+
+        agent_turns: list = []
+        any_failed = False
+        prior_speaker_turn = op_row
+        chain_depth = 0
+
+        # Process addressees one at a time. The first addressee responds;
+        # if its response @mentions another participant, that becomes the
+        # next addressee. Self-mentions are filtered by the resolver.
+        while addressees and chain_depth < body.max_chain_depth:
+            next_id = addressees[0]
+            agent = _safe_get_agent(next_id)
+            if agent is None:
+                # Participant references unknown agent — skip but log.
+                addressees = addressees[1:]
+                continue
+
+            # Refresh history each iteration so each agent sees the
+            # latest chain state including prior agents' turns.
+            recent_turns = registry.conversations.list_turns(
+                conversation_id, limit=body.history_limit, offset=0,
+            )
+            prompt = _build_conversation_prompt(
+                agent_name=agent.agent_name,
+                agent_role=agent.role,
+                domain=domain,
+                turns=recent_turns,
             )
 
-        result_output = outcome.result.output or {}
-        response_text = result_output.get("response", "") or ""
-        if not response_text:
-            return TurnDispatchResponse(
-                operator_turn=_turn_out(op_row),
-                agent_dispatch_failed=True,
-            )
+            constitution_path = Path(agent.constitution_path)
+            try:
+                outcome = await tool_dispatcher.dispatch(
+                    instance_id=agent.instance_id,
+                    agent_dna=agent.dna,
+                    role=agent.role,
+                    genre=None,
+                    session_id=f"conv-{conversation_id}",
+                    constitution_path=constitution_path,
+                    tool_name="llm_think",
+                    tool_version="1",
+                    args={
+                        "prompt":     prompt,
+                        "task_kind":  "conversation",
+                        "max_tokens": body.max_response_tokens,
+                    },
+                    provider=provider,
+                )
+            except Exception:
+                any_failed = True
+                break
 
-        # Append the agent's response as the next turn.
-        agent_row = registry.conversations.append_turn(
-            conversation_id=conversation_id,
-            speaker=agent.instance_id,
-            body=response_text,
-            addressed_to=None,  # response is to whoever spoke before
-            token_count=outcome.result.tokens_used,
-            model_used=result_output.get("model"),
-        )
-        try:
-            audit.append(
-                "conversation_turn",
-                {
-                    "conversation_id":    conversation_id,
-                    "turn_id":            agent_row.turn_id,
-                    "speaker":            agent_row.speaker,
-                    "addressed_to":       agent_row.addressed_to,
-                    "body_hash":          agent_row.body_hash,
-                    "token_count":        agent_row.token_count,
-                    "model_used":         agent_row.model_used,
-                    "in_response_to":     op_row.turn_id,
-                    "dispatched_via":     "llm_think.v1",
-                    "dispatch_audit_seq": outcome.audit_seq,
-                },
-                agent_dna=agent.dna,
+            if not isinstance(outcome, _DispatchSucceeded):
+                any_failed = True
+                break
+
+            result_output = outcome.result.output or {}
+            response_text = result_output.get("response", "") or ""
+            if not response_text:
+                any_failed = True
+                break
+
+            agent_row = registry.conversations.append_turn(
+                conversation_id=conversation_id,
+                speaker=agent.instance_id,
+                body=response_text,
+                addressed_to=None,
+                token_count=outcome.result.tokens_used,
+                model_used=result_output.get("model"),
             )
-        except Exception:
-            pass
+            agent_turns.append(agent_row)
+            try:
+                audit.append(
+                    "conversation_turn",
+                    {
+                        "conversation_id":    conversation_id,
+                        "turn_id":            agent_row.turn_id,
+                        "speaker":            agent_row.speaker,
+                        "addressed_to":       agent_row.addressed_to,
+                        "body_hash":          agent_row.body_hash,
+                        "token_count":        agent_row.token_count,
+                        "model_used":         agent_row.model_used,
+                        "in_response_to":     prior_speaker_turn.turn_id,
+                        "dispatched_via":     "llm_think.v1",
+                        "dispatch_audit_seq": outcome.audit_seq,
+                        "chain_depth":        chain_depth + 1,
+                    },
+                    agent_dna=agent.dna,
+                )
+            except Exception:
+                pass
+
+            chain_depth += 1
+            prior_speaker_turn = agent_row
+
+            # Decide who's next. Priority:
+            #  - additional explicit addressees from caller's list (Y3
+            #    addressed_to was a multi-element list)
+            #  - @mentions in the agent's response (Y3 chain pass)
+            # Empty list → chain ends naturally.
+            remaining_explicit = addressees[1:]
+            mention_continuation = resolve_chain_continuation(
+                last_responder_id=next_id,
+                last_response_body=response_text,
+                participants=participants,
+                agent_lookup_fn=_safe_get_agent,
+            )
+            # Explicit addressing wins; mentions are the natural
+            # extension when explicit list runs out.
+            if remaining_explicit:
+                addressees = remaining_explicit
+            else:
+                addressees = mention_continuation
 
     return TurnDispatchResponse(
         operator_turn=_turn_out(op_row),
-        agent_turn=_turn_out(agent_row),
+        agent_turn=(_turn_out(agent_turns[0]) if agent_turns else None),
+        agent_turn_chain=[_turn_out(t) for t in agent_turns],
+        chain_depth=len(agent_turns),
+        agent_dispatch_failed=any_failed,
     )
 
 

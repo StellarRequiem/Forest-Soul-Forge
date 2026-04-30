@@ -177,19 +177,18 @@ class TurnAppendRequest(BaseModel):
     auto_respond: bool = Field(
         default=False,
         description=(
-            "Y2 single-agent orchestration. When True AND the conversation "
-            "has exactly 1 agent participant, the router dispatches "
-            "llm_think.v1 to that agent with prior conversation history as "
-            "context, appends the agent's response as a follow-up turn, and "
-            "returns both turns. False (default) preserves Y1 behavior — "
-            "just append this turn and return."
+            "Conversation orchestration. When True, the router resolves "
+            "addressees and dispatches llm_think.v1 against them — appending "
+            "agent responses as follow-up turns and returning the full chain. "
+            "False (default) preserves Y1 behavior — just append this turn "
+            "and return."
         ),
     )
     history_limit: int = Field(
         default=20,
         ge=1, le=100,
         description=(
-            "Y2: cap on prior turns included in the agent's prompt context. "
+            "Cap on prior turns included in each agent's prompt context. "
             "Default 20 keeps prompts under typical 32K-token model limits "
             "while preserving recent conversation flow."
         ),
@@ -197,7 +196,18 @@ class TurnAppendRequest(BaseModel):
     max_response_tokens: int = Field(
         default=400,
         ge=1, le=8192,
-        description="Y2: max_tokens passed to llm_think.v1 for the agent response.",
+        description="Y2: max_tokens passed to llm_think.v1 for each agent response.",
+    )
+    max_chain_depth: int = Field(
+        default=4,
+        ge=1, le=20,
+        description=(
+            "Y3: cap on agent-to-agent passes after the operator's turn. "
+            "After an agent responds, the orchestrator parses its body for "
+            "@AgentName mentions; mentioned agents respond next, up to this "
+            "depth. Default 4 per ADR-003Y; raise via this field for "
+            "deeper chains, lower for tighter operator control."
+        ),
     )
 
 
@@ -223,36 +233,49 @@ class TurnListOut(BaseModel):
 class TurnDispatchResponse(BaseModel):
     """Response shape for ``POST /conversations/{id}/turns``.
 
-    Y1 just returned a single TurnOut. Y2 wraps it so the
-    auto_respond path can return BOTH turns (operator + agent) in
-    one response, while the legacy auto_respond=False path returns
-    operator_turn only with agent_turn=None.
+    Y1 just returned a single TurnOut. Y2 wrapped it for operator +
+    1-agent dispatch. Y3 generalizes: ``agent_turn_chain`` carries
+    every agent turn appended (in order). For Y2 backward-compat,
+    ``agent_turn`` is the FIRST element of the chain (or None).
 
     A 400 is raised before any turn is written when auto_respond=True
-    fails the "exactly 1 agent participant" precondition; the
-    operator turn isn't persisted in that error case to avoid
-    half-state.
+    fails preconditions (e.g. unknown participant); the operator turn
+    isn't persisted in that error case to avoid half-state.
     """
 
     operator_turn: TurnOut
     agent_turn:    TurnOut | None = Field(
         default=None,
         description=(
-            "The agent's response when auto_respond=True succeeded. "
-            "None when auto_respond=False was set, or when "
-            "orchestration was skipped because the room had 0 agent "
-            "participants (rare — caller should check)."
+            "First agent turn in the chain (Y2 back-compat). None when "
+            "auto_respond=False or the room had 0 agent participants."
+        ),
+    )
+    agent_turn_chain: list[TurnOut] = Field(
+        default_factory=list,
+        description=(
+            "Y3: all agent turns appended during this dispatch, in order. "
+            "Length 0 when no agent responded; length 1 for Y2-style "
+            "single-agent; length 2+ when @mention passes triggered. "
+            "Capped at max_chain_depth from the request."
+        ),
+    )
+    chain_depth: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Number of agent turns produced. Equal to len(agent_turn_chain). "
+            "Hitting max_chain_depth doesn't fail the request — the chain "
+            "just stops cleanly there."
         ),
     )
     agent_dispatch_failed: bool = Field(
         default=False,
         description=(
-            "True when auto_respond=True succeeded the precondition "
-            "but the llm_think dispatch itself returned a non-success "
-            "status (provider error, refused, etc.). Operator can "
-            "inspect the audit chain by recent tool_call_failed events "
-            "to diagnose. The operator turn IS still persisted in this "
-            "case — the operator's input lands; only the agent's "
-            "response did not."
+            "True when at least one agent dispatch returned non-success "
+            "(provider error, refused, etc.) AND no further chain step "
+            "fired after it. Audit chain has the diagnostic. The operator "
+            "turn AND any earlier successful agent turns ARE still "
+            "persisted; only the failing branch was dropped."
         ),
     )
