@@ -96,6 +96,11 @@
         <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="5" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="11" cy="11" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.4 6.4 L9.6 9.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
         Audit
       </button>
+      <!-- ADR-003Y Y6 — Chat tab. Multi-turn conversations with agents. -->
+      <button class="tab" data-tab="chat" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4 H14 V11 H8 L5 14 V11 H2 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
+        Chat
+      </button>
     </nav>
 
     <!-- ========================================================== -->
@@ -419,6 +424,115 @@
         </div>
         <div class="panel__body">
           <div id="audit-list" class="audit-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Chat tab — ADR-003Y Y6 multi-turn conversations             -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="chat" role="tabpanel" hidden>
+      <div class="chat-grid">
+        <!-- Left rail: conversation list grouped by domain -->
+        <div class="chat-rail">
+          <div class="panel">
+            <div class="panel__header">
+              <h2 class="panel__title">Rooms</h2>
+              <div class="panel__actions">
+                <button class="btn btn--ghost btn--sm" id="chat-rooms-refresh" type="button" title="Re-fetch /conversations">refresh</button>
+                <button class="btn btn--sm" id="chat-new-room" type="button">+ new</button>
+              </div>
+            </div>
+            <div class="panel__body">
+              <div id="chat-rooms" class="chat-rooms" aria-live="polite">
+                <p class="muted">Loading…</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Center: room view (header + turns + composer) -->
+        <div class="chat-room">
+          <div class="panel" id="chat-room-panel">
+            <div class="panel__header">
+              <div>
+                <h2 class="panel__title" id="chat-room-title">No room selected</h2>
+                <div class="muted" id="chat-room-subtitle">Pick a room from the left, or create a new one.</div>
+              </div>
+              <div class="panel__actions" id="chat-room-actions" hidden>
+                <span class="muted" id="chat-room-retention">retention: —</span>
+                <button class="btn btn--ghost btn--sm" id="chat-room-archive" type="button">archive</button>
+              </div>
+            </div>
+
+            <!-- Participant chips row -->
+            <div class="chat-participants" id="chat-participants" hidden></div>
+
+            <!-- Turns list (scrollable) -->
+            <div class="chat-turns" id="chat-turns" hidden>
+              <p class="muted">No turns yet.</p>
+            </div>
+
+            <!-- Composer -->
+            <div class="chat-composer" id="chat-composer" hidden>
+              <textarea id="chat-composer-input" class="inp"
+                        rows="3"
+                        placeholder="Type a turn… use @AgentName to address a specific participant."></textarea>
+              <div class="chat-composer-row">
+                <label class="chat-composer-flag">
+                  <input type="checkbox" id="chat-auto-respond" checked />
+                  auto-respond (dispatch llm_think)
+                </label>
+                <label class="chat-composer-flag">
+                  <span class="lbl">depth</span>
+                  <input type="number" id="chat-max-depth" class="inp inp--sm" value="4" min="1" max="20"
+                         title="max_chain_depth — how many @mention passes the chain may take" />
+                </label>
+                <label class="chat-composer-flag">
+                  <span class="lbl">tokens</span>
+                  <input type="number" id="chat-max-tokens" class="inp inp--sm" value="400" min="1" max="8192"
+                         title="max_response_tokens per agent reply" />
+                </label>
+                <button class="btn" id="chat-send" type="button">send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- New-room dialog (lightweight inline form, hidden by default) -->
+      <div id="chat-new-room-dialog" class="chat-dialog" hidden>
+        <div class="chat-dialog__inner">
+          <h3>New room</h3>
+          <div class="field">
+            <label class="lbl" for="chat-new-domain">domain</label>
+            <input type="text" id="chat-new-domain" class="inp" placeholder="therapy | coding | builders | admin" />
+          </div>
+          <div class="field">
+            <label class="lbl" for="chat-new-operator">operator id</label>
+            <input type="text" id="chat-new-operator" class="inp" placeholder="alex" />
+          </div>
+          <div class="field">
+            <label class="lbl" for="chat-new-retention">retention policy</label>
+            <select id="chat-new-retention" class="inp">
+              <option value="full_7d" selected>full_7d (7-day raw retention)</option>
+              <option value="full_30d">full_30d</option>
+              <option value="full_indefinite">full_indefinite (deliberate)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="lbl">add participant (optional)</label>
+            <select id="chat-new-participant" class="inp">
+              <option value="">— none for now —</option>
+            </select>
+            <div class="muted" style="margin-top: 4px; font-size: 12px;">
+              You can add more participants from the room view after creating.
+            </div>
+          </div>
+          <div class="chat-dialog__actions">
+            <button class="btn btn--ghost btn--sm" id="chat-new-cancel" type="button">cancel</button>
+            <button class="btn btn--sm" id="chat-new-create" type="button">create</button>
+          </div>
         </div>
       </div>
     </section>

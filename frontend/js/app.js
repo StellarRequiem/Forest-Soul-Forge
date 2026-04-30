@@ -16,6 +16,7 @@ import * as pendingPanel from "./pending.js";
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
 import * as memoryPanel from "./memory.js";
+import * as chatPanel from "./chat.js";
 import * as welcome from "./welcome.js";
 import * as statusbar from "./statusbar.js";
 import * as tour from "./tour.js";
@@ -69,6 +70,7 @@ async function boot() {
     skillsPanel.start();
     toolRegistryPanel.start();
     memoryPanel.start();
+    chatPanel.start().catch(() => {});
     return;
   }
 
@@ -109,6 +111,12 @@ async function boot() {
   // Non-fatal posture — tab degrades to empty state if the daemon
   // doesn't expose memory endpoints (older deploys).
   memoryPanel.start();
+  // ADR-003Y Y6 — Chat tab. Same non-fatal posture; if /conversations
+  // endpoints aren't there (pre-Y1 daemon), the rooms list shows an
+  // error and the rest of the app is unaffected.
+  chatPanel.start().catch((e) => {
+    console.warn("[chat] start failed:", e);
+  });
 }
 
 if (document.readyState === "loading") {
