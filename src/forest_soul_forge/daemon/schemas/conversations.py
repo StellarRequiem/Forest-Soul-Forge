@@ -105,7 +105,13 @@ class RetentionPolicyUpdateRequest(BaseModel):
 # Participants
 # ---------------------------------------------------------------------------
 class ParticipantAddRequest(BaseModel):
-    """Body for ``POST /conversations/{id}/participants``."""
+    """Body for ``POST /conversations/{id}/participants`` (in-domain join).
+
+    For cross-domain invitations, prefer ``POST /bridge`` — it requires
+    operator_id + reason and emits a richer audit event tying the bridge
+    to a specific operator decision. ``bridged_from`` here is preserved
+    as an escape hatch for tests / scripted setup.
+    """
 
     instance_id:  str = Field(..., min_length=1)
     bridged_from: str | None = Field(
@@ -114,6 +120,43 @@ class ParticipantAddRequest(BaseModel):
             "Source domain when this is a Y4 cross-domain bridge. "
             "Same-domain joins leave this NULL. Recorded in the "
             "participant row and surfaced via /participants list."
+        ),
+    )
+
+
+class ConversationBridgeRequest(BaseModel):
+    """Body for ``POST /conversations/{id}/bridge`` — Y4 cross-domain invite.
+
+    Required separately from the plain participants endpoint because
+    bringing an agent IN from another domain is the main exfiltration
+    risk per ADR-003Y §threat-model. The operator_id + reason fields
+    land in the audit event so the bridge is attributable later.
+    """
+
+    instance_id: str = Field(
+        ..., min_length=1,
+        description="Agent being bridged in from another domain.",
+    )
+    from_domain: str = Field(
+        ..., min_length=1, max_length=64,
+        description=(
+            "Source domain — recorded as bridged_from on the participant "
+            "row. Free-form to match conversations.domain shape."
+        ),
+    )
+    operator_id: str = Field(
+        ..., min_length=1, max_length=64,
+        description=(
+            "Operator initiating the bridge. Lands in conversation_bridged "
+            "audit event_data so the action is attributable."
+        ),
+    )
+    reason: str = Field(
+        ..., min_length=1, max_length=512,
+        description=(
+            "Operator's rationale. Required to encourage deliberate use; "
+            "the chronicle/render output surfaces this on the bridged "
+            "participant's row."
         ),
     )
 
@@ -228,6 +271,119 @@ class TurnListOut(BaseModel):
     turns:  list[TurnOut]
     limit:  int
     offset: int
+
+
+AmbientRate = Literal["minimal", "normal", "heavy"]
+
+# Per ADR-003Y Y5: per-agent-per-day quotas keyed by operator rate.
+AMBIENT_QUOTA_BY_RATE: dict[str, int] = {
+    "minimal": 1,
+    "normal":  3,
+    "heavy":   10,
+}
+
+
+class AmbientNudgeRequest(BaseModel):
+    """Body for ``POST /conversations/{id}/ambient/nudge`` — Y5.
+
+    Operator-triggered (or future scheduler-triggered) request that
+    asks a specific agent participant to produce a proactive turn.
+    Two gates apply before dispatch:
+
+      1. The agent's constitution must include ``ambient_opt_in: true``
+         under its interaction_modes block (default false). An agent
+         whose constitution doesn't opt-in returns 403.
+      2. The operator's ambient_rate (env-configured) sets a per-agent-
+         per-conversation-per-day quota. Sum of ``ambient_nudge`` audit
+         events in the last 24h for (instance_id, conversation_id) >=
+         quota → 429. Operator can raise the rate or wait until the
+         next calendar day.
+
+    The agent's body is grounded in the conversation history (same
+    rolling-window prompt as Y2/Y3 turns), with a frame instructing
+    the agent to surface 'something new' (a question, observation,
+    follow-up) rather than re-answering the most recent operator turn.
+    """
+
+    instance_id:    str = Field(..., min_length=1)
+    operator_id:    str = Field(..., min_length=1)
+    nudge_kind:     str = Field(
+        default="proactive",
+        max_length=32,
+        description=(
+            "Free-form label recorded in the audit event so operators "
+            "can categorize their nudges later. Common values: "
+            "'proactive', 'check_in', 'follow_up', 'reflection'."
+        ),
+    )
+    history_limit:  int = Field(default=20, ge=1, le=100)
+    max_response_tokens: int = Field(default=400, ge=1, le=8192)
+
+
+class AmbientNudgeResponse(BaseModel):
+    agent_turn:  TurnOut
+    quota_used:  int = Field(
+        description="Ambient nudges by this agent in this room in the last 24h, INCLUDING this one."
+    )
+    quota_max:   int = Field(
+        description="Per ADR-003Y Y5 quota for the daemon's current ambient_rate."
+    )
+    rate:        AmbientRate
+
+
+class RetentionSweepRequest(BaseModel):
+    """Body for ``POST /admin/conversations/sweep_retention`` — Y7.
+
+    Operator-triggered sweep that summarizes turns past their
+    conversation's retention window and purges the raw bodies.
+    Capped per pass via ``limit`` so a single call doesn't fan out
+    into hundreds of LLM round-trips. Operator runs again to drain.
+    """
+
+    limit: int = Field(
+        default=20,
+        ge=1, le=200,
+        description=(
+            "Max turns this sweep will process. Default 20 keeps a "
+            "single pass under ~10 minutes on local 7B models."
+        ),
+    )
+    summary_max_tokens: int = Field(
+        default=200,
+        ge=1, le=2000,
+        description=(
+            "max_tokens passed to llm_think.v1 for each summarization. "
+            "Summaries should be tight; 200 is usually plenty."
+        ),
+    )
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "When True, report what WOULD be summarized but don't "
+            "dispatch llm_think or modify rows. Useful for rate planning."
+        ),
+    )
+
+
+class RetentionSweepEntry(BaseModel):
+    """Per-turn outcome from a retention sweep."""
+
+    turn_id:         str
+    conversation_id: str
+    age_days:        float
+    status:          str  # 'summarized' | 'dry_run' | 'failed' | 'no_summarizer_agent'
+    summary:         str | None = None
+    error:           str | None = None
+
+
+class RetentionSweepResponse(BaseModel):
+    sweep_at:           str
+    candidates:         int
+    summarized:         int
+    skipped:            int
+    failed:             int
+    dry_run:            bool
+    entries:            list[RetentionSweepEntry]
 
 
 class TurnDispatchResponse(BaseModel):

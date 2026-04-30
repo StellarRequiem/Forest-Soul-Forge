@@ -33,6 +33,10 @@ from forest_soul_forge.daemon.deps import (
     require_writes_enabled,
 )
 from forest_soul_forge.daemon.schemas import (
+    AMBIENT_QUOTA_BY_RATE,
+    AmbientNudgeRequest,
+    AmbientNudgeResponse,
+    ConversationBridgeRequest,
     ConversationCreateRequest,
     ConversationListOut,
     ConversationOut,
@@ -321,6 +325,77 @@ def list_participants(
     return ParticipantListOut(participants=[_participant_out(r) for r in rows])
 
 
+@router.post(
+    "/{conversation_id}/bridge",
+    response_model=ParticipantOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writes_enabled)],
+)
+def bridge_participant(
+    conversation_id: str,
+    body:            ConversationBridgeRequest,
+    registry:        Registry      = Depends(get_registry),
+    audit:           AuditChain    = Depends(get_audit_chain),
+    write_lock:      threading.Lock = Depends(get_write_lock),
+) -> ParticipantOut:
+    """Y4: cross-domain bridge invitation.
+
+    Distinct from ``POST /participants`` because bringing an agent
+    IN from another domain is the main exfiltration vector per
+    ADR-003Y §threat-model. The endpoint requires operator_id +
+    reason and emits a richer ``conversation_bridged`` audit event
+    so the action is attributable to a specific operator decision.
+
+    Idempotent on (conversation_id, instance_id) per the underlying
+    add_participant — re-bridging the same agent returns the existing
+    participant row (with the original ``bridged_from`` preserved).
+    """
+    with write_lock:
+        try:
+            conv = registry.conversations.get_conversation(conversation_id)
+        except ConversationNotFoundError:
+            raise HTTPException(status_code=404, detail=f"conversation {conversation_id!r} not found")
+        try:
+            agent = registry.get_agent(body.instance_id)
+        except UnknownAgentError:
+            raise HTTPException(status_code=404, detail=f"agent {body.instance_id!r} not found")
+
+        # Sanity-check: refusing to bridge an agent FROM the same domain
+        # they're already in. That's a same-domain join (use
+        # /participants instead). Y4 wants the cross-domain invariant
+        # visible at submission time.
+        if body.from_domain == conv.domain:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"from_domain={body.from_domain!r} is the same as the "
+                    f"conversation's domain — use POST /participants for "
+                    "in-domain joins. /bridge is for cross-domain only."
+                ),
+            )
+
+        row = registry.conversations.add_participant(
+            conversation_id, body.instance_id, bridged_from=body.from_domain,
+        )
+        try:
+            audit.append(
+                "conversation_bridged",
+                {
+                    "conversation_id": conversation_id,
+                    "instance_id":     body.instance_id,
+                    "agent_name":      agent.agent_name,
+                    "from_domain":     body.from_domain,
+                    "to_domain":       conv.domain,
+                    "operator_id":     body.operator_id,
+                    "reason":          body.reason,
+                },
+                agent_dna=agent.dna,
+            )
+        except Exception:
+            pass
+    return _participant_out(row)
+
+
 @router.delete(
     "/{conversation_id}/participants/{instance_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -567,6 +642,278 @@ async def append_turn(
         chain_depth=len(agent_turns),
         agent_dispatch_failed=any_failed,
     )
+
+
+# ---------------------------------------------------------------------------
+# Y5 ambient mode — opt-in + rate-gated proactive turn
+# ---------------------------------------------------------------------------
+def _read_ambient_opt_in(constitution_path: Path) -> bool:
+    """Read ``interaction_modes.ambient_opt_in`` from the agent's
+    constitution.yaml. Default False — Y5 is structurally opt-in
+    even when the genre would permit it.
+    """
+    import yaml
+    if not constitution_path.exists():
+        return False
+    try:
+        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return False
+    block = data.get("interaction_modes") or {}
+    if isinstance(block, dict):
+        return bool(block.get("ambient_opt_in", False))
+    return False
+
+
+def _ambient_quota_used(
+    *, audit_chain, instance_id: str, conversation_id: str,
+) -> int:
+    """Count ``ambient_nudge`` events in the last 24h for the
+    (agent, conversation) tuple. Walks the in-memory tail; cheap at
+    realistic scales because ambient quotas are 1-10 per day.
+    """
+    from datetime import datetime, timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+    used = 0
+    # tail(N) gives newest-first; we want last 24h so a generous
+    # tail covers the worst case (a maxed-out heavy rate is 10/day
+    # so ~10 entries at most per tuple).
+    for entry in audit_chain.tail(500) or []:
+        if entry.event_type != "ambient_nudge":
+            continue
+        if entry.timestamp < cutoff_iso:
+            break  # rest are older than 24h
+        d = entry.event_data or {}
+        if d.get("instance_id") == instance_id and d.get("conversation_id") == conversation_id:
+            used += 1
+    return used
+
+
+@router.post(
+    "/{conversation_id}/ambient/nudge",
+    response_model=AmbientNudgeResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_writes_enabled)],
+)
+async def ambient_nudge(
+    conversation_id: str,
+    body:            AmbientNudgeRequest,
+    request:         Request,
+    registry:        Registry      = Depends(get_registry),
+    audit:           AuditChain    = Depends(get_audit_chain),
+    write_lock:      threading.Lock = Depends(get_write_lock),
+    tool_dispatcher = Depends(get_tool_dispatcher),
+) -> AmbientNudgeResponse:
+    """Y5: dispatch a proactive agent turn into a conversation.
+
+    Two structural gates before anything dispatches:
+      - agent's constitution must opt in via interaction_modes.ambient_opt_in
+      - operator's ambient_rate quota for (instance_id, conversation_id) in
+        the last 24h must not be exhausted
+
+    On success, emits ``ambient_nudge`` audit event BEFORE the
+    agent's turn lands so an operator inspecting the chain sees the
+    nudge first, then the resulting turn — same ordering the
+    dispatcher uses for ``tool_call_dispatched`` → ``tool_call_succeeded``.
+    """
+    rate = (getattr(request.app.state, "ambient_rate", None) or "minimal").lower()
+    if rate not in AMBIENT_QUOTA_BY_RATE:
+        rate = "minimal"
+    quota_max = AMBIENT_QUOTA_BY_RATE[rate]
+
+    # 1. Validate conversation + agent exist + agent is a participant.
+    try:
+        conv = registry.conversations.get_conversation(conversation_id)
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail=f"conversation {conversation_id!r} not found")
+    if conv.status == "archived":
+        raise HTTPException(status_code=409, detail="conversation is archived; ambient nudges refused")
+    try:
+        agent = registry.get_agent(body.instance_id)
+    except UnknownAgentError:
+        raise HTTPException(status_code=404, detail=f"agent {body.instance_id!r} not found")
+
+    participants = registry.conversations.list_participants(conversation_id)
+    if not any(p.instance_id == body.instance_id for p in participants):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"agent {body.instance_id!r} is not a participant in this room — "
+                "add via /participants or /bridge first"
+            ),
+        )
+
+    # 2. Constitution opt-in.
+    constitution_path = Path(agent.constitution_path)
+    if not _read_ambient_opt_in(constitution_path):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"agent {agent.agent_name!r} has not opted into ambient mode. "
+                "Set interaction_modes.ambient_opt_in=true in the constitution."
+            ),
+        )
+
+    # 3. Quota check.
+    used_before = _ambient_quota_used(
+        audit_chain=audit,
+        instance_id=body.instance_id,
+        conversation_id=conversation_id,
+    )
+    if used_before >= quota_max:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"ambient quota exhausted: rate={rate} (max {quota_max}/day) and "
+                f"this agent has {used_before} ambient turns in this room in the "
+                "last 24h. Raise FSF_AMBIENT_RATE or wait until quota window rolls."
+            ),
+        )
+
+    # 4. Build prompt — recent history + ambient framing.
+    recent_turns = registry.conversations.list_turns(
+        conversation_id, limit=body.history_limit, offset=0,
+    )
+    prompt = _build_ambient_prompt(
+        agent_name=agent.agent_name,
+        agent_role=agent.role,
+        domain=conv.domain,
+        nudge_kind=body.nudge_kind,
+        turns=recent_turns,
+    )
+
+    # 5. Dispatch llm_think + append turn (single-writer lock).
+    provider = _resolve_active_provider(request)
+    from forest_soul_forge.tools.dispatcher import (
+        DispatchSucceeded as _DispatchSucceeded,
+    )
+
+    with write_lock:
+        # 5a. Emit ambient_nudge BEFORE dispatch so the chain shows
+        # nudge → tool_call_dispatched → tool_call_succeeded → turn.
+        try:
+            audit.append(
+                "ambient_nudge",
+                {
+                    "conversation_id": conversation_id,
+                    "instance_id":     body.instance_id,
+                    "agent_name":      agent.agent_name,
+                    "operator_id":     body.operator_id,
+                    "nudge_kind":      body.nudge_kind,
+                    "rate":            rate,
+                    "quota_used_before": used_before,
+                    "quota_max":       quota_max,
+                },
+                agent_dna=agent.dna,
+            )
+        except Exception:
+            pass
+
+        try:
+            outcome = await tool_dispatcher.dispatch(
+                instance_id=agent.instance_id,
+                agent_dna=agent.dna,
+                role=agent.role,
+                genre=None,
+                session_id=f"ambient-{conversation_id}",
+                constitution_path=constitution_path,
+                tool_name="llm_think",
+                tool_version="1",
+                args={
+                    "prompt":     prompt,
+                    "task_kind":  "conversation",
+                    "max_tokens": body.max_response_tokens,
+                },
+                provider=provider,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"llm_think dispatch failed: {type(e).__name__}: {e}",
+            )
+
+        if not isinstance(outcome, _DispatchSucceeded):
+            raise HTTPException(
+                status_code=502,
+                detail=f"llm_think returned {type(outcome).__name__} — see audit chain",
+            )
+
+        result_output = outcome.result.output or {}
+        response_text = (result_output.get("response") or "").strip()
+        if not response_text:
+            raise HTTPException(status_code=502, detail="empty ambient response")
+
+        agent_row = registry.conversations.append_turn(
+            conversation_id=conversation_id,
+            speaker=agent.instance_id,
+            body=response_text,
+            addressed_to=None,
+            token_count=outcome.result.tokens_used,
+            model_used=result_output.get("model"),
+        )
+        try:
+            audit.append(
+                "conversation_turn",
+                {
+                    "conversation_id":    conversation_id,
+                    "turn_id":            agent_row.turn_id,
+                    "speaker":            agent_row.speaker,
+                    "addressed_to":       agent_row.addressed_to,
+                    "body_hash":          agent_row.body_hash,
+                    "token_count":        agent_row.token_count,
+                    "model_used":         agent_row.model_used,
+                    "ambient":            True,
+                    "nudge_kind":         body.nudge_kind,
+                    "dispatch_audit_seq": outcome.audit_seq,
+                },
+                agent_dna=agent.dna,
+            )
+        except Exception:
+            pass
+
+    return AmbientNudgeResponse(
+        agent_turn=_turn_out(agent_row),
+        quota_used=used_before + 1,
+        quota_max=quota_max,
+        rate=rate,
+    )
+
+
+def _build_ambient_prompt(
+    *,
+    agent_name: str,
+    agent_role: str,
+    domain:     str,
+    nudge_kind: str,
+    turns:      list,
+) -> str:
+    """Build a prompt that asks the agent to surface SOMETHING NEW
+    rather than re-answer the latest operator turn. The framing
+    distinguishes ambient mode from reactive Y2/Y3 dispatches."""
+    lines: list[str] = []
+    lines.append(
+        f"You are {agent_name}, an agent in role '{agent_role}' "
+        f"participating in a conversation in domain '{domain}'. "
+        f"This is an AMBIENT nudge of kind '{nudge_kind}' — the operator "
+        "has invited you to proactively surface something useful, NOT "
+        "to answer a recent message."
+    )
+    lines.append("")
+    lines.append("Recent conversation (oldest → newest):")
+    for t in turns:
+        body_or_summary = t.body if t.body is not None else (
+            f"[summarized] {t.summary or '(content purged)'}"
+        )
+        lines.append(f"  {t.speaker}: {body_or_summary}")
+    lines.append("")
+    lines.append(
+        f"Surface ONE concise new contribution as {agent_name}: a follow-up "
+        "question, a check-in, an observation, an open thread the room hasn't "
+        "addressed yet. Keep it 1-3 sentences. Don't summarize what's already "
+        "been said. Don't pretend to be another participant."
+    )
+    return "\n".join(lines)
 
 
 def _build_conversation_prompt(

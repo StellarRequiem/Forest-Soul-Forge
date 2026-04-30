@@ -151,7 +151,9 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "conversation_participant_joined",
     "conversation_participant_left",
     "conversation_turn",
+    "conversation_summarized",  # Y7 — body purged after retention window
     "retention_policy_changed",
+    "ambient_nudge",            # Y5 — proactive agent turn (opt-in + rate-gated)
 })
 
 

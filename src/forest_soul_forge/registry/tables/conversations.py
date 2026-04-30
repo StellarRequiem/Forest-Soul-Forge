@@ -390,3 +390,45 @@ class ConversationsTable:
                 (summary, turn_id),
             )
             return cur.rowcount > 0
+
+    def list_turns_due_for_summarization(
+        self, *, now_iso: str, limit: int = 50,
+    ) -> list[TurnRow]:
+        """Y7: return turns whose body is past its conversation's
+        retention window AND not yet summarized.
+
+        The retention windows per ADR-003Y:
+          - full_7d         → 7 days
+          - full_30d        → 30 days
+          - full_indefinite → never expires (returns nothing for these)
+
+        ``now_iso`` is the cutoff anchor; the call site passes
+        :func:`utc_now_iso` typically. Limit caps how many rows the
+        sweeper handles per pass — operator can call repeatedly.
+        """
+        # Inline the window math in SQL via julianday() — works on the
+        # ISO timestamps we store. NULL retention_policy never matches
+        # (no row); full_indefinite never matches (subtracted with
+        # 999_999 days so it's effectively unreachable).
+        rows = self._conn.execute(
+            """
+            SELECT t.turn_id, t.conversation_id, t.speaker, t.addressed_to,
+                   t.body, t.summary, t.body_hash, t.token_count, t.timestamp,
+                   t.model_used
+              FROM conversation_turns t
+              JOIN conversations c ON c.conversation_id = t.conversation_id
+             WHERE t.body IS NOT NULL
+               AND c.retention_policy != 'full_indefinite'
+               AND julianday(?) - julianday(t.timestamp) >= (
+                   CASE c.retention_policy
+                       WHEN 'full_7d'  THEN 7.0
+                       WHEN 'full_30d' THEN 30.0
+                       ELSE 999999.0
+                   END
+               )
+             ORDER BY t.timestamp ASC
+             LIMIT ?;
+            """,
+            (now_iso, int(limit)),
+        ).fetchall()
+        return [TurnRow(**dict(r)) for r in rows]

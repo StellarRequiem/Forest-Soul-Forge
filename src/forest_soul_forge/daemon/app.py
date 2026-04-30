@@ -46,6 +46,7 @@ from forest_soul_forge.daemon.routers import skills_run as skills_run_router
 from forest_soul_forge.daemon.routers import tool_dispatch as tool_dispatch_router
 from forest_soul_forge.daemon.routers import tools as tools_router
 from forest_soul_forge.daemon.routers import conversations as conversations_router
+from forest_soul_forge.daemon.routers import conversations_admin as conversations_admin_router
 from forest_soul_forge.daemon.routers import hardware as hardware_router
 from forest_soul_forge.daemon.routers import tools_reload as tools_reload_router
 from forest_soul_forge.daemon.routers import traits as traits_router
@@ -391,6 +392,16 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.skill_catalog = skill_catalog
         app.state.priv_client = priv_client
         app.state.startup_diagnostics = startup_diagnostics
+        # ADR-003Y Y5: ambient mode rate. Operator sets via env var
+        # FSF_AMBIENT_RATE in {minimal, normal, heavy}; default
+        # 'minimal' (1 ambient nudge per agent per conversation per
+        # day). Per ADR-003Y the default is intentionally low — the
+        # operator turns it up deliberately.
+        import os as _os
+        _ambient_rate_env = (_os.environ.get("FSF_AMBIENT_RATE") or "minimal").lower()
+        if _ambient_rate_env not in ("minimal", "normal", "heavy"):
+            _ambient_rate_env = "minimal"
+        app.state.ambient_rate = _ambient_rate_env
         # threading.RLock (not asyncio.Lock): sync route handlers run on
         # the FastAPI threadpool, so a thread-level lock is the right
         # primitive. RLock (reentrant) — not plain Lock — because the
@@ -445,6 +456,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(triune_router.router)
     app.include_router(hardware_router.router)
     app.include_router(conversations_router.router)
+    app.include_router(conversations_admin_router.router)
     return app
 
 
