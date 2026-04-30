@@ -95,11 +95,71 @@ def resolve_initial_addressees(
     if mentioned:
         return mentioned
 
-    # Path 3 — fallback. Y3 keeps simple: first agent participant.
-    # Y3.5 / Y4 may integrate suggest_agent.v1 here.
-    if participants:
-        return [participants[0].instance_id]
-    return []
+    # Path 3 — Y3.5 keyword-rank fallback. Tokenize the body and pick
+    # the participant whose (agent_name + role) shares the most non-
+    # trivial tokens. Falls back to first participant when nothing
+    # scores. This is BM25-lite — full BM25 (via suggest_agent.v1) is
+    # available but overkill for the participant-subset case where
+    # corpus size is 1-10.
+    if not participants:
+        return []
+    ranked = _rank_participants_by_body(body, participants, agent_lookup_fn)
+    return [ranked[0].instance_id] if ranked else [participants[0].instance_id]
+
+
+# ---------------------------------------------------------------------------
+# Y3.5 — keyword-rank fallback
+# ---------------------------------------------------------------------------
+import re as _re
+
+# Stopwords + tokens too short to be informative. Conservative set —
+# we want REAL signal in the body, not connective tissue.
+_RANK_STOPWORDS: frozenset[str] = frozenset({
+    "the", "a", "an", "and", "or", "but", "is", "are", "was", "were",
+    "be", "been", "being", "to", "of", "in", "on", "at", "by", "for",
+    "with", "as", "from", "this", "that", "these", "those", "i", "you",
+    "we", "they", "he", "she", "it", "do", "does", "did", "have", "has",
+    "had", "will", "would", "should", "could", "can", "may", "might",
+    "what", "when", "where", "why", "how", "who", "which", "if", "then",
+    "so", "very", "just", "also", "too", "any", "some", "all", "no", "not",
+})
+
+
+def _tokenize(text: str) -> set[str]:
+    """Tokenize to a set of lowercase alpha-words ≥3 chars. Strips
+    @mentions (already handled upstream) and discards stopwords."""
+    if not text:
+        return set()
+    cleaned = _re.sub(r"@[A-Za-z0-9_\-]+", " ", text)
+    raw = _re.findall(r"[a-zA-Z]{3,}", cleaned.lower())
+    return {tok for tok in raw if tok not in _RANK_STOPWORDS}
+
+
+def _rank_participants_by_body(
+    body: str,
+    participants: list[Any],
+    agent_lookup_fn: Callable[[str], Any],
+) -> list[Any]:
+    """Order participants by token-overlap score (descending). Ties
+    keep declaration order (stable sort). Returns the original
+    ParticipantRow objects so callers extract instance_ids cleanly."""
+    body_tokens = _tokenize(body)
+    if not body_tokens:
+        return list(participants)
+    scored: list[tuple[int, int, Any]] = []  # (score, declaration_idx, p)
+    for idx, p in enumerate(participants):
+        agent = agent_lookup_fn(p.instance_id) if agent_lookup_fn else None
+        if agent is None:
+            scored.append((0, idx, p))
+            continue
+        agent_tokens = _tokenize(
+            f"{getattr(agent, 'agent_name', '') or ''} "
+            f"{getattr(agent, 'role', '') or ''}"
+        )
+        score = len(body_tokens & agent_tokens)
+        scored.append((score, idx, p))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    return [t[2] for t in scored]
 
 
 def resolve_chain_continuation(

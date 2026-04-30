@@ -36,6 +36,9 @@ export async function start() {
   wireNewRoomDialog();
   wireComposer();
   wireRoomActions();
+  wireBridgeDialog();
+  wireAmbientDialog();
+  wireSweepDialog();
   await loadRooms();
   // Auto-resume an active conversation if one is stashed.
   const stashed = localStorage.getItem(ACTIVE_KEY);
@@ -226,7 +229,7 @@ function renderParticipants() {
       const agent = agentLookupCache.get(p.instance_id);
       const name = agent ? agent.agent_name : p.instance_id.slice(0, 12);
       const bridged = p.bridged_from ? ` (bridged from ${escapeHTML(p.bridged_from)})` : "";
-      html.push(`<span class="chat-chip" title="${escapeHTML(p.instance_id)}">@${escapeHTML(name)}${bridged}<button class="chat-chip__x" data-iid="${p.instance_id}" title="Remove from room">×</button></span>`);
+      html.push(`<span class="chat-chip" title="${escapeHTML(p.instance_id)}">@${escapeHTML(name)}${bridged}<button class="chat-chip__nudge" data-iid="${p.instance_id}" title="Y5 — ambient nudge">⚡</button><button class="chat-chip__x" data-iid="${p.instance_id}" title="Remove from room">×</button></span>`);
     }
     html.push(`<button class="btn btn--ghost btn--sm" id="chat-add-participant" type="button" style="margin-left: auto;">+ add</button>`);
   }
@@ -246,6 +249,13 @@ function renderParticipants() {
     });
   });
   document.getElementById("chat-add-participant")?.addEventListener("click", () => promptAddParticipant());
+  // Y5 — ambient nudge buttons (⚡ on each chip).
+  row.querySelectorAll(".chat-chip__nudge").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openAmbientDialog(btn.dataset.iid);
+    });
+  });
 }
 
 async function promptAddParticipant() {
@@ -402,6 +412,165 @@ function wireRoomActions() {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Y4 — Bridge dialog
+// ---------------------------------------------------------------------------
+function wireBridgeDialog() {
+  const dialog = document.getElementById("chat-bridge-dialog");
+  document.getElementById("chat-room-bridge")?.addEventListener("click", () => {
+    if (!activeConversationId) return;
+    // Populate agent picker from active agents NOT already in the room.
+    const sel = document.getElementById("chat-bridge-instance");
+    const inRoom = new Set(activeParticipants.map((p) => p.instance_id));
+    const opts = [];
+    for (const a of (state.agents || [])) {
+      if (a.status !== "active") continue;
+      if (inRoom.has(a.instance_id)) continue;
+      opts.push(`<option value="${a.instance_id}">${escapeHTML(a.agent_name)} (${escapeHTML(a.role)})</option>`);
+    }
+    sel.innerHTML = opts.length ? opts.join("") : `<option value="">— no eligible agents —</option>`;
+    document.getElementById("chat-bridge-from-domain").value = "";
+    document.getElementById("chat-bridge-reason").value = "";
+    dialog.hidden = false;
+  });
+  document.getElementById("chat-bridge-cancel")?.addEventListener("click", () => { dialog.hidden = true; });
+  document.getElementById("chat-bridge-confirm")?.addEventListener("click", async () => {
+    const instance_id = document.getElementById("chat-bridge-instance").value;
+    const from_domain = document.getElementById("chat-bridge-from-domain").value.trim();
+    const reason = document.getElementById("chat-bridge-reason").value.trim();
+    const operator_id = activeConversation?.operator_id || "alex";
+    if (!instance_id || !from_domain || !reason) {
+      toast({ title: "Missing fields", msg: "agent + from_domain + reason all required.", kind: "warn", ttl: 4000 });
+      return;
+    }
+    try {
+      await writeCall(`/conversations/${activeConversationId}/bridge`, {
+        instance_id, from_domain, operator_id, reason,
+      });
+      dialog.hidden = true;
+      toast({ title: "Bridged in", msg: `${instance_id.slice(0, 12)}… from ${from_domain}`, kind: "info", ttl: 4000 });
+      await selectRoom(activeConversationId);
+    } catch (e) {
+      toast({ title: "Bridge failed", msg: String(e.message || e), kind: "error", ttl: 6000 });
+    }
+  });
+}
+
+
+// ---------------------------------------------------------------------------
+// Y5 — Ambient nudge dialog
+// ---------------------------------------------------------------------------
+function openAmbientDialog(instance_id) {
+  const dialog = document.getElementById("chat-ambient-dialog");
+  const agent = agentLookupCache.get(instance_id);
+  const display = agent ? `${agent.agent_name}  (${instance_id})` : instance_id;
+  document.getElementById("chat-ambient-instance").value = display;
+  dialog.dataset.iid = instance_id;
+  document.getElementById("chat-ambient-kind").value = "proactive";
+  dialog.hidden = false;
+}
+
+function wireAmbientDialog() {
+  const dialog = document.getElementById("chat-ambient-dialog");
+  document.getElementById("chat-ambient-cancel")?.addEventListener("click", () => { dialog.hidden = true; });
+  document.getElementById("chat-ambient-confirm")?.addEventListener("click", async () => {
+    const instance_id = dialog.dataset.iid;
+    if (!instance_id || !activeConversationId) return;
+    const operator_id = activeConversation?.operator_id || "alex";
+    const nudge_kind = document.getElementById("chat-ambient-kind").value;
+    try {
+      const resp = await writeCall(`/conversations/${activeConversationId}/ambient/nudge`, {
+        instance_id, operator_id, nudge_kind,
+        max_response_tokens: 200,
+        history_limit: 20,
+      });
+      dialog.hidden = true;
+      toast({
+        title: "Nudge sent",
+        msg: `quota ${resp.quota_used}/${resp.quota_max} (rate=${resp.rate})`,
+        kind: "info",
+        ttl: 4000,
+      });
+      await selectRoom(activeConversationId);
+    } catch (e) {
+      const status = e?.status;
+      if (status === 403) {
+        toast({ title: "Not opted in", msg: "Set interaction_modes.ambient_opt_in=true in this agent's constitution.", kind: "warn", ttl: 8000 });
+      } else if (status === 429) {
+        toast({ title: "Quota exhausted", msg: e.detail?.detail || "Wait until tomorrow or raise FSF_AMBIENT_RATE.", kind: "warn", ttl: 8000 });
+      } else {
+        toast({ title: "Nudge failed", msg: String(e.message || e), kind: "error", ttl: 6000 });
+      }
+    }
+  });
+}
+
+
+// ---------------------------------------------------------------------------
+// Y7 — Retention sweep dialog
+// ---------------------------------------------------------------------------
+function wireSweepDialog() {
+  const dialog = document.getElementById("chat-sweep-dialog");
+  const statusEl = document.getElementById("chat-sweep-status");
+  const resultsEl = document.getElementById("chat-sweep-results");
+  const runBtn = document.getElementById("chat-sweep-run");
+  let lastDryRunHadCandidates = false;
+
+  document.getElementById("chat-room-sweep")?.addEventListener("click", () => {
+    statusEl.textContent = "Click Dry-run to preview candidates.";
+    resultsEl.innerHTML = "";
+    runBtn.disabled = true;
+    lastDryRunHadCandidates = false;
+    dialog.hidden = false;
+  });
+  document.getElementById("chat-sweep-close")?.addEventListener("click", () => { dialog.hidden = true; });
+
+  async function runSweep(dry_run) {
+    statusEl.textContent = dry_run ? "Running dry-run…" : "Running sweep + summarizing…";
+    resultsEl.innerHTML = "";
+    runBtn.disabled = true;
+    try {
+      const resp = await writeCall(`/admin/conversations/sweep_retention`, {
+        limit: 20,
+        dry_run,
+        summary_max_tokens: 200,
+      });
+      statusEl.innerHTML = `<strong>candidates:</strong> ${resp.candidates}  ·  <strong>summarized:</strong> ${resp.summarized}  ·  <strong>skipped:</strong> ${resp.skipped}  ·  <strong>failed:</strong> ${resp.failed}  ${resp.dry_run ? "<em>(dry-run)</em>" : ""}`;
+      if (!resp.entries.length) {
+        resultsEl.innerHTML = `<em>No candidates. Sweep is up to date.</em>`;
+      } else {
+        const lines = [];
+        for (const e of resp.entries) {
+          const cidShort = e.conversation_id.slice(0, 8);
+          const tidShort = e.turn_id.slice(0, 8);
+          const tag = `<span style="display:inline-block; padding:1px 6px; border-radius:3px; background: var(--bg-soft, #161c25);">${escapeHTML(e.status)}</span>`;
+          let line = `${tag}  conv=${cidShort}…  turn=${tidShort}…  age=${e.age_days}d`;
+          if (e.summary) line += `<br><em style="color:var(--fg-faint);">${escapeHTML(e.summary.slice(0, 120))}${e.summary.length > 120 ? "…" : ""}</em>`;
+          if (e.error) line += `<br><span style="color:#d44;">${escapeHTML(e.error)}</span>`;
+          lines.push(`<div style="padding: 4px 0; border-bottom: 1px dashed var(--border, #2a3340);">${line}</div>`);
+        }
+        resultsEl.innerHTML = lines.join("");
+      }
+      lastDryRunHadCandidates = (dry_run && resp.candidates > 0);
+      runBtn.disabled = !lastDryRunHadCandidates;
+      if (!dry_run) {
+        // After a real sweep, reload the active conversation so summarized
+        // turns surface in the room view.
+        if (activeConversationId) {
+          await selectRoom(activeConversationId);
+        }
+      }
+    } catch (e) {
+      statusEl.innerHTML = `<span style="color:#d44;">Sweep failed: ${escapeHTML(String(e.message || e))}</span>`;
+      runBtn.disabled = true;
+    }
+  }
+
+  document.getElementById("chat-sweep-dryrun")?.addEventListener("click", () => runSweep(true));
+  runBtn?.addEventListener("click", () => runSweep(false));
+}
+
 
 // ---------------------------------------------------------------------------
 // Helpers

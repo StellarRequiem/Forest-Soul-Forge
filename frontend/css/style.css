@@ -1654,3 +1654,18 @@ body { padding-bottom: 56px; }
   gap: 8px;
   margin-top: 16px;
 }
+
+/* Y6.1 — chip ambient-nudge button (⚡) */
+.chat-chip__nudge {
+  background: none;
+  border: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 0.95em;
+  line-height: 1;
+  margin-left: 2px;
+}
+.chat-chip__nudge:hover {
+  color: #f4c020;
+}

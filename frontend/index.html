@@ -461,6 +461,8 @@
               </div>
               <div class="panel__actions" id="chat-room-actions" hidden>
                 <span class="muted" id="chat-room-retention">retention: —</span>
+                <button class="btn btn--ghost btn--sm" id="chat-room-bridge" type="button" title="Y4 — invite an agent from another domain">+ bridge</button>
+                <button class="btn btn--ghost btn--sm" id="chat-room-sweep" type="button" title="Y7 — preview retention sweep candidates">sweep</button>
                 <button class="btn btn--ghost btn--sm" id="chat-room-archive" type="button">archive</button>
               </div>
             </div>
@@ -496,6 +498,82 @@
                 <button class="btn" id="chat-send" type="button">send</button>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Y4 — bridge dialog. Cross-domain agent invitation. -->
+      <div id="chat-bridge-dialog" class="chat-dialog" hidden>
+        <div class="chat-dialog__inner">
+          <h3>Bridge in an agent (Y4 cross-domain)</h3>
+          <p class="muted" style="margin-top:-8px;font-size:12px;">
+            Inviting an agent from another domain. Operator + reason are
+            required and land in the audit chain.
+          </p>
+          <div class="field">
+            <label class="lbl" for="chat-bridge-instance">agent</label>
+            <select id="chat-bridge-instance" class="inp"></select>
+          </div>
+          <div class="field">
+            <label class="lbl" for="chat-bridge-from-domain">from_domain</label>
+            <input type="text" id="chat-bridge-from-domain" class="inp" placeholder="e.g. review_room" />
+          </div>
+          <div class="field">
+            <label class="lbl" for="chat-bridge-reason">reason</label>
+            <input type="text" id="chat-bridge-reason" class="inp" placeholder="why you're bridging this agent in" />
+          </div>
+          <div class="chat-dialog__actions">
+            <button class="btn btn--ghost btn--sm" id="chat-bridge-cancel" type="button">cancel</button>
+            <button class="btn btn--sm" id="chat-bridge-confirm" type="button">bridge</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Y5 — ambient nudge dialog. Trigger a proactive turn. -->
+      <div id="chat-ambient-dialog" class="chat-dialog" hidden>
+        <div class="chat-dialog__inner">
+          <h3>Ambient nudge (Y5)</h3>
+          <p class="muted" style="margin-top:-8px;font-size:12px;">
+            Asks the agent to surface a proactive turn. Requires
+            <code>interaction_modes.ambient_opt_in: true</code> in the
+            agent's constitution. Quota gates by FSF_AMBIENT_RATE.
+          </p>
+          <div class="field">
+            <label class="lbl" for="chat-ambient-instance">agent</label>
+            <input type="text" id="chat-ambient-instance" class="inp" readonly />
+          </div>
+          <div class="field">
+            <label class="lbl" for="chat-ambient-kind">nudge_kind</label>
+            <select id="chat-ambient-kind" class="inp">
+              <option value="proactive">proactive</option>
+              <option value="check_in">check_in</option>
+              <option value="follow_up">follow_up</option>
+              <option value="reflection">reflection</option>
+            </select>
+          </div>
+          <div class="chat-dialog__actions">
+            <button class="btn btn--ghost btn--sm" id="chat-ambient-cancel" type="button">cancel</button>
+            <button class="btn btn--sm" id="chat-ambient-confirm" type="button">nudge</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Y7 — retention sweep results dialog. -->
+      <div id="chat-sweep-dialog" class="chat-dialog" hidden>
+        <div class="chat-dialog__inner" style="min-width: 520px; max-width: 720px;">
+          <h3>Retention sweep (Y7)</h3>
+          <p class="muted" style="margin-top:-8px;font-size:12px;">
+            Summarizes turns past their conversation's retention window
+            and purges the raw bodies. <code>body_hash</code> persists for
+            tamper-evidence. Dry-run shows candidates without dispatching
+            llm_think.
+          </p>
+          <div id="chat-sweep-status" class="muted" style="margin: 12px 0;">Click <strong>Dry-run</strong> to preview candidates.</div>
+          <div id="chat-sweep-results" style="max-height: 320px; overflow-y: auto; margin: 12px 0; font-family: var(--mono, monospace); font-size: 12px;"></div>
+          <div class="chat-dialog__actions">
+            <button class="btn btn--ghost btn--sm" id="chat-sweep-close" type="button">close</button>
+            <button class="btn btn--ghost btn--sm" id="chat-sweep-dryrun" type="button">dry-run</button>
+            <button class="btn btn--sm" id="chat-sweep-run" type="button" disabled title="Run a real sweep — summarizes + purges bodies">run sweep</button>
           </div>
         </div>
       </div>
