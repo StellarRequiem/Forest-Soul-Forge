@@ -135,16 +135,22 @@ class ParticipantListOut(BaseModel):
 class TurnAppendRequest(BaseModel):
     """Body for ``POST /conversations/{id}/turns``.
 
-    Y1 only supports operator-spoken turns (the operator typed
-    something into the room). Agent turns are appended by the
-    orchestrator, which is Y2+ work.
+    Y1 supported operator-spoken turns only. Y2 adds the optional
+    ``auto_respond`` flag that triggers single-agent orchestration:
+    after appending the operator's turn, the router dispatches
+    ``llm_think.v1`` to the conversation's sole agent participant
+    and appends the response as the next turn before returning.
+
+    Multi-agent rooms (>1 agent participant) currently 400 when
+    auto_respond=True; Y3 lifts that constraint via @mention +
+    suggest_agent fallback resolution.
     """
 
     speaker:      str = Field(
         ...,
         min_length=1,
         max_length=64,
-        description="Who spoke. Operator id for Y1; instance_id for agents in Y2+.",
+        description="Who spoke. Operator id for the operator; instance_id for agents.",
     )
     body:         str = Field(
         ...,
@@ -168,6 +174,31 @@ class TurnAppendRequest(BaseModel):
         max_length=128,
         description="Model tag when speaker is an agent; None for operator.",
     )
+    auto_respond: bool = Field(
+        default=False,
+        description=(
+            "Y2 single-agent orchestration. When True AND the conversation "
+            "has exactly 1 agent participant, the router dispatches "
+            "llm_think.v1 to that agent with prior conversation history as "
+            "context, appends the agent's response as a follow-up turn, and "
+            "returns both turns. False (default) preserves Y1 behavior — "
+            "just append this turn and return."
+        ),
+    )
+    history_limit: int = Field(
+        default=20,
+        ge=1, le=100,
+        description=(
+            "Y2: cap on prior turns included in the agent's prompt context. "
+            "Default 20 keeps prompts under typical 32K-token model limits "
+            "while preserving recent conversation flow."
+        ),
+    )
+    max_response_tokens: int = Field(
+        default=400,
+        ge=1, le=8192,
+        description="Y2: max_tokens passed to llm_think.v1 for the agent response.",
+    )
 
 
 class TurnOut(BaseModel):
@@ -187,3 +218,41 @@ class TurnListOut(BaseModel):
     turns:  list[TurnOut]
     limit:  int
     offset: int
+
+
+class TurnDispatchResponse(BaseModel):
+    """Response shape for ``POST /conversations/{id}/turns``.
+
+    Y1 just returned a single TurnOut. Y2 wraps it so the
+    auto_respond path can return BOTH turns (operator + agent) in
+    one response, while the legacy auto_respond=False path returns
+    operator_turn only with agent_turn=None.
+
+    A 400 is raised before any turn is written when auto_respond=True
+    fails the "exactly 1 agent participant" precondition; the
+    operator turn isn't persisted in that error case to avoid
+    half-state.
+    """
+
+    operator_turn: TurnOut
+    agent_turn:    TurnOut | None = Field(
+        default=None,
+        description=(
+            "The agent's response when auto_respond=True succeeded. "
+            "None when auto_respond=False was set, or when "
+            "orchestration was skipped because the room had 0 agent "
+            "participants (rare — caller should check)."
+        ),
+    )
+    agent_dispatch_failed: bool = Field(
+        default=False,
+        description=(
+            "True when auto_respond=True succeeded the precondition "
+            "but the llm_think dispatch itself returned a non-success "
+            "status (provider error, refused, etc.). Operator can "
+            "inspect the audit chain by recent tool_call_failed events "
+            "to diagnose. The operator turn IS still persisted in this "
+            "case — the operator's input lands; only the agent's "
+            "response did not."
+        ),
+    )

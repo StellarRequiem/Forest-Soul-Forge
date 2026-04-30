@@ -1,10 +1,15 @@
-"""``/conversations`` — ADR-003Y Y1 conversation runtime CRUD.
+"""``/conversations`` — ADR-003Y conversation runtime endpoints.
 
-Y1 ships only the data-model layer: create / get / list / archive
-conversations, add / list / remove participants, append turns by an
-operator, list turns. NO orchestration — multi-agent turn passing,
-@mention resolution, ambient-mode quotas, lazy summarization all live
-in Y2-Y7.
+Y1 shipped the data-model layer (CRUD on conversations / participants
+/ turns). Y2 adds the optional ``auto_respond`` flag on
+``POST /turns`` that triggers single-agent orchestration: when there
+is exactly one agent participant in the room, the router dispatches
+``llm_think.v1`` to that agent with prior conversation history as
+context, appends the response as the next turn, and returns both
+turns in one response.
+
+Multi-agent turn passing, @mention resolution, ambient-mode quotas,
+and lazy summarization are still future work (Y3-Y7).
 
 Templated on hardware.py (smallest existing K-track router) per the
 2026-04-30 load-bearing survey recommendation #5. write_lock + audit
@@ -13,15 +18,17 @@ emission discipline preserved; no new state lives outside the registry.
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from forest_soul_forge.core.audit_chain import AuditChain
 from forest_soul_forge.daemon.deps import (
     get_audit_chain,
     get_registry,
+    get_tool_dispatcher,
     get_write_lock,
     require_writes_enabled,
 )
@@ -35,6 +42,7 @@ from forest_soul_forge.daemon.schemas import (
     ParticipantOut,
     RetentionPolicyUpdateRequest,
     TurnAppendRequest,
+    TurnDispatchResponse,
     TurnListOut,
     TurnOut,
 )
@@ -345,30 +353,37 @@ def remove_participant(
 # ---------------------------------------------------------------------------
 @router.post(
     "/{conversation_id}/turns",
-    response_model=TurnOut,
+    response_model=TurnDispatchResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_writes_enabled)],
 )
-def append_turn(
+async def append_turn(
     conversation_id: str,
     body:            TurnAppendRequest,
+    request:         Request,
     registry:        Registry      = Depends(get_registry),
     audit:           AuditChain    = Depends(get_audit_chain),
     write_lock:      threading.Lock = Depends(get_write_lock),
-) -> TurnOut:
-    """Append a turn. Y1 supports operator-spoken turns; agent turns
-    in Y2 will reuse this endpoint with ``speaker=instance_id`` once
-    the orchestrator wires through.
+    tool_dispatcher = Depends(get_tool_dispatcher),
+) -> TurnDispatchResponse:
+    """Append a turn. Y2 adds the auto_respond orchestration path.
 
-    Emits ``conversation_turn`` (without body — body_hash is the
-    integrity proof; full content lives in the registry until the
-    retention window expires)."""
+    Emits ``conversation_turn`` for both the operator turn and (when
+    auto_respond fires) the agent's response turn. Each turn carries
+    ``body_hash`` for tamper-evidence; bodies live in the registry
+    until the retention window expires (Y7).
+
+    ``auto_respond=True`` requires exactly 1 agent participant in
+    the conversation (Y2 scope). Multi-agent rooms with @mention
+    resolution come in Y3.
+    """
     addressed_to_str = (
         ",".join(body.addressed_to) if body.addressed_to else None
     )
     with write_lock:
+        # ---- Append the operator (or whoever spoke) turn -----------------
         try:
-            row = registry.conversations.append_turn(
+            op_row = registry.conversations.append_turn(
                 conversation_id=conversation_id,
                 speaker=body.speaker,
                 body=body.body,
@@ -385,18 +400,203 @@ def append_turn(
                 "conversation_turn",
                 {
                     "conversation_id": conversation_id,
-                    "turn_id":         row.turn_id,
-                    "speaker":         row.speaker,
-                    "addressed_to":    row.addressed_to,
-                    "body_hash":       row.body_hash,
-                    "token_count":     row.token_count,
-                    "model_used":      row.model_used,
+                    "turn_id":         op_row.turn_id,
+                    "speaker":         op_row.speaker,
+                    "addressed_to":    op_row.addressed_to,
+                    "body_hash":       op_row.body_hash,
+                    "token_count":     op_row.token_count,
+                    "model_used":      op_row.model_used,
                 },
                 agent_dna=None,
             )
         except Exception:
             pass
-    return _turn_out(row)
+
+        if not body.auto_respond:
+            return TurnDispatchResponse(operator_turn=_turn_out(op_row))
+
+        # ---- Y2 orchestration: dispatch the agent's response -------------
+        # Y2 requires exactly 1 agent participant. Multi-agent room
+        # resolution is Y3 work (@mention + suggest_agent.v1 fallback).
+        participants = registry.conversations.list_participants(conversation_id)
+        if len(participants) == 0:
+            # Operator turn already landed; we just don't dispatch a
+            # response. Operator-only rooms are valid (used as a
+            # journaling surface), so this isn't an error.
+            return TurnDispatchResponse(operator_turn=_turn_out(op_row))
+        if len(participants) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"auto_respond=True requires exactly 1 agent participant; "
+                    f"conversation {conversation_id} has {len(participants)}. "
+                    "Use Y3+ multi-agent endpoints once they ship."
+                ),
+            )
+
+        agent_participant = participants[0]
+        try:
+            agent = registry.get_agent(agent_participant.instance_id)
+        except UnknownAgentError:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"participant {agent_participant.instance_id!r} not in "
+                    "agents table — registry inconsistency"
+                ),
+            )
+
+        # Build the prompt from recent turn history. Older turns whose
+        # body has been purged by Y7 retention contribute their summary
+        # instead. The history is ordered oldest-first (chronological).
+        recent_turns = registry.conversations.list_turns(
+            conversation_id, limit=body.history_limit, offset=0,
+        )
+        prompt = _build_conversation_prompt(
+            agent_name=agent.agent_name,
+            agent_role=agent.role,
+            domain=registry.conversations.get_conversation(conversation_id).domain,
+            turns=recent_turns,
+        )
+
+        # Dispatch llm_think.v1 against the agent. Session id is the
+        # conversation_id so per-session counters scope to the room.
+        # Provider is whatever's currently active (provider_constraint
+        # check runs inside the pipeline's GenreFloorStep).
+        provider = _resolve_active_provider(request)
+        constitution_path = Path(agent.constitution_path)
+        try:
+            outcome = await tool_dispatcher.dispatch(
+                instance_id=agent.instance_id,
+                agent_dna=agent.dna,
+                role=agent.role,
+                genre=None,  # GenreFloorStep already resolves via engine
+                session_id=f"convy2-{conversation_id}",
+                constitution_path=constitution_path,
+                tool_name="llm_think",
+                tool_version="1",
+                args={
+                    "prompt":     prompt,
+                    "task_kind":  "conversation",
+                    "max_tokens": body.max_response_tokens,
+                },
+                provider=provider,
+            )
+        except Exception:
+            # Dispatcher itself crashed — we already persisted the
+            # operator turn, so return with agent_dispatch_failed=True.
+            return TurnDispatchResponse(
+                operator_turn=_turn_out(op_row),
+                agent_dispatch_failed=True,
+            )
+
+        from forest_soul_forge.tools.dispatcher import (
+            DispatchSucceeded as _DispatchSucceeded,
+        )
+        if not isinstance(outcome, _DispatchSucceeded):
+            # Refused / pending / failed — operator turn lands but no
+            # agent turn appended. Audit chain has the diagnostic.
+            return TurnDispatchResponse(
+                operator_turn=_turn_out(op_row),
+                agent_dispatch_failed=True,
+            )
+
+        result_output = outcome.result.output or {}
+        response_text = result_output.get("response", "") or ""
+        if not response_text:
+            return TurnDispatchResponse(
+                operator_turn=_turn_out(op_row),
+                agent_dispatch_failed=True,
+            )
+
+        # Append the agent's response as the next turn.
+        agent_row = registry.conversations.append_turn(
+            conversation_id=conversation_id,
+            speaker=agent.instance_id,
+            body=response_text,
+            addressed_to=None,  # response is to whoever spoke before
+            token_count=outcome.result.tokens_used,
+            model_used=result_output.get("model"),
+        )
+        try:
+            audit.append(
+                "conversation_turn",
+                {
+                    "conversation_id":    conversation_id,
+                    "turn_id":            agent_row.turn_id,
+                    "speaker":            agent_row.speaker,
+                    "addressed_to":       agent_row.addressed_to,
+                    "body_hash":          agent_row.body_hash,
+                    "token_count":        agent_row.token_count,
+                    "model_used":         agent_row.model_used,
+                    "in_response_to":     op_row.turn_id,
+                    "dispatched_via":     "llm_think.v1",
+                    "dispatch_audit_seq": outcome.audit_seq,
+                },
+                agent_dna=agent.dna,
+            )
+        except Exception:
+            pass
+
+    return TurnDispatchResponse(
+        operator_turn=_turn_out(op_row),
+        agent_turn=_turn_out(agent_row),
+    )
+
+
+def _build_conversation_prompt(
+    *,
+    agent_name: str,
+    agent_role: str,
+    domain:     str,
+    turns:      list,
+) -> str:
+    """Build the llm_think prompt for a conversation reply.
+
+    Layout: a brief frame ("you are <name> in domain <X>"), the
+    conversation history rendered as 'speaker: body' lines (oldest
+    first), and a closing instruction. Purged turns surface as
+    'speaker: [summarized] <summary>' so the agent has continuity
+    even past the retention window.
+
+    Kept here in the router (rather than as a tool) because the
+    framing is conversation-specific and doesn't make sense outside
+    Y2's single-agent context. Y3 will need a richer builder that
+    accounts for @mentions + multi-agent rooms; that's its own
+    helper at that point.
+    """
+    lines: list[str] = []
+    lines.append(
+        f"You are {agent_name}, an agent in role '{agent_role}' "
+        f"participating in a conversation in domain '{domain}'."
+    )
+    lines.append("")
+    lines.append("Recent conversation (oldest → newest):")
+    for t in turns:
+        body_or_summary = t.body if t.body is not None else (
+            f"[summarized] {t.summary or '(content purged, no summary available)'}"
+        )
+        lines.append(f"  {t.speaker}: {body_or_summary}")
+    lines.append("")
+    lines.append(
+        "Respond as " + agent_name + ", in character with your role. "
+        "Keep the response focused and grounded; do not pretend to be "
+        "another participant. Speak only as yourself."
+    )
+    return "\n".join(lines)
+
+
+def _resolve_active_provider(request: Request):
+    """Mirror of skills_run._resolve_active_provider so conversation
+    dispatches use the same provider plumbing. Best-effort; tools that
+    don't need a provider tolerate None."""
+    pr = getattr(request.app.state, "providers", None)
+    if pr is None:
+        return None
+    try:
+        return pr.active()
+    except Exception:
+        return None
 
 
 @router.get(

@@ -114,6 +114,7 @@ from forest_soul_forge.daemon.schemas.conversations import (
     ParticipantListOut,
     RetentionPolicyUpdateRequest,
     TurnAppendRequest,
+    TurnDispatchResponse,
     TurnOut,
     TurnListOut,
 )
@@ -200,6 +201,7 @@ __all__ = [
     "ParticipantListOut",
     "RetentionPolicyUpdateRequest",
     "TurnAppendRequest",
+    "TurnDispatchResponse",
     "TurnOut",
     "TurnListOut",
 ]
