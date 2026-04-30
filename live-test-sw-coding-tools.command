@@ -152,13 +152,14 @@ payload=$(jq -n --arg session "ct-$SUFFIX-r2" '{
 body=$(curl -s --max-time 30 -X POST "$DAEMON/agents/$ENG_ID/tools/call" \
   -H "Content-Type: application/json" $(auth_header) -d "$payload")
 status=$(echo "$body" | jq -r '.status // "?"')
-if [[ "$status" == "failed" ]] && echo "$body" | grep -qi 'allowed_paths\|outside'; then
-  ok "/etc/passwd refused as expected (path-allowlist holds)"
+fail_type=$(echo "$body" | jq -r '.failure_exception_type // "?"')
+if [[ "$status" == "failed" && "$fail_type" == "CodeReadError" ]]; then
+  ok "/etc/passwd refused as expected (CodeReadError fired — path-allowlist holds)"
 elif [[ "$status" == "succeeded" ]]; then
   die "SECURITY FAIL — Engineer was able to read /etc/passwd!"
 else
   echo "  body: ${body:0:300}"
-  die "unexpected response shape — verify path-allowlist manually"
+  die "unexpected response shape (status=$status fail_type=$fail_type) — verify path-allowlist manually"
 fi
 
 # ---- Step 6: shell_exec git status (in-allowlist) → should succeed -------
@@ -190,13 +191,14 @@ payload=$(jq -n --arg session "ct-$SUFFIX-s2" '{
 body=$(curl -s --max-time 30 -X POST "$DAEMON/agents/$ENG_ID/tools/call" \
   -H "Content-Type: application/json" $(auth_header) -d "$payload")
 status=$(echo "$body" | jq -r '.status // "?"')
-if [[ "$status" == "failed" ]] && echo "$body" | grep -qi 'allowed_commands\|not in.*allowed'; then
-  ok "rm refused as expected (allowed_commands holds)"
+fail_type=$(echo "$body" | jq -r '.failure_exception_type // "?"')
+if [[ "$status" == "failed" && "$fail_type" == "ShellExecError" ]]; then
+  ok "rm refused as expected (ShellExecError fired — allowed_commands holds)"
 elif [[ "$status" == "succeeded" ]]; then
   die "SECURITY FAIL — Engineer was able to invoke rm!"
 else
   echo "  body: ${body:0:300}"
-  die "unexpected response shape — verify allowed_commands manually"
+  die "unexpected response shape (status=$status fail_type=$fail_type) — verify allowed_commands manually"
 fi
 
 # ---- Step 8: code_edit /tmp file (in-allowlist) → should succeed ---------
