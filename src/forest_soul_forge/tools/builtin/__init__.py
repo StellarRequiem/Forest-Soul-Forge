@@ -41,6 +41,7 @@ from forest_soul_forge.tools.builtin.ueba_track import UebaTrackTool
 from forest_soul_forge.tools.builtin.browser_action import BrowserActionTool
 from forest_soul_forge.tools.builtin.mcp_call import McpCallTool
 from forest_soul_forge.tools.builtin.memory_verify import MemoryVerifyTool
+from forest_soul_forge.tools.builtin.llm_think import LlmThinkTool
 from forest_soul_forge.tools.builtin.suggest_agent import SuggestAgentTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
 from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
@@ -82,6 +83,7 @@ __all__ = [
     "BrowserActionTool",
     "McpCallTool",
     "SuggestAgentTool",
+    "LlmThinkTool",
 ]
 
 
@@ -160,3 +162,11 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # cleanly when the dispatcher wasn't given a registry handle.
     # Read-only; no audit gating.
     registry.register(SuggestAgentTool())
+    # SW-track — llm_think.v1. The bridge tool that turns Forest
+    # agents into entities you can actually ask things of. Wraps
+    # provider.complete() inside the dispatcher so every LLM call
+    # gets governance-pipeline gating, an audit row, and tokens
+    # reported. Side_effects=read_only — runnable inside Guardian
+    # (Reviewer) agents without per-call human approval. Honors the
+    # T2.2b usage_cap_tokens task_cap (clips max_tokens down).
+    registry.register(LlmThinkTool())

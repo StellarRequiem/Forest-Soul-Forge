@@ -371,6 +371,91 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  # ---- SW track — coding triune (3) -------------------------------------
+  # Architect designs (researcher genre), Engineer builds (actuator),
+  # Reviewer gates (guardian). All three are "thinker" roles that
+  # primarily run llm_think; their out_of_scope and policies reflect
+  # what they SHOULD never do in a coding context.
+
+  system_architect:
+    policies:
+      - id: approval_for_external_publishing
+        rule: require_human_approval
+        triggers: [publish_design, share_design_externally]
+        rationale: "Designs that leave the local box (commits, tickets, posts) require operator review."
+      - id: forbid_unilateral_implementation
+        rule: forbid
+        triggers: [modify_code, modify_host, modify_config_file]
+        rationale: "Architect designs and reasons; implementation belongs to Engineer."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.45
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - implement_code_changes
+      - bypass_review_gate
+    operator_duties:
+      - "Confirm any design that proposes new system surface area before adoption."
+      - "Audit Architect's reasoning trail when delegating to Engineer."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  software_engineer:
+    policies:
+      - id: approval_for_destructive_changes
+        rule: require_human_approval
+        triggers: [delete_file, force_push, drop_table, rm_rf]
+        rationale: "Destructive operations always hit the operator before bytes touch disk."
+      - id: forbid_unauthorized_dependencies
+        rule: forbid
+        triggers: [install_unvetted_package, fetch_remote_binary]
+        rationale: "Dependency adds need explicit operator review; supply-chain concern."
+      - id: approval_for_external_calls
+        rule: require_human_approval
+        triggers: [send_external_request, post_to_remote_api]
+        rationale: "Engineer's actuator-tier kit means external calls always gate."
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - install_unvetted_package
+      - bypass_review_gate
+    operator_duties:
+      - "Review Engineer's diffs before merge — Reviewer's pass is necessary, not sufficient."
+      - "Audit Engineer's tool-call history weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  code_reviewer:
+    policies:
+      - id: forbid_implementation
+        rule: forbid
+        triggers: [modify_code, modify_host, modify_config_file, install_software]
+        rationale: "Reviewer is read-only by design. The 'no' agent in the triune; never edits."
+      - id: forbid_silent_approval
+        rule: forbid
+        triggers: [approve_without_evidence, rubber_stamp]
+        rationale: "Every approval must carry a reasoning trail visible in the audit chain."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - modify_code
+      - approve_without_evidence
+    operator_duties:
+      - "Treat Reviewer's refusals as load-bearing — escalate, don't override silently."
+      - "Audit Reviewer's reasoning when its approval rate drops below baseline."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
 
 # ---------------------------------------------------------------------------
 # Layer 2 — trait modifiers

@@ -109,6 +109,7 @@ genres:
       - ticket_creator
       - deploy_runner
       - alert_dispatcher
+      - software_engineer        # SW track — coding swarm Engineer
 
   guardian:
     description: |
@@ -130,6 +131,7 @@ genres:
       - safety_check
       - content_review
       - refusal_arbiter
+      - code_reviewer            # SW track — coding swarm Reviewer
 
   researcher:
     description: |
@@ -152,6 +154,7 @@ genres:
       - paper_summarizer
       - vendor_research
       - knowledge_consolidator
+      - system_architect         # SW track — coding swarm Architect
 
   companion:
     description: |

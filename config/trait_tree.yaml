@@ -497,6 +497,44 @@ roles:
       emotional: 0.4
       embodiment: 0.5
 
+  # ---- Coding-Swarm roles (3) — added with the SW track --------------------
+  # Three specialists that bond into a triune for software engineering work.
+  # Architect designs, Engineer builds, Reviewer gates. Domain weights anchor
+  # each to its dominant signal:
+  #   - cognitive scales with depth-of-reasoning expected (Architect peaks)
+  #   - audit scales with evidence demand (Reviewer peaks)
+  #   - embodiment scales with hands-on execution (Engineer peaks)
+  #   - emotional stays low — these are not user-facing roles
+  system_architect:
+    description: "Designs systems and writes specs. Evidence-driven, abstract, breaks-down-the-problem. Genre: researcher."
+    domain_weights:
+      security: 1.5
+      audit: 1.8
+      cognitive: 2.5
+      communication: 1.5
+      emotional: 0.5
+      embodiment: 0.7
+
+  software_engineer:
+    description: "Implements designs. Writes code, runs tests, fixes bugs. Action-oriented, expert craft. Genre: actuator."
+    domain_weights:
+      security: 1.2
+      audit: 1.3
+      cognitive: 2.0
+      communication: 1.0
+      emotional: 0.5
+      embodiment: 1.8
+
+  code_reviewer:
+    description: "Reviews diffs. Adversarial mindset, finds bugs, gates merges. Refusal arbiter. Genre: guardian."
+    domain_weights:
+      security: 2.0
+      audit: 2.0
+      cognitive: 1.8
+      communication: 1.3
+      emotional: 0.6
+      embodiment: 0.5
+
 # ---------------------------------------------------------------------------
 # META — constraints enforced by the trait engine
 # ---------------------------------------------------------------------------

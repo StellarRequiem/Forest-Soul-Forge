@@ -1350,6 +1350,54 @@ tools:
     side_effects: filesystem
     archetype_tags: [observer, guardian, security_high]
 
+  llm_think.v1:
+    name: llm_think
+    version: "1"
+    description: |
+      Audited LLM completion as a dispatchable tool. The bridge tool
+      that lets Forest agents actually use the active LLM provider —
+      every call goes through the governance pipeline (constitution
+      constraints, genre kit-tier ceiling, per-task task_caps,
+      hardware quarantine) and lands in the audit chain as
+      tool_call_dispatched → tool_call_succeeded/failed with token
+      counts reported. Side_effects=read_only because the LLM call
+      itself produces no external mutation; this lets Guardian-genre
+      agents (e.g. code_reviewer in a coding triune) think out loud
+      without per-call human approval. Honors T2.2b usage_cap_tokens
+      task_cap. Default system prompt derives agent identity from
+      role + genre; operators can override with `system`. Default
+      task_kind="conversation"; pass "generate" for heavier reasoning
+      to route to the FSF_LOCAL_MODEL_GENERATE override.
+    input_schema:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 32000
+          description: "The user/operator question or instruction."
+        system:
+          type: string
+          description: "System prompt override. Defaults to a minimal one derived from agent role + genre."
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 8192
+          default: 800
+        task_kind:
+          type: string
+          enum: [classify, generate, safety_check, conversation, tool_use]
+          default: conversation
+          description: "Routes to the model the operator picked for this task_kind via FSF_LOCAL_MODEL_<KIND>."
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+          description: "Provider passthrough; default left to provider."
+    side_effects: read_only
+    archetype_tags: [system_architect, software_engineer, code_reviewer, companion, researcher, investigator, guardian]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
@@ -1471,6 +1519,36 @@ archetypes:
       - memory_recall.v1
       - memory_write.v1
       - memory_disclose.v1
+      - delegate.v1
+
+  # ---- SW-track coding swarm kits ---------------------------------------
+  # The 3 specialists in the coding triune. Architect designs (researcher
+  # genre), Engineer builds (actuator), Reviewer gates (guardian). All
+  # three get llm_think for reasoning, memory_write/recall for the
+  # shared notebook, and delegate for triune-bonded handoff.
+  #
+  # Engineer is the only one with a genre-tier ceiling that admits
+  # heavier tools (actuator → external) — when code_edit.v1 / shell_exec.v1
+  # land in the SW.7+ tranche, they go in Engineer's kit only.
+  system_architect:
+    standard_tools:
+      - llm_think.v1
+      - memory_write.v1
+      - memory_recall.v1
+      - delegate.v1
+
+  software_engineer:
+    standard_tools:
+      - llm_think.v1
+      - memory_write.v1
+      - memory_recall.v1
+      - delegate.v1
+
+  code_reviewer:
+    standard_tools:
+      - llm_think.v1
+      - memory_write.v1
+      - memory_recall.v1
       - delegate.v1
 
 # Per-genre fallback kits (ADR-0021 T4). Used by the kit resolver as
