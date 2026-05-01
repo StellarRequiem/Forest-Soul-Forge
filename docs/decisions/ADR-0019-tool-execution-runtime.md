@@ -1,6 +1,6 @@
 # ADR-0019 — Tool execution runtime
 
-- **Status:** Proposed
+- **Status:** Accepted (promoted 2026-04-30 — Phase A audit §A-2; see docs/audits/2026-04-30-comprehensive-repo-audit.md). Tool execution runtime — T1–T6 implemented, R3 governance pipeline shipped 2026-04-30.
 - **Date:** 2026-04-26
 - **Supersedes:** —
 - **Related:** ADR-0004 (constitution builder — the rulebook the runtime enforces), ADR-0005 (audit chain — the runtime emits per-call entries here), ADR-0006 (artifact-authoritative storage), ADR-0007 (FastAPI daemon — the host process), ADR-0008 (local-first model provider — the runtime fans tool calls through the active provider's tool-use loop), ADR-0017 (voice renderer — adjacent runtime concern, same provider machinery), ADR-0018 (tool catalog — the source of truth for what's invokable), ADR-0021 (role genres — the runtime checks genre's provider_constraint at call time), ADR-0022 (memory subsystem — runtime writes to it), ADR-0023 (benchmark suite — runtime is what gets benchmarked).

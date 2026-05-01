@@ -14,13 +14,27 @@ from forest_soul_forge.core.memory import (
     UnknownScopeError,
 )
 from forest_soul_forge.registry import Registry
+from tests.unit.conftest import seed_stub_agent
+
+
+# Instance ids used across the test cases below. Seeded into the
+# ``agents`` table by the fixture so FK constraints on
+# ``memory_entries.instance_id`` are satisfied. Phase A audit
+# (2026-04-30) traced ~13 failures here to missing seeding.
+_KNOWN_AGENT_IDS = ("i1", "i2", "A", "B", "C", "D")
 
 
 @pytest.fixture
 def memory(tmp_path):
-    """A Memory bound to a fresh in-test registry."""
+    """A Memory bound to a fresh in-test registry.
+
+    Seeds 6 stub agent rows the test cases reference. Tests don't
+    need to call ``seed_stub_agent`` themselves.
+    """
     db = tmp_path / "reg.sqlite"
     reg = Registry.bootstrap(db)
+    for aid in _KNOWN_AGENT_IDS:
+        seed_stub_agent(reg, aid)
     yield Memory(conn=reg._conn)  # noqa: SLF001 — test peeks at internals
     reg.close()
 

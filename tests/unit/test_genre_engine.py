@@ -74,13 +74,16 @@ class TestRealCatalog:
         assert engine.version == "0.1"
         assert engine.source_path == REAL_GENRES
 
-    def test_has_ten_genres(self):
-        # ADR-0021 shipped 7; ADR-0033 added the security_low/mid/high family.
+    def test_has_thirteen_genres(self):
+        # ADR-0021 shipped 7; ADR-0033 added the security_low/mid/high
+        # family (10 total); ADR-003X added the web_observer/researcher/
+        # actuator family (13 total).
         engine = load_genres(REAL_GENRES)
         assert set(engine.genres.keys()) == {
             "observer", "investigator", "communicator", "actuator",
             "guardian", "researcher", "companion",
             "security_low", "security_mid", "security_high",
+            "web_observer", "web_researcher", "web_actuator",
         }
 
     def test_existing_trait_engine_roles_claimed(self):
@@ -249,9 +252,9 @@ class TestPublicAPI:
         with pytest.raises(GenreEngineError, match="unknown genre"):
             engine.roles_for("phantom")
 
-    def test_all_genres_returns_ten(self, engine):
-        # 7 from ADR-0021 + 3 from ADR-0033.
-        assert len(engine.all_genres()) == 10
+    def test_all_genres_returns_thirteen(self, engine):
+        # 7 from ADR-0021 + 3 from ADR-0033 + 3 from ADR-003X.
+        assert len(engine.all_genres()) == 13
 
     def test_can_spawn_unknown_parent_raises(self, engine):
         with pytest.raises(GenreEngineError, match="unknown parent genre"):
@@ -433,8 +436,15 @@ class TestSecuritySwarm:
         # ADR-0033: low tier is observation/audit only, never actuating.
         assert engine.genres["security_low"].risk_profile.max_side_effects == "read_only"
 
-    def test_mid_max_side_effects_is_network(self, engine):
-        assert engine.genres["security_mid"].risk_profile.max_side_effects == "network"
+    def test_mid_max_side_effects_is_external(self, engine):
+        # ADR-0033 §4 puts isolate_process.v1 (external side-effect) in
+        # the mid tier; runtime gating is per-tool requires_human_approval
+        # (tool_policy's external_always rule), not the genre ceiling.
+        # A network-only mid would orphan ResponseRogue's containment
+        # path. See genres.yaml security_mid risk_profile comment.
+        # (Earlier test asserted "network" — that was from a pre-final
+        # draft of the design; YAML is the source of truth.)
+        assert engine.genres["security_mid"].risk_profile.max_side_effects == "external"
 
     def test_high_max_side_effects_is_external(self, engine):
         # High tier has the broadest side-effect ceiling because it includes

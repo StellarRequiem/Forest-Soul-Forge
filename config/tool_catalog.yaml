@@ -28,114 +28,57 @@ version: "0.1"
 
 tools:
   # ----- network_watcher kit ----------------------------------------------
-  packet_query.v1:
-    name: packet_query
-    version: "1"
-    description: |
-      Query the local pcap store for packets matching a BPF filter
-      within a time window. Returns up to `limit` packet records
-      (header + first 256 bytes of payload). Read-only.
-    input_schema:
-      type: object
-      required: [filter, start_ts, end_ts]
-      properties:
-        filter:
-          type: string
-          description: "BPF filter expression (e.g. 'tcp port 443')."
-        start_ts:
-          type: string
-          format: date-time
-          description: "Inclusive lower bound, ISO-8601 UTC."
-        end_ts:
-          type: string
-          format: date-time
-          description: "Exclusive upper bound, ISO-8601 UTC."
-        limit:
-          type: integer
-          minimum: 1
-          maximum: 10000
-          default: 100
-    side_effects: read_only
-    archetype_tags: [network_watcher, anomaly_investigator]
-
-  flow_summary.v1:
-    name: flow_summary
-    version: "1"
-    description: |
-      Summarize netflow records by 5-tuple over a time window. Returns
-      counts, byte totals, and direction breakdown per flow. Read-only.
-    input_schema:
-      type: object
-      required: [start_ts, end_ts]
-      properties:
-        start_ts: { type: string, format: date-time }
-        end_ts: { type: string, format: date-time }
-        src_filter:
-          type: string
-          description: "Optional CIDR or IP — limits to flows originating from."
-        dst_filter:
-          type: string
-          description: "Optional CIDR or IP — limits to flows directed to."
-        top_n:
-          type: integer
-          minimum: 1
-          maximum: 1000
-          default: 50
-    side_effects: read_only
-    archetype_tags: [network_watcher, anomaly_investigator]
-
+  # NOTE: packet_query.v1 and flow_summary.v1 were specced in ADR-0018
+  # but never implemented at v0.1 (catalog vs impl drift caught in the
+  # 2026-04-30 audit, Finding C-1).
+  #   - packet_query.v1    DEFERRED — supersedeed by Phase G's planned
+  #                         tshark_pcap_query.v1 (libpcap-free wrapper
+  #                         around Wireshark's tshark CLI). Removed
+  #                         from catalog + kits.
+  #   - flow_summary.v1    SUBSTITUTED with traffic_flow_local.v1
+  #                         (already implemented). Same conceptual
+  #                         surface — flow records, 5-tuple aggregation.
+  #                         Removed from catalog + kits.
+  # See docs/audits/2026-04-30-c1-zombie-tool-dissection.md for the
+  # per-tool §0 verdict, and ADR-0018 for the tool-catalog contract.
   dns_lookup.v1:
     name: dns_lookup
     version: "1"
     description: |
-      Forward or reverse DNS lookup for a hostname or IP. Issues a real
-      query against the configured resolver. Network side-effect (one
-      UDP request to the resolver, no other reach).
+      Forward or reverse DNS lookup via the OS resolver (stdlib socket).
+      Single A or PTR record only — multi-record-type support
+      (MX, TXT, AAAA, NS, CNAME) deferred to dns_lookup.v2 once we
+      decide whether to take a dnspython dep.
+
+      Implemented 2026-04-30 under C-1 zombie-tool dissection.
+      See docs/audits/2026-04-30-c1-zombie-tool-dissection.md.
     input_schema:
       type: object
-      required: [target]
       properties:
-        target:
+        hostname:
           type: string
-          description: "Hostname (forward) or IP (reverse)."
-        record_types:
-          type: array
-          items:
-            type: string
-            enum: [A, AAAA, MX, TXT, NS, PTR, CNAME]
-          default: [A, AAAA]
+          description: "Hostname to resolve forward (A record). Mutex with ip."
+        ip:
+          type: string
+          description: "IP to resolve reverse (PTR record). Mutex with hostname."
+        timeout:
+          type: integer
+          minimum: 1
+          maximum: 30
+          default: 5
+      oneOf:
+        - {required: [hostname]}
+        - {required: [ip]}
     side_effects: network
     archetype_tags: [network_watcher]
 
   # ----- log_analyst kit --------------------------------------------------
-  log_grep.v1:
-    name: log_grep
-    version: "1"
-    description: |
-      Run a regex match against a configured log store within a time
-      window. Returns matching lines (capped at `limit`) with timestamps
-      and source identifiers. Read-only.
-    input_schema:
-      type: object
-      required: [pattern, start_ts, end_ts]
-      properties:
-        pattern:
-          type: string
-          description: "Python-flavor regex."
-        start_ts: { type: string, format: date-time }
-        end_ts: { type: string, format: date-time }
-        sources:
-          type: array
-          items: { type: string }
-          description: "Optional list of source identifiers (e.g. log group names)."
-        limit:
-          type: integer
-          minimum: 1
-          maximum: 10000
-          default: 500
-    side_effects: read_only
-    archetype_tags: [log_analyst, anomaly_investigator]
-
+  # NOTE: log_grep.v1 was specced in ADR-0018 but never implemented at
+  # v0.1. C-1 dissection (2026-04-30) verdict: SUBSTITUTED with
+  # log_scan.v1 (already implemented at src/.../tools/builtin/log_scan.py,
+  # tested in test_b1_tools.py, ships in security_low log_lurker kit).
+  # Functionally equivalent — regex/pattern scan over file or directory.
+  # Removed from catalog + archetype kits.
   log_aggregate.v1:
     name: log_aggregate
     version: "1"
@@ -190,69 +133,21 @@ tools:
     archetype_tags: [log_analyst, network_watcher, anomaly_investigator]
 
   # ----- anomaly_investigator kit -----------------------------------------
-  baseline_compare.v1:
-    name: baseline_compare
-    version: "1"
-    description: |
-      Compare a metric series in the current window to a historical
-      baseline (configurable lookback period and aggregation). Returns
-      z-score and absolute delta per bucket. Read-only.
-    input_schema:
-      type: object
-      required: [metric, current_start, current_end]
-      properties:
-        metric:
-          type: string
-          description: "Metric identifier (e.g. 'flow_bytes', 'auth_failures')."
-        current_start: { type: string, format: date-time }
-        current_end: { type: string, format: date-time }
-        baseline_lookback_days:
-          type: integer
-          minimum: 1
-          maximum: 90
-          default: 14
-        aggregation:
-          type: string
-          enum: [sum, avg, p50, p95, p99, max]
-          default: sum
-        bucket_seconds:
-          type: integer
-          minimum: 60
-          maximum: 86400
-          default: 300
-    side_effects: read_only
-    archetype_tags: [anomaly_investigator]
-
-  correlation_window.v1:
-    name: correlation_window
-    version: "1"
-    description: |
-      Correlate events across two or more sources within a sliding time
-      window. Returns event-pair clusters where source A and source B
-      activity overlap inside the window. Useful for tying a network
-      anomaly to a corresponding log spike. Read-only.
-    input_schema:
-      type: object
-      required: [sources, start_ts, end_ts]
-      properties:
-        sources:
-          type: array
-          items: { type: string }
-          minItems: 2
-          description: "Two or more source identifiers to correlate."
-        start_ts: { type: string, format: date-time }
-        end_ts: { type: string, format: date-time }
-        window_seconds:
-          type: integer
-          minimum: 1
-          maximum: 3600
-          default: 60
-        min_overlap_count:
-          type: integer
-          minimum: 1
-          default: 2
-    side_effects: read_only
-    archetype_tags: [anomaly_investigator]
+  # NOTE: baseline_compare.v1 and correlation_window.v1 were specced
+  # in ADR-0018 but never implemented at v0.1. C-1 dissection
+  # (2026-04-30) verdicts:
+  #   - baseline_compare.v1   SUBSTITUTED with the pair behavioral_baseline.v1
+  #                            + anomaly_score.v1 (already implemented).
+  #                            Together they cover the same surface
+  #                            (summary stats over event stream + z-score
+  #                            deviation) with cleaner separation of
+  #                            concerns. Removed from catalog + kits.
+  #   - correlation_window.v1 SUBSTITUTED with log_correlate.v1 (already
+  #                            implemented in security_mid swarm kits,
+  #                            tested in test_b2_tools.py). Identical
+  #                            conceptual surface — temporal cross-source
+  #                            joins. Removed from catalog + kits.
+  # See docs/audits/2026-04-30-c1-zombie-tool-dissection.md.
 
   # ----- memory subsystem (ADR-0022 v0.1+v0.2) ----------------------------
   memory_recall.v1:
@@ -1491,23 +1386,42 @@ tools:
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
 archetypes:
+  # ---- Original 5 archetype kits (post C-1 dissection 2026-04-30) -------
+  # The 6 zombie tools that lived in these kits at v0.1 were either
+  # newly implemented (dns_lookup.v1) or substituted with existing
+  # equivalent v0.2 tools. See docs/audits/2026-04-30-c1-zombie-tool-
+  # dissection.md for per-tool §0 verdicts.
   network_watcher:
+    # network_watcher is in genre observer (max_side_effects=read_only).
+    # dns_lookup.v1 is a network side-effect tool; keeping it in the
+    # standard kit would trip the genre kit-tier ceiling at birth time.
+    # The original kit had this latent bug — it never tripped because
+    # dns_lookup wasn't implemented (dispatcher refused with
+    # unknown_tool before the kit-tier check fired). Now that
+    # dns_lookup exists, we leave it OUT of the standard kit and
+    # operators who genuinely want network_watcher to do DNS lookups
+    # either:
+    #   (a) birth with tools_add: [{name: dns_lookup, version: 1}], or
+    #   (b) use the investigator-genre roles (anomaly_investigator),
+    #       which already get dns_lookup-equivalent capability.
     standard_tools:
-      - packet_query.v1
-      - flow_summary.v1
-      - dns_lookup.v1
+      # packet_query.v1 deferred to Phase G tshark_pcap_query.v1
+      # dns_lookup.v1 NOT included — see comment above (genre ceiling)
+      - traffic_flow_local.v1   # was flow_summary.v1; read_only — fits observer
       - timestamp_window.v1
   log_analyst:
     standard_tools:
-      - log_grep.v1
+      - log_scan.v1              # was log_grep.v1
       - log_aggregate.v1
       - timestamp_window.v1
   anomaly_investigator:
     standard_tools:
-      - packet_query.v1
-      - log_grep.v1
-      - baseline_compare.v1
-      - correlation_window.v1
+      # packet_query.v1 deferred to Phase G tshark_pcap_query.v1
+      - traffic_flow_local.v1    # was flow_summary.v1 (shared with network_watcher)
+      - log_scan.v1              # was log_grep.v1
+      - behavioral_baseline.v1   # half of was baseline_compare.v1
+      - anomaly_score.v1         # half of was baseline_compare.v1
+      - log_correlate.v1         # was correlation_window.v1
       - timestamp_window.v1
 
   # ---- ADR-0033 Phase D — Security Swarm role kits (9) -------------------
@@ -1665,14 +1579,20 @@ archetypes:
 # above; the loader rejects unknowns at startup.
 genre_default_tools:
   observer:
-    - packet_query.v1
-    - flow_summary.v1
+    # post C-1 dissection 2026-04-30: packet_query → deferred (Phase G);
+    # flow_summary → traffic_flow_local
+    - traffic_flow_local.v1
     - timestamp_window.v1
   investigator:
-    - packet_query.v1
-    - log_grep.v1
-    - baseline_compare.v1
-    - correlation_window.v1
+    # post C-1 dissection 2026-04-30:
+    # - packet_query     → deferred (Phase G tshark_pcap_query.v1)
+    # - log_grep         → log_scan.v1
+    # - baseline_compare → behavioral_baseline.v1 + anomaly_score.v1
+    # - correlation_window → log_correlate.v1
+    - log_scan.v1
+    - behavioral_baseline.v1
+    - anomaly_score.v1
+    - log_correlate.v1
     - timestamp_window.v1
   communicator:
     - timestamp_window.v1

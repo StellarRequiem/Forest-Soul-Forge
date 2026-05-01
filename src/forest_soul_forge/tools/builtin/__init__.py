@@ -14,6 +14,7 @@ from forest_soul_forge.tools.builtin.behavioral_baseline import BehavioralBaseli
 from forest_soul_forge.tools.builtin.canary_token import CanaryTokenTool
 from forest_soul_forge.tools.builtin.continuous_verify import ContinuousVerifyTool
 from forest_soul_forge.tools.builtin.delegate import DelegateTool
+from forest_soul_forge.tools.builtin.dns_lookup import DnsLookupTool
 from forest_soul_forge.tools.builtin.dynamic_policy import DynamicPolicyTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
@@ -90,6 +91,7 @@ __all__ = [
     "CodeReadTool",
     "CodeEditTool",
     "ShellExecTool",
+    "DnsLookupTool",
 ]
 
 
@@ -105,6 +107,11 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     registry.register(MemoryWriteTool())
     registry.register(MemoryDiscloseTool())
     registry.register(DelegateTool())
+    # ADR-0018 archetype kits — DNS resolution. Implemented 2026-04-30
+    # under C-1 zombie-tool dissection (was specced in ADR-0018 but
+    # never landed; verdict: IMPLEMENT — foundational primitive, no
+    # substitute, network_watcher kit needs it).
+    registry.register(DnsLookupTool())
     # ADR-0033 Phase B1 — security_low pure-python tools.
     registry.register(AuditChainVerifyTool())
     registry.register(FileIntegrityTool())

@@ -369,10 +369,15 @@ def test_write_then_recall_loop(memory_smoke_env):
             providers={"local": provider, "frontier": provider},
             default="local",
         )
-        # Birth a researcher (writable scope ceiling > companion).
+        # Birth a system_architect (researcher-genre, ships memory_write +
+        # memory_recall in its standard kit per ADR-0034 SW-track).
+        # Earlier this used anomaly_investigator but that role's kit
+        # doesn't include memory tools — the test always failed with
+        # "memory_write.v1 ref ... not in constitution". Fixed under
+        # the 2026-04-30 C-1 dissection follow-on.
         resp = client.post("/birth", json={
             "profile": {
-                "role": "anomaly_investigator",
+                "role": "system_architect",
                 "trait_values": {},
                 "domain_weight_overrides": {},
             },

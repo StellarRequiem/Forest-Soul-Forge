@@ -178,14 +178,11 @@ class TestMockHelperOutcomes:
 # ===========================================================================
 class TestParseReadProtected:
     def test_well_formed_output(self):
-        digest, size, path = PrivClient.parse_read_protected_output(
-            "sha256:abc123  1024  /System/Library/CoreServices/file\n"
-        )
-        # parse_read_protected splits on a single space — the helper
-        # uses single spaces, the test uses double to verify the
-        # split tolerates whitespace stripping correctly.
-        # Actually the helper emits single spaces; the doubles here
-        # would break the split. Use single spaces.
+        # The helper emits single-space-separated fields. The parser
+        # uses ``split(" ", 2)`` which would NOT tolerate multi-space
+        # separators (an earlier draft of this test had a doubled-space
+        # variant; it was wrong because split-on-single-space produces
+        # an empty middle field on doubled input. Single spaces only.)
         digest, size, path = PrivClient.parse_read_protected_output(
             "sha256:abc123 1024 /System/Library/CoreServices/file\n"
         )
@@ -202,8 +199,11 @@ class TestParseReadProtected:
         assert path == "/Library/Apple/some path/bin"
 
     def test_malformed_output_raises(self):
+        # Truly malformed = wrong field count. ``split(" ", 2)`` returns
+        # at most 3 elements, so anything with fewer than 3 spaces
+        # (i.e. fewer than 3 parts) trips the length check.
         with pytest.raises(PrivClientError, match="malformed"):
-            PrivClient.parse_read_protected_output("just one field")
+            PrivClient.parse_read_protected_output("only-two fields")
 
     def test_bad_digest_format_raises(self):
         with pytest.raises(PrivClientError, match="digest"):

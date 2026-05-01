@@ -264,7 +264,14 @@ class Memory:
         sql = (
             "SELECT * FROM memory_entries WHERE "
             + " AND ".join(clauses)
-            + " ORDER BY created_at DESC LIMIT ?;"
+            # ORDER BY created_at DESC, rowid DESC — the rowid
+            # tiebreaker makes "newest first" airtight. ISO-8601
+            # timestamps from _now_iso() collide when two entries are
+            # appended in the same microsecond (multi-agent skills,
+            # rapid-fire writes); without the tiebreaker SQLite returns
+            # ties in undefined order which in practice means oldest-
+            # first, silently inverting the documented contract.
+            + " ORDER BY created_at DESC, rowid DESC LIMIT ?;"
         )
         params.append(int(limit))
         rows = self.conn.execute(sql, params).fetchall()
@@ -391,7 +398,14 @@ class Memory:
         sql = (
             "SELECT * FROM memory_entries WHERE "
             + " AND ".join(clauses)
-            + " ORDER BY created_at DESC LIMIT ?;"
+            # ORDER BY created_at DESC, rowid DESC — the rowid
+            # tiebreaker makes "newest first" airtight. ISO-8601
+            # timestamps from _now_iso() collide when two entries are
+            # appended in the same microsecond (multi-agent skills,
+            # rapid-fire writes); without the tiebreaker SQLite returns
+            # ties in undefined order which in practice means oldest-
+            # first, silently inverting the documented contract.
+            + " ORDER BY created_at DESC, rowid DESC LIMIT ?;"
         )
         params.append(int(limit))
         rows = self.conn.execute(sql, params).fetchall()

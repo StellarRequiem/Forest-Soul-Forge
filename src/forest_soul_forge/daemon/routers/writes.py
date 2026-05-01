@@ -100,6 +100,25 @@ from forest_soul_forge.soul.voice_renderer import (
     update_soul_voice,
 )
 
+# Phase C.2 (2026-04-30) extraction — the truly pure helpers (string/path
+# math, hashing, adapters, filesystem, time) moved to birth_pipeline.py
+# so they're unit-testable in isolation. Import-as-alias keeps every
+# call site below byte-stable; the underscore convention marks them as
+# module-internal so external callers continue to use the routes, not
+# the helpers.
+from forest_soul_forge.daemon.routers.birth_pipeline import (
+    chain_entry_to_parsed as _chain_entry_to_parsed,
+    derive_constitution_hash as _derive_constitution_hash,
+    idempotency_now as _idempotency_now,
+    instance_id_for as _instance_id_for,
+    rollback_artifacts as _rollback_artifacts,
+    safe_agent_name as _safe_agent_name,
+    soul_path_for as _soul_path_for,
+    to_agent_out as _to_agent_out,
+    voice_event_fields as _voice_event_fields,
+    write_artifacts as _write_artifacts,
+)
+
 
 router = APIRouter(
     tags=["writes"],
@@ -113,31 +132,16 @@ router = APIRouter(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _safe_agent_name(name: str) -> str:
-    """Filename-safe rendering of the agent name.
-
-    Whitelist-only: letters, digits, hyphen, underscore. Everything else
-    becomes underscore. Keeps filenames portable across OSes and prevents
-    a malicious agent name from being a traversal vector.
-    """
-    out: list[str] = []
-    for ch in name:
-        if ch.isalnum() or ch in ("-", "_"):
-            out.append(ch)
-        else:
-            out.append("_")
-    return "".join(out) or "agent"
-
-
-def _instance_id_for(role: str, dna_short_hex: str, sibling_index: int) -> str:
-    """Build the canonical instance_id.
-
-    First sibling (the common case) gets the clean ``role_dna`` form. Twins
-    and beyond append ``_N`` so the ID is unique and the suffix only
-    appears when it's load-bearing.
-    """
-    base = f"{role}_{dna_short_hex}"
-    return base if sibling_index <= 1 else f"{base}_{sibling_index}"
+# The truly pure helpers (string/path math, hashing, adapters,
+# filesystem, time) moved to birth_pipeline.py during the 2026-04-30
+# Phase C.2 decomposition; imported as underscore aliases above so
+# every call site below this comment is byte-stable.
+#
+# What stayed: the HTTPException-raising helpers below (_build_trait_profile,
+# _parent_lineage_from_registry, _resolve_*, _enforce_genre_kit_tier,
+# _maybe_replay_cached, _cache_response, _maybe_render_voice). Each
+# couples to FastAPI by raising HTTPException, so they belong with the
+# routes for now. Future tranches can decide whether to extract them.
 
 
 def _build_trait_profile(engine: TraitEngine, payload: TraitProfileIn):
@@ -160,35 +164,6 @@ def _build_trait_profile(engine: TraitEngine, payload: TraitProfileIn):
         raise HTTPException(status_code=400, detail=f"invalid profile: {e}") from e
 
 
-def _derive_constitution_hash(
-    derived_hash: str, constitution_override: str | None
-) -> str:
-    """Fold an optional override YAML into the constitution hash.
-
-    Path D: when the caller supplies ``constitution_override``, we bind
-    its bytes to the agent's constitution hash so tampering with the
-    override invalidates verification. When absent, the derived hash is
-    used untouched — behavior is identical to the no-override case.
-    """
-    if not constitution_override:
-        return derived_hash
-    h = hashlib.sha256()
-    h.update(derived_hash.encode("utf-8"))
-    h.update(b"\noverride:\n")
-    h.update(constitution_override.encode("utf-8"))
-    return h.hexdigest()
-
-
-def _soul_path_for(
-    out_dir: Path, agent_name: str, instance_id: str
-) -> tuple[Path, Path]:
-    """Return (soul_path, constitution_path) under the output dir."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    safe = _safe_agent_name(agent_name)
-    base = f"{safe}__{instance_id}"
-    return out_dir / f"{base}.soul.md", out_dir / f"{base}.constitution.yaml"
-
-
 def _parent_lineage_from_registry(registry: Registry, parent_instance_id: str):
     """Reconstruct the parent's :class:`Lineage` from the registry.
 
@@ -206,38 +181,6 @@ def _parent_lineage_from_registry(registry: Registry, parent_instance_id: str):
     root_first = list(reversed(ancestors_rows))
     parent_lineage_ancestors = tuple(r.dna for r in root_first)
     return parent_row, parent_lineage_ancestors
-
-
-def _to_agent_out(row) -> AgentOut:
-    return AgentOut(**asdict(row))
-
-
-def _write_artifacts(
-    soul_path: Path, soul_md: str, constitution_path: Path, constitution_yaml: str
-) -> None:
-    """Write the paired artifacts.
-
-    Writing constitution first so a crash between the two leaves a
-    dangling constitution instead of a soul that points at nothing —
-    easier to detect and clean up.
-    """
-    constitution_path.write_text(constitution_yaml, encoding="utf-8")
-    soul_path.write_text(soul_md, encoding="utf-8")
-
-
-def _rollback_artifacts(soul_path: Path, constitution_path: Path) -> None:
-    """Best-effort cleanup when the audit append fails."""
-    for p in (soul_path, constitution_path):
-        try:
-            if p.exists():
-                p.unlink()
-        except OSError:
-            pass
-
-
-def _idempotency_now() -> str:
-    """ISO-8601 UTC timestamp for the idempotency-cache row."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _maybe_replay_cached(
@@ -459,39 +402,6 @@ def _maybe_render_voice(
             genre_name=genre_name,
             genre_trait_emphasis=genre_trait_emphasis,
         )
-    )
-
-
-def _voice_event_fields(voice: VoiceText | None) -> dict:
-    """Optional narrative_* fields for audit event_data.
-
-    Returns an empty dict when voice is None so callers can ``**spread``
-    into the event payload without conditionals.
-    """
-    if voice is None:
-        return {}
-    return {
-        "narrative_provider": voice.provider,
-        "narrative_model": voice.model,
-        "narrative_generated_at": voice.generated_at,
-    }
-
-
-def _chain_entry_to_parsed(entry: ChainEntry) -> ParsedAuditEntry:
-    """Lift a :class:`ChainEntry` into a :class:`ParsedAuditEntry`.
-
-    The registry's ``register_birth`` signature takes the parsed form
-    (that's what the rebuild path also produces), so we translate once
-    here rather than teach the registry two shapes.
-    """
-    return ParsedAuditEntry(
-        seq=entry.seq,
-        timestamp=entry.timestamp,
-        prev_hash=entry.prev_hash,
-        entry_hash=entry.entry_hash,
-        agent_dna=entry.agent_dna,
-        event_type=entry.event_type,
-        event_data=dict(entry.event_data),
     )
 
 

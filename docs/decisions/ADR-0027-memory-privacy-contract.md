@@ -1,6 +1,6 @@
 # ADR-0027 — Memory privacy contract (information flow control)
 
-- **Status:** Proposed
+- **Status:** Accepted (promoted 2026-04-30 — Phase A audit §A-2; see docs/audits/2026-04-30-comprehensive-repo-audit.md). Memory privacy contract — T14–T17 shipped with ADR-0033 A2.
 - **Date:** 2026-04-27 (promoted from Placeholder)
 - **Related:** ADR-0022 (memory subsystem — the substrate this contract governs), ADR-0021 (role genres — Companion's privacy posture is the strict ceiling), ADR-0024 (project horizons — social anchoring in H3 needs this contract first), ADR-0025 (threat model v2 — what an attacker can see), ADR-0029 (regulatory map — GDPR / COPPA constraints feed in here).
 

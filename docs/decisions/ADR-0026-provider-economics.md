@@ -1,6 +1,8 @@
 # ADR-0026 — Provider economics (frontier LLM cost model)
 
-- **Status:** Placeholder
+- **Status:** Placeholder — Deferred to v0.3+ (Phase A audit 2026-04-30 §A-1).
+
+**Deferral rationale:** Provider economics — frontier LLM cost model. Deferred to v0.3+: v0.1 + v0.2 are local-first; frontier providers are opt-in via FSF_FRONTIER_ENABLED but cost tracking is not yet operator-facing. v0.3 plan: per-agent token spend rollups + budget alerts (see ADR-0037 Observability candidate in the v0.2-to-v1.0 roadmap §7).
 - **Date:** 2026-04-27
 - **Triggers when:** Before marketplace cut math is finalized; before frontier provider becomes a billed product surface.
 - **Related:** ADR-0008 (local-first model provider — the architecture this builds on), ADR-0019 T4 (per-call accounting — the metering infrastructure), ADR-0024 (horizons).

@@ -1,6 +1,6 @@
 # ADR-0030 — Tool Forge
 
-- **Status:** Proposed
+- **Status:** Accepted (promoted 2026-04-30 — Phase A audit §A-2; see docs/audits/2026-04-30-comprehensive-repo-audit.md). Tool Forge — T1 (propose) + T2 (static analysis) + T3 (sandbox) + T4 (install) shipped.
 - **Date:** 2026-04-27
 - **Supersedes:** Subsumes the "Skill Forge" sketch in [docs/notes/skill-and-tool-trees.md](../notes/skill-and-tool-trees.md). That note conflated tool authoring (this ADR) with skill authoring (ADR-0031); the two are distinct layers and get separate ADRs.
 - **Related:** ADR-0018 (tool catalog — Tool Forge produces entries here), ADR-0019 (tool execution runtime — Forged tools must satisfy the Tool Protocol), ADR-0021 (genres — Forged tools inherit side-effects classification rules), ADR-0024 (horizons — Tool Forge is the H1 "wow" feature), ADR-0031 (Skill Forge — composes tools that this ADR creates).

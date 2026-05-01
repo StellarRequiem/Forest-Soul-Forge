@@ -1,6 +1,8 @@
 # ADR-0028 — Data portability spec (export / leave guarantee)
 
-- **Status:** Placeholder
+- **Status:** Placeholder — Deferred to v0.3+ (Phase A audit 2026-04-30 §A-1).
+
+**Deferral rationale:** Data portability — export / leave guarantee. Deferred to v0.3+: v0.1 stores everything locally on the operator's disk in plain files (soul.md / constitution.yaml / audit_chain.jsonl). "Export" is `tar -czf` of the data dir today. v0.3 formalizes the portability format + adds a structured export endpoint.
 - **Date:** 2026-04-27
 - **Triggers when:** Before the v0.1 public release; before any feature stores user data outside the local artifact tree.
 - **Related:** ADR-0006 (artifacts as canonical storage — this ADR formalizes the user-facing contract built on top), ADR-0024 (horizons), ADR-0027 (memory privacy — deletion semantics interact).

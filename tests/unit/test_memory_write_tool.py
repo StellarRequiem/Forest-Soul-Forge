@@ -9,6 +9,7 @@ from forest_soul_forge.core.memory import Memory
 from forest_soul_forge.registry import Registry
 from forest_soul_forge.tools.base import ToolContext, ToolValidationError
 from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
+from tests.unit.conftest import seed_stub_agent
 
 
 def _run(coro):
@@ -18,6 +19,7 @@ def _run(coro):
 @pytest.fixture
 def env(tmp_path):
     reg = Registry.bootstrap(tmp_path / "reg.sqlite")
+    seed_stub_agent(reg, "agent_a")  # Phase A FK-seeding
     memory = Memory(conn=reg._conn)  # noqa: SLF001
     ctx = ToolContext(
         instance_id="agent_a", agent_dna="d" * 12,

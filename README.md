@@ -27,16 +27,18 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 
 | | |
 |---:|:---|
-| **Source LoC (Python)** | ~44,000 across `src/` |
-| **Tests (lines)** | ~7,800 across 45 unit suites + 1 integration |
-| **ADRs filed** | 26 (`ADR-0001` → `ADR-0033`) |
-| **Built-in tools registered** | **36** (31 base + web_fetch + browser_action + memory_verify + mcp_call + suggest_agent) |
+| **Source LoC (Python)** | ~36,400 across `src/` |
+| **Tests (lines)** | ~16,100 across unit + integration suites |
+| **ADRs filed** | **30** (`ADR-0001` → `ADR-0034` + `ADR-003X` open-web + `ADR-003Y` conversation runtime) |
+| **Built-in tools registered** | **40** (per `register_builtins()` — 9 swarm tier + 8 swarm tier + 8 swarm tier + 7 originals + 5 SW-track/ADR-003X + 3 memory + delegate + llm_think). YAML catalog declares 46; the 6-entry gap is tracked in audit doc 2026-04-30 as Finding C-1. |
 | **Genres** | **13** (7 original + 3 security tiers + 3 web tiers) |
-| **Trait roles** | **14** (5 original + 9 swarm) |
-| **Skill manifests shipped** | **24** chain + supporting + triune (`examples/skills/`) |
-| **Audit event types** | 30+ (lifecycle, dispatch, memory, delegation, swarm) |
-| **Frontend modules (vanilla JS)** | 18 (`frontend/js/`) |
-| **Operator `.command` scripts** | 19 (start/stop/reset/start-demo/load-scenario/dist-build + 13 ops) |
+| **Trait roles** | **17** (5 original + 9 swarm + 3 SW-track: system_architect / software_engineer / code_reviewer) |
+| **Skill manifests shipped** | **26** chain + supporting + triune (`examples/skills/`) |
+| **Audit event types** | **52** (lifecycle, dispatch, memory, delegation, swarm, forge, conversation, ambient, summarization) |
+| **Registry schema version** | **v10** (adds conversations + conversation_participants + conversation_turns) |
+| **Frontend modules (vanilla JS)** | **22** (`frontend/js/`) |
+| **Frontend tabs** | **8** (Forge / Agents / Approvals / Skills / Tools / Memory / Audit / **Chat**) |
+| **Operator `.command` scripts** | **37** (start/stop/reset + demo + scenario + dist + live-test trio + ops) |
 | **Demo scenarios** | 2 (synthetic-incident + fresh-forge, with presenter scripts) |
 | **Isolated demo dir** | `demo/` (start-demo.command points here; prod state untouched) |
 | **Distribution** | `dist/build.command` → `forest-soul-forge-<sha>-<date>.zip` |
@@ -62,9 +64,9 @@ Same sliders feed three things deterministically:
 - The agent's **constitution** — machine-readable rulebook with strictness-wins conflict resolution.
 - The agent's **soul.md voice** — LLM-rendered narrative weighted by your genre's signature traits.
 
-### 🎭 Ten genres
+### 🎭 Thirteen genres
 
-Seven shipped with ADR-0021; three more (`security_low / mid / high`) added with ADR-0033 for the defensive plane. Each carries its own trait emphasis, spawn-compatibility table, risk floor, memory ceiling, and approval policy.
+Seven shipped with ADR-0021; three more (`security_low / mid / high`) added with ADR-0033 for the defensive plane; three more (`web_observer / web_researcher / web_actuator`) added with ADR-003X for the open-web plane. Each carries its own trait emphasis, spawn-compatibility table, risk floor, memory ceiling, and approval policy.
 
 | Genre | Vibe | Risk floor | Memory ceiling |
 |---|---|---|---|
@@ -78,8 +80,23 @@ Seven shipped with ADR-0021; three more (`security_low / mid / high`) added with
 | **security_low** | Always-on patrol — patches, gatekeepers, log lurkers | read_only | lineage |
 | **security_mid** | Anomaly, NDR, SOAR-style triage | external | lineage |
 | **security_high** | Paranoid apex — zero-trust, vault, deception | external + local-only | private |
+| **web_observer** | Read-only open-web reach — `web_fetch.v1` only | network | lineage |
+| **web_researcher** | Investigates with `web_fetch` + allowlisted MCP | network | consented |
+| **web_actuator** | Headed actions via `browser_action.v1`; gated | external | lineage |
 
 Spawning across an incompatible genre boundary requires `--override-genre-spawn-rule` and emits a dedicated `spawn_genre_override` audit event.
+
+### 🛠️ Seventeen trait roles — including the SW-track triune
+
+The role catalog spans 17 templates: 5 original (network_watcher / log_analyst / anomaly_investigator / incident_communicator / operator_companion), 9 Security Swarm (low/mid/high tiers, ADR-0033), and **3 SW-track** added with [ADR-0034](docs/decisions/ADR-0034-software-engineering-track.md):
+
+| SW-track role | Genre claim | What it does |
+|---|---|---|
+| **system_architect** | researcher | reads code, files ADRs, doesn't touch source |
+| **software_engineer** | actuator | writes code; filesystem + shell side-effects gated |
+| **code_reviewer** | guardian | second-opinion / refusal arbiter on engineer output |
+
+The SW-track is the Triune that just filed its own ADR-0034 in a meta-demonstration of the runtime — engineering agents proposed, debated, and committed the very ADR that defines them.
 
 ### 🛠️ Tool runtime + approval queue
 
@@ -173,7 +190,7 @@ Append-only JSONL at `data/audit_chain.jsonl`. Every birth, spawn, archive, voic
 
 ### 🖥️ The Forge UI
 
-Vanilla JS on nginx. No build step, no framework lock-in. **Seven tabs:**
+Vanilla JS on nginx. No build step, no framework lock-in. **Eight tabs:**
 
 | Tab | What it shows |
 |---|---|
@@ -184,6 +201,21 @@ Vanilla JS on nginx. No build step, no framework lock-in. **Seven tabs:**
 | **Tools** | Registered tools (built-in / plugin / unknown), with reload-from-disk button |
 | **Memory** | Per-agent entries by mode, consent grants, disclosed copies with left-border accent |
 | **Audit** | Tail of the chain, filterable by agent |
+| **Chat** | Multi-agent conversation rooms (ADR-003Y): @mention chains, cross-domain bridge, ambient nudges, retention sweeps |
+
+### 💬 Conversation runtime — ADR-003Y
+
+A dedicated room substrate sits beside the dispatch path. Operators birth a room, add agent participants, and turn-take in plain text. Resolution order on each operator turn:
+1. Explicit `addressed_to` — only those agents respond, in order given
+2. `@AgentName` mentions in the body — matched to participants, deduped, mention-order
+3. **Y3.5 keyword-rank fallback** — body tokens are matched against each participant's `(agent_name + role)` and the highest-overlap participant takes the turn (BM25-lite over the 1-10 participants in the room)
+4. First participant if everything ties
+
+After an agent responds, its body is parsed for new `@mentions`; those become the next addressees. `max_chain_depth` (default 4) caps runaway chains. Self-mention is filtered (no DoS-via-self-pass).
+
+Cross-domain **bridge** invites an agent from another forge into a local room. **Ambient mode** lets an agent surface one concise contribution per nudge (gated by `interaction_modes.ambient_opt_in` in the constitution + a per-rate quota: 1/3/10 per agent per conversation per day). **Retention sweep** lazy-summarizes old turn bodies and purges the original body, keeping only `body_hash` (SHA-256) for tamper-evidence.
+
+All eight conversation event types feed the audit chain: `conversation_created`, `conversation_participant_added`, `conversation_participant_removed`, `conversation_turn_appended`, `conversation_bridged`, `ambient_nudge`, `conversation_summarized`, `conversation_status_changed`.
 
 ---
 
@@ -201,6 +233,8 @@ The Phase E synthetic-incident smoke ran on `2026-04-28` against the live stack.
 - ✅ **Cross-agent chain proven**: `LogLurker → AnomalyAce → ResponseRogue → VaultWarden`, four levels of `delegate.v1` nesting, **47 ordered audit events** (4 `skill_invoked` + 12 `tool_call_dispatched` + 12 `tool_call_succeeded` + 4 `skill_completed` + 3 `agent_delegated` + 12 `skill_step_started/completed` pairs)
 
 The audit doc at [`docs/audits/2026-04-28-phase-d-e-review.md`](docs/audits/2026-04-28-phase-d-e-review.md) captures the six findings that surfaced live (and were fixed in this round) — chiefly the skill engine's structured-arg stringification, a non-reentrant write_lock that deadlocked nested delegations, and a delegator/install-script path mismatch. ADR-0033 promoted from Proposed → **Accepted** as a result.
+
+The follow-up audit at [`docs/audits/2026-04-30-end-of-session-stack-review.md`](docs/audits/2026-04-30-end-of-session-stack-review.md) captures the Y-track + SW-track + R3 push that landed `v0.1.0`: 3-of-4 god-objects closed (dispatcher refactored via R3 governance_pipeline), all 7 ADR-003Y phases shipped, ADR-0034 SW-track filed by the agents themselves.
 
 ---
 
@@ -328,7 +362,7 @@ Read [`docs/runbooks/security-swarm-bringup.md`](docs/runbooks/security-swarm-br
          └────────────────┴───────┬──────┴────────────────┘
                                   ▼
                      ┌───────────────────────────┐
-                     │ SQLite registry v7        │
+                     │ SQLite registry v10       │
                      │ (rebuildable from chain)  │
                      └────────────┬──────────────┘
                                   ▼
@@ -374,7 +408,9 @@ Every non-trivial design choice has its own ADR. Files live in [`docs/decisions/
 | 0031 | Skill Forge (T1, T2a/T2b, T5, T7, T8 implemented)       | Proposed |
 | 0032 | CLI architecture                                        | Proposed |
 | 0033 | **Security Swarm** (Phases A–E1 shipped + chain proven live 2026-04-28) | **Accepted** |
+| 0034 | **SW-track triune** (system_architect / software_engineer / code_reviewer + meta-demo: agents filed this very ADR) | Proposed |
 | 003X | **Open-Web Tool Family** (web_fetch + browser_action + mcp_call + secrets + suggest_agent + 3 web genres) | Proposed |
+| 003Y | **Conversation runtime** (Y1–Y7 shipped: rooms, @mention chains, bridge, ambient, lazy summarization) | Proposed |
 
 Don't trust the doc — trust the code. Every Accepted ADR has a corresponding implementation; every Proposed ADR is in flight or queued.
 
@@ -434,8 +470,23 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 - Operator runbook: `docs/runbooks/security-swarm-bringup.md`
 
 ### Frontend
-- 7 tabs (Forge / Agents / Approvals / Skills / Tools / Memory / Audit)
+- **8 tabs** (Forge / Agents / Approvals / Skills / Tools / Memory / Audit / **Chat**)
 - Live-preview radar chart, character-sheet view, plugin reload, consent grants
+- Chat tab: room list, participant chips with ⚡ ambient nudge, +bridge dialog, sweep dialog (dry-run preview before run)
+
+### Conversation runtime (ADR-003Y, Y1 → Y7)
+- Schema v10 — 3 new tables (conversations / participants / turns) + 8 new audit event types
+- Y1 CRUD endpoints + Y2 single-agent auto-respond + Y3 multi-agent @mention chain (max_chain_depth 4)
+- Y3.5 keyword-rank fallback (BM25-lite) when no addressing/mention hits
+- Y4 cross-domain `POST /bridge` invitations
+- Y5 ambient `POST /ambient/nudge` with constitution opt-in + minimal/normal/heavy quotas (1/3/10 per day)
+- Y7 lazy `POST /admin/conversations/sweep_retention` summarizes + purges body, retains body_hash for tamper-evidence
+- Live-test: `live-test-y-full.command` drives all 7 phases end-to-end
+
+### SW-track (ADR-0034)
+- 3 roles wired: system_architect (researcher genre) / software_engineer (actuator) / code_reviewer (guardian)
+- Triune meta-demo: the agents themselves filed ADR-0034 via `live-triune-file-adr-0034.command`
+- Engineering tools available: `code_read.v1`, `shell_exec.v1` (filesystem + external; both gated)
 
 ### Ops
 - Docker compose stack with optional `llm` profile
@@ -447,21 +498,22 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 
 ## 📅 What's next
 
-Per the [Phase B + D + E audit](docs/audits/2026-04-28-phase-d-e-review.md), ranked by leverage:
+Per the [end-of-session stack review](docs/audits/2026-04-30-end-of-session-stack-review.md), ranked by leverage. v0.1.0 is tagged; v0.2 priorities below:
 
 | Priority | Item | Why |
 |---|---|---|
-| **1** | Open-web tool family ([ADR-003X](docs/decisions/), unfiled) + Phase C1 secrets store | Next major direction: `mcp_call.v1` + `browser_action.v1` + `web_fetch.v1` + per-agent encrypted secrets store + `suggest_agent.v1`. Now that the audit-mirror gap is closed, every open-web event will be visible via `/audit/tail` from day one |
-| **2** | Decompose `daemon/routers/writes.py` (1127 LoC kitchen-sink router) | Smell — split before open-web routers add more endpoints |
-| **3** | 3-5 integration tests for cross-subsystem flows | Currently 1 integration test for the whole stack |
-| **4** | Frontend test scaffold (Vitest + jsdom) | Real coverage gap; 3,500 LoC of JS, 0 tests |
-| **5** | JSONSchema input defaults at runtime in the skill engine | So manifests can rely on declared defaults instead of hard-coding values inline |
-| **6** | `mfa_check.v1` | Deferred — operator hasn't scoped what "MFA posture" means |
-| **7** | Pytest version of `security-smoke.sh` (E2) | Shell suffices for the operator loop; pytest fixture would let CI gate on the chain |
-| **8** | Frontend Swarm tab (E3) | Per-tier agent listing + recent chain events viewer |
-| **9** | Companion-tier real-time A/V interaction | Mission pillar 2 — accessibility-first |
-| **10** | HSM hardware adapter for VaultWarden's `key_rotate.v1` | Gated on operator hardware decision |
-| **11** | External product MCP adapters (Wazuh / Suricata / Defender / etc.) | Gated on operator install |
+| **1** | Cross-subsystem integration test trio | dispatcher + memory + delegate round-trip · approval-queue resume · conversation→llm_think→audit-chain coherence. Today: 1 integration test exists |
+| **2** | R2 — extract `birth_pipeline.py` from `daemon/routers/writes.py` | R3 closed `dispatcher.py`; `writes.py` is the next 1100-LoC god object |
+| **3** | Frontend Vitest scaffold | 22 frontend modules, ~3,500 LoC JS, 0 tests. Add 1-2 fixtures to unblock contributor PRs |
+| **4** | README + STATE prose tightening + ADR-0023 benchmark fixture v1 | Snapshot-as-of-v0.1 polish |
+| **5** | Open-web hardening (ADR-003X) — secrets store + suggest_agent.v1 | `web_fetch / browser_action / mcp_call` are wired; per-agent encrypted secrets store + agent-suggester are the next dependencies for real open-web work |
+| **6** | JSONSchema input defaults at runtime in the skill engine | So manifests can rely on declared defaults instead of hard-coding values inline |
+| **7** | `mfa_check.v1` | Deferred — operator hasn't scoped what "MFA posture" means |
+| **8** | Pytest version of `security-smoke.sh` (E2) | Shell suffices for the operator loop; pytest fixture would let CI gate on the chain |
+| **9** | Frontend Swarm tab (E3) | Per-tier agent listing + recent chain events viewer |
+| **10** | Companion-tier real-time A/V interaction | Mission pillar 2 — accessibility-first |
+| **11** | HSM hardware adapter for VaultWarden's `key_rotate.v1` | Gated on operator hardware decision |
+| **12** | External product MCP adapters (Wazuh / Suricata / Defender / etc.) | Gated on operator install |
 
 ---
 

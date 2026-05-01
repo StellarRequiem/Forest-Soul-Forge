@@ -197,15 +197,50 @@ class TestPendingCallsEndpoints:
         """Patch the agent's on-disk constitution so the timestamp_window
         tool flips to requires_human_approval=True. The test owns the
         artifact tree so this is fine; in production the operator
-        would re-birth or use tools_add semantics."""
+        would re-birth or use tools_add semantics.
+
+        Implementation note: the constitution YAML lists multiple tools
+        each with their own ``requires_human_approval`` line. Earlier
+        version of this helper just did ``str.replace(..., count=1)``,
+        which always flipped the FIRST tool's flag — and that worked
+        only because timestamp_window was first in the network_watcher
+        kit. After the 2026-04-30 C-1 zombie-tool dissection
+        (traffic_flow_local now precedes timestamp_window in the kit),
+        the helper needs to scope the replacement to timestamp_window's
+        specific block. Use a multi-line search anchored on the tool
+        name.
+        """
         registry = app.state.registry
         agent = registry.get_agent(instance_id)
         const_path = Path(agent.constitution_path)
         text = const_path.read_text(encoding="utf-8")
-        new_text = text.replace(
-            "requires_human_approval: false",
-            "requires_human_approval: true",
-            1,
+        # Find the timestamp_window tool's block + flip its flag in
+        # isolation. The block looks roughly like:
+        #
+        #     - constraints:
+        #         max_calls_per_session: ...
+        #         requires_human_approval: false
+        #       name: timestamp_window
+        #
+        # We search for "name: timestamp_window" and walk back to the
+        # nearest preceding ``requires_human_approval: false`` line.
+        marker = "name: timestamp_window"
+        marker_pos = text.find(marker)
+        if marker_pos < 0:
+            raise RuntimeError(
+                "test fixture: timestamp_window not in agent's constitution"
+            )
+        # Walk backward to find the nearest requires_human_approval line.
+        prefix = text[:marker_pos]
+        rha_pos = prefix.rfind("requires_human_approval: false")
+        if rha_pos < 0:
+            raise RuntimeError(
+                "test fixture: timestamp_window has no requires_human_approval flag"
+            )
+        new_text = (
+            text[:rha_pos]
+            + "requires_human_approval: true"
+            + text[rha_pos + len("requires_human_approval: false"):]
         )
         const_path.write_text(new_text, encoding="utf-8")
 

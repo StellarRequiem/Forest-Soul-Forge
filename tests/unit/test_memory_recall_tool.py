@@ -9,6 +9,7 @@ from forest_soul_forge.core.memory import Memory
 from forest_soul_forge.registry import Registry
 from forest_soul_forge.tools.base import ToolContext, ToolValidationError
 from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
+from tests.unit.conftest import seed_stub_agent
 
 
 def _run(coro):
@@ -19,6 +20,8 @@ def _run(coro):
 def env(tmp_path):
     """Memory + ToolContext bound to a fresh registry."""
     reg = Registry.bootstrap(tmp_path / "reg.sqlite")
+    seed_stub_agent(reg, "agent_a")          # Phase A FK-seeding
+    seed_stub_agent(reg, "other_agent")      # Cross-agent isolation tests
     memory = Memory(conn=reg._conn)  # noqa: SLF001
     ctx = ToolContext(
         instance_id="agent_a", agent_dna="d" * 12,
@@ -117,6 +120,7 @@ class TestMemoryRecallExecute:
     def test_test_fallback_via_constraints(self, tmp_path):
         """Fallback path: tests can pass Memory via constraints dict."""
         reg = Registry.bootstrap(tmp_path / "reg.sqlite")
+        seed_stub_agent(reg, "x")  # Phase A FK-seeding
         memory = Memory(conn=reg._conn)
         memory.append(
             instance_id="x", agent_dna="0" * 12,

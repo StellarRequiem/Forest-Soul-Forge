@@ -1,6 +1,6 @@
 # ADR-0022 — Memory subsystem
 
-- **Status:** Proposed
+- **Status:** Accepted (promoted 2026-04-30 — Phase A audit §A-2; see docs/audits/2026-04-30-comprehensive-repo-audit.md). Memory subsystem — v0.1 + v0.2 (lineage + consented + disclosed) shipped.
 - **Date:** 2026-04-25
 - **Supersedes:** —
 - **Related:** ADR-0005 (audit chain), ADR-0006 (registry as index over artifacts), ADR-0008 (local-first model provider — the privacy floor this ADR enforces), ADR-0017 (LLM-enriched soul.md narrative — the Voice depends on consolidated memory in the long run), ADR-0018 (tool catalog — a `memory_recall` tool wraps this subsystem), ADR-0020 (character sheet — `memory` section), ADR-0021 (genres carry `memory_pattern`).

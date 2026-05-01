@@ -447,18 +447,28 @@ class TestDispatchFailed:
 # Registry counter accessors (T2a)
 # ---------------------------------------------------------------------------
 class TestRegistryCounter:
+    """Per-session counter accessor tests.
+
+    All cases that exercise INSERT into ``tool_call_counters`` need a
+    seeded ``agents`` row first because of the FK constraint (see
+    schema.py + Phase A audit doc 2026-04-30).
+    """
+
     def test_counter_starts_at_zero(self, tmp_path):
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            # No INSERT here — read-only path; FK seeding not required.
             assert r.get_tool_call_count("i1", "s1") == 0
 
     def test_increment_creates_row(self, tmp_path):
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            _seed_stub_agent(r, "i1")
             n = r.increment_tool_call_count("i1", "s1", "2026-04-26T00:00:00Z")
             assert n == 1
             assert r.get_tool_call_count("i1", "s1") == 1
 
     def test_increment_is_per_session(self, tmp_path):
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            _seed_stub_agent(r, "i1")
             r.increment_tool_call_count("i1", "s1", "2026-04-26T00:00:00Z")
             r.increment_tool_call_count("i1", "s1", "2026-04-26T00:00:01Z")
             r.increment_tool_call_count("i1", "s2", "2026-04-26T00:00:02Z")
@@ -470,8 +480,15 @@ class TestRegistryCounter:
 # T4 — per-call accounting (tool_calls table + dispatcher mirror)
 # ---------------------------------------------------------------------------
 class TestRegistryToolCalls:
+    """Per-call accounting accessor tests.
+
+    All cases that INSERT into ``tool_calls`` need a seeded ``agents``
+    row first because of the FK constraint.
+    """
+
     def test_record_persists_row(self, tmp_path):
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            _seed_stub_agent(r, "i1")
             r.record_tool_call(
                 audit_seq=42, instance_id="i1", session_id="s1",
                 tool_key="timestamp_window.v1", status="succeeded",
@@ -488,6 +505,7 @@ class TestRegistryToolCalls:
 
     def test_aggregate_sums_tokens_and_cost(self, tmp_path):
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            _seed_stub_agent(r, "i1")
             r.record_tool_call(
                 audit_seq=1, instance_id="i1", session_id="s1",
                 tool_key="summarize.v1", status="succeeded",
@@ -510,6 +528,7 @@ class TestRegistryToolCalls:
         """None totals (no LLM-wrapping tool ever ran) must not collapse
         to 0, which would look like 'ran with zero tokens'."""
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            _seed_stub_agent(r, "i1")
             # Pure-function tool: no tokens, no cost.
             r.record_tool_call(
                 audit_seq=1, instance_id="i1", session_id="s1",
@@ -524,6 +543,8 @@ class TestRegistryToolCalls:
 
     def test_aggregate_is_per_instance(self, tmp_path):
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            _seed_stub_agent(r, "i1")
+            _seed_stub_agent(r, "i2")
             r.record_tool_call(
                 audit_seq=1, instance_id="i1", session_id="s1",
                 tool_key="t.v1", status="succeeded",
@@ -968,9 +989,51 @@ class TestGenreFloor:
         assert recorded == []
 
 
+def _seed_stub_agent(registry, instance_id: str = "i1") -> None:
+    """Insert a minimal agent row so FK constraints on dependent tables
+    (e.g., ``tool_call_pending_approvals.instance_id``) are satisfied.
+
+    Reaches into the registry's underlying connection deliberately. The
+    public ``register_birth`` API requires a full ``ParsedSoul`` with
+    on-disk artifacts, which is overkill when the test only needs the
+    row to exist as a foreign-key target. SQLite has FK enforcement
+    enabled (see ``schema.CONNECTION_PRAGMAS``), so the row must
+    physically exist before the dependent insert.
+    """
+    registry._conn.execute(
+        "INSERT INTO agents ("
+        "  instance_id, dna, dna_full, role, agent_name, parent_instance,"
+        "  owner_id, model_name, model_version, soul_path, constitution_path,"
+        "  constitution_hash, created_at, status, legacy_minted, sibling_index"
+        ") VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, 0, 1)",
+        (
+            instance_id,
+            "stub_dna_short_12c",
+            "stub_dna_full_" + ("x" * 50),
+            "network_watcher",
+            f"StubAgent_{instance_id}",
+            f"/tmp/stub-{instance_id}.soul.md",
+            f"/tmp/stub-{instance_id}.constitution.yaml",
+            "stub_constitution_hash",
+            "2026-04-27T00:00:00Z",
+            "active",
+        ),
+    )
+    registry._conn.commit()
+
+
 class TestRegistryApprovalQueue:
+    """Approval-queue table accessor tests.
+
+    All cases seed a stub agent row first because
+    ``tool_call_pending_approvals.instance_id`` has a FK constraint on
+    ``agents(instance_id)`` (per schema.py) and SQLite enforcement is
+    enabled via ``PRAGMA foreign_keys=ON`` in CONNECTION_PRAGMAS.
+    """
+
     def test_record_and_get(self, tmp_path):
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            _seed_stub_agent(r, "i1")
             r.record_pending_approval(
                 ticket_id="t1", instance_id="i1", session_id="s1",
                 tool_key="timestamp_window.v1",
@@ -986,6 +1049,7 @@ class TestRegistryApprovalQueue:
 
     def test_list_filters_by_status(self, tmp_path):
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            _seed_stub_agent(r, "i1")
             r.record_pending_approval(
                 ticket_id="t1", instance_id="i1", session_id="s1",
                 tool_key="t.v1", args_json="{}", side_effects="read_only",
@@ -1008,6 +1072,7 @@ class TestRegistryApprovalQueue:
 
     def test_double_decide_returns_false(self, tmp_path):
         with Registry.bootstrap(tmp_path / "reg.sqlite") as r:
+            _seed_stub_agent(r, "i1")
             r.record_pending_approval(
                 ticket_id="t1", instance_id="i1", session_id="s1",
                 tool_key="t.v1", args_json="{}", side_effects="read_only",

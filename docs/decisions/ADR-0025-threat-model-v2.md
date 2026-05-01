@@ -1,6 +1,8 @@
 # ADR-0025 — Threat model v2 (adversarial operators / federation)
 
-- **Status:** Placeholder
+- **Status:** Placeholder — Deferred to v0.3+ (Phase A audit 2026-04-30 §A-1).
+
+**Deferral rationale:** Threat model v2 — adversarial operators / federation. Deferred to v0.3+: v0.1 ships an honest-but-forgetful threat model (audit chain is tamper-evident, not tamper-proof). v2 covers root attackers + multi-machine federation, neither of which is in v0.1 scope. The placeholder exists as an explicit anchor so the v0.3 work has somewhere to land.
 - **Date:** 2026-04-27
 - **Triggers when:** Before any federation work begins (Horizon 3 federated realms — see ADR-0024).
 - **Related:** ADR-0005 (audit chain — current threat model lives in its docstring), ADR-0024 (project horizons), ADR-0007 (FastAPI daemon — the surface that gets attacked).

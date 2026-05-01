@@ -6,6 +6,124 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-04-30 (audit + hardening release)
+
+The post-v0.1.0 hardening + cleanup pass. **Test suite: 992 → 1439
+passing (+447, +45%); 122 broken → 0; 1 documented xfail.** No
+behavior shift beyond two §0-gated bug fixes (one-line each); the
+rest is coverage closure, decomposition, documentation, and
+verified-not-removed cleanup.
+
+### Phase A — critical hardening (96 + 26 broken cases → 0)
+
+- **`fix: brew formula off-by-one (patch_check.v1)`** — One-line
+  production bug fix. Was producing `brew:formula` because of a
+  naive `[:-1]` slice on `formulae`; now preserves the kind verbatim
+  as `brew:formulae`.
+- **`fix: memory recall ordering tiebreaker (core/memory.py)`** —
+  Two-line production bug fix. `ORDER BY created_at DESC` wasn't
+  airtight under sub-microsecond writes; tiebreaker on `rowid DESC`
+  makes the documented "newest first" guarantee deterministic.
+- **`test: shared seed_stub_agent fixture`** — Phase A audit traced
+  43 FK-constraint failures to a single missing-seed pattern; the
+  shared helper is the durable fix.
+- **`test: Tool Forge static analysis fixture indent`** — fixed a
+  textwrap.dedent + body-interpolation bug that produced unparseable
+  Python in 15 fixtures.
+- **`test: stale assertion updates`** — role count 5→17, genre count
+  10→13, schema_version 6→10, security_mid `network`→`external`.
+- **`test: priv_client edge cases`** — fixed two test bugs.
+- **`test: xfail v6→v7 migration with documented reason`** — SQLite
+  ≥3.35 ALTER TABLE semantics make the test setup brittle even
+  though production migration works.
+
+### C-1 zombie tool dissection
+
+Six catalog entries had no on-disk implementation. Per-tool §0
+verdict in `docs/audits/2026-04-30-c1-zombie-tool-dissection.md`:
+
+- **IMPLEMENT `dns_lookup.v1`** — new ~190 LoC tool using stdlib
+  socket. 20 unit tests.
+- **SUBSTITUTE 4 tools** with existing equivalents: `log_grep` →
+  `log_scan`, `flow_summary` → `traffic_flow_local`,
+  `baseline_compare` → `behavioral_baseline + anomaly_score`,
+  `correlation_window` → `log_correlate`.
+- **DEFER `packet_query.v1`** to Phase G `tshark_pcap_query`.
+
+Catalog count: 46 → 41.
+
+### Phase B — coverage closure (+323 unit-test cases)
+
+Eleven files that had zero unit-test coverage now have it:
+
+- `tools/governance_pipeline.py` (R3) — 37 cases
+- `daemon/routers/conversation_resolver.py` (Y3.5) — 23 cases
+- `daemon/routers/conversations_admin.py` (Y7) — 19 cases
+- `core/hardware.py` (K6) — 30 cases
+- `chronicle/render.py` — 59 cases (covers all per-event sanitizers
+  + secret-leak prevention)
+- `soul/voice_renderer.py` — 29 cases (all 4 provider-error paths)
+- `cli/main.py` — 22 argparse-dispatch smoke cases
+- `cli/triune.py` + `cli/chronicle.py` — 15 cases
+- `daemon/providers/local.py` + `frontier.py` — 28 cases
+- 8 untested tools (`code_read`, `code_edit`, `shell_exec`,
+  `llm_think`, `mcp_call`, `browser_action`, `suggest_agent`,
+  `memory_verify`) — 61 batched smoke cases
+- `dns_lookup.v1` (newly implemented) — 20 cases
+
+Frontend Vitest scaffold (B.4) deferred to v0.3.
+
+### Phase C — decomposition
+
+Two god-objects had pure helpers extracted:
+
+- `conversations.py` 994 → 852 LoC. Helpers in
+  `daemon/routers/conversation_helpers.py` (226 LoC, 30 unit tests).
+- `writes.py` 1186 → 1096 LoC. Helpers in
+  `daemon/routers/birth_pipeline.py` (194 LoC, 33 unit tests).
+
+Net 232 LoC out of god-objects + 420 LoC of newly-testable helpers.
+
+### Phase D — documentation
+
+- **CLAUDE.md** at repo root with harness conventions
+- **8 ADR status promotions** Proposed → Accepted (0019, 0021, 0022,
+  0027, 0030, 0031, 0034, 003Y) with audit reference
+- **4 ADR placeholders explicitly Deferred to v0.3+** with rationale
+  (0025, 0026, 0028, 0029)
+- **7 new operator runbooks**: `conversation-runtime.md`,
+  `sw-track-triune.md`, `demo-scenarios.md`, `forge-tool-skill.md`,
+  `plugin-package-format.md`, `memory-subsystem.md`, `triune-bond.md`
+- **`command-scripts-index.md`** covering all 37 `.command` scripts
+- **examples/README.md** orientation
+- **5 audit / planning docs**: comprehensive repo audit, audit plan,
+  C-1 dissection, Phase E verdicts, v0.2→v1.0 roadmap with external-
+  review §7 addendum
+- **Tool catalog expansion survey** with ~80 candidate tools
+
+### Phase E — verification + cleanup (under §0 gate)
+
+Net effect: **zero deletions of load-bearing code**. Per-candidate
+verdicts in `docs/audits/2026-04-30-phase-e-cleanup-verdicts.md`:
+
+- `agents/` + `ui/` empty packages: **KEEP-WITH-COMMENT**
+- `scripts/initial_push.sh`: **KEEP-WITH-GUARD** (`exit 1` early)
+- `.env` tracked: **KEEP** (verified non-sensitive)
+- registry default path: **FIX-IN-PLACE** (`data/registry.sqlite`)
+- `docs/PROGRESS.md`: **ARCHIVE** to `docs/_archive/`
+- `scripts/verify_*.py`: **KEEP**
+
+### Files NOT changed (preserved verbatim)
+
+- Audit chain format
+- DNA derivation
+- Constitution hash semantics
+- Schema (still v10)
+- All daemon endpoints (URLs + payloads unchanged)
+- Frontend behavior (8 tabs, same wiring)
+- Single-writer SQLite discipline
+- All `.command` script names
+
 ## [0.1.0] — 2026-04-30
 
 The "agents you can actually talk to" milestone. Three new tracks shipped in

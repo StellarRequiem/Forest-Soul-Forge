@@ -45,8 +45,14 @@ class DaemonSettings(BaseSettings):
 
     # ----- registry / artifacts -------------------------------------------
     registry_db_path: Path = Field(
-        default=Path("registry.sqlite"),
-        description="Where the SQLite registry lives. Rebuildable from artifacts.",
+        default=Path("data/registry.sqlite"),
+        description=(
+            "Where the SQLite registry lives. Rebuildable from artifacts. "
+            "Default lives under data/ (gitignored) so a casual daemon "
+            "launch doesn't leave a registry.sqlite stray at repo root. "
+            "Phase E audit (2026-04-30) moved this from 'registry.sqlite' "
+            "→ 'data/registry.sqlite'."
+        ),
     )
     artifacts_dir: Path = Field(
         default=Path("examples"),

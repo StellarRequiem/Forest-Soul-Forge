@@ -1,6 +1,6 @@
 # ADR-0021 — Role genres and agent taxonomy
 
-- **Status:** Proposed
+- **Status:** Accepted (promoted 2026-04-30 — Phase A audit §A-2; see docs/audits/2026-04-30-comprehensive-repo-audit.md). Role genres — T1–T8 implemented; 3 web genres added via ADR-003X.
 - **Date:** 2026-04-25
 - **Supersedes:** —
 - **Related:** ADR-0001 (trait tree), ADR-0002 (DNA + lineage), ADR-0004 (constitution builder), ADR-0008 (local-first model provider — Phase 5 is therapy/accessibility, which this ADR plans for), ADR-0017 (LLM-enriched soul.md narrative), ADR-0018 (tool catalog), ADR-0020 (agent character sheet — the `capabilities.genre` field this ADR populates).

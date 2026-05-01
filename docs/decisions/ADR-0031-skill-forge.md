@@ -1,6 +1,6 @@
 # ADR-0031 — Skill Forge
 
-- **Status:** Proposed
+- **Status:** Accepted (promoted 2026-04-30 — Phase A audit §A-2; see docs/audits/2026-04-30-comprehensive-repo-audit.md). Skill Forge — T1, T2a/T2b, T5, T7, T8 shipped + 26 manifests live.
 - **Date:** 2026-04-27
 - **Related:** ADR-0030 (Tool Forge — Skill Forge composes tools that ADR-0030 produces), ADR-0019 (tool execution runtime — skill execution dispatches each step through the same runtime), ADR-0021 (genres — skills inherit constraint posture from the agent that runs them), ADR-0022 (memory subsystem — skills are the natural granularity for memory checkpoints), ADR-0024 (horizons — Skill Forge is the H1 "wow" feature alongside Tool Forge).
 

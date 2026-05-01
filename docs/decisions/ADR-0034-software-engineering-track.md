@@ -1,6 +1,6 @@
 # ADR-0034 — Software-Engineering Track (Atlas / Forge / Sentinel)
 
-- **Status:** Proposed
+- **Status:** Accepted (promoted 2026-04-30 — Phase A audit §A-2; see docs/audits/2026-04-30-comprehensive-repo-audit.md). SW-track triune — Phases A.1–A.6 + B.1 shipped; agents themselves filed this ADR (meta-demo).
 - **Date:** 2026-04-29 (filed retroactively after Phase A shipped 2026-04-29)
 - **Related:** ADR-0019 (tool execution runtime — every SW tool ships through
   the dispatcher with audit + approval), ADR-0021 (role genres — this ADR

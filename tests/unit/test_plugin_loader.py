@@ -75,9 +75,23 @@ def _empty_catalog():
 
 @pytest.fixture
 def env(tmp_path):
+    """Plugin-loader test fixture.
+
+    Cleans up ``sys.modules`` before AND after the test so plugin
+    modules loaded by earlier tests don't leak into the next one.
+    Without this, ``unload_plugins`` (which scans sys.modules for the
+    plugin namespace prefix) double-counts modules from prior fixtures
+    and the unload-count assertion fails. Phase A audit 2026-04-30.
+    """
+    import sys
+    _PREFIX = "forest_soul_forge.plugins."
+    for mod_name in [n for n in sys.modules if n.startswith(_PREFIX)]:
+        sys.modules.pop(mod_name, None)
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir()
     yield {"plugins_dir": plugins_dir}
+    for mod_name in [n for n in sys.modules if n.startswith(_PREFIX)]:
+        sys.modules.pop(mod_name, None)
 
 
 class TestLoadPlugins:

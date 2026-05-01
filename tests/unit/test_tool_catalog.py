@@ -81,9 +81,17 @@ class TestRealCatalog:
             pytest.skip(f"catalog missing at {CATALOG_PATH}")
         cat = load_catalog(CATALOG_PATH)
         assert cat.version  # non-empty
-        assert "packet_query.v1" in cat.tools
-        assert "log_grep.v1" in cat.tools
-        assert "baseline_compare.v1" in cat.tools
+        # Spot-check entries actually in the catalog post the 2026-04-30
+        # C-1 zombie-tool dissection. The earlier asserts referenced
+        # zombies (packet_query / log_grep / baseline_compare) that have
+        # been removed in favor of implemented equivalents — see
+        # docs/audits/2026-04-30-c1-zombie-tool-dissection.md.
+        assert "dns_lookup.v1" in cat.tools         # IMPLEMENTed primitive
+        assert "log_scan.v1" in cat.tools           # was log_grep
+        assert "behavioral_baseline.v1" in cat.tools  # was baseline_compare (1/2)
+        assert "anomaly_score.v1" in cat.tools        # was baseline_compare (2/2)
+        assert "traffic_flow_local.v1" in cat.tools   # was flow_summary
+        assert "log_correlate.v1" in cat.tools        # was correlation_window
         assert "network_watcher" in cat.archetypes
         assert "log_analyst" in cat.archetypes
         assert "anomaly_investigator" in cat.archetypes

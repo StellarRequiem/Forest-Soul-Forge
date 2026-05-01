@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
 # scripts/initial_push.sh
 #
+# HISTORICAL ONLY — DO NOT RUN. The bootstrap this script performs
+# already happened (the repo has commits + history). Re-running would
+# `rm -rf .git` and overwrite the actual history with a single
+# scaffolding commit.
+#
+# This file is preserved as documentation of how the repo was first
+# pushed to origin. Phase E audit (2026-04-30) verified the script
+# is referenced nowhere else; the §0 Hippocratic gate said "keep with
+# comment" rather than delete, and the guard below makes the script
+# inert so no contributor can accidentally re-run it.
+#
+# To remove the guard intentionally (e.g., if you're cloning the repo
+# fresh and want to use this for a NEW remote), comment out the
+# ``exit 1`` line below.
+echo "scripts/initial_push.sh — HISTORICAL ONLY. Aborting."
+echo "See header comment for explanation."
+exit 1
+
+# --- the rest of this script is preserved as the historical record
+# of how the repo was first bootstrapped to origin. Don't run it.
+# ----------------------------------------------------------------
+#
 # One-shot initial commit + push for the Forest Soul Forge repo.
 # Safe to read before running — it does exactly what's below, nothing more.
 #

@@ -1,6 +1,8 @@
 # ADR-0029 — Regulatory map (EU AI Act / COPPA / CSAM / etc.)
 
-- **Status:** Placeholder
+- **Status:** Placeholder — Deferred to v0.3+ (Phase A audit 2026-04-30 §A-1).
+
+**Deferral rationale:** Regulatory map — EU AI Act / COPPA / CSAM / etc. Deferred to v0.3+: v0.1 is local-first single-operator-use; the regulatory surface matters most when multi-tenant deployment lands. The placeholder is explicit so v0.3 multi-tenant work doesn't ship without addressing it.
 - **Date:** 2026-04-27
 - **Triggers when:** Before any feature targeting minors or EU users; before public availability past local-first single-user.
 - **Related:** ADR-0024 (horizons), ADR-0027 (memory privacy — interacts with GDPR), ADR-0028 (portability — Article 20), ADR-0025 (threat model — content moderation is partly a security problem).

@@ -843,7 +843,21 @@ class TestToolKit:
 
     def test_birth_default_kit_lands_in_soul(self, write_env):
         """No tools_add / tools_remove → soul.md has the
-        network_watcher standard kit from config/tool_catalog.yaml."""
+        network_watcher standard kit from config/tool_catalog.yaml.
+
+        Post C-1 dissection (2026-04-30) the network_watcher kit is:
+          - traffic_flow_local.v1   (was flow_summary.v1; read_only)
+          - timestamp_window.v1     (read_only)
+        Both fit network_watcher's observer-genre read_only ceiling.
+        Notable absences:
+          - packet_query.v1 — deferred to Phase G tshark_pcap_query.v1
+          - dns_lookup.v1   — exists in the catalog (newly implemented)
+                              but kept OUT of the standard kit because
+                              its network side-effect would trip the
+                              observer-genre ceiling. Operators who
+                              want it pass tools_add at birth time.
+        See docs/audits/2026-04-30-c1-zombie-tool-dissection.md.
+        """
         client, _, _ = write_env
         body = _sample_birth_body(agent_name="ToolDefault")
         body["enrich_narrative"] = False  # keep soul.md byte-deterministic
@@ -851,10 +865,10 @@ class TestToolKit:
         assert resp.status_code == 201, resp.text
         soul_text = Path(resp.json()["soul_path"]).read_text(encoding="utf-8")
         # Standard kit for network_watcher (per config/tool_catalog.yaml):
-        assert "name: packet_query" in soul_text
-        assert "name: flow_summary" in soul_text
-        assert "name: dns_lookup" in soul_text
+        assert "name: traffic_flow_local" in soul_text
         assert "name: timestamp_window" in soul_text
+        # dns_lookup is in the catalog but NOT in the default kit:
+        assert "name: dns_lookup" not in soul_text
         # Catalog version is pinned.
         assert "tool_catalog_version:" in soul_text
 
@@ -862,25 +876,29 @@ class TestToolKit:
         client, _, _ = write_env
         body = _sample_birth_body(agent_name="ToolAdd")
         body["enrich_narrative"] = False
-        body["tools_add"] = [{"name": "log_grep", "version": "1"}]
+        # Use a tool that exists in the catalog but isn't in
+        # network_watcher's standard kit. log_correlate fits — it lives
+        # in security_mid swarm kits, not network_watcher.
+        body["tools_add"] = [{"name": "log_correlate", "version": "1"}]
         resp = client.post("/birth", json=body)
         assert resp.status_code == 201, resp.text
         soul_text = Path(resp.json()["soul_path"]).read_text(encoding="utf-8")
-        # log_grep isn't in network_watcher's standard kit, so it must
-        # have come from tools_add.
-        assert "name: log_grep" in soul_text
+        # log_correlate isn't in network_watcher's standard kit, so it
+        # must have come from tools_add.
+        assert "name: log_correlate" in soul_text
 
     def test_birth_tools_remove_drops_standard_tool(self, write_env):
         client, _, _ = write_env
         body = _sample_birth_body(agent_name="ToolRemove")
         body["enrich_narrative"] = False
-        body["tools_remove"] = ["dns_lookup"]
+        body["tools_remove"] = ["traffic_flow_local"]
         resp = client.post("/birth", json=body)
         assert resp.status_code == 201, resp.text
         soul_text = Path(resp.json()["soul_path"]).read_text(encoding="utf-8")
-        assert "name: dns_lookup" not in soul_text
-        # Other standard tools still present.
-        assert "name: packet_query" in soul_text
+        assert "name: traffic_flow_local" not in soul_text
+        # timestamp_window is still in the network_watcher kit and
+        # should remain after the targeted removal.
+        assert "name: timestamp_window" in soul_text
 
     def test_birth_tools_add_unknown_returns_400(self, write_env):
         client, _, _ = write_env
@@ -904,7 +922,7 @@ class TestToolKit:
         client, _, _ = write_env
         body = _sample_birth_body(agent_name="ToolAudited")
         body["enrich_narrative"] = False
-        body["tools_remove"] = ["dns_lookup"]
+        body["tools_remove"] = ["traffic_flow_local"]
         resp = client.post("/birth", json=body)
         assert resp.status_code == 201, resp.text
         instance_id = resp.json()["instance_id"]
@@ -921,8 +939,11 @@ class TestToolKit:
         assert "tools" in ev
         assert "tool_catalog_version" in ev
         names = {t["name"] for t in ev["tools"]}
-        assert "packet_query" in names
-        assert "dns_lookup" not in names  # we removed it
+        # Post C-1 dissection (2026-04-30): network_watcher kit is
+        # traffic_flow_local + timestamp_window. We remove
+        # traffic_flow_local; timestamp_window should remain.
+        assert "timestamp_window" in names
+        assert "traffic_flow_local" not in names  # we removed it
 
 
 class TestVoiceRendererUnit:

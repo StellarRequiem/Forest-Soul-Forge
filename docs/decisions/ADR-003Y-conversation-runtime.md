@@ -1,6 +1,6 @@
 # ADR-003Y — Conversation Runtime
 
-- **Status:** Proposed
+- **Status:** Accepted (promoted 2026-04-30 — Phase A audit §A-2; see docs/audits/2026-04-30-comprehensive-repo-audit.md). Conversation runtime — Y1–Y7 all shipped end-to-end; live-test-y-full.command verifies the full chain.
 - **Date:** 2026-04-29
 - **Supersedes:** —
 - **Related:** ADR-0008 (Companion genre — the genre that needs this most),

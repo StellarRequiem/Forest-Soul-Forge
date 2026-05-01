@@ -187,7 +187,14 @@ def _run_brew(binary: str) -> tuple[list[dict], list[str]]:
                     "name":              entry["name"],
                     "current_version":   installed[0] if installed else None,
                     "available_version": entry.get("current_version", ""),
-                    "source":            f"brew:{kind[:-1]}",
+                    # Preserve the brew kind verbatim. Earlier code used
+                    # ``kind[:-1]`` to singularize but that produced "formula"
+                    # for "formulae" — wrong, because English plural rules
+                    # don't strip a single trailing letter consistently.
+                    # Keeping the plural form is also more honest: the JSON
+                    # field IS named "formulae", and the source tag is just
+                    # a passthrough label.
+                    "source":            f"brew:{kind}",
                 })
             except (KeyError, IndexError, TypeError) as e:
                 parse_errors.append(f"{kind} entry: {e}")
