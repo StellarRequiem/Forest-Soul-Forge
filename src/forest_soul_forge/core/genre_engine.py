@@ -45,6 +45,15 @@ _PROVIDER_CONSTRAINTS = frozenset({"local_only"})
 _MEMORY_CEILING_TIERS: tuple[str, ...] = ("private", "lineage", "consented", "realm")
 _MEMORY_CEILINGS = frozenset(_MEMORY_CEILING_TIERS)
 
+# ADR-0021-amendment §1 — initiative ladder. Six levels orthogonal to the
+# side-effect ladder. Order encodes increasing autonomy:
+#   L0 reactive only → L1 private memory writes → L2 suggestion-class →
+#   L3 read-only autonomous → L4 reversible side-effects with policy →
+#   L5 destructive with friction (always operator-gated per call).
+# Stored as strings for YAML readability; comparison uses tuple index.
+_INITIATIVE_LEVELS: tuple[str, ...] = ("L0", "L1", "L2", "L3", "L4", "L5")
+_INITIATIVE_LEVEL_SET = frozenset(_INITIATIVE_LEVELS)
+
 
 class GenreEngineError(Exception):
     """Raised when ``genres.yaml`` is malformed or violates an integrity rule."""
@@ -76,7 +85,34 @@ class RiskProfile:
 
 @dataclass(frozen=True)
 class GenreDef:
-    """One genre entry from ``genres.yaml``."""
+    """One genre entry from ``genres.yaml``.
+
+    ``min_trait_floors`` (ADR-0038 T1) is a per-genre map of trait_name →
+    minimum integer value [0, 100]. A profile whose value for a listed
+    trait falls below the floor is refused at birth time. Default empty
+    dict — a genre with no floors enforces nothing. The mechanism is the
+    dual of ``risk_profile.max_side_effects`` (a ceiling on tool effects);
+    floors operate on trait values to harden the Companion-genre safety
+    posture (H-1 sycophancy mitigation: minimum ``evidence_demand`` and
+    ``transparency``).
+
+    ``max_initiative_level`` (ADR-0021-amendment §2) is the genre's
+    initiative ceiling on the L0–L5 ladder, orthogonal to
+    ``risk_profile.max_side_effects``. Where ``max_side_effects`` answers
+    "how destructive can this agent's actions be?", ``max_initiative_level``
+    answers "how autonomous is this agent allowed to be in deciding to
+    act?" Two different agents with the same effect ceiling may have
+    very different initiative postures — Guardian (autonomous reads on
+    other agents' output) vs Companion (reactive responder).
+
+    ``default_initiative_level`` is the per-genre default at birth. Roles
+    inside the genre may override downward (more conservative); upward
+    overrides past ``max_initiative_level`` are refused at birth time.
+    Defaults to ``max_initiative_level`` when YAML omits the explicit
+    default — the safest sensible fallback ("genre's most-autonomous
+    posture is its default" only matches reactive-default genres like
+    Companion when the YAML pairs them with a lower default explicitly).
+    """
 
     name: str
     description: str
@@ -86,6 +122,17 @@ class GenreDef:
     memory_pattern: str
     spawn_compatibility: tuple[str, ...]
     roles: tuple[str, ...]
+    # ADR-0038 T1 — trait floor map. Empty dict = no floors enforced.
+    # Dataclass-frozen prevents attribute reassignment; the dict itself
+    # remains mutable per Python semantics. Treat as read-only by
+    # convention; loaders should never mutate post-construction.
+    min_trait_floors: dict[str, int] = field(default_factory=dict)
+    # ADR-0021-amendment §2 — initiative ladder ceiling + default.
+    # Both default to "L5" so a genre that omits the field stays
+    # back-compatible (no new ceiling vs. v1 behavior). Companion-genre
+    # YAML must set both explicitly to engage the new mechanism.
+    max_initiative_level: str = "L5"
+    default_initiative_level: str = "L5"
 
 
 @dataclass(frozen=True)
@@ -302,6 +349,73 @@ def _parse_genre_entry(name: str, entry: Any) -> GenreDef:
             "'short_retention' if ADR-0022 hasn't refined the values yet)"
         )
 
+    # ADR-0038 T1 — min_trait_floors. Optional; defaults to empty dict
+    # (no floors enforced). Each entry: trait_name (non-empty str) →
+    # value (int in [0, 100]). Floats are rejected — the trait engine
+    # uses integers, and silent float-to-int coercion would mask typos.
+    min_trait_floors_raw = entry.get("min_trait_floors")
+    min_trait_floors: dict[str, int] = {}
+    if min_trait_floors_raw is not None:
+        if not isinstance(min_trait_floors_raw, dict):
+            raise GenreEngineError(
+                f"genre {name!r}.min_trait_floors must be a mapping, got "
+                f"{type(min_trait_floors_raw).__name__}"
+            )
+        for trait_name, floor_raw in min_trait_floors_raw.items():
+            tn = str(trait_name).strip()
+            if not tn:
+                raise GenreEngineError(
+                    f"genre {name!r}.min_trait_floors has an empty trait name"
+                )
+            # Reject bool explicitly: isinstance(True, int) == True in Python,
+            # but a YAML "true" floor value is always a typo.
+            if isinstance(floor_raw, bool) or not isinstance(floor_raw, int):
+                raise GenreEngineError(
+                    f"genre {name!r}.min_trait_floors[{tn!r}] must be an "
+                    f"integer in [0, 100], got {floor_raw!r} "
+                    f"({type(floor_raw).__name__})"
+                )
+            if not 0 <= floor_raw <= 100:
+                raise GenreEngineError(
+                    f"genre {name!r}.min_trait_floors[{tn!r}] must be in "
+                    f"[0, 100], got {floor_raw}"
+                )
+            min_trait_floors[tn] = floor_raw
+
+    # ADR-0021-amendment §2 — max_initiative_level + default_initiative_level.
+    # Optional; both default to "L5" (back-compat: a v1 genres.yaml without
+    # these fields keeps the v1 behavior of no initiative ceiling). When
+    # provided, both must be values from the L0–L5 ladder; default must
+    # not exceed max (a default above the ceiling is meaningless).
+    max_initiative_level = str(
+        risk_raw.get("max_initiative_level", "L5")
+    ).strip()
+    if max_initiative_level not in _INITIATIVE_LEVEL_SET:
+        raise GenreEngineError(
+            f"genre {name!r}.risk_profile.max_initiative_level must be one "
+            f"of {list(_INITIATIVE_LEVELS)}; got {max_initiative_level!r}"
+        )
+    default_initiative_level_raw = risk_raw.get("default_initiative_level")
+    if default_initiative_level_raw is None:
+        # Inherit ceiling — preserves "no new restrictions for genres that
+        # don't opt in" semantics. Companion-genre YAML pairs an explicit
+        # default below the ceiling.
+        default_initiative_level = max_initiative_level
+    else:
+        default_initiative_level = str(default_initiative_level_raw).strip()
+        if default_initiative_level not in _INITIATIVE_LEVEL_SET:
+            raise GenreEngineError(
+                f"genre {name!r}.risk_profile.default_initiative_level must "
+                f"be one of {list(_INITIATIVE_LEVELS)}; got "
+                f"{default_initiative_level!r}"
+            )
+        if _initiative_index(default_initiative_level) > _initiative_index(max_initiative_level):
+            raise GenreEngineError(
+                f"genre {name!r}.risk_profile.default_initiative_level "
+                f"({default_initiative_level}) must not exceed "
+                f"max_initiative_level ({max_initiative_level})"
+            )
+
     return GenreDef(
         name=name,
         description=description,
@@ -311,6 +425,9 @@ def _parse_genre_entry(name: str, entry: Any) -> GenreDef:
         memory_pattern=memory_pattern,
         spawn_compatibility=tuple(spawn_compatibility),
         roles=tuple(roles),
+        min_trait_floors=min_trait_floors,
+        max_initiative_level=max_initiative_level,
+        default_initiative_level=default_initiative_level,
     )
 
 
@@ -461,6 +578,62 @@ _GENRE_APPROVAL_RULES: dict[str, frozenset[str]] = {
     "security_mid":  frozenset({"filesystem", "external"}),
     "security_low":  frozenset(),
 }
+
+
+# ---------------------------------------------------------------------------
+# ADR-0038 T1 — min_trait_floors enforcement
+# ---------------------------------------------------------------------------
+def trait_floor_violations(
+    genre_def: GenreDef,
+    trait_values: dict[str, int],
+) -> list[tuple[str, int, int]]:
+    """ADR-0038 T1: return ``(trait_name, actual_value, floor)`` for traits
+    whose value falls below the genre's declared floor.
+
+    Empty list = compliant. Non-empty list = caller refuses the birth/
+    spawn with all violations cited (don't return on first; let the
+    operator see the whole picture in one error).
+
+    A floor referencing an unknown trait is silently skipped — the
+    loader already rejected unknown trait names at YAML parse time, so
+    if one slipped through it's a runtime mismatch (genres.yaml + trait
+    tree out of sync). The mismatch is logged elsewhere (via the
+    genre↔trait validation pass at daemon startup); the floor check
+    itself doesn't try to be the first signal.
+    """
+    violations: list[tuple[str, int, int]] = []
+    for trait_name, floor in genre_def.min_trait_floors.items():
+        actual = trait_values.get(trait_name)
+        if actual is None:
+            continue
+        if actual < floor:
+            violations.append((trait_name, actual, floor))
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# ADR-0021-amendment §2 — initiative ladder helpers
+# ---------------------------------------------------------------------------
+def _initiative_index(level: str) -> int:
+    """Return strictness index of an initiative level. Unknown → strictest
+    (L0 = 0). Same fail-closed shape as ``_tier_index``."""
+    try:
+        return _INITIATIVE_LEVELS.index(level)
+    except ValueError:
+        return 0
+
+
+def initiative_exceeds_ceiling(level: str, ceiling: str) -> bool:
+    """True iff ``level`` is above ``ceiling`` on the L0–L5 ladder.
+
+    Used at birth time: a Companion (max=L2) that's asked to birth at
+    L3 triggers a refusal with this returning True. Operator override
+    path raises a ``initiative_level_override`` audit event.
+
+    Unknown level OR unknown ceiling fail closed (treated as widest /
+    strictest respectively). Symmetric to memory_scope_exceeds_ceiling.
+    """
+    return _initiative_index(level) > _initiative_index(ceiling)
 
 
 def genre_requires_approval(genre: str | None, side_effects: str) -> bool:

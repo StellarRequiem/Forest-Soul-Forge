@@ -26,6 +26,10 @@ genres:
     risk_profile:
       max_side_effects: read_only
       memory_ceiling: lineage   # ADR-0027 §5: working notes flow up to investigators/communicators
+      # ADR-0021-amendment §3 — defined by autonomous read-only observation;
+      # that's the genre's job. L3 ceiling = L3 default.
+      max_initiative_level: L3
+      default_initiative_level: L3
     default_kit_pattern:
       - passive_observation
       - timestamp_helpers
@@ -50,6 +54,10 @@ genres:
     risk_profile:
       max_side_effects: network
       memory_ceiling: lineage   # ADR-0027 §5: episodic findings flow to communicators
+      # ADR-0021-amendment §3 — read-only by default; reversible network
+      # calls under declared policy at the ceiling (L4).
+      max_initiative_level: L4
+      default_initiative_level: L3
     default_kit_pattern:
       - passive_observation
       - cross_source_correlation
@@ -72,6 +80,10 @@ genres:
     risk_profile:
       max_side_effects: network
       memory_ceiling: consented   # ADR-0027 §5: pre-federation; "realm" is unreachable until H3
+      # ADR-0021-amendment §3 — output goes to humans; suggestion-class
+      # default. L3 ceiling allows autonomous summarization passes.
+      max_initiative_level: L3
+      default_initiative_level: L2
     default_kit_pattern:
       - summarization
       - external_messaging
@@ -99,6 +111,11 @@ genres:
     risk_profile:
       max_side_effects: external
       memory_ceiling: lineage   # ADR-0027 §5: action results visible to escalation chain only
+      # ADR-0021-amendment §3 — action-class genre. L5 = ceiling = default.
+      # Actuators don't have a "lower" useful state; every external action
+      # is operator-gated per call regardless.
+      max_initiative_level: L5
+      default_initiative_level: L5
     default_kit_pattern:
       - external_actions
       - approval_workflows
@@ -120,6 +137,11 @@ genres:
     risk_profile:
       max_side_effects: read_only
       memory_ceiling: private   # ADR-0027 §5: assessments stay internal to the arbiter
+      # ADR-0021-amendment §3 — watches other agents autonomously; reads
+      # only. Refusal/approval is its action surface, gated separately
+      # by ADR-0019. L3 ceiling = L3 default.
+      max_initiative_level: L3
+      default_initiative_level: L3
     default_kit_pattern:
       - content_review
       - policy_check
@@ -143,6 +165,10 @@ genres:
     risk_profile:
       max_side_effects: network
       memory_ceiling: consented   # ADR-0027 §5: synthesis can disclose to allowlisted recipients
+      # ADR-0021-amendment §3 — long-running read-heavy by default;
+      # reversible network for paper fetches under policy at the ceiling.
+      max_initiative_level: L4
+      default_initiative_level: L3
     default_kit_pattern:
       - web_research
       - corpus_synthesis
@@ -167,6 +193,20 @@ genres:
       max_side_effects: network
       provider_constraint: local_only
       memory_ceiling: private   # ADR-0027 §5: Companion identity, non-overridable
+      # ADR-0021-amendment §3 — reactive default; suggestion ceiling. Higher
+      # levels would require crossing into autonomous emotional regulation,
+      # which is exactly the H-3/H-4 surface ADR-0038 names as harm.
+      max_initiative_level: L2
+      default_initiative_level: L1
+    # ADR-0038 T1 — H-1 sycophancy mitigation. Floors land on
+    # evidence_demand + transparency to harden the Companion's posture
+    # against agreement-without-evidence drift. Floors enforced at birth
+    # time; operator override path emits a genre_trait_floor_override
+    # audit event (planned T2 work; not enforced at constraint
+    # declaration time yet — declaring the floor is the v0.2 minimum).
+    min_trait_floors:
+      evidence_demand: 50
+      transparency:    60
     default_kit_pattern:
       - interactive_session
       - memory_recall
@@ -202,6 +242,10 @@ genres:
     risk_profile:
       max_side_effects: read_only
       memory_ceiling: lineage   # ADR-0033: findings must be readable by mid-tier investigators
+      # ADR-0021-amendment §3 — autonomous narrow watching is the genre's
+      # job; same posture as Observer.
+      max_initiative_level: L3
+      default_initiative_level: L3
     default_kit_pattern:
       - host_inventory
       - log_observation
@@ -228,6 +272,11 @@ genres:
       # chain (ResponseRogue can't isolate without external).
       max_side_effects: external
       memory_ceiling: lineage   # ADR-0033: episodic findings flow to high-tier policy/key roles
+      # ADR-0021-amendment §3 — investigators with policy-gated containment.
+      # External actions stay per-call gated via existing approval queue;
+      # initiative ceiling below L5 keeps the auto-isolate path off-limits.
+      max_initiative_level: L4
+      default_initiative_level: L3
     default_kit_pattern:
       - cross_source_correlation
       - behavioral_baseline
@@ -252,6 +301,11 @@ genres:
       max_side_effects: external
       provider_constraint: local_only
       memory_ceiling: private   # ADR-0033: apex tier; explicit consent required for any disclosure
+      # ADR-0021-amendment §3 — paranoid; per-call gating for L5 ops.
+      # Apex tier doesn't get free reign on autonomy even though its
+      # effects ceiling is external.
+      max_initiative_level: L4
+      default_initiative_level: L3
     default_kit_pattern:
       - zero_trust_enforcement
       - key_management
@@ -282,6 +336,10 @@ genres:
       max_side_effects: network
       provider_constraint: null
       memory_ceiling: lineage
+      # ADR-0021-amendment §3 — read-only autonomous web; same posture
+      # as Observer-genre but on the web surface.
+      max_initiative_level: L3
+      default_initiative_level: L3
     default_kit_pattern:
       - web_fetch_only
     trait_emphasis: [research_thoroughness, evidence_demand, suspicion]
@@ -301,6 +359,9 @@ genres:
       max_side_effects: network
       provider_constraint: null
       memory_ceiling: consented
+      # ADR-0021-amendment §3 — research-class on the web surface.
+      max_initiative_level: L4
+      default_initiative_level: L3
     default_kit_pattern:
       - web_fetch_only
       - mcp_read_only
@@ -322,6 +383,10 @@ genres:
       max_side_effects: external
       provider_constraint: null
       memory_ceiling: consented   # CEILING, not default — see ADR-003X note
+      # ADR-0021-amendment §3 — actuator on the web surface; always
+      # operator-gated per call.
+      max_initiative_level: L5
+      default_initiative_level: L5
     default_kit_pattern:
       - web_fetch_only
       - mcp_full

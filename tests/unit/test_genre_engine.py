@@ -526,3 +526,282 @@ class TestGenreApprovalPolicy:
         # constitution entry that drifted on case still matches.
         assert genre_requires_approval("Security_High", "network") is True
         assert genre_requires_approval("SECURITY_LOW", "external") is False
+
+
+# ===========================================================================
+# ADR-0038 T1 — min_trait_floors (Companion harm model H-1 mitigation)
+# ===========================================================================
+from forest_soul_forge.core.genre_engine import (
+    initiative_exceeds_ceiling,
+    trait_floor_violations,
+)
+
+
+class TestMinTraitFloors:
+    """min_trait_floors is a per-genre map of trait_name → integer floor.
+    Profiles whose trait values fall below the floor refuse at birth time.
+    Companion-genre v0.2 declares evidence_demand >= 50, transparency >= 60
+    to mitigate H-1 sycophancy drift."""
+
+    def test_real_companion_declares_h1_floors(self):
+        engine = load_genres(REAL_GENRES)
+        companion = engine.genres["companion"]
+        # ADR-0038 T1 — exact values pinned. Future bumps should be
+        # deliberate edits with audit-doc citation, not silent drift.
+        assert companion.min_trait_floors == {
+            "evidence_demand": 50,
+            "transparency": 60,
+        }
+
+    def test_real_non_companion_genres_have_empty_floors(self):
+        # Floors are Companion-only at v0.2. Other genres declaring floors
+        # should be deliberate; this test pins the v0.2 invariant.
+        engine = load_genres(REAL_GENRES)
+        for name, gd in engine.genres.items():
+            if name == "companion":
+                continue
+            assert gd.min_trait_floors == {}, (
+                f"genre {name!r} unexpectedly has floors {gd.min_trait_floors}; "
+                "Companion is the only genre that should declare floors at v0.2"
+            )
+
+    def test_empty_floors_returns_no_violations(self, tmp_path):
+        engine = load_genres(REAL_GENRES)
+        # Use a genre with no floors. Any trait value is fine.
+        observer = engine.genres["observer"]
+        violations = trait_floor_violations(observer, {"vigilance": 10})
+        assert violations == []
+
+    def test_compliant_profile_returns_no_violations(self):
+        engine = load_genres(REAL_GENRES)
+        companion = engine.genres["companion"]
+        # 85/85 are above 50/60 — both pass.
+        violations = trait_floor_violations(
+            companion,
+            {"evidence_demand": 85, "transparency": 85},
+        )
+        assert violations == []
+
+    def test_below_floor_surfaces_with_actual_and_floor(self):
+        engine = load_genres(REAL_GENRES)
+        companion = engine.genres["companion"]
+        violations = trait_floor_violations(
+            companion,
+            {"evidence_demand": 30, "transparency": 70},
+        )
+        # evidence_demand=30 below floor=50; transparency=70 above floor=60.
+        assert violations == [("evidence_demand", 30, 50)]
+
+    def test_multiple_below_floor_all_reported(self):
+        # Caller wants to see every violation in one pass, not first-only.
+        engine = load_genres(REAL_GENRES)
+        companion = engine.genres["companion"]
+        violations = trait_floor_violations(
+            companion,
+            {"evidence_demand": 10, "transparency": 20},
+        )
+        assert sorted(violations) == [
+            ("evidence_demand", 10, 50),
+            ("transparency",    20, 60),
+        ]
+
+    def test_unknown_trait_in_profile_is_ignored(self):
+        # The floor is keyed on trait_name; profile values for unrelated
+        # traits don't move the needle.
+        engine = load_genres(REAL_GENRES)
+        companion = engine.genres["companion"]
+        violations = trait_floor_violations(
+            companion,
+            {"vigilance": 0, "evidence_demand": 80, "transparency": 80},
+        )
+        assert violations == []
+
+    def test_missing_trait_in_profile_is_skipped(self):
+        # Loader cross-validation handles "floor references unknown trait".
+        # The runtime check just skips profile values it can't find — the
+        # mismatch is logged at startup, not at every birth.
+        engine = load_genres(REAL_GENRES)
+        companion = engine.genres["companion"]
+        # Profile missing evidence_demand entirely — function skips it.
+        violations = trait_floor_violations(
+            companion, {"transparency": 80}
+        )
+        assert violations == []
+
+
+class TestMinTraitFloorsParse:
+    """Loader edge cases for min_trait_floors."""
+
+    def test_floors_field_is_optional(self, tmp_path):
+        # Genre without min_trait_floors loads cleanly; defaults to {}.
+        p = _write(tmp_path, _good_yaml())
+        engine = load_genres(p)
+        assert engine.genres["watcher"].min_trait_floors == {}
+
+    def test_negative_floor_rejected(self, tmp_path):
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["min_trait_floors"] = {"vigilance": -1}
+        p = _write(tmp_path, yaml.safe_dump(body))
+        with pytest.raises(GenreEngineError, match=r"\[0, 100\]"):
+            load_genres(p)
+
+    def test_above_100_floor_rejected(self, tmp_path):
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["min_trait_floors"] = {"vigilance": 101}
+        p = _write(tmp_path, yaml.safe_dump(body))
+        with pytest.raises(GenreEngineError, match=r"\[0, 100\]"):
+            load_genres(p)
+
+    def test_float_floor_rejected(self, tmp_path):
+        # Float values are typos — the trait engine uses ints, silent
+        # coercion would mask the mistake.
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["min_trait_floors"] = {"vigilance": 0.5}
+        p = _write(tmp_path, yaml.safe_dump(body))
+        with pytest.raises(GenreEngineError, match="must be an integer"):
+            load_genres(p)
+
+    def test_bool_floor_rejected(self, tmp_path):
+        # isinstance(True, int) is True in Python — explicit bool guard.
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["min_trait_floors"] = {"vigilance": True}
+        p = _write(tmp_path, yaml.safe_dump(body))
+        with pytest.raises(GenreEngineError, match="must be an integer"):
+            load_genres(p)
+
+    def test_non_dict_floors_rejected(self, tmp_path):
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["min_trait_floors"] = ["vigilance", 50]
+        p = _write(tmp_path, yaml.safe_dump(body))
+        with pytest.raises(GenreEngineError, match="must be a mapping"):
+            load_genres(p)
+
+
+# ===========================================================================
+# ADR-0021-amendment §2 — max_initiative_level + default_initiative_level
+# ===========================================================================
+class TestInitiativeLadder:
+    """Each genre gets a max_initiative_level (L0–L5 ceiling) and a
+    default_initiative_level (the genre default at birth). The defaults are
+    pinned per ADR-0021-am §3 mapping."""
+
+    def test_companion_caps_at_l2_default_l1(self):
+        # The harm-model-defining pair: Companion is reactive (L1) and
+        # cannot exceed suggestion class (L2). Higher levels would mean
+        # autonomous emotional regulation — H-3/H-4 surface.
+        engine = load_genres(REAL_GENRES)
+        companion = engine.genres["companion"]
+        assert companion.max_initiative_level == "L2"
+        assert companion.default_initiative_level == "L1"
+
+    def test_actuator_l5_max_l5_default(self):
+        # Action-class genre — action is its job. Default = ceiling.
+        engine = load_genres(REAL_GENRES)
+        actuator = engine.genres["actuator"]
+        assert actuator.max_initiative_level == "L5"
+        assert actuator.default_initiative_level == "L5"
+
+    def test_observer_l3_l3(self):
+        # Defined by autonomous read-only observation.
+        engine = load_genres(REAL_GENRES)
+        observer = engine.genres["observer"]
+        assert observer.max_initiative_level == "L3"
+        assert observer.default_initiative_level == "L3"
+
+    def test_per_genre_pinning(self):
+        # ADR-0021-am §3 mapping. Pinned so accidental drift surfaces.
+        engine = load_genres(REAL_GENRES)
+        expected = {
+            "observer":       ("L3", "L3"),
+            "investigator":   ("L4", "L3"),
+            "communicator":   ("L3", "L2"),
+            "actuator":       ("L5", "L5"),
+            "guardian":       ("L3", "L3"),
+            "researcher":     ("L4", "L3"),
+            "companion":      ("L2", "L1"),
+            "security_low":   ("L3", "L3"),
+            "security_mid":   ("L4", "L3"),
+            "security_high":  ("L4", "L3"),
+            "web_observer":   ("L3", "L3"),
+            "web_researcher": ("L4", "L3"),
+            "web_actuator":   ("L5", "L5"),
+        }
+        for name, (mx, df) in expected.items():
+            gd = engine.genres[name]
+            assert (gd.max_initiative_level, gd.default_initiative_level) == (mx, df), (
+                f"genre {name!r}: expected max={mx} default={df}, got "
+                f"max={gd.max_initiative_level} default={gd.default_initiative_level}"
+            )
+
+    def test_initiative_exceeds_ceiling_above(self):
+        assert initiative_exceeds_ceiling("L4", "L2") is True
+        assert initiative_exceeds_ceiling("L5", "L0") is True
+
+    def test_initiative_exceeds_ceiling_at_or_below(self):
+        assert initiative_exceeds_ceiling("L1", "L2") is False
+        assert initiative_exceeds_ceiling("L2", "L2") is False
+        assert initiative_exceeds_ceiling("L0", "L5") is False
+
+    def test_initiative_exceeds_unknown_fail_closed(self):
+        # Unknown level → strictest (L0=0). Unknown ceiling → strictest.
+        # Both unknown collapses to 0>0=False — neutral; not load-bearing.
+        # A typo on either side never quietly permits more than intended.
+        assert initiative_exceeds_ceiling("LZ", "L5") is False  # Lz→0, L5→5
+        assert initiative_exceeds_ceiling("L5", "LZ") is True   # L5→5, Lz→0
+
+
+class TestInitiativeLadderParse:
+    """Loader edge cases for max_initiative_level / default_initiative_level."""
+
+    def test_omitted_defaults_to_l5_l5(self, tmp_path):
+        # Back-compat: a v1 genres.yaml without the new fields keeps the
+        # v1 behavior (no initiative ceiling).
+        p = _write(tmp_path, _good_yaml())
+        engine = load_genres(p)
+        gd = engine.genres["watcher"]
+        assert gd.max_initiative_level == "L5"
+        assert gd.default_initiative_level == "L5"
+
+    def test_default_inherits_max_when_only_max_set(self, tmp_path):
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["risk_profile"]["max_initiative_level"] = "L3"
+        p = _write(tmp_path, yaml.safe_dump(body))
+        engine = load_genres(p)
+        gd = engine.genres["watcher"]
+        # No default set → inherits ceiling.
+        assert gd.max_initiative_level == "L3"
+        assert gd.default_initiative_level == "L3"
+
+    def test_invalid_max_level_rejected(self, tmp_path):
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["risk_profile"]["max_initiative_level"] = "L9"
+        p = _write(tmp_path, yaml.safe_dump(body))
+        with pytest.raises(GenreEngineError, match="max_initiative_level"):
+            load_genres(p)
+
+    def test_invalid_default_level_rejected(self, tmp_path):
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["risk_profile"]["default_initiative_level"] = "tier_1"
+        p = _write(tmp_path, yaml.safe_dump(body))
+        with pytest.raises(GenreEngineError, match="default_initiative_level"):
+            load_genres(p)
+
+    def test_default_above_ceiling_rejected(self, tmp_path):
+        # default > max is meaningless; loader rejects.
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["risk_profile"]["max_initiative_level"] = "L2"
+        body["genres"]["watcher"]["risk_profile"]["default_initiative_level"] = "L4"
+        p = _write(tmp_path, yaml.safe_dump(body))
+        with pytest.raises(GenreEngineError, match="must not exceed"):
+            load_genres(p)
+
+    def test_default_at_ceiling_accepted(self, tmp_path):
+        # default == max is fine — Actuator's case.
+        body = yaml.safe_load(_good_yaml())
+        body["genres"]["watcher"]["risk_profile"]["max_initiative_level"] = "L3"
+        body["genres"]["watcher"]["risk_profile"]["default_initiative_level"] = "L3"
+        p = _write(tmp_path, yaml.safe_dump(body))
+        engine = load_genres(p)
+        gd = engine.genres["watcher"]
+        assert gd.max_initiative_level == "L3"
+        assert gd.default_initiative_level == "L3"

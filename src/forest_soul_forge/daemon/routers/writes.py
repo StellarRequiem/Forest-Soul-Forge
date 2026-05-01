@@ -59,6 +59,7 @@ from forest_soul_forge.core.genre_engine import (
     GenreEngine,
     GenreEngineError,
     kit_violations_for_genre,
+    trait_floor_violations,
 )
 from forest_soul_forge.core.tool_policy import resolve_constraints
 from forest_soul_forge.daemon.config import DaemonSettings
@@ -331,6 +332,55 @@ def _enforce_genre_kit_tier(
         )
 
 
+def _enforce_genre_trait_floors(
+    genre_engine: GenreEngine,
+    role: str,
+    trait_values: dict[str, int],
+) -> None:
+    """ADR-0038 T1: refuse a profile whose trait values fall below the
+    genre's declared ``min_trait_floors``.
+
+    No-op when:
+      - The role isn't claimed by any genre (no floors to enforce against).
+      - The genre declares no floors (default for all non-Companion genres).
+
+    Raises HTTPException(400) listing every violating trait so the
+    operator sees the full picture in one error rather than playing
+    whack-a-mole. Refusal happens BEFORE constraint resolution + before
+    any artifact is written; audit chain stays clean of would-be
+    illegal agents.
+
+    The §0 reasoning for hard-refusing rather than warning: the floor
+    exists to mitigate H-1 (sycophancy) at birth time. A warning that
+    the operator can dismiss reproduces exactly the failure mode the
+    floor is meant to prevent. Operator override path emits a separate
+    ``genre_trait_floor_override`` audit event (T2 work; not in this
+    tranche — declaring + enforcing the floor is the v0.2 minimum).
+    """
+    try:
+        gd = genre_engine.genre_for(role)
+    except GenreEngineError:
+        return  # unclaimed role → no genre check
+    if not gd.min_trait_floors:
+        return
+    violations = trait_floor_violations(gd, trait_values)
+    if violations:
+        offenders = ", ".join(
+            f"{name}={actual} (floor {floor})"
+            for name, actual, floor in violations
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"genre trait-floor violation: {role!r} is in genre "
+                f"{gd.name!r} which declares min_trait_floors={dict(gd.min_trait_floors)}; "
+                f"the requested profile falls below: {offenders}. Raise the "
+                f"offending trait value(s) at or above the floor or change "
+                f"the role to one whose genre has no floor for those traits."
+            ),
+        )
+
+
 def _resolve_genre(
     genre_engine: GenreEngine, role: str
 ) -> tuple[str | None, str | None]:
@@ -485,6 +535,11 @@ def _perform_create(
     # otherwise. Done BEFORE constraint resolution so a violating birth
     # rejects fast.
     _enforce_genre_kit_tier(genre_engine, tool_catalog, profile.role, resolved_tools)
+    # ADR-0038 T1: profile must respect the genre's min_trait_floors.
+    # Same fail-fast posture as kit-tier — refusal lands before any
+    # artifact write. No-op for genres without declared floors (all
+    # but Companion at v0.2).
+    _enforce_genre_trait_floors(genre_engine, profile.role, profile.trait_values)
     # Per-tool constraints from the trait profile (ADR-0018 T2.5).
     # constitution.build() ingests these so they're part of the
     # constitution_hash — agents with the same profile but different

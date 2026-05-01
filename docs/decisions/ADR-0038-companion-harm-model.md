@@ -73,7 +73,7 @@ symptom + the genre-level surface where it can be detected/mitigated.
 
 | Harm | Lands in (existing surface) | New work required |
 |---|---|---|
-| H-1 | Genre minimum trait values (ADR-0021) | Add `min_trait_floors:` field to genres.yaml; Companion floors `evidence_demand >= 0.5` and `transparency >= 0.6`. |
+| H-1 | Genre minimum trait values (ADR-0021) | Add `min_trait_floors:` field to genres.yaml; Companion floors `evidence_demand >= 50` and `transparency >= 60` (trait engine scale: integer in [0,100]). |
 | H-2 | Voice renderer (ADR-0017) post-filter | New `voice_safety_filter.py` with a small denylist of sentience-claim patterns; rejects + asks for retry. |
 | H-3 | New telemetry table + character sheet field | Add `companion_session_telemetry` (session_id, started_at, ended_at, operator_emotional_class). New character-sheet field `dependency_signal` computed from telemetry. |
 | H-4 | Constitution role anchor (ADR-0004) | Constitution-hash already binds the role; add a per-turn assertion that Companion's response stays within role-scope. New constraint: `role_scope_drift_check`. |
@@ -97,8 +97,9 @@ companion:
     max_side_effects: network
     provider_constraint: local_only
   min_trait_floors:
-    evidence_demand: 0.5
-    transparency: 0.6
+    # Trait engine scale is integer in [0, 100]; floats rejected at load.
+    evidence_demand: 50
+    transparency:    60
   trait_emphasis: [empathy, patience, warmth, composure, transparency]
   # ...
 ```

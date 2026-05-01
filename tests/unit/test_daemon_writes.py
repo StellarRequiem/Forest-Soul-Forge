@@ -946,6 +946,79 @@ class TestToolKit:
         assert "traffic_flow_local" not in names  # we removed it
 
 
+class TestGenreTraitFloors:
+    """ADR-0038 T1 — birth refuses when a Companion's profile falls below
+    the genre's declared min_trait_floors. Symmetric to the existing kit-
+    tier ceiling check (TestToolKit) but on traits, not tools."""
+
+    def test_companion_default_traits_pass_floor(self, write_env):
+        # operator_companion is the v0.2 Companion-genre role registered
+        # in the trait engine. Defaults are evidence_demand=85,
+        # transparency=85 — both above the floor (50/60).
+        client, _, _ = write_env
+        body = _sample_birth_body(
+            agent_name="Companion-Defaults", role="operator_companion"
+        )
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 201, resp.text
+
+    def test_companion_below_evidence_demand_floor_400(self, write_env):
+        client, _, _ = write_env
+        body = _sample_birth_body(
+            agent_name="Companion-LowEvidence", role="operator_companion"
+        )
+        body["profile"]["trait_values"] = {"evidence_demand": 30}
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 400, resp.text
+        detail = resp.json()["detail"]
+        # ADR-0038 T1: error names the genre + the offending trait + floor.
+        assert "genre trait-floor violation" in detail
+        assert "companion" in detail
+        assert "evidence_demand=30" in detail
+        assert "floor 50" in detail
+
+    def test_companion_below_transparency_floor_400(self, write_env):
+        client, _, _ = write_env
+        body = _sample_birth_body(
+            agent_name="Companion-LowTransparency", role="operator_companion"
+        )
+        body["profile"]["trait_values"] = {"transparency": 40}
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 400, resp.text
+        detail = resp.json()["detail"]
+        assert "transparency=40" in detail
+        assert "floor 60" in detail
+
+    def test_companion_below_both_floors_lists_both(self, write_env):
+        # Operator should see every violation in one error, not whack-a-mole.
+        client, _, _ = write_env
+        body = _sample_birth_body(
+            agent_name="Companion-BothLow", role="operator_companion"
+        )
+        body["profile"]["trait_values"] = {
+            "evidence_demand": 10, "transparency": 20,
+        }
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 400, resp.text
+        detail = resp.json()["detail"]
+        assert "evidence_demand=10" in detail
+        assert "transparency=20" in detail
+
+    def test_observer_genre_has_no_floor_to_violate(self, write_env):
+        # Other genres declare no floors at v0.2. Birthing an Observer
+        # with evidence_demand=0 succeeds — the floor mechanic is
+        # opt-in, not a global default.
+        client, _, _ = write_env
+        body = _sample_birth_body(
+            agent_name="Observer-LowEverything", role="network_watcher"
+        )
+        body["profile"]["trait_values"] = {
+            "evidence_demand": 0, "transparency": 0,
+        }
+        resp = client.post("/birth", json=body)
+        assert resp.status_code == 201, resp.text
+
+
 class TestVoiceRendererUnit:
     """Direct unit tests for forest_soul_forge.soul.voice_renderer.render_voice.
 
