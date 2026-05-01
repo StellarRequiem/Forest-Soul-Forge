@@ -6,6 +6,116 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-01 (SarahR1 absorption release)
+
+Three Proposed ADRs from external reviewer SarahR1 (Irisviel) — the
+2026-04-30 comparative review of FSF vs. her Nexus / Irkalla project
+— shipped as a coherent absorption arc. **Test suite: 1434 → 1567
+passing (+133, +9%).** Zero regressions across the arc. All three
+ADRs promoted from Proposed to Accepted on landing.
+
+External catalyst: [SarahR1 (Irisviel)](https://github.com/SarahR1) —
+see `CREDITS.md` for the full attribution + adopted/declined ledger.
+
+### ADR-0027-amendment — epistemic memory metadata
+
+Closes ADR-0038 H-6 ("memory overreach / inferred-preference
+cementing") at the data layer.
+
+- **T1 + T2 — schema v10 → v11 + MemoryEntry write/read paths**
+  (commit `fcd8d2c`). Three new columns on `memory_entries`:
+  `claim_type` (six-class enum: observation / user_statement /
+  agent_inference / preference / promise / external_fact),
+  `confidence` (three-state: low / medium / high),
+  `last_challenged_at` (nullable). New `memory_contradictions`
+  table with FK back to entries + CHECK enum on
+  `contradiction_kind`. Forward-only additive migration; default
+  values land for pre-migration rows. New typed errors
+  `UnknownClaimTypeError` / `UnknownConfidenceError`.
+- **T3 — `memory_recall.v1` epistemic enrichments** (commit
+  `24ec62b`). Recall always surfaces the new fields. Optional
+  `surface_contradictions` parameter attaches unresolved
+  contradictions per entry. Optional `staleness_threshold_days`
+  parameter flags `is_stale`. K1 verification fold: verified
+  entries surface as `confidence=high` regardless of stored
+  value.
+- **T4 — `memory_challenge.v1` tool** (commit `fdef95b`). Operator-
+  driven scrutiny stamp on a memory entry. Distinct from
+  contradictions; surfaces through staleness flag. Operator-only
+  by convention via `challenger_id` arg + constitutional kit
+  gating.
+- **T7 (operator-driven `memory_reclassify.v1`)** deferred to v0.3.
+
+### ADR-0021-amendment — initiative ladder
+
+Adds the L0–L5 initiative ladder, orthogonal to the existing
+side-effects ceiling.
+
+- **T1 — genres.yaml fields + loader** (commit `03b3d60`). All 13
+  genres pinned to per-§3 mapping: Companion L2 max / L1 default,
+  Actuator L5/L5, Observer L3/L3, Investigator L4/L3, etc.
+- **T2 — constitution derived fields** (commit `823e69c`). Two new
+  fields on `Constitution`: `initiative_level` + `initiative_ceiling`.
+  Both hashed (changes the constitution-hash for new births).
+  YAML emission conditional: defaults (L5/L5) keep pre-amendment
+  artifacts byte-identical for back-compat.
+- **T3 — `InitiativeFloorStep` dispatcher** (commit `4e9b8cf`).
+  Pipeline step in R3 governance, between `GenreFloorStep` and
+  `CallCounterStep`. Opt-in per tool: tools that declare
+  `required_initiative_level` get gated; others pass through. New
+  `_load_initiative_level` defensive helper. Per-tool annotation
+  audit deferred (v0.3 candidate to convert opt-in to enforcement
+  on web_fetch / web_actuator / shell_exec / etc.).
+
+### ADR-0038 — Companion harm model
+
+Eight-harm taxonomy (H-1 sycophancy through H-8 self-improvement
+narrative inflation) with per-harm structural mitigations.
+
+- **T1 — `min_trait_floors` mechanic** (commit `03b3d60`).
+  Companion declares `evidence_demand >= 50, transparency >= 60`
+  (H-1 sycophancy mitigation). Birth refuses below-floor profiles.
+- **T2 — voice safety filter** (commit `fb75c6f`). New
+  `voice_safety_filter.py` module with conservative denylist of
+  nine sentience-claim pattern categories. Wired into voice
+  renderer post-processing: hits trigger template fallback.
+  Hard refuse, not soft warn.
+- **T3 — Companion §honesty constitutional template** (commit
+  `ddf0326`). Three new policies on `operator_companion`:
+  `forbid_sentience_claims` (H-2), `forbid_self_modification_claims`
+  (H-8), `external_support_redirect` (H-3, require_human_approval).
+  Two new out_of_scope entries (H-4):
+  `claim_romantic_relationship`,
+  `assume_intimacy_beyond_configured_role`. New operator-duty
+  (H-7 burnout awareness).
+- **T4–T6 (telemetry + per-call gates) + T7 (dashboard)** deferred
+  to v0.3 — operator dashboard work + per-call gate plumbing, not
+  blocking the structural floor.
+
+### Other
+
+- **`CREDITS.md`** introduced (commit `889e362`). First entry:
+  SarahR1 (Irisviel). Documents both adopted and declined-with-
+  reasoning items. Future contributor work goes here with the
+  same discipline.
+- **`docs/audits/2026-05-01-sarahr1-review-response.md`** — saved
+  response in audit trail. Disk-citation corrections of stale
+  claims, three adoption announcements, three pushbacks, three
+  questions back at her.
+
+### Files NOT changed
+
+Audit chain format, DNA derivation, constitution-hash semantics
+(field additions, not invariant changes), schema rebuild path,
+single-writer SQLite discipline, `memory_verify.v1` (K1) API,
+genre kit-tier ceiling enforcement, tool-of-the-turn dispatcher
+public API, the seven `genres.yaml` original genres' identities.
+
+See `docs/decisions/ADR-0027-amendment-epistemic-metadata.md`,
+`docs/decisions/ADR-0021-amendment-initiative-ladder.md`,
+`docs/decisions/ADR-0038-companion-harm-model.md` for the
+per-amendment rationale + open questions + tranche ledgers.
+
 ## [0.1.1] — 2026-04-30 (audit + hardening release)
 
 The post-v0.1.0 hardening + cleanup pass. **Test suite: 992 → 1439

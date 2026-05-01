@@ -4,7 +4,7 @@ A self-contained snapshot for a developer joining the project. What's implemente
 
 > **Refresh cadence:** this doc + [`README.md`](README.md) update together at every phase boundary (Phase A close, Phase B close, Phase D close, etc.) and after any meaningful architectural finding. The two are designed to stay in sync; STATE.md is the developer-facing current-reality view, README.md is the product-and-mission view.
 
-Last updated: 2026-04-30, after the v0.1.0 release session shipped SW-track + R3 governance pipeline + ADR-003Y Y1-Y7 conversation runtime end-to-end. See [CHANGELOG.md](CHANGELOG.md) for the commit-by-commit ledger.
+Last updated: 2026-05-01, post-v0.1.2 (SarahR1 absorption release). v0.1.1 shipped 2026-04-30 (audit + hardening, 992 → 1439 tests). v0.1.2 shipped 2026-05-01 absorbing three ADRs from SarahR1 (Irisviel)'s 2026-04-30 comparative review: ADR-0027-am epistemic memory metadata (schema v11 + memory_recall enrichments + memory_challenge tool), ADR-0021-am initiative ladder (L0–L5 ladder + InitiativeFloorStep dispatcher), ADR-0038 companion harm model (min_trait_floors + voice safety filter + Companion §honesty constitutional template). Test count 1434 → 1567 (+133 net). See [CHANGELOG.md](CHANGELOG.md) and [CREDITS.md](CREDITS.md) for the full attribution + ledger.
 
 ---
 
@@ -28,12 +28,12 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | | |
 |---:|:---|
 | Source LoC (Python) | ~36,400 across `src/forest_soul_forge/` (post-R-track refactors split god-objects) |
-| Tests (LoC) | ~7,800 across 45 unit suites + 1 integration |
-| ADRs filed | 29 (`ADR-0001` → `ADR-0034`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts in numerical order) |
-| Builtin tools registered | 40 (was 36 + code_read.v1 + code_edit.v1 + shell_exec.v1 + llm_think.v1 from SW-track) |
+| Tests (passing) | **1567** (was 1439 at v0.1.1; +133 from v0.1.2 SarahR1 absorption arc) |
+| ADRs filed | 32 (`ADR-0001` → `ADR-0038`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts; ADR-0021-am + ADR-0027-am amendments + ADR-0038 companion harm model — all Accepted in v0.1.2) |
+| Builtin tools registered | 41 (was 40 + memory_challenge.v1 from ADR-0027-am T4) |
 | Skill manifests shipped | 26 (4 chain + 17 supporting + 3 triune + 2 from forge-CLI seeds) |
-| Schema version | v10 (v8: agent_secrets / v9: memory_verifications / v10: conversations + participants + turns from ADR-003Y Y1) |
-| Genres | 13 (7 original + 3 security tiers + 3 web tiers) |
+| Schema version | **v11** (v8: agent_secrets / v9: memory_verifications / v10: conversations / v11: epistemic memory — claim_type + confidence + last_challenged_at + memory_contradictions table from ADR-0027-am T1) |
+| Genres | 13 (7 original + 3 security tiers + 3 web tiers); each genre now carries `max_initiative_level` + `default_initiative_level` per ADR-0021-am §3 |
 | Trait roles | 17 (5 original + 9 swarm + 3 SW-track: system_architect, software_engineer, code_reviewer) |
 | Audit event types | 54 (was 36+ added: 8 conversation_*, ambient_nudge, conversation_summarized, K-track ceremony/verify/hardware/triune, T-track governance_relaxed/posture_override, plus chain_depth metadata on conversation_turn) |
 | Frontend modules (vanilla JS) | 22 (was 18 + chat.js + cleanup) |
