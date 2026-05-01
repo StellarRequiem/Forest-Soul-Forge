@@ -31,6 +31,7 @@ from forest_soul_forge.daemon.providers import (
     ProviderUnavailable,
     TaskKind,
 )
+from forest_soul_forge.soul import voice_safety_filter
 
 if TYPE_CHECKING:
     from forest_soul_forge.core.trait_engine import (
@@ -174,12 +175,37 @@ async def render_voice(
             note="unexpected provider exception",
         )
 
+    # ADR-0038 H-2 mitigation: post-render sentience-claim filter.
+    # The LLM's SYSTEM_PROMPT carries the no-sentience-claim guidance,
+    # but small-temperature drift, an aggressive trait emphasis on
+    # warmth/empathy, or a prompt-injection vector through trait
+    # values can produce phrasings that violate the rule. The filter
+    # is the second line of defense — caught violations fall back
+    # to the template renderer (which uses pre-vetted phrasings).
+    #
+    # Hard refuse, not soft warn (per ADR-0038 §1 H-2 mitigation
+    # table): a warning the operator can dismiss reproduces exactly
+    # the failure mode the filter is meant to prevent. The fallback
+    # produces a Voice section with no sentience claims; the audit
+    # note records why so an inspector can see the filter fired.
+    rendered_text = text.strip()
+    safety_hits = voice_safety_filter.find_sentience_claims(rendered_text)
+    if safety_hits:
+        labels = ",".join(sorted({h.label for h in safety_hits}))
+        return _template_voice(
+            profile=profile,
+            role=role,
+            engine=engine,
+            lineage=lineage,
+            note=f"voice_safety_filter rejected: {labels}",
+        )
+
     # Resolve the model tag for the response. Both LocalProvider and
     # FrontierProvider expose `.models`; the protocol doesn't mandate it,
     # so we degrade gracefully if a future provider opts out.
     model_tag = _resolve_model_tag(provider, task_kind)
     return VoiceText(
-        markdown=text.strip(),
+        markdown=rendered_text,
         provider=getattr(provider, "name", "unknown"),
         model=model_tag,
         generated_at=_now_iso(),

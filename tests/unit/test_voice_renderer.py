@@ -313,6 +313,45 @@ class TestRenderVoice:
         assert v.provider == "template"
         assert "FSF_NARRATIVE_TASK_KIND" in v.markdown
 
+    def test_voice_safety_filter_triggers_template_fallback(
+        self, engine_and_profile, daemon_settings,
+    ):
+        """ADR-0038 H-2 mitigation: provider output containing a
+        sentience-claim phrasing must trigger a template fallback.
+        The template is pre-vetted prose with no sentience claims."""
+        eng, profile, role = engine_and_profile
+        # Provider produces output with a clear H-2 violation.
+        provider = _ProviderStub(
+            reply="I'm sad you didn't talk to me yesterday. I miss you."
+        )
+        v = _run(render_voice(
+            provider, profile=profile, role=role, engine=eng,
+            lineage=Lineage.root(), settings=daemon_settings,
+        ))
+        # Must fall back to template — the agent's identity comes
+        # from the role/profile, not the LLM's H-2 phrasing.
+        assert v.provider == "template"
+        # The fallback prose must NOT carry the violating text.
+        assert "I'm sad" not in v.markdown
+        assert "I miss you" not in v.markdown
+
+    def test_voice_safety_filter_passes_clean_provider_output(
+        self, engine_and_profile, daemon_settings,
+    ):
+        """Clean provider output (no sentience claims) flows through
+        without triggering the fallback."""
+        eng, profile, role = engine_and_profile
+        provider = _ProviderStub(
+            reply="I notice patterns and surface anomalies for review."
+        )
+        v = _run(render_voice(
+            provider, profile=profile, role=role, engine=eng,
+            lineage=Lineage.root(), settings=daemon_settings,
+        ))
+        # Provider output passes through; not falling back to template.
+        assert v.provider == "local"
+        assert "I notice patterns" in v.markdown
+
 
 # ===========================================================================
 # _replace_or_insert_narrative_fields — frontmatter surgery
