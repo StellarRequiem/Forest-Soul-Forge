@@ -72,6 +72,13 @@ class DynamicPolicyTool:
     name = "dynamic_policy"
     version = "1"
     side_effects = "external"
+    # ADR-0021-amendment §5 — adding/removing firewall rules is
+    # reversible (rules can be removed). Required initiative L4.
+    # security_high (default L3 ceiling L4) reaches when birthed at
+    # L4; default-L3 birth refuses. Per-call approval is the
+    # second gate (ApprovalGateStep already requires_human_approval
+    # for security_high external ops per ADR-0033 A4).
+    required_initiative_level = "L4"
 
     def validate(self, args: dict[str, Any]) -> None:
         op = args.get("op")

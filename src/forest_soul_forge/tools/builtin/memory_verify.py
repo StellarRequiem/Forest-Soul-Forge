@@ -74,6 +74,15 @@ class MemoryVerifyTool:
     name = "memory_verify"
     version = "1"
     side_effects = "filesystem"
+    # ADR-0021-amendment §5 — promoting a memory entry to verified
+    # is operator-driven by convention but technically dispatchable
+    # by any agent in whose kit it appears. Required L3 — reactive
+    # Companion (L1) cannot autonomously promote inferences to
+    # verified ground truth, even with a verifier_id arg (the gate
+    # is structural, not just argument-shape). Operator-driven calls
+    # land in the agent's session context as L3+ via the operator's
+    # birthing posture.
+    required_initiative_level = "L3"
 
     def validate(self, args: dict[str, Any]) -> None:
         entry_id = args.get("entry_id")

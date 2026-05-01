@@ -69,6 +69,15 @@ class DelegateTool:
     name = "delegate"
     version = "1"
     side_effects = "read_only"
+    # ADR-0021-amendment §5 — delegate dispatches another agent's
+    # skill but doesn't itself mutate state; the dispatched skill's
+    # tools carry their own initiative requirements. Required L3 here
+    # so reactive Companion (L1) and suggestion-class (L2) agents
+    # can't autonomously delegate work. Observer / Investigator /
+    # Researcher / SW-track all reach by genre default. The chained
+    # downstream tools each enforce their own floor independently —
+    # delegation is not a back-door around per-tool requirements.
+    required_initiative_level = "L3"
 
     def validate(self, args: dict[str, Any]) -> None:
         for field in ("target_instance_id", "skill_name", "skill_version", "reason"):

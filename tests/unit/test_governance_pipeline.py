@@ -639,6 +639,106 @@ class TestRealToolAnnotations:
         dctx.tool = CodeEditTool()
         assert step.evaluate(dctx).is_refuse
 
+    # -- Round-2 annotations (Burst 49) ------------------------------------
+    # Pin the L4 / L3 declarations on 7 more tools. Catches accidental
+    # drop on refactor.
+
+    def test_isolate_process_requires_l4(self):
+        from forest_soul_forge.tools.builtin.isolate_process import (
+            IsolateProcessTool,
+        )
+        assert IsolateProcessTool.required_initiative_level == "L4"
+
+    def test_jit_access_requires_l4(self):
+        from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
+        assert JitAccessTool.required_initiative_level == "L4"
+
+    def test_dynamic_policy_requires_l4(self):
+        from forest_soul_forge.tools.builtin.dynamic_policy import (
+            DynamicPolicyTool,
+        )
+        assert DynamicPolicyTool.required_initiative_level == "L4"
+
+    def test_delegate_requires_l3(self):
+        from forest_soul_forge.tools.builtin.delegate import DelegateTool
+        assert DelegateTool.required_initiative_level == "L3"
+
+    def test_memory_disclose_requires_l3(self):
+        from forest_soul_forge.tools.builtin.memory_disclose import (
+            MemoryDiscloseTool,
+        )
+        assert MemoryDiscloseTool.required_initiative_level == "L3"
+
+    def test_memory_verify_requires_l3(self):
+        from forest_soul_forge.tools.builtin.memory_verify import (
+            MemoryVerifyTool,
+        )
+        assert MemoryVerifyTool.required_initiative_level == "L3"
+
+    def test_memory_challenge_requires_l3(self):
+        from forest_soul_forge.tools.builtin.memory_challenge import (
+            MemoryChallengeTool,
+        )
+        assert MemoryChallengeTool.required_initiative_level == "L3"
+
+    # Behavioral: at least one "agent below floor refuses" per round-2 tool.
+
+    def test_companion_l1_blocks_delegate(self):
+        # Companion L1 cannot autonomously delegate work — the chained
+        # downstream tools' floors don't matter if the delegation
+        # itself refuses.
+        from forest_soul_forge.tools.builtin.delegate import DelegateTool
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L1")
+        dctx = _ctx()
+        dctx.tool = DelegateTool()
+        result = step.evaluate(dctx)
+        assert result.is_refuse
+        assert "L3" in result.detail
+
+    def test_companion_l2_blocks_memory_disclose(self):
+        # Even if a Companion's kit somehow includes memory_disclose
+        # (operator-supplied tools_add at birth), the L3 gate fires
+        # against L2 ceiling. ADR-0027 §4 disclosure invariant
+        # gets a structural backstop.
+        from forest_soul_forge.tools.builtin.memory_disclose import (
+            MemoryDiscloseTool,
+        )
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L2")
+        dctx = _ctx()
+        dctx.tool = MemoryDiscloseTool()
+        assert step.evaluate(dctx).is_refuse
+
+    def test_security_mid_l3_blocks_isolate_process(self):
+        # security_mid default L3 cannot autonomously isolate; must
+        # be birthed at ceiling L4 (or hit the per-call approval
+        # path which is gated separately).
+        from forest_soul_forge.tools.builtin.isolate_process import (
+            IsolateProcessTool,
+        )
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L3")
+        dctx = _ctx()
+        dctx.tool = IsolateProcessTool()
+        assert step.evaluate(dctx).is_refuse
+
+    def test_security_high_l4_passes_isolate_process(self):
+        # security_high birthed at ceiling L4 reaches.
+        from forest_soul_forge.tools.builtin.isolate_process import (
+            IsolateProcessTool,
+        )
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L4")
+        dctx = _ctx()
+        dctx.tool = IsolateProcessTool()
+        assert step.evaluate(dctx).verdict == "GO"
+
+    def test_observer_l3_passes_delegate(self):
+        # Observer at default L3 reaches delegate's L3. Existing
+        # delegation chains continue to work.
+        from forest_soul_forge.tools.builtin.delegate import DelegateTool
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L3")
+        dctx = _ctx()
+        dctx.tool = DelegateTool()
+        assert step.evaluate(dctx).verdict == "GO"
+
 
 # ===========================================================================
 # ApprovalGateStep

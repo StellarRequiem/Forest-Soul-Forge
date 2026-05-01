@@ -80,6 +80,13 @@ class MemoryDiscloseTool:
     name = "memory_disclose"
     version = "1"
     side_effects = "read_only"  # local-only registry write; see module docstring
+    # ADR-0021-amendment §5 — cross-agent memory disclosure is a
+    # load-bearing decision (ADR-0027 §4 minimum-disclosure). Requires
+    # L3+: reactive Companion (L1) and suggestion-class Communicator
+    # (L2) cannot autonomously disclose. The agent's own memory_ceiling
+    # (per ADR-0027 §5 genre privacy floor) gates which scopes can be
+    # disclosed at all; this gate adds the orthogonal initiative axis.
+    required_initiative_level = "L3"
 
     def validate(self, args: dict[str, Any]) -> None:
         for field in ("source_entry_id", "recipient_instance", "summary"):

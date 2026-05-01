@@ -83,6 +83,11 @@ class JitAccessTool:
     name = "jit_access"
     version = "1"
     side_effects = "external"
+    # ADR-0021-amendment §5 — JIT credential grants are reversible
+    # (revoke + expire), so reversible-with-policy class. Required
+    # initiative L4. security_mid + security_high reach by birthing
+    # at ceiling L4; default L3 cannot autonomously grant.
+    required_initiative_level = "L4"
 
     def validate(self, args: dict[str, Any]) -> None:
         principal = args.get("principal")

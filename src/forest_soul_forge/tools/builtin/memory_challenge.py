@@ -85,6 +85,12 @@ class MemoryChallengeTool:
     name = "memory_challenge"
     version = "1"
     side_effects = "filesystem"
+    # ADR-0021-amendment §5 — challenging a memory entry is a
+    # scrutiny stamp; same posture as memory_verify. Required L3 —
+    # reactive Companion (L1) cannot autonomously challenge entries
+    # (the open question 4 in ADR-0027-am explicitly defers agent-
+    # self-challenge until a concrete use case surfaces).
+    required_initiative_level = "L3"
 
     def validate(self, args: dict[str, Any]) -> None:
         entry_id = args.get("entry_id")

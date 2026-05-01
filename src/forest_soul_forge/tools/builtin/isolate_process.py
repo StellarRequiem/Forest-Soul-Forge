@@ -56,6 +56,13 @@ class IsolateProcessTool:
     name = "isolate_process"
     version = "1"
     side_effects = "external"
+    # ADR-0021-amendment §5 — process containment is reversible-with-
+    # policy class (resume + reattach are operator-driven). Required
+    # initiative L4. security_mid (default L3) at the genre default
+    # cannot autonomously isolate; operator-initiated calls or
+    # birthing at ceiling L4 reach. security_high (default L3 ceiling
+    # L4) can be raised to L4 for a specific deployment.
+    required_initiative_level = "L4"
 
     def validate(self, args: dict[str, Any]) -> None:
         pid = args.get("pid")
