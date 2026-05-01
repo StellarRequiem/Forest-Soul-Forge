@@ -1520,6 +1520,52 @@ tools:
     side_effects: read_only
     archetype_tags: [actuator, guardian, software_engineer]
 
+  semgrep_scan.v1:
+    name: semgrep_scan
+    version: "1"
+    description: |
+      Run semgrep against the agent's allowed_paths. Read-only:
+      semgrep reports findings; nothing is mutated. Subprocess
+      invocation of semgrep with --json --quiet --no-rewrite-rule-ids
+      --disable-version-check --metrics=off. Output parsed from
+      semgrep's JSON shape into structured findings (rule_id /
+      severity / message / filename / start_line / end_line /
+      start_column / end_column / code_snippet). Config can be a
+      registry ref ("auto", "p/python", "p/security-audit") or a
+      local yaml ruleset path (must resolve within allowed_paths).
+      Optional severity_filter narrows to subset of
+      {ERROR, WARNING, INFO}. Phase G.1.A primitive — catches the
+      class of bugs that come from 'this looks like it could be
+      exploited'. SW-track Reviewer (Guardian L3) primary consumer.
+    input_schema:
+      type: object
+      required: [path, config]
+      properties:
+        path:
+          type: string
+          description: "File or directory to scan."
+        config:
+          type: string
+          description: "Registry ref ('auto', 'p/python') or yaml path. Must not start with '-'."
+        max_findings:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: "Cap on findings returned. Default 500."
+        severity_filter:
+          type: array
+          items:
+            type: string
+            enum: [ERROR, WARNING, INFO]
+          description: "Subset of severities to keep. Default: all."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 600
+          description: "Subprocess timeout. Default 60."
+    side_effects: read_only
+    archetype_tags: [guardian, security_low, software_engineer]
+
   memory_challenge.v1:
     name: memory_challenge
     version: "1"

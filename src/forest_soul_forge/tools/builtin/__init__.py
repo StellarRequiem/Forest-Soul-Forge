@@ -40,6 +40,7 @@ from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
 from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
 from forest_soul_forge.tools.builtin.pytest_run import PytestRunTool
 from forest_soul_forge.tools.builtin.ruff_lint import RuffLintTool
+from forest_soul_forge.tools.builtin.semgrep_scan import SemgrepScanTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
 from forest_soul_forge.tools.builtin.tamper_detect import TamperDetectTool
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
@@ -79,6 +80,7 @@ __all__ = [
     "GitDiffReadTool",
     "GitBlameReadTool",
     "MypyTypecheckTool",
+    "SemgrepScanTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -244,3 +246,10 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # into structured findings (file/line/column/severity/code/msg).
     # SW-track Engineer + Reviewer reach.
     registry.register(MypyTypecheckTool())
+    # Phase G.1.A — semgrep_scan.v1 (Burst 59). Read-only subprocess
+    # invocation of semgrep with JSON output. Catches the class of
+    # bugs that come from "this looks like it could be exploited" —
+    # SQL injection patterns, unsafe deserialization, hard-coded
+    # secrets, taint-propagation issues. SW-track Reviewer (Guardian
+    # genre L3) is the primary consumer.
+    registry.register(SemgrepScanTool())
