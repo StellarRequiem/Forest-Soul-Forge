@@ -1476,6 +1476,50 @@ tools:
     side_effects: read_only
     archetype_tags: [observer, guardian, researcher, software_engineer]
 
+  mypy_typecheck.v1:
+    name: mypy_typecheck
+    version: "1"
+    description: |
+      Run mypy against the agent's allowed_paths. Read-only: type
+      errors are reported; nothing is mutated. Subprocess invocation
+      of `python3 -m mypy --no-incremental --show-column-numbers
+      --show-error-codes --no-error-summary --no-color-output` so
+      no `.mypy_cache` is written (honors the read_only contract).
+      Output parsed from mypy's stable text format into structured
+      findings (filename / line / column / severity / code /
+      message). Optional config_file path (must be within
+      allowed_paths). Optional `strict` flag toggles `--strict`.
+      60-second default timeout (mypy is slower than ruff because
+      whole-program inference). Phase G.1.A primitive — where ruff
+      catches style + simple logic, mypy catches the class of bugs
+      that come from 'I thought this was a string'. SW-track
+      Engineer + Reviewer.
+    input_schema:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: "Absolute or relative path to typecheck (file or dir)."
+        config_file:
+          type: string
+          description: "Optional mypy config file path; must resolve within allowed_paths."
+        strict:
+          type: boolean
+          description: "Forward --strict. Default false."
+        max_findings:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: "Cap on findings returned. Default 500."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+          description: "Subprocess timeout. Default 60."
+    side_effects: read_only
+    archetype_tags: [actuator, guardian, software_engineer]
+
   memory_challenge.v1:
     name: memory_challenge
     version: "1"

@@ -33,6 +33,7 @@ from forest_soul_forge.tools.builtin.memory_challenge import MemoryChallengeTool
 from forest_soul_forge.tools.builtin.memory_disclose import MemoryDiscloseTool
 from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
 from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
+from forest_soul_forge.tools.builtin.mypy_typecheck import MypyTypecheckTool
 from forest_soul_forge.tools.builtin.patch_check import PatchCheckTool
 from forest_soul_forge.tools.builtin.port_policy_audit import PortPolicyAuditTool
 from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
@@ -77,6 +78,7 @@ __all__ = [
     "GitLogReadTool",
     "GitDiffReadTool",
     "GitBlameReadTool",
+    "MypyTypecheckTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -236,3 +238,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # narrows to a hot section. SW-track Reviewer + Architect both
     # reach (read_only).
     registry.register(GitBlameReadTool())
+    # Phase G.1.A — mypy_typecheck.v1 (Burst 58). Read-only subprocess
+    # invocation of mypy with --no-incremental (so no .mypy_cache is
+    # written; honest read_only contract). Parses mypy's text output
+    # into structured findings (file/line/column/severity/code/msg).
+    # SW-track Engineer + Reviewer reach.
+    registry.register(MypyTypecheckTool())
