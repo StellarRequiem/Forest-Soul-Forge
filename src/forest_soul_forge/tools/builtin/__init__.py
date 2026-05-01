@@ -17,6 +17,7 @@ from forest_soul_forge.tools.builtin.delegate import DelegateTool
 from forest_soul_forge.tools.builtin.dns_lookup import DnsLookupTool
 from forest_soul_forge.tools.builtin.dynamic_policy import DynamicPolicyTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
+from forest_soul_forge.tools.builtin.git_blame_read import GitBlameReadTool
 from forest_soul_forge.tools.builtin.git_diff_read import GitDiffReadTool
 from forest_soul_forge.tools.builtin.git_log_read import GitLogReadTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
@@ -75,6 +76,7 @@ __all__ = [
     "PytestRunTool",
     "GitLogReadTool",
     "GitDiffReadTool",
+    "GitBlameReadTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -228,3 +230,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # SW-track Reviewer is the primary consumer — diffing a feature
     # branch against main is the canonical entry point of code review.
     registry.register(GitDiffReadTool())
+    # Phase G.1.A — git_blame_read.v1 (Burst 57). Read-only subprocess
+    # invocation of `git blame --porcelain` with per-line attribution
+    # (sha + author + date + summary + content). Optional line_range
+    # narrows to a hot section. SW-track Reviewer + Architect both
+    # reach (read_only).
+    registry.register(GitBlameReadTool())

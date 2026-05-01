@@ -1431,6 +1431,51 @@ tools:
     side_effects: read_only
     archetype_tags: [observer, guardian, researcher, software_engineer]
 
+  git_blame_read.v1:
+    name: git_blame_read
+    version: "1"
+    description: |
+      Per-line blame via `git blame --porcelain`. Read-only: inspects
+      commit objects + the file at the requested ref; nothing is
+      mutated. Subprocess invocation of `git -C <parent> blame
+      --porcelain [-L start,end] <ref> -- <basename>`. The porcelain
+      stream is parsed into a flat per-line list (line_no /
+      original_line_no / sha / author_name / author_email /
+      author_date / summary / content). Per-agent allowed_paths
+      gates the file path. Optional line_range narrows the scan
+      upstream of max_lines for a precise read of a hot section.
+      Phase G.1.A programming primitive — answers 'who last touched
+      this specific line, when, in what commit?' for SW-track
+      Reviewer + Architect.
+    input_schema:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: "Absolute or relative path to a file inside a git repo."
+        ref:
+          type: string
+          description: "Commit/branch/tag to blame at. Default HEAD. Must not start with '-'."
+        line_range:
+          type: array
+          items: {type: integer, minimum: 1}
+          minItems: 2
+          maxItems: 2
+          description: "[start, end] (inclusive, 1-indexed). Forwarded as -L start,end."
+        max_lines:
+          type: integer
+          minimum: 1
+          maximum: 5000
+          description: "Cap on entries returned. Default 500."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 120
+          description: "Subprocess timeout. Default 30."
+    side_effects: read_only
+    archetype_tags: [observer, guardian, researcher, software_engineer]
+
   memory_challenge.v1:
     name: memory_challenge
     version: "1"
