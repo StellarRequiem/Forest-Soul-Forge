@@ -72,6 +72,26 @@ GENRE_CEILINGS: dict[str, str] = {
 
 _SCOPE_RANK = {"private": 0, "lineage": 1, "realm": 2, "consented": 3}
 
+# ADR-0027-amendment §7.1 — six-class enum for ``claim_type``. Schema-level
+# CHECK constraint enforces these values; this Python tuple is the source
+# of truth for write-time validation. The default 'observation' is the
+# safest classification (immutable, high-confidence by default).
+CLAIM_TYPES: tuple[str, ...] = (
+    "observation",      # direct event log; high reliability
+    "user_statement",   # operator-stated; reliability bounded by operator
+    "agent_inference",  # agent-derived; explicitly NOT operator's stated word
+    "preference",       # operator's stated preference
+    "promise",          # operator's stated commitment with implicit deadline
+    "external_fact",    # claim sourced outside the agent-operator dyad
+)
+_CLAIM_TYPE_SET = frozenset(CLAIM_TYPES)
+
+# ADR-0027-amendment §7.2 — three-state confidence. Float confidence
+# invites agents to rationalize precision they don't have ("0.73") that
+# means nothing the operator can interpret. Three-state aligns with UI.
+CONFIDENCE_LEVELS: tuple[str, ...] = ("low", "medium", "high")
+_CONFIDENCE_SET = frozenset(CONFIDENCE_LEVELS)
+
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -92,6 +112,16 @@ class MemoryScopeViolation(MemoryError):
 
 class UnknownLayerError(MemoryError):
     pass
+
+
+class UnknownClaimTypeError(MemoryError):
+    """Raised when a write specifies an unknown claim_type. v11 addition
+    (ADR-0027-amendment §7.1)."""
+
+
+class UnknownConfidenceError(MemoryError):
+    """Raised when a write specifies a confidence outside the three-state
+    enum (low/medium/high). v11 addition (ADR-0027-amendment §7.2)."""
 
 
 class UnknownScopeError(MemoryError):
@@ -131,6 +161,13 @@ class MemoryEntry:
     disclosed_from_entry: str | None = None
     disclosed_summary: str | None = None
     disclosed_at: str | None = None
+    # v11 additions (ADR-0027-amendment §7) — epistemic metadata.
+    # Defaults match the schema CHECK column DEFAULTs so that v10-shape
+    # in-memory test fixtures (which still use the old append() args)
+    # land on the safe classification.
+    claim_type: str = "observation"
+    confidence: str = "medium"
+    last_challenged_at: str | None = None
 
     @property
     def is_deleted(self) -> bool:
@@ -169,13 +206,26 @@ class Memory:
         scope: str = "private",
         genre: str | None = None,
         consented_to: tuple[str, ...] = (),
+        # v11 — ADR-0027-amendment §7. Optional with safe defaults so
+        # existing callers (every memory_write tool, every test) keep
+        # working without an explicit claim_type.
+        claim_type: str = "observation",
+        confidence: str = "medium",
     ) -> MemoryEntry:
-        """Insert one entry. Validates layer + scope + genre ceiling
-        before touching the table.
+        """Insert one entry. Validates layer + scope + genre ceiling +
+        claim_type + confidence before touching the table.
 
         Raises :class:`MemoryScopeViolation` if the scope exceeds the
         genre's ceiling. Caller (the runtime) emits ``memory_written``
         on the audit chain after a successful write.
+
+        ``claim_type`` defaults to ``"observation"`` (the safest
+        classification — directly logged events). Inferences should
+        be tagged ``"agent_inference"`` so they don't silently surface
+        as user-stated facts. ``confidence`` defaults to ``"medium"``;
+        observations and user_statements should typically be ``"high"``,
+        agent inferences ``"low"`` (ADR-0027-amendment §7.2 — full
+        per-claim-type defaulting is deferred to T7's reclassify pass).
         """
         if layer not in LAYERS:
             raise UnknownLayerError(
@@ -184,6 +234,14 @@ class Memory:
         if scope not in SCOPES:
             raise UnknownScopeError(
                 f"scope must be one of {list(SCOPES)}; got {scope!r}"
+            )
+        if claim_type not in _CLAIM_TYPE_SET:
+            raise UnknownClaimTypeError(
+                f"claim_type must be one of {list(CLAIM_TYPES)}; got {claim_type!r}"
+            )
+        if confidence not in _CONFIDENCE_SET:
+            raise UnknownConfidenceError(
+                f"confidence must be one of {list(CONFIDENCE_LEVELS)}; got {confidence!r}"
             )
         if genre is not None:
             ceiling = GENRE_CEILINGS.get(genre.lower(), "consented")
@@ -201,15 +259,15 @@ class Memory:
             INSERT INTO memory_entries (
                 entry_id, instance_id, agent_dna, layer, scope,
                 content, content_digest, tags_json, consented_to_json,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                created_at, claim_type, confidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 entry_id, instance_id, agent_dna, layer, scope,
                 content, digest,
                 json.dumps(list(tags), separators=(",", ":")),
                 json.dumps(list(consented_to), separators=(",", ":")),
-                created_at,
+                created_at, claim_type, confidence,
             ),
         )
         return MemoryEntry(
@@ -223,6 +281,8 @@ class Memory:
             tags=tuple(tags),
             consented_to=tuple(consented_to),
             created_at=created_at,
+            claim_type=claim_type,
+            confidence=confidence,
         )
 
     # ---- read path -----------------------------------------------------
@@ -624,11 +684,12 @@ def _sha256(s: str) -> str:
 
 
 def _row_to_entry(row) -> MemoryEntry:
-    # The v7 disclosed_* columns may be absent on a row from a v6-shaped
+    # The v7 disclosed_* columns and v11 claim_type/confidence/
+    # last_challenged_at columns may be absent on a row from an older
     # in-memory test fixture or a registry that hasn't been migrated
-    # yet. Defensively probe via row.keys() so this helper works on both
-    # shapes — important for Memory unit tests that build their own
-    # SQLite without going through Registry.bootstrap.
+    # yet. Defensively probe via row.keys() so this helper works on
+    # every shape — important for Memory unit tests that build their
+    # own SQLite without going through Registry.bootstrap.
     keys = row.keys() if hasattr(row, "keys") else ()
     return MemoryEntry(
         entry_id=row["entry_id"],
@@ -648,4 +709,13 @@ def _row_to_entry(row) -> MemoryEntry:
             if "disclosed_summary" in keys else None,
         disclosed_at=row["disclosed_at"]
             if "disclosed_at" in keys else None,
+        # v11 — defensive: pre-migration rows lack these columns. Defaults
+        # match the schema CHECK column DEFAULTs ('observation', 'medium')
+        # so a v10-shape row reads as an observation at medium confidence.
+        claim_type=row["claim_type"]
+            if "claim_type" in keys else "observation",
+        confidence=row["confidence"]
+            if "confidence" in keys else "medium",
+        last_challenged_at=row["last_challenged_at"]
+            if "last_challenged_at" in keys else None,
     )

@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 10
+SCHEMA_VERSION: int = 11
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -233,6 +233,22 @@ DDL_STATEMENTS: tuple[str, ...] = (
         disclosed_from_entry TEXT,
         disclosed_summary    TEXT,
         disclosed_at         TEXT,
+        -- v11 additions (ADR-0027-amendment §7 — epistemic metadata):
+        -- ``claim_type`` distinguishes observations from inferences from
+        -- preferences etc. so agents can't silently treat their own
+        -- inferences as operator-stated facts. ``confidence`` is a
+        -- three-state coarse signal (low/medium/high). ``last_challenged_at``
+        -- captures staleness pressure — an inference unchallenged for
+        -- 30+ days surfaces as stale at recall time.
+        claim_type      TEXT NOT NULL DEFAULT 'observation'
+                          CHECK (claim_type IN (
+                              'observation', 'user_statement',
+                              'agent_inference', 'preference',
+                              'promise', 'external_fact'
+                          )),
+        confidence      TEXT NOT NULL DEFAULT 'medium'
+                          CHECK (confidence IN ('low', 'medium', 'high')),
+        last_challenged_at TEXT,
         FOREIGN KEY (instance_id) REFERENCES agents(instance_id),
         FOREIGN KEY (disclosed_from_entry) REFERENCES memory_entries(entry_id)
     );
@@ -244,6 +260,15 @@ DDL_STATEMENTS: tuple[str, ...] = (
     # entry X?" in O(rows-with-pointer) instead of full-table scan.
     # Used by the future revocation propagation path (ADR-0022 v0.3).
     "CREATE INDEX IF NOT EXISTS idx_memory_disclosed_from ON memory_entries(disclosed_from_entry);",
+    # v11 — claim_type index supports "show me all inferences" UI surfaces
+    # without a full-table scan. Cardinality is small (six values) so the
+    # index is cheap; the gain is on the targeted-inferences case.
+    "CREATE INDEX IF NOT EXISTS idx_memory_claim_type ON memory_entries(claim_type);",
+    # v11 — last_challenged_at supports the staleness sweep at recall time
+    # (entries with old last_challenged_at + claim_type=agent_inference
+    # surface as stale). Partial index over non-NULL values keeps it small.
+    "CREATE INDEX IF NOT EXISTS idx_memory_last_challenged ON memory_entries(last_challenged_at) "
+        "WHERE last_challenged_at IS NOT NULL;",
     # --- memory consents (ADR-0022 v0.2) ---------------------------------
     # Per-(entry, recipient) consent grants. Per-event consent only in
     # v0.2; per-relationship + tiered consent (ADR-0027 §2) are deferred
@@ -265,6 +290,41 @@ DDL_STATEMENTS: tuple[str, ...] = (
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_memory_consents_recipient ON memory_consents(recipient_instance);",
+    # --- memory contradictions (v11 — ADR-0027-amendment §7.3) -----------
+    # Many-to-many: one entry can be contradicted by N later entries, and
+    # one new entry can contradict N older ones. Composite shape doesn't
+    # fit on memory_entries as a column; separate table is the correct
+    # normalization.
+    #
+    # Contradictions are operator- or agent-supplied at v0.2; auto-
+    # detection is deferred to ADR-0036 (Verifier Loop, queued for v0.3).
+    # ``detected_by`` records the agent/operator id; ``resolved_at``
+    # is NULL while the contradiction is open. Resolution is operator-
+    # narrated (``resolution_summary``) — this is the workflow surface
+    # for "the operator decided which version is true."
+    """
+    CREATE TABLE IF NOT EXISTS memory_contradictions (
+        contradiction_id   TEXT PRIMARY KEY,
+        earlier_entry_id   TEXT NOT NULL,
+        later_entry_id     TEXT NOT NULL,
+        contradiction_kind TEXT NOT NULL CHECK (contradiction_kind IN (
+            'direct', 'updated', 'qualified', 'retracted'
+        )),
+        detected_at        TEXT NOT NULL,
+        detected_by        TEXT NOT NULL,
+        resolved_at        TEXT,
+        resolution_summary TEXT,
+        FOREIGN KEY (earlier_entry_id) REFERENCES memory_entries(entry_id),
+        FOREIGN KEY (later_entry_id)   REFERENCES memory_entries(entry_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_contradictions_earlier ON memory_contradictions(earlier_entry_id);",
+    "CREATE INDEX IF NOT EXISTS idx_contradictions_later   ON memory_contradictions(later_entry_id);",
+    # Partial index over unresolved contradictions — the common query
+    # ("any open contradictions affecting entry X?") is hot; resolved
+    # rows are kept for audit but rarely queried.
+    "CREATE INDEX IF NOT EXISTS idx_contradictions_unresolved ON memory_contradictions(resolved_at) "
+        "WHERE resolved_at IS NULL;",
     # --- metadata --------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS registry_meta (
@@ -389,8 +449,13 @@ REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     "tool_call_pending_approvals",
     "tool_calls",
     "tool_call_counters",
-    # memory_consents references memory_entries(entry_id) — clear first.
+    # memory_consents and memory_contradictions both reference
+    # memory_entries(entry_id) — clear first. memory_contradictions
+    # references entries via TWO FKs (earlier_ + later_entry_id), so it
+    # MUST be cleared before memory_entries to avoid orphaned references
+    # during the truncate sweep. v11 (ADR-0027-amendment §7.3) addition.
     "memory_consents",
+    "memory_contradictions",
     "memory_entries",
     # ADR-003X C1: agent_secrets references agents(instance_id) — clear
     # first. Note: rebuild-from-artifacts will NOT recover secrets
@@ -680,5 +745,54 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX IF NOT EXISTS idx_turns_conversation ON conversation_turns(conversation_id);",
         "CREATE INDEX IF NOT EXISTS idx_turns_timestamp    ON conversation_turns(timestamp);",
         "CREATE INDEX IF NOT EXISTS idx_turns_speaker      ON conversation_turns(speaker);",
+    ),
+    # v10 → v11: ADR-0027-amendment §7 epistemic memory metadata. Adds
+    # three columns to memory_entries (claim_type, confidence,
+    # last_challenged_at) and one new memory_contradictions table. Pure
+    # addition — old v10 rows land at claim_type='observation',
+    # confidence='medium', last_challenged_at=NULL via the column
+    # DEFAULTs. Operator-driven re-classification post-migration goes
+    # through memory_reclassify.v1 (deferred to ADR-0027-am T7).
+    #
+    # SQLite ALTER TABLE ADD COLUMN with a CHECK constraint is supported
+    # since 3.25 (way past our minimum); the CHECK lives on the column
+    # definition exactly like the bootstrap DDL above.
+    11: (
+        "ALTER TABLE memory_entries ADD COLUMN claim_type TEXT NOT NULL "
+            "DEFAULT 'observation' CHECK (claim_type IN ("
+                "'observation', 'user_statement', 'agent_inference', "
+                "'preference', 'promise', 'external_fact'"
+            "));",
+        "ALTER TABLE memory_entries ADD COLUMN confidence TEXT NOT NULL "
+            "DEFAULT 'medium' CHECK (confidence IN ('low', 'medium', 'high'));",
+        "ALTER TABLE memory_entries ADD COLUMN last_challenged_at TEXT;",
+        "CREATE INDEX IF NOT EXISTS idx_memory_claim_type ON memory_entries(claim_type);",
+        "CREATE INDEX IF NOT EXISTS idx_memory_last_challenged ON memory_entries(last_challenged_at) "
+            "WHERE last_challenged_at IS NOT NULL;",
+        # New table for many-to-many contradictions. CHECK enum mirrors
+        # the bootstrap DDL above. FKs on both entry_id columns; lifetime
+        # tied to memory_entries (purging an entry orphans its
+        # contradictions, which the operator-driven purge path knows
+        # to clean up).
+        """
+        CREATE TABLE IF NOT EXISTS memory_contradictions (
+            contradiction_id   TEXT PRIMARY KEY,
+            earlier_entry_id   TEXT NOT NULL,
+            later_entry_id     TEXT NOT NULL,
+            contradiction_kind TEXT NOT NULL CHECK (contradiction_kind IN (
+                'direct', 'updated', 'qualified', 'retracted'
+            )),
+            detected_at        TEXT NOT NULL,
+            detected_by        TEXT NOT NULL,
+            resolved_at        TEXT,
+            resolution_summary TEXT,
+            FOREIGN KEY (earlier_entry_id) REFERENCES memory_entries(entry_id),
+            FOREIGN KEY (later_entry_id)   REFERENCES memory_entries(entry_id)
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_contradictions_earlier ON memory_contradictions(earlier_entry_id);",
+        "CREATE INDEX IF NOT EXISTS idx_contradictions_later   ON memory_contradictions(later_entry_id);",
+        "CREATE INDEX IF NOT EXISTS idx_contradictions_unresolved ON memory_contradictions(resolved_at) "
+            "WHERE resolved_at IS NULL;",
     ),
 }

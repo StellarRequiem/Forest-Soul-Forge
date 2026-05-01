@@ -142,7 +142,7 @@ class TestHealth:
         # registry's live schema_version; assertion tracks the live
         # value rather than a stale literal. Earlier assertion of 6
         # was stale per Phase A audit 2026-04-30.
-        assert body["schema_version"] == 10
+        assert body["schema_version"] == 11
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"

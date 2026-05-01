@@ -133,7 +133,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 10
+            assert r.schema_version() == 11
             assert r.list_agents() == []
             assert r.audit_tail() == []
         assert db.exists()
@@ -147,7 +147,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 10
+            assert r.schema_version() == 11
 
     def test_empty_existing_file_gets_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
@@ -158,7 +158,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 10
+            assert r.schema_version() == 11
 
     def test_schema_downgrade_raises(self, tmp_path: Path):
         """A file stamped at a version *newer* than the code refuses to open.
@@ -262,7 +262,7 @@ class TestBootstrap:
         # disclosure). The assertion tests that all migration steps
         # landed on the same pass.
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 10
+            assert r.schema_version() == 11
 
             # Data survives.
             row = r.get_agent(pre_existing)
@@ -298,6 +298,35 @@ class TestBootstrap:
             mem_cols = {row[1] for row in raw.execute("PRAGMA table_info(memory_entries)")}
             assert {"disclosed_from_entry", "disclosed_summary", "disclosed_at"}.issubset(mem_cols), (
                 f"v7 disclosed_* columns missing from memory_entries: {mem_cols}"
+            )
+            # v11 epistemic columns + memory_contradictions table.
+            assert {"claim_type", "confidence", "last_challenged_at"}.issubset(mem_cols), (
+                f"v11 epistemic columns missing from memory_entries: {mem_cols}"
+            )
+            assert "memory_contradictions" in tables, (
+                f"v11 memory_contradictions table missing: {tables}"
+            )
+            assert "idx_memory_claim_type" in indexes
+            assert "idx_contradictions_earlier" in indexes
+            # Pre-existing rows landed at the schema DEFAULTs. Use the
+            # legacy agent's row to verify (it had no memory entries
+            # so we insert one through the bootstrap connection — we
+            # need a row to assert the DEFAULT was applied to).
+            raw.execute(
+                "INSERT INTO memory_entries (entry_id, instance_id, "
+                "agent_dna, layer, scope, content, content_digest, "
+                "tags_json, consented_to_json, created_at) "
+                "VALUES (?, ?, ?, 'episodic', 'private', '', '', '[]', '[]', '');",
+                ("v11_test_entry", pre_existing, "a" * 12),
+            )
+            raw.commit()
+            row = raw.execute(
+                "SELECT claim_type, confidence, last_challenged_at "
+                "FROM memory_entries WHERE entry_id = ?;",
+                ("v11_test_entry",),
+            ).fetchone()
+            assert row == ("observation", "medium", None), (
+                f"v11 column DEFAULTs not applied: {row}"
             )
             raw.close()
 
@@ -387,7 +416,7 @@ class TestBootstrap:
 
         # Reopen — bootstrap should run MIGRATIONS[7].
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 10
+            assert r.schema_version() == 11
 
             raw = sqlite3.connect(str(db))
             raw.execute("PRAGMA foreign_keys = ON")
@@ -432,6 +461,141 @@ class TestBootstrap:
             assert copies == [("e2",)], (
                 f"disclosed_from_entry lookup wrong: {copies}"
             )
+            raw.close()
+
+    def test_v10_to_v11_forward_migration(self, tmp_path: Path):
+        """ADR-0027-amendment §7: a v10 DB with existing memory_entries
+        migrates forward to v11 with the three new columns added (DEFAULTs
+        applied to existing rows) and a new memory_contradictions table.
+
+        Mirrors the v6→v7 test shape but is NOT xfailed: the v11 additions
+        don't drop any columns or invalidate any FK references, so the
+        ALTER TABLE DROP COLUMN approach to building a v10-shape fixture
+        works cleanly. Production migration path is the same code that
+        runs here (MIGRATIONS[11] tuple).
+        """
+        import sqlite3
+        db = tmp_path / "reg.sqlite"
+
+        # Bootstrap a current-version DB so all the structural prerequisites
+        # (agents table, FKs, the v10 memory_entries shape) are there.
+        Registry.bootstrap(db).close()
+
+        # Stamp it back to v10 by dropping the v11 columns and the new
+        # memory_contradictions table, then setting schema_version=10.
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys = ON")
+        # Drop indexes that reference v11 columns first — SQLite's
+        # ALTER TABLE DROP COLUMN errors out if any index (including the
+        # partial idx_memory_last_challenged) names the column being
+        # dropped. Dropping the indexes is fine because MIGRATIONS[11]
+        # recreates them via CREATE INDEX IF NOT EXISTS.
+        conn.execute("DROP INDEX IF EXISTS idx_memory_last_challenged;")
+        conn.execute("DROP INDEX IF EXISTS idx_memory_claim_type;")
+        # Drop the v11 columns. None have FKs, so DROP COLUMN is safe —
+        # no internal table rebuild that would break referential
+        # integrity (unlike the v6→v7 test setup).
+        for col in ("last_challenged_at", "confidence", "claim_type"):
+            conn.execute(f"ALTER TABLE memory_entries DROP COLUMN {col};")
+        conn.execute("DROP TABLE IF EXISTS memory_contradictions;")
+        conn.execute(
+            "UPDATE registry_meta SET value='10' WHERE key='schema_version';"
+        )
+        # Insert a v10-shape row to prove it survives the migration.
+        # agents row first (FK target).
+        conn.execute(
+            "INSERT INTO agents (instance_id, dna, dna_full, role, "
+            "agent_name, soul_path, constitution_path, "
+            "constitution_hash, created_at) VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "v10-agent", "0" * 12, "0" * 64, "operator_companion",
+                "Pre-V11", "souls/pre-v11.md",
+                "constitutions/pre-v11.yaml", "0" * 64,
+                "2026-04-30T23:00:00Z",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO memory_entries (entry_id, instance_id, agent_dna, "
+            "layer, scope, content, content_digest, "
+            "tags_json, consented_to_json, created_at) "
+            "VALUES (?, ?, ?, 'episodic', 'private', ?, ?, '[]', '[]', ?)",
+            (
+                "pre-v11-entry", "v10-agent", "0" * 12,
+                "remembered before v11", "digest_v10",
+                "2026-04-30T23:00:01Z",
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        # Reopen through bootstrap — should run MIGRATIONS[11].
+        with Registry.bootstrap(db) as r:
+            assert r.schema_version() == 11
+
+            raw = sqlite3.connect(str(db))
+            raw.execute("PRAGMA foreign_keys = ON")
+
+            # 1. Existing v10 row carries the schema column DEFAULTs.
+            row = raw.execute(
+                "SELECT content, claim_type, confidence, last_challenged_at "
+                "FROM memory_entries WHERE entry_id = ?;",
+                ("pre-v11-entry",),
+            ).fetchone()
+            assert row == ("remembered before v11", "observation", "medium", None), (
+                f"v10 memory row drifted across v11 migration: {row}"
+            )
+
+            # 2. New columns reject invalid values via CHECK constraint.
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
+                raw.execute(
+                    "INSERT INTO memory_entries (entry_id, instance_id, "
+                    "agent_dna, layer, scope, content, content_digest, "
+                    "tags_json, consented_to_json, created_at, claim_type) "
+                    "VALUES (?, ?, ?, 'episodic', 'private', '', '', '[]', '[]', '', 'rumor');",
+                    ("post-v11-bad", "v10-agent", "0" * 12),
+                )
+
+            # 3. memory_contradictions is present + FK back to memory_entries.
+            tables = {t[0] for t in raw.execute(
+                "SELECT name FROM sqlite_master WHERE type='table';"
+            )}
+            assert "memory_contradictions" in tables
+
+            # 4. Indexes shipped with the migration.
+            indexes = {t[0] for t in raw.execute(
+                "SELECT name FROM sqlite_master WHERE type='index';"
+            )}
+            assert "idx_memory_claim_type" in indexes
+            assert "idx_contradictions_unresolved" in indexes
+
+            # 5. Inserting a contradiction works end-to-end.
+            raw.execute(
+                "INSERT INTO memory_entries (entry_id, instance_id, "
+                "agent_dna, layer, scope, content, content_digest, "
+                "tags_json, consented_to_json, created_at, claim_type) "
+                "VALUES (?, ?, ?, 'episodic', 'private', ?, ?, '[]', '[]', ?, 'observation');",
+                ("post-v11-row", "v10-agent", "0" * 12,
+                 "post-migration entry", "digest2", "2026-05-01T00:00:00Z"),
+            )
+            raw.execute(
+                "INSERT INTO memory_contradictions ("
+                "    contradiction_id, earlier_entry_id, later_entry_id,"
+                "    contradiction_kind, detected_at, detected_by"
+                ") VALUES (?, ?, ?, 'updated', ?, ?);",
+                ("cid-1", "pre-v11-entry", "post-v11-row",
+                 "2026-05-01T00:01:00Z", "operator"),
+            )
+            # FK guard: contradiction referencing a non-existent entry must fail.
+            with pytest.raises(sqlite3.IntegrityError):
+                raw.execute(
+                    "INSERT INTO memory_contradictions ("
+                    "    contradiction_id, earlier_entry_id, later_entry_id,"
+                    "    contradiction_kind, detected_at, detected_by"
+                    ") VALUES (?, ?, ?, 'direct', ?, ?);",
+                    ("cid-2", "pre-v11-entry", "ghost-entry",
+                     "2026-05-01T00:02:00Z", "operator"),
+                )
             raw.close()
 
     def test_migration_missing_entry_raises(self, tmp_path: Path):

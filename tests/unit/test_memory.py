@@ -4,12 +4,16 @@ from __future__ import annotations
 import pytest
 
 from forest_soul_forge.core.memory import (
+    CLAIM_TYPES,
+    CONFIDENCE_LEVELS,
     GENRE_CEILINGS,
     LAYERS,
     Memory,
     MemoryScopeViolation,
     RECALL_MODES,
     SCOPES,
+    UnknownClaimTypeError,
+    UnknownConfidenceError,
     UnknownLayerError,
     UnknownScopeError,
 )
@@ -488,3 +492,164 @@ class TestDisclosedCopyMetadata:
         assert "disc-2" in ids, (
             f"disclosed_summary not searched in query: {ids}"
         )
+
+
+# ===========================================================================
+# v11 epistemic metadata (ADR-0027-amendment §7.1 + §7.2)
+# ===========================================================================
+class TestEpistemicMetadata:
+    """ADR-0027-amendment §7 — every memory entry carries claim_type +
+    confidence + last_challenged_at. Defaults match the schema CHECK
+    column DEFAULTs (observation / medium / NULL) so old call sites
+    continue to work. Validated at write time so typos surface
+    immediately rather than on read."""
+
+    def test_default_claim_type_is_observation(self, memory):
+        # Every existing call site that doesn't pass claim_type lands at
+        # 'observation' — the safest classification.
+        e = memory.append(
+            instance_id="i1", agent_dna="d" * 12,
+            content="watched something happen", layer="episodic",
+        )
+        assert e.claim_type == "observation"
+        assert e.confidence == "medium"
+        assert e.last_challenged_at is None
+
+    def test_explicit_claim_type_round_trips(self, memory):
+        e = memory.append(
+            instance_id="i1", agent_dna="d" * 12,
+            content="operator seems to prefer mornings", layer="semantic",
+            claim_type="agent_inference",
+            confidence="low",
+        )
+        # ADR-0027-am §7.1: agent_inference is the load-bearing
+        # distinction — the agent's derived guess is NOT the operator's
+        # stated word. Reading back from the DB confirms it sticks.
+        round_trip = memory.get(e.entry_id)
+        assert round_trip is not None
+        assert round_trip.claim_type == "agent_inference"
+        assert round_trip.confidence == "low"
+
+    def test_all_six_claim_types_accepted(self, memory):
+        # All six CLAIM_TYPES values are valid at the API + the schema.
+        for ct in CLAIM_TYPES:
+            e = memory.append(
+                instance_id="i1", agent_dna="d" * 12,
+                content=f"a {ct} entry", layer="episodic",
+                claim_type=ct,
+            )
+            assert e.claim_type == ct
+
+    def test_all_three_confidence_levels_accepted(self, memory):
+        for level in CONFIDENCE_LEVELS:
+            e = memory.append(
+                instance_id="i1", agent_dna="d" * 12,
+                content=f"confidence {level}", layer="episodic",
+                confidence=level,
+            )
+            assert e.confidence == level
+
+    def test_unknown_claim_type_raises(self, memory):
+        with pytest.raises(UnknownClaimTypeError):
+            memory.append(
+                instance_id="i1", agent_dna="d" * 12,
+                content="bad type", layer="episodic",
+                claim_type="rumor",  # not in CLAIM_TYPES
+            )
+
+    def test_unknown_confidence_raises(self, memory):
+        with pytest.raises(UnknownConfidenceError):
+            memory.append(
+                instance_id="i1", agent_dna="d" * 12,
+                content="bad confidence", layer="episodic",
+                confidence="0.73",  # float-string; should reject
+            )
+
+    def test_recall_surfaces_claim_type_and_confidence(self, memory):
+        # The read path must propagate the new fields; otherwise
+        # downstream UI / voice renderer can't distinguish inferences.
+        memory.append(
+            instance_id="i1", agent_dna="d" * 12,
+            content="operator said they prefer X", layer="semantic",
+            claim_type="user_statement", confidence="high",
+        )
+        rows = memory.recall(instance_id="i1")
+        assert len(rows) == 1
+        assert rows[0].claim_type == "user_statement"
+        assert rows[0].confidence == "high"
+
+    def test_schema_check_constraint_rejects_invalid_claim_type(self, memory):
+        # The schema-level CHECK constraint is the second line of defense
+        # if the Python validator is bypassed (e.g. a future tool writes
+        # raw SQL). A direct INSERT with an invalid claim_type must fail.
+        import sqlite3
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
+            memory.conn.execute(
+                "INSERT INTO memory_entries (entry_id, instance_id, "
+                "agent_dna, layer, scope, content, content_digest, "
+                "tags_json, consented_to_json, created_at, claim_type) "
+                "VALUES (?, ?, ?, 'episodic', 'private', '', '', '[]', '[]', '', 'rumor');",
+                ("eX", "i1", "d" * 12),
+            )
+
+    def test_schema_check_constraint_rejects_invalid_confidence(self, memory):
+        import sqlite3
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
+            memory.conn.execute(
+                "INSERT INTO memory_entries (entry_id, instance_id, "
+                "agent_dna, layer, scope, content, content_digest, "
+                "tags_json, consented_to_json, created_at, confidence) "
+                "VALUES (?, ?, ?, 'episodic', 'private', '', '', '[]', '[]', '', 'absolute');",
+                ("eY", "i1", "d" * 12),
+            )
+
+    def test_memory_contradictions_table_exists(self, memory):
+        # ADR-0027-amendment §7.3 — the contradictions table is part of
+        # v11. Verify the schema is in place + a row can be inserted.
+        import uuid
+        e1 = memory.append(
+            instance_id="i1", agent_dna="d" * 12,
+            content="prefer mornings", layer="semantic",
+            claim_type="preference",
+        )
+        e2 = memory.append(
+            instance_id="i1", agent_dna="d" * 12,
+            content="actually I prefer evenings", layer="semantic",
+            claim_type="preference",
+        )
+        cid = str(uuid.uuid4())
+        memory.conn.execute(
+            "INSERT INTO memory_contradictions ("
+            "    contradiction_id, earlier_entry_id, later_entry_id,"
+            "    contradiction_kind, detected_at, detected_by"
+            ") VALUES (?, ?, ?, 'updated', '2026-05-01T00:00:00Z', 'operator');",
+            (cid, e1.entry_id, e2.entry_id),
+        )
+        rows = memory.conn.execute(
+            "SELECT contradiction_kind, resolved_at FROM memory_contradictions "
+            "WHERE contradiction_id = ?;",
+            (cid,),
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "updated"   # contradiction_kind
+        assert rows[0][1] is None        # resolved_at NULL = open
+
+    def test_memory_contradictions_invalid_kind_rejected(self, memory):
+        # Schema CHECK rejects unknown contradiction_kind values.
+        import sqlite3, uuid
+        e1 = memory.append(
+            instance_id="i1", agent_dna="d" * 12,
+            content="x", layer="episodic",
+        )
+        e2 = memory.append(
+            instance_id="i1", agent_dna="d" * 12,
+            content="y", layer="episodic",
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
+            memory.conn.execute(
+                "INSERT INTO memory_contradictions ("
+                "    contradiction_id, earlier_entry_id, later_entry_id,"
+                "    contradiction_kind, detected_at, detected_by"
+                ") VALUES (?, ?, ?, 'fictional', '2026-05-01T00:00:00Z', 'op');",
+                (str(uuid.uuid4()), e1.entry_id, e2.entry_id),
+            )
