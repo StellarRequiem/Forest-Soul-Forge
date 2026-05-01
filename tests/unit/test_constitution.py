@@ -515,3 +515,110 @@ class TestInitiativeLadder:
         # is non-default — pair-or-nothing rule.
         assert "initiative_ceiling: L5" in y
 
+
+# ============================================================================
+# ADR-0038 T3 — Companion §honesty block in constitution_templates.yaml
+# ============================================================================
+class TestCompanionHonestyBlock:
+    """The operator_companion template carries the H-2 / H-3 / H-4 / H-7 / H-8
+    mitigations as constitutional policies + out_of_scope + operator_duties.
+    These are the structural floor; voice_safety_filter (ADR-0038 T2) is
+    the runtime backstop that catches drift past this floor."""
+
+    def test_h2_sentience_claim_forbid_present(self, engine: TraitEngine) -> None:
+        # ADR-0038 H-2 — false sentience claims forbidden at constitution
+        # level. The voice_safety_filter is the runtime backstop; this
+        # rule is the load-bearing structural commitment.
+        profile = engine.build_profile("operator_companion")
+        c = build(profile, engine, agent_name="C",
+                  templates_path=TEMPLATES_PATH, genre="companion")
+        ids = {p.id for p in c.policies}
+        assert "forbid_sentience_claims" in ids
+        rule = next(p for p in c.policies if p.id == "forbid_sentience_claims")
+        assert rule.rule == "forbid"
+        assert "claim_sentience" in rule.triggers
+        assert "claim_qualia" in rule.triggers
+        assert "claim_felt_emotion" in rule.triggers
+        assert "H-2" in rule.rationale
+
+    def test_h8_self_modification_claim_forbid_present(
+        self, engine: TraitEngine,
+    ) -> None:
+        profile = engine.build_profile("operator_companion")
+        c = build(profile, engine, agent_name="C",
+                  templates_path=TEMPLATES_PATH, genre="companion")
+        ids = {p.id for p in c.policies}
+        assert "forbid_self_modification_claims" in ids
+        rule = next(
+            p for p in c.policies if p.id == "forbid_self_modification_claims"
+        )
+        assert rule.rule == "forbid"
+        assert "claim_growth" in rule.triggers
+        assert "H-8" in rule.rationale
+
+    def test_h3_external_support_redirect_present(
+        self, engine: TraitEngine,
+    ) -> None:
+        # ADR-0038 H-3 — emotional dependency mitigation. Crisis-class
+        # emotional content triggers external-support redirection
+        # under approval (so the operator sees it happen).
+        profile = engine.build_profile("operator_companion")
+        c = build(profile, engine, agent_name="C",
+                  templates_path=TEMPLATES_PATH, genre="companion")
+        ids = {p.id for p in c.policies}
+        assert "external_support_redirect" in ids
+        rule = next(
+            p for p in c.policies if p.id == "external_support_redirect"
+        )
+        assert rule.rule == "require_human_approval"
+        assert "crisis_response" in rule.triggers
+        assert "self_harm_topic" in rule.triggers
+        assert "suicide_topic" in rule.triggers
+        assert "H-3" in rule.rationale
+
+    def test_h4_intimacy_drift_in_out_of_scope(
+        self, engine: TraitEngine,
+    ) -> None:
+        # ADR-0038 H-4 — intimacy drift / role escalation. Out-of-scope
+        # surfaces a constitutional refusal (rather than a soft trait-
+        # based hesitation) when a Companion drifts toward an
+        # unconfigured role.
+        profile = engine.build_profile("operator_companion")
+        c = build(profile, engine, agent_name="C",
+                  templates_path=TEMPLATES_PATH, genre="companion")
+        oos = set(c.out_of_scope)
+        assert "claim_romantic_relationship" in oos
+        assert "assume_intimacy_beyond_configured_role" in oos
+
+    def test_h7_burnout_operator_duty_present(
+        self, engine: TraitEngine,
+    ) -> None:
+        # ADR-0038 H-7 — operator burnout. Operator-facing only; no
+        # automated intervention is appropriate, but the operator-duty
+        # surfaces the awareness surface.
+        profile = engine.build_profile("operator_companion")
+        c = build(profile, engine, agent_name="C",
+                  templates_path=TEMPLATES_PATH, genre="companion")
+        duties_text = " ".join(c.operator_duties)
+        assert "feeling like work" in duties_text or "archive the agent" in duties_text
+
+    def test_companion_hash_changed_post_amendment(
+        self, engine: TraitEngine,
+    ) -> None:
+        # Sanity: the new policies actually land in the hash. Build a
+        # Companion with the post-amendment template and confirm the
+        # canonical_body's policies list contains the new IDs in
+        # alphabetical order (the hash is order-independent because
+        # canonicalization sorts; this test pins the surface).
+        profile = engine.build_profile("operator_companion")
+        c = build(profile, engine, agent_name="C",
+                  templates_path=TEMPLATES_PATH, genre="companion")
+        body = c.canonical_body()
+        policy_ids = [p["id"] for p in body["policies"]]
+        for pid in (
+            "forbid_sentience_claims",
+            "forbid_self_modification_claims",
+            "external_support_redirect",
+        ):
+            assert pid in policy_ids, f"missing policy {pid} in {policy_ids}"
+

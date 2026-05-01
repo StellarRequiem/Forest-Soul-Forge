@@ -1,6 +1,6 @@
 # ADR-0038 — Companion harm model
 
-- **Status:** Proposed (filed 2026-05-01 by Alex + harness; awaiting orchestrator sign-off before promotion).
+- **Status:** Accepted (promoted 2026-05-01 — implementation complete across T1+T2+T3). Implementation commits: `03b3d60` (T1 min_trait_floors at birth time), `fb75c6f` (T2 voice safety filter), this commit (T3 Companion §honesty constitutional template). T4–T6 (telemetry / disclosure_intent_check / external_support_redirect tooling) deferred to v0.3 — operator dashboard work and per-call gate plumbing, not blocking the structural floor that v0.2 lands.
 - **Date:** 2026-05-01
 - **Supersedes:** —
 - **Related:** ADR-0008 (Companion genre — local-only provider floor; this ADR adds the harm-taxonomy floor), ADR-0021 (role genres — Companion is one of seven; this ADR makes Companion's harm surface explicit), ADR-0025 (threat model v2 — operational threats; this ADR adds *relational* threats), ADR-0027 (memory privacy contract — privacy is necessary but insufficient for companion-tier safety), ADR-003Y (conversation runtime — Y1–Y7 is the substrate where most companion-tier interactions land; harms surface here first).

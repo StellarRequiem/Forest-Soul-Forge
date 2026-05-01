@@ -1,6 +1,6 @@
 # ADR-0021 amendment — initiative ladder + `max_initiative_level`
 
-- **Status:** Proposed (filed 2026-05-01; awaiting orchestrator sign-off before promotion). The base ADR-0021 stays Accepted; this is an additive amendment.
+- **Status:** Accepted (promoted 2026-05-01 — implementation complete across T1+T2+T3). The base ADR-0021 stays Accepted; this is an additive amendment. Implementation commits: `03b3d60` (T1 genres.yaml fields + loader), `823e69c` (T2 constitution derived fields), `4e9b8cf` (T3 InitiativeFloorStep dispatcher; opt-in per tool — per-tool annotation deferred for catalog audit).
 - **Date:** 2026-05-01
 - **Amends:** ADR-0021 (role genres). Adds `max_initiative_level` field alongside the existing `risk_profile.max_side_effects`. The original taxonomy + spawn rules + storage shape stay in force.
 - **Related:** ADR-0019 (tool execution runtime — initiative landings go through the dispatcher with audit), ADR-0027 (memory privacy contract — memory writes are an L1 operation), ADR-0033 (Security Swarm — swarm roles need higher initiative ceilings than Companions), ADR-0034 (SW-track triune — Architect/Engineer/Reviewer initiative tiers differ; this amendment makes that explicit), ADR-0038 (companion harm model — H-3/H-4 mitigation depends on Companion's initiative ceiling being declared, not implicit).
