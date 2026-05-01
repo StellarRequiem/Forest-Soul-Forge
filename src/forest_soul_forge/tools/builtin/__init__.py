@@ -26,6 +26,7 @@ from forest_soul_forge.tools.builtin.lateral_movement_detect import LateralMovem
 from forest_soul_forge.tools.builtin.log_aggregate import LogAggregateTool
 from forest_soul_forge.tools.builtin.log_correlate import LogCorrelateTool
 from forest_soul_forge.tools.builtin.log_scan import LogScanTool
+from forest_soul_forge.tools.builtin.memory_challenge import MemoryChallengeTool
 from forest_soul_forge.tools.builtin.memory_disclose import MemoryDiscloseTool
 from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
 from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
@@ -55,6 +56,7 @@ __all__ = [
     "MemoryRecallTool",
     "MemoryWriteTool",
     "MemoryDiscloseTool",
+    "MemoryChallengeTool",
     "DelegateTool",
     "AuditChainVerifyTool",
     "FileIntegrityTool",
@@ -158,6 +160,11 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # status. Reuses memory_consents table via 'operator:verified'
     # sentinel — no schema bump.
     registry.register(MemoryVerifyTool())
+    # ADR-0027-amendment §7.4 — memory_challenge.v1. Operator-only at
+    # v0.2: stamps last_challenged_at on an entry to record explicit
+    # operator scrutiny without writing a competing entry. Surfaces
+    # through memory_recall.v1's staleness flag.
+    registry.register(MemoryChallengeTool())
     # ADR-003X Phase C3 — browser_action.v1. Drives a chromium browser
     # via Playwright. Heaviest open-web primitive; always gated
     # (side_effects=external triggers requires_human_approval). Lazy

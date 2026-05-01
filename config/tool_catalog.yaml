@@ -1245,6 +1245,39 @@ tools:
     side_effects: filesystem
     archetype_tags: [observer, guardian, security_high]
 
+  memory_challenge.v1:
+    name: memory_challenge
+    version: "1"
+    description: |
+      Stamp a memory entry as challenged (ADR-0027-amendment §7.4).
+      Distinct from a contradiction: a challenge is operator scrutiny
+      WITHOUT a competing later entry. Updates last_challenged_at to
+      NOW; surfaces through memory_recall.v1's staleness threshold
+      check. Operator-driven by convention — gated via constitutional
+      kit (operator deliberately includes this tool only on agents
+      that should surface the signal on their behalf). Mirrors
+      memory_verify.v1's challenger_id pattern: the human's
+      identifier lands in the audit-event payload. Refuses to
+      challenge entries the calling agent can't see (private to a
+      different agent). The note (if any) lands in audit only — the
+      entry's content + claim_type stay unchanged.
+    input_schema:
+      type: object
+      required: [entry_id, challenger_id]
+      properties:
+        entry_id:
+          type: string
+          description: "ID of the memory entry to challenge."
+        challenger_id:
+          type: string
+          description: "Identifier of the human challenger (operator handle, key fingerprint)."
+        note:
+          type: string
+          maxLength: 500
+          description: "Optional free-text reason for the challenge."
+    side_effects: filesystem
+    archetype_tags: [observer, guardian]
+
   llm_think.v1:
     name: llm_think
     version: "1"

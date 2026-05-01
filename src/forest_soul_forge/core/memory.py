@@ -621,6 +621,32 @@ class Memory:
         ).fetchone()
         return row["verifier_id"] if row else None
 
+    # ---- challenge path (ADR-0027-amendment §7.4) -------------------------
+    def mark_challenged(self, *, entry_id: str) -> str:
+        """Stamp ``last_challenged_at`` on ``entry_id`` to the current
+        UTC time and return the timestamp written.
+
+        Per ADR-0027-amendment §7.4, a challenge is an explicit operator
+        signal that an entry is in question — distinct from a
+        contradiction (which has a competing later entry). The challenge
+        itself doesn't change the entry's content or claim_type; it
+        just records "this is being scrutinized."
+
+        Idempotent in shape (always overwrites with NOW), but each call
+        produces a fresh timestamp + a fresh audit-chain event when the
+        caller emits ``memory_challenged``. Operators reviewing history
+        see every challenge in the chain.
+
+        Returns the ISO-8601 timestamp written so the caller can include
+        it in the audit-event payload without a follow-up read.
+        """
+        ts = _now_iso()
+        self.conn.execute(
+            "UPDATE memory_entries SET last_challenged_at = ? WHERE entry_id = ?;",
+            (ts, entry_id),
+        )
+        return ts
+
     def get(self, entry_id: str) -> MemoryEntry | None:
         row = self.conn.execute(
             "SELECT * FROM memory_entries WHERE entry_id=?;",
