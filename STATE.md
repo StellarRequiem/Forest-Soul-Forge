@@ -28,12 +28,13 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | | |
 |---:|:---|
 | Source LoC (Python) | ~36,400 across `src/forest_soul_forge/` (post-R-track refactors split god-objects) |
-| Tests (passing) | **1567** (was 1439 at v0.1.1; +133 from v0.1.2 SarahR1 absorption arc) |
-| ADRs filed | 32 (`ADR-0001` → `ADR-0038`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts; ADR-0021-am + ADR-0027-am amendments + ADR-0038 companion harm model — all Accepted in v0.1.2) |
+| Tests (passing) | **1589** (was 1439 at v0.1.1; +150 across the v0.1.2 SarahR1 absorption arc + Bursts 46/49 per-tool initiative annotations) |
+| ADRs filed | 35 (`ADR-0001` → `ADR-0038`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts; ADR-0021-am + ADR-0027-am amendments + ADR-0038 companion harm model all Accepted in v0.1.2; ADR-0035 Persona Forge + ADR-0036 Verifier Loop + ADR-0037 Observability dashboard Proposed for v0.3) |
 | Builtin tools registered | 41 (was 40 + memory_challenge.v1 from ADR-0027-am T4) |
 | Skill manifests shipped | 26 (4 chain + 17 supporting + 3 triune + 2 from forge-CLI seeds) |
 | Schema version | **v11** (v8: agent_secrets / v9: memory_verifications / v10: conversations / v11: epistemic memory — claim_type + confidence + last_challenged_at + memory_contradictions table from ADR-0027-am T1) |
 | Genres | 13 (7 original + 3 security tiers + 3 web tiers); each genre now carries `max_initiative_level` + `default_initiative_level` per ADR-0021-am §3 |
+| Tools with initiative annotations | 12 of 41 (Burst 46 + 49 — shell_exec / browser_action / mcp_call / code_edit / web_fetch + isolate_process / jit_access / dynamic_policy / delegate / memory_disclose / memory_verify / memory_challenge). Remaining 29 are read-only or memory-write with no operator-relevant initiative gate; v0.3 catalog audit may add more. |
 | Trait roles | 17 (5 original + 9 swarm + 3 SW-track: system_architect, software_engineer, code_reviewer) |
 | Audit event types | 54 (was 36+ added: 8 conversation_*, ambient_nudge, conversation_summarized, K-track ceremony/verify/hardware/triune, T-track governance_relaxed/posture_override, plus chain_depth metadata on conversation_turn) |
 | Frontend modules (vanilla JS) | 22 (was 18 + chat.js + cleanup) |
