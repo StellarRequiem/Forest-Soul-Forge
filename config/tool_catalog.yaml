@@ -1322,6 +1322,57 @@ tools:
     side_effects: read_only
     archetype_tags: [observer, guardian, researcher, security_low]
 
+  git_log_read.v1:
+    name: git_log_read
+    version: "1"
+    description: |
+      Read commit history via `git log`. Read-only: inspects refs and
+      commit objects; nothing in the repo is mutated. Subprocess
+      invocation of `git -C <path> log --pretty=format:<delim>` with
+      ASCII US/RS field+record separators (robust against any
+      commit-message content). Per-agent allowed_paths constraint
+      gates both the repo path and any paths_filter entries. Output
+      includes sha/author/dates/parents/subject/body for each commit;
+      capped at max_count (default 50, hard ceiling 500). Phase G.1.A
+      programming primitive — gives SW-track Architect / Engineer /
+      Reviewer a structured read of repo history before suggesting
+      edits.
+    input_schema:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: "Path inside a git repo (root or subdir); invoked via `git -C`."
+        max_count:
+          type: integer
+          minimum: 1
+          maximum: 500
+          description: "Cap on commits returned. Default 50."
+        ref:
+          type: string
+          description: "Ref to start the log from (default HEAD). Must not start with '-'."
+        since:
+          type: string
+          description: "Forwarded as --since=<value> (approxidate accepted)."
+        until:
+          type: string
+          description: "Forwarded as --until=<value> (approxidate accepted)."
+        author:
+          type: string
+          description: "Forwarded as --author=<value> (regex; substring match works)."
+        paths_filter:
+          type: array
+          items: {type: string}
+          description: "Path filters (after `--`); each must resolve within allowed_paths."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 120
+          description: "Subprocess timeout. Default 30."
+    side_effects: read_only
+    archetype_tags: [observer, guardian, researcher, software_engineer]
+
   memory_challenge.v1:
     name: memory_challenge
     version: "1"

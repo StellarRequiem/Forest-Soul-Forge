@@ -17,6 +17,7 @@ from forest_soul_forge.tools.builtin.delegate import DelegateTool
 from forest_soul_forge.tools.builtin.dns_lookup import DnsLookupTool
 from forest_soul_forge.tools.builtin.dynamic_policy import DynamicPolicyTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
+from forest_soul_forge.tools.builtin.git_log_read import GitLogReadTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
@@ -71,6 +72,7 @@ __all__ = [
     "BehavioralBaselineTool",
     "RuffLintTool",
     "PytestRunTool",
+    "GitLogReadTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -213,3 +215,8 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # .pytest_cache); required_initiative_level L4. SW-track Engineer
     # (Actuator L5/L5) is the primary kit consumer.
     registry.register(PytestRunTool())
+    # Phase G.1.A — git_log_read.v1 (Burst 55). Read-only subprocess
+    # invocation of `git log` with structured output (delim-separated
+    # fields, robust against arbitrary commit-message content).
+    # SW-track Architect+Engineer+Reviewer all reach (read_only).
+    registry.register(GitLogReadTool())
