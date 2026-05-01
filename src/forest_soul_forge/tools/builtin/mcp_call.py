@@ -87,6 +87,14 @@ class McpCallTool:
     name = "mcp_call"
     version = "1"
     side_effects = "external"  # default — per-server config can override
+    # ADR-0021-amendment §5 — MCP servers can perform arbitrary external
+    # mutations (file writes on the host, API calls to third parties,
+    # any side-effect the server author chose). Required initiative
+    # L5 mirrors browser_action: only web_actuator (default L5) reaches.
+    # Per-server side_effects override exists in mcp_call's resolve
+    # path, but the initiative floor is uniform — any MCP call is
+    # treated as destructive-class for autonomy purposes.
+    required_initiative_level = "L5"
 
     def validate(self, args: dict[str, Any]) -> None:
         server = args.get("server_name")

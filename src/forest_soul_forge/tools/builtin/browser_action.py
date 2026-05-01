@@ -102,6 +102,13 @@ class BrowserActionTool:
     name = "browser_action"
     version = "1"
     side_effects = "external"
+    # ADR-0021-amendment §5 — driving a real browser UI is destructive
+    # in the worst case (form submits, payment flows, mutating clicks).
+    # Required initiative L5; only web_actuator (default L5) reaches.
+    # ApprovalGateStep gates each call on top, but the initiative gate
+    # ensures Companion / Observer / Researcher agents cannot dispatch
+    # browser_action even when their kit happens to include it.
+    required_initiative_level = "L5"
 
     def validate(self, args: dict[str, Any]) -> None:
         url = args.get("url")

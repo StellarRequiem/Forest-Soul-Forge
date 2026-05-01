@@ -89,6 +89,14 @@ class CodeEditTool:
     name = "code_edit"
     version = "1"
     side_effects = "filesystem"
+    # ADR-0021-amendment §5 — code_edit writes to allowlisted paths under
+    # constitutional policy (reversible-with-policy class). Required
+    # initiative L4. SW-track Engineer (Actuator genre, default L5)
+    # reaches; Companion / Observer / Researcher do not. The
+    # ApprovalGateStep handles per-call approval on top — initiative
+    # is the structural floor that says "this agent is allowed to be
+    # in the business of editing code at all."
+    required_initiative_level = "L4"
 
     def validate(self, args: dict[str, Any]) -> None:
         path = args.get("path")

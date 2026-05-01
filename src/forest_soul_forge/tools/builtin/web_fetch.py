@@ -80,6 +80,13 @@ class WebFetchTool:
     name = "web_fetch"
     version = "1"
     side_effects = "network"
+    # ADR-0021-amendment §5 — autonomous web reads need at least L3.
+    # web_observer (default L3) and web_researcher (default L3 ceiling
+    # L4) reach. Companion (L1) cannot autonomously fetch — operator-
+    # initiated fetch path is a v0.3 escape hatch (per ADR-0021-am
+    # §5 the operator-initiated marker isn't wired in v0.2; the
+    # initiative gate applies to every dispatch uniformly until then).
+    required_initiative_level = "L3"
 
     def validate(self, args: dict[str, Any]) -> None:
         url = args.get("url")

@@ -100,6 +100,14 @@ class ShellExecTool:
     name = "shell_exec"
     version = "1"
     side_effects = "external"
+    # ADR-0021-amendment §5 — destructive shell execution requires the
+    # agent to be configured at L5 (destructive-with-friction class).
+    # Companion (L1), Observer (L3), Investigator (L3), etc. cannot
+    # dispatch this tool; only Actuator (default L5) and operator-
+    # promoted agents reach the floor. Per-call approval gating still
+    # fires on top via ApprovalGateStep — initiative is the FIRST
+    # gate, approval is the SECOND.
+    required_initiative_level = "L5"
 
     def validate(self, args: dict[str, Any]) -> None:
         argv = args.get("argv")

@@ -562,6 +562,84 @@ class TestInitiativeFloorStep:
         assert seen_paths == [custom_path]
 
 
+class TestRealToolAnnotations:
+    """The five tools annotated post-v0.1.2 with required_initiative_level
+    are imported live and their declared levels pinned. If a future
+    refactor accidentally drops the annotation, this test catches it
+    rather than the catalog/registry consistency check missing it."""
+
+    def test_shell_exec_requires_l5(self):
+        from forest_soul_forge.tools.builtin.shell_exec import ShellExecTool
+        assert ShellExecTool.required_initiative_level == "L5"
+
+    def test_browser_action_requires_l5(self):
+        from forest_soul_forge.tools.builtin.browser_action import BrowserActionTool
+        assert BrowserActionTool.required_initiative_level == "L5"
+
+    def test_mcp_call_requires_l5(self):
+        from forest_soul_forge.tools.builtin.mcp_call import McpCallTool
+        assert McpCallTool.required_initiative_level == "L5"
+
+    def test_code_edit_requires_l4(self):
+        from forest_soul_forge.tools.builtin.code_edit import CodeEditTool
+        assert CodeEditTool.required_initiative_level == "L4"
+
+    def test_web_fetch_requires_l3(self):
+        from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
+        assert WebFetchTool.required_initiative_level == "L3"
+
+    def test_companion_l1_blocks_web_fetch(self):
+        # Concrete end-to-end: a Companion-class agent (L1) trying to
+        # dispatch web_fetch (L3) hits the initiative floor.
+        from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L1")
+        dctx = _ctx()
+        dctx.tool = WebFetchTool()
+        result = step.evaluate(dctx)
+        assert result.is_refuse
+        assert result.reason == "initiative_floor_violated"
+        assert "L3" in result.detail
+        assert "L1" in result.detail
+
+    def test_observer_l3_passes_web_fetch(self):
+        # Observer (default L3) reaches web_fetch's L3 floor — equality
+        # is "at the floor", which is a GO per the comparator semantic.
+        from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L3")
+        dctx = _ctx()
+        dctx.tool = WebFetchTool()
+        assert step.evaluate(dctx).verdict == "GO"
+
+    def test_engineer_l5_passes_shell_exec(self):
+        # SW-track Engineer (Actuator default L5) clears shell_exec.
+        from forest_soul_forge.tools.builtin.shell_exec import ShellExecTool
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L5")
+        dctx = _ctx()
+        dctx.tool = ShellExecTool()
+        assert step.evaluate(dctx).verdict == "GO"
+
+    def test_observer_l3_blocks_shell_exec(self):
+        # Observer (L3) cannot reach shell_exec's L5 — refusal even
+        # though the kit might not include it; the gate is uniform.
+        from forest_soul_forge.tools.builtin.shell_exec import ShellExecTool
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L3")
+        dctx = _ctx()
+        dctx.tool = ShellExecTool()
+        result = step.evaluate(dctx)
+        assert result.is_refuse
+        assert "L5" in result.detail
+
+    def test_researcher_l3_blocks_code_edit(self):
+        # Researcher (default L3 ceiling L4) — at default L3 cannot
+        # reach code_edit's L4. An operator who births a Researcher
+        # at L4 (within ceiling) would clear the gate.
+        from forest_soul_forge.tools.builtin.code_edit import CodeEditTool
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L3")
+        dctx = _ctx()
+        dctx.tool = CodeEditTool()
+        assert step.evaluate(dctx).is_refuse
+
+
 # ===========================================================================
 # ApprovalGateStep
 # ===========================================================================
