@@ -1,6 +1,6 @@
 # ADR-0027 amendment — epistemic metadata on memory entries
 
-- **Status:** Proposed (filed 2026-05-01; awaiting orchestrator sign-off before promotion). The base ADR-0027 stays Accepted; this is an additive amendment, not a supersession.
+- **Status:** Accepted (promoted 2026-05-01 — implementation complete across all four tranches T1–T4). The base ADR-0027 stays Accepted; this is an additive amendment, not a supersession. Implementation commits: `fcd8d2c` (T1+T2 schema v10→v11 + MemoryEntry write/read paths), `24ec62b` (T3 memory_recall.v1 epistemic enrichments), `fdef95b` (T4 memory_challenge.v1 tool). T7 (operator-driven memory_reclassify.v1) deferred to v0.3 — quality-of-life follow-up, not blocking.
 - **Date:** 2026-05-01
 - **Amends:** ADR-0027 (memory privacy contract). The original §1–§6 stay in force. This amendment adds §7 (epistemic metadata) and updates §6 (audit obligations) with three new event types.
 - **Related:** ADR-0022 (memory subsystem — substrate), ADR-0021 (role genres), ADR-003X K1 (`memory_verify.v1` — verification-as-consent-grant; this amendment makes verification multi-state without breaking K1), ADR-0038 (companion harm model — H-6 "memory overreach / inferred-preference cementing" is closed by this amendment).

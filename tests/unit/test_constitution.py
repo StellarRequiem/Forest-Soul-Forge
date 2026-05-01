@@ -417,3 +417,101 @@ class TestGenre:
         assert "genre:" not in y
         assert "genre_description:" not in y
 
+
+# ============================================================================
+# ADR-0021-amendment §2 — initiative_level + initiative_ceiling on
+# constitution. Hashed; surface in YAML when non-default.
+# ============================================================================
+class TestInitiativeLadder:
+    """Initiative posture is part of the rulebook (hashed). YAML emission
+    is conditional: defaults (L5/L5) stay omitted for back-compat with
+    pre-amendment artifacts; non-defaults always surface as a pair."""
+
+    def test_default_l5_l5_when_no_genre(self, engine: TraitEngine) -> None:
+        # No genre supplied → defaults to L5/L5 (pre-amendment behavior).
+        c = build(engine.build_profile("network_watcher"),
+                  engine, agent_name="A", templates_path=TEMPLATES_PATH)
+        assert c.initiative_level == "L5"
+        assert c.initiative_ceiling == "L5"
+
+    def test_explicit_initiative_round_trips(
+        self, engine: TraitEngine
+    ) -> None:
+        c = build(engine.build_profile("network_watcher"),
+                  engine, agent_name="A", templates_path=TEMPLATES_PATH,
+                  genre="companion",
+                  initiative_level="L1", initiative_ceiling="L2")
+        assert c.initiative_level == "L1"
+        assert c.initiative_ceiling == "L2"
+
+    def test_canonical_body_includes_both_fields(
+        self, engine: TraitEngine
+    ) -> None:
+        # Hash shape is stable: both fields always present in body.
+        c = build(engine.build_profile("network_watcher"),
+                  engine, agent_name="A", templates_path=TEMPLATES_PATH,
+                  initiative_level="L3", initiative_ceiling="L4")
+        body = c.canonical_body()
+        assert body["initiative_level"] == "L3"
+        assert body["initiative_ceiling"] == "L4"
+
+    def test_hash_changes_when_initiative_level_changes(
+        self, engine: TraitEngine
+    ) -> None:
+        profile = engine.build_profile("network_watcher")
+        c_l1 = build(profile, engine, agent_name="A",
+                     templates_path=TEMPLATES_PATH,
+                     initiative_level="L1", initiative_ceiling="L2")
+        c_l2 = build(profile, engine, agent_name="A",
+                     templates_path=TEMPLATES_PATH,
+                     initiative_level="L2", initiative_ceiling="L2")
+        assert c_l1.constitution_hash != c_l2.constitution_hash
+
+    def test_hash_changes_when_ceiling_changes(
+        self, engine: TraitEngine
+    ) -> None:
+        profile = engine.build_profile("network_watcher")
+        c_l3 = build(profile, engine, agent_name="A",
+                     templates_path=TEMPLATES_PATH,
+                     initiative_level="L1", initiative_ceiling="L3")
+        c_l4 = build(profile, engine, agent_name="A",
+                     templates_path=TEMPLATES_PATH,
+                     initiative_level="L1", initiative_ceiling="L4")
+        assert c_l3.constitution_hash != c_l4.constitution_hash
+
+    def test_to_yaml_emits_initiative_pair_when_non_default(
+        self, engine: TraitEngine
+    ) -> None:
+        c = build(engine.build_profile("network_watcher"),
+                  engine, agent_name="A", templates_path=TEMPLATES_PATH,
+                  genre="companion",
+                  initiative_level="L1", initiative_ceiling="L2")
+        y = c.to_yaml(generated_at="2026-05-01 00:00:00Z")
+        assert "initiative_level: L1" in y
+        assert "initiative_ceiling: L2" in y
+
+    def test_to_yaml_omits_when_l5_l5_back_compat(
+        self, engine: TraitEngine
+    ) -> None:
+        # Default L5/L5 keeps pre-amendment YAML byte-identical for
+        # callers that don't engage the new mechanism.
+        c = build(engine.build_profile("network_watcher"),
+                  engine, agent_name="A", templates_path=TEMPLATES_PATH)
+        y = c.to_yaml(generated_at="2026-05-01 00:00:00Z")
+        assert "initiative_level:" not in y
+        assert "initiative_ceiling:" not in y
+
+    def test_to_yaml_emits_pair_when_only_one_non_default(
+        self, engine: TraitEngine
+    ) -> None:
+        # If level OR ceiling is non-default, both surface — operators
+        # always see a complete posture, never a half-pair.
+        c = build(engine.build_profile("network_watcher"),
+                  engine, agent_name="A", templates_path=TEMPLATES_PATH,
+                  initiative_level="L3", initiative_ceiling="L5")
+        y = c.to_yaml(generated_at="2026-05-01 00:00:00Z")
+        assert "initiative_level: L3" in y
+        # Ceiling defaults to L5 here but still emitted because level
+        # is non-default — pair-or-nothing rule.
+        assert "initiative_ceiling: L5" in y
+

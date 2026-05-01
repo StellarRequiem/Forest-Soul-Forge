@@ -185,13 +185,19 @@ async def preview(
     # constitution_hash equals what /birth would write. Unclaimed-role
     # path returns (None, None) and the canonical body uses the
     # empty-string sentinel — still hash-stable across calls.
+    # ADR-0021 T3 — derive genre + ADR-0021-am §2 — initiative posture.
+    # Unclaimed-role path returns L5/L5 + None genre — still hash-stable.
     try:
         gd = genre_engine.genre_for(profile.role)
         genre_name: str | None = gd.name
         genre_description: str | None = gd.description
+        initiative_level: str = gd.default_initiative_level
+        initiative_ceiling: str = gd.max_initiative_level
     except GenreEngineError:
         genre_name = None
         genre_description = None
+        initiative_level = "L5"
+        initiative_ceiling = "L5"
 
     try:
         constitution = build_constitution(
@@ -199,6 +205,8 @@ async def preview(
             tools=tuple(tool_constraints),
             genre=genre_name,
             genre_description=genre_description,
+            initiative_level=initiative_level,
+            initiative_ceiling=initiative_ceiling,
         )
     except Exception as e:
         raise HTTPException(

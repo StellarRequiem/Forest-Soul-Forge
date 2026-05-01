@@ -155,6 +155,17 @@ class Constitution:
     # Hashed; description is not.
     genre: str | None = None
     genre_description: str | None = None
+    # Initiative ladder (ADR-0021-amendment §2). Both default to "L5"
+    # for back-compat: a constitution built without these fields keeps
+    # the v1 behavior of "no initiative ceiling." When the genre engine
+    # supplies values, they reflect the genre's max_initiative_level
+    # (ceiling) and default_initiative_level (the genre default that
+    # the operator can narrow but not widen). Both fields land in the
+    # canonical body and therefore the hash — two agents with the same
+    # role + traits + tools but different initiative postures get
+    # different constitution hashes.
+    initiative_level: str = "L5"
+    initiative_ceiling: str = "L5"
 
     # ---- hashing --------------------------------------------------------
     def canonical_body(self) -> dict[str, Any]:
@@ -164,6 +175,15 @@ class Constitution:
         unclaimed-role sentinel so old constitutions (which never
         carried genre) re-derive to a stable hash. ``genre_description``
         is intentionally excluded — it's documentation, not policy.
+
+        ``initiative_level`` and ``initiative_ceiling`` (ADR-0021-amendment
+        §2) are included unconditionally with the L5/L5 back-compat
+        defaults — same shape as the genre field's introduction. A
+        post-amendment constitution carries the genre-derived values;
+        a pre-amendment constitution re-derived without them gets the
+        defaults. Two agents with identical role + traits + tools but
+        different initiative postures get different hashes, which is
+        correct: their effective autonomy posture differs.
         """
         return {
             "policies": [_policy_to_dict(p) for p in self.policies],
@@ -181,6 +201,8 @@ class Constitution:
             },
             "tools": [dict(sorted(t.items())) for t in self.tools],
             "genre": self.genre or "",
+            "initiative_level": self.initiative_level,
+            "initiative_ceiling": self.initiative_ceiling,
         }
 
     @property
@@ -222,6 +244,16 @@ class Constitution:
             agent_block["genre"] = self.genre
         if self.genre_description is not None:
             agent_block["genre_description"] = self.genre_description
+        # Initiative posture (ADR-0021-amendment §2) lands in the agent
+        # block alongside genre — both shape "what kind of agent is
+        # this" at the operator-readable level. Omit when both are at
+        # the L5/L5 back-compat default to keep pre-amendment YAML
+        # byte-identical for callers that don't engage the new mechanism.
+        # When at least one is non-default, both surface so an inspector
+        # always sees a complete posture (level + ceiling pair).
+        if self.initiative_level != "L5" or self.initiative_ceiling != "L5":
+            agent_block["initiative_level"] = self.initiative_level
+            agent_block["initiative_ceiling"] = self.initiative_ceiling
         doc["agent"] = agent_block
         # Body fields come after identity so readers see the rules front-and-
         # center rather than buried beneath metadata.
@@ -252,6 +284,8 @@ def build(
     tools: tuple[dict[str, Any], ...] = (),
     genre: str | None = None,
     genre_description: str | None = None,
+    initiative_level: str = "L5",
+    initiative_ceiling: str = "L5",
 ) -> Constitution:
     """Derive a :class:`Constitution` from a profile.
 
@@ -263,6 +297,16 @@ def build(
     claimed by any genre — the constitution still builds, just without
     a genre policy floor. The hash uses ``""`` as the no-genre
     sentinel so old artifacts re-derive to a stable hash.
+
+    ``initiative_level`` + ``initiative_ceiling`` (ADR-0021-amendment §2)
+    populate from the genre engine in the same way: the daemon edge
+    reads the role's claimed genre's ``max_initiative_level`` /
+    ``default_initiative_level`` and passes them through. The
+    operator can narrow ``initiative_level`` (set it BELOW the
+    ceiling); raising it above the ceiling refuses at the
+    enforcement layer (writes.py). Both default to ``"L5"`` for
+    back-compat — a constitution built without these args keeps
+    the v1 behavior of "no initiative ceiling."
     """
     tpath = Path(templates_path) if templates_path else DEFAULT_TEMPLATES_PATH
     templates = _load_templates(tpath)
@@ -328,6 +372,8 @@ def build(
         tools=tuple(tools),
         genre=genre,
         genre_description=genre_description,
+        initiative_level=initiative_level,
+        initiative_ceiling=initiative_ceiling,
     )
 
 

@@ -381,6 +381,29 @@ def _enforce_genre_trait_floors(
         )
 
 
+def _resolve_initiative_posture(
+    genre_engine: GenreEngine, role: str,
+) -> tuple[str, str]:
+    """ADR-0021-amendment §2: derive (initiative_level, initiative_ceiling)
+    for an agent at birth time.
+
+    The ceiling comes from the genre's ``max_initiative_level``; the
+    default level comes from the genre's ``default_initiative_level``.
+    Operator-supplied overrides land via a separate per-request flow
+    (deferred to a later tranche; v0.2 ships with genre defaults).
+
+    Returns ``("L5", "L5")`` (back-compat defaults) when the role is
+    unclaimed by any genre OR the genre engine is empty. The
+    constitution build path treats those defaults as "no initiative
+    ceiling", matching pre-amendment behavior.
+    """
+    try:
+        gd = genre_engine.genre_for(role)
+    except GenreEngineError:
+        return "L5", "L5"
+    return gd.default_initiative_level, gd.max_initiative_level
+
+
 def _resolve_genre(
     genre_engine: GenreEngine, role: str
 ) -> tuple[str | None, str | None]:
@@ -553,6 +576,13 @@ def _perform_create(
     # the same values means /preview, /birth, and the audit event all
     # see one consistent genre claim per request.
 
+    # ADR-0021-amendment §2 — initiative posture from the genre.
+    # Returns L5/L5 for unclaimed roles (back-compat); for claimed
+    # roles, returns the genre's default + ceiling.
+    initiative_level, initiative_ceiling = _resolve_initiative_posture(
+        genre_engine, profile.role,
+    )
+
     # Build constitution outside the lock — pure function, any schema
     # error surfaces as a 400 before we touch the write path.
     try:
@@ -561,6 +591,8 @@ def _perform_create(
             tools=tool_constraints,
             genre=genre,
             genre_description=genre_description,
+            initiative_level=initiative_level,
+            initiative_ceiling=initiative_ceiling,
         )
     except Exception as e:
         raise HTTPException(
