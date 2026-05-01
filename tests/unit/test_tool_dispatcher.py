@@ -1090,3 +1090,82 @@ class TestRegistryApprovalQueue:
             )
             assert ok1 is True
             assert ok2 is False  # already decided
+
+
+# ===========================================================================
+# ADR-0021-amendment §2 — _load_initiative_level helper
+# ===========================================================================
+class TestLoadInitiativeLevel:
+    """Pulls agent.initiative_level out of constitution.yaml. Defensive
+    against every read failure path: missing file, malformed YAML,
+    missing field, non-string field. All return 'L5' (back-compat
+    default — no initiative ceiling)."""
+
+    def test_missing_file_returns_l5(self, tmp_path):
+        from forest_soul_forge.tools.dispatcher import _load_initiative_level
+        assert _load_initiative_level(tmp_path / "absent.yaml") == "L5"
+
+    def test_missing_field_returns_l5(self, tmp_path):
+        # Pre-amendment constitution: agent block exists but has no
+        # initiative_level field. Must default to L5 cleanly.
+        from forest_soul_forge.tools.dispatcher import _load_initiative_level
+        p = tmp_path / "c.yaml"
+        p.write_text(
+            "agent:\n  role: network_watcher\n  agent_name: A\n",
+            encoding="utf-8",
+        )
+        assert _load_initiative_level(p) == "L5"
+
+    def test_explicit_l1_returns_l1(self, tmp_path):
+        # Companion-class artifact written by a post-amendment build.
+        from forest_soul_forge.tools.dispatcher import _load_initiative_level
+        p = tmp_path / "c.yaml"
+        p.write_text(
+            "agent:\n  role: operator_companion\n  agent_name: A\n"
+            "  initiative_level: L1\n  initiative_ceiling: L2\n",
+            encoding="utf-8",
+        )
+        assert _load_initiative_level(p) == "L1"
+
+    def test_malformed_yaml_returns_l5(self, tmp_path):
+        # YAML parse error → fail-open with the back-compat default
+        # so a corrupt-on-disk constitution doesn't kill every dispatch.
+        # ConstraintResolutionStep separately refuses missing tool
+        # entries, so a bad file still ends with a refusal — just not
+        # for "initiative" reasons.
+        from forest_soul_forge.tools.dispatcher import _load_initiative_level
+        p = tmp_path / "c.yaml"
+        p.write_text("agent: : :\n  not: valid: yaml\n", encoding="utf-8")
+        assert _load_initiative_level(p) == "L5"
+
+    def test_non_string_field_returns_l5(self, tmp_path):
+        # Defensive: someone hand-edits the YAML and writes
+        # `initiative_level: 1` (int). Treat as missing.
+        from forest_soul_forge.tools.dispatcher import _load_initiative_level
+        p = tmp_path / "c.yaml"
+        p.write_text(
+            "agent:\n  role: r\n  agent_name: A\n  initiative_level: 1\n",
+            encoding="utf-8",
+        )
+        assert _load_initiative_level(p) == "L5"
+
+    def test_empty_string_returns_l5(self, tmp_path):
+        from forest_soul_forge.tools.dispatcher import _load_initiative_level
+        p = tmp_path / "c.yaml"
+        p.write_text(
+            "agent:\n  role: r\n  agent_name: A\n  initiative_level: ''\n",
+            encoding="utf-8",
+        )
+        assert _load_initiative_level(p) == "L5"
+
+    def test_strips_whitespace(self, tmp_path):
+        # Trailing whitespace on the YAML scalar shouldn't change the
+        # comparison semantics — strip on read.
+        from forest_soul_forge.tools.dispatcher import _load_initiative_level
+        p = tmp_path / "c.yaml"
+        p.write_text(
+            "agent:\n  role: r\n  agent_name: A\n"
+            "  initiative_level: '  L3  '\n",
+            encoding="utf-8",
+        )
+        assert _load_initiative_level(p) == "L3"

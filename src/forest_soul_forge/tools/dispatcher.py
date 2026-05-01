@@ -54,6 +54,7 @@ from forest_soul_forge.tools.governance_pipeline import (
     ApprovalGateStep,
     ArgsValidationStep,
     CallCounterStep,
+    InitiativeFloorStep,
     ConstraintResolutionStep,
     DispatchContext,
     GenreFloorStep,
@@ -169,6 +170,34 @@ class _ResolvedToolConstraints:
     side_effects: str
     constraints: dict[str, Any] = field(default_factory=dict)
     applied_rules: tuple[str, ...] = ()
+
+
+def _load_initiative_level(constitution_path: Path) -> str:
+    """ADR-0021-amendment §2: read the agent's ``initiative_level`` from
+    its constitution.yaml.
+
+    Returns ``"L5"`` (back-compat default; no initiative ceiling) when:
+      - the file is missing
+      - the file lacks an ``agent.initiative_level`` field
+      - parsing fails
+
+    Symmetric in shape with :func:`_load_resolved_constraints` —
+    pure function, no side effects, defensive against any read failure.
+    Called per-dispatch by InitiativeFloorStep. Reading the YAML twice
+    per dispatch (once for constraints, once for initiative) is
+    acceptable at v0.2; v0.3 may cache.
+    """
+    if not constitution_path.exists():
+        return "L5"
+    try:
+        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return "L5"
+    agent_block = data.get("agent") or {}
+    level = agent_block.get("initiative_level")
+    if not isinstance(level, str) or not level.strip():
+        return "L5"
+    return level.strip()
 
 
 def _load_resolved_constraints(
@@ -317,6 +346,17 @@ class ToolDispatcher:
                 # initial value and break that pattern.
                 genre_engine_fn=lambda: self.genre_engine,
                 check_genre_floor_fn=_check_genre_floor,
+            ),
+            # ADR-0021-amendment §5 — initiative ladder check, orthogonal
+            # to GenreFloorStep's side-effects ceiling. v0.2 enforcement
+            # is opt-in per tool: tools that declare a
+            # ``required_initiative_level`` get gated; others pass
+            # through. Inserts AFTER GenreFloorStep so the side-effects
+            # ceiling refusal fires first when both would refuse —
+            # operators see the load-bearing ADR-0021 T5 violation
+            # rather than the secondary initiative one.
+            InitiativeFloorStep(
+                initiative_loader_fn=_load_initiative_level,
             ),
             CallCounterStep(counter_get_fn=self.counter_get),
             ApprovalGateStep(

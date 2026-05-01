@@ -467,6 +467,72 @@ class GenreFloorStep:
         return StepResult.go()
 
 
+_INITIATIVE_ORDER: tuple[str, ...] = ("L0", "L1", "L2", "L3", "L4", "L5")
+
+
+def _initiative_index(level: str) -> int:
+    """Strictness index of an initiative level. Unknown → strictest
+    (L0 = 0). Same fail-closed shape as the side-effects tier helper.
+    """
+    try:
+        return _INITIATIVE_ORDER.index(level)
+    except ValueError:
+        return 0
+
+
+@dataclass
+class InitiativeFloorStep:
+    """ADR-0021-amendment §5 — runtime check on the L0–L5 initiative
+    ladder, orthogonal to the side-effects ceiling that
+    :class:`GenreFloorStep` enforces.
+
+    Where ``GenreFloorStep`` answers "how destructive can the agent's
+    actions be?", this step answers "how autonomous is the agent
+    allowed to be in deciding to act?"
+
+    v0.2 enforcement is **opt-in per tool**: a tool that declares a
+    ``required_initiative_level`` class attribute (e.g. ``"L4"``) is
+    gated against the agent's ``initiative_level``. Tools that don't
+    declare are unaffected. This avoids silent regressions while the
+    catalog is audited tool-by-tool (deferred per-tool annotation
+    work; v0.3 candidates).
+
+    The agent's level is loaded from its constitution.yaml via
+    ``initiative_loader_fn``. v0.2 reads the YAML on every dispatch;
+    v0.3 may cache.
+    """
+
+    initiative_loader_fn: Any  # callable(constitution_path: Path) -> str
+
+    def evaluate(self, dctx: DispatchContext) -> StepResult:
+        # Tool-side declaration. Tools without the attribute are no-op
+        # for this gate — no enforcement until they opt in.
+        required = getattr(dctx.tool, "required_initiative_level", "") or ""
+        if not required:
+            return StepResult.go()
+        # Agent-side level from constitution.yaml. Defensive default
+        # is L5 (no ceiling) so a missing/unreadable constitution
+        # produces a permissive call rather than a hard refusal —
+        # ConstraintResolutionStep already refuses missing
+        # constitutions earlier in the pipeline, so reaching this
+        # step with L5 means the constitution exists but lacks
+        # the field (pre-amendment artifact).
+        agent_level = self.initiative_loader_fn(dctx.constitution_path)
+        if _initiative_index(required) <= _initiative_index(agent_level):
+            return StepResult.go()
+        return StepResult.refuse(
+            "initiative_floor_violated",
+            (
+                f"tool {dctx.key} requires initiative_level >= {required}; "
+                f"agent's level is {agent_level}. The agent's genre caps "
+                f"its autonomy posture below this tool's requirement; "
+                f"either operator-initiate the call (planned escape "
+                f"hatch — not yet wired in v0.2) or change the role "
+                f"to one with a higher initiative_level."
+            ),
+        )
+
+
 @dataclass
 class CallCounterStep:
     """Per-session ``max_calls_per_session`` pre-check (read-only).

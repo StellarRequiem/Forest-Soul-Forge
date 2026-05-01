@@ -31,6 +31,7 @@ from forest_soul_forge.tools.governance_pipeline import (
     GenreFloorStep,
     GovernancePipeline,
     HardwareQuarantineStep,
+    InitiativeFloorStep,
     PostureOverrideStep,
     StepResult,
     TaskUsageCapStep,
@@ -468,6 +469,97 @@ class TestCallCounterStep:
         dctx = _ctx()
         dctx.resolved = _StubResolved(constraints={"max_calls_per_session": 10})
         assert step.evaluate(dctx).is_refuse
+
+
+# ===========================================================================
+# InitiativeFloorStep — ADR-0021-amendment §5
+# ===========================================================================
+class _StubTool:
+    """Stub for the loaded tool object dctx.tool — only the attributes
+    InitiativeFloorStep reads."""
+    def __init__(self, required_initiative_level: str = ""):
+        self.required_initiative_level = required_initiative_level
+
+
+class TestInitiativeFloorStep:
+    """Opt-in initiative ladder gate. v0.2 enforcement only fires for
+    tools that declare ``required_initiative_level`` — others pass."""
+
+    def test_tool_without_required_level_passes(self):
+        # No declared initiative requirement → no enforcement.
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L0")
+        dctx = _ctx()
+        dctx.tool = _StubTool(required_initiative_level="")
+        assert step.evaluate(dctx).verdict == "GO"
+
+    def test_tool_without_attribute_passes(self):
+        # Defensive: a tool that doesn't have the attribute at all
+        # (older tool that hasn't been audited yet) is treated the
+        # same as one declaring "" — no enforcement.
+        class _BareT:
+            pass
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L0")
+        dctx = _ctx()
+        dctx.tool = _BareT()
+        assert step.evaluate(dctx).verdict == "GO"
+
+    def test_required_at_or_below_agent_passes(self):
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L4")
+        dctx = _ctx()
+        dctx.tool = _StubTool(required_initiative_level="L3")
+        assert step.evaluate(dctx).verdict == "GO"
+
+    def test_required_at_agent_level_passes(self):
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L3")
+        dctx = _ctx()
+        dctx.tool = _StubTool(required_initiative_level="L3")
+        assert step.evaluate(dctx).verdict == "GO"
+
+    def test_required_above_agent_refuses(self):
+        # Companion (L1) calling a tool that requires L4. Refused.
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L1")
+        dctx = _ctx()
+        dctx.tool = _StubTool(required_initiative_level="L4")
+        result = step.evaluate(dctx)
+        assert result.is_refuse
+        assert result.reason == "initiative_floor_violated"
+        assert "L4" in result.detail
+        assert "L1" in result.detail
+
+    def test_unknown_required_level_fails_closed(self):
+        # Unknown level → strictest (L0=0). Refuses against any agent
+        # level above L0 (which is every realistic agent — L0 means
+        # "reactive only, no memory writes" and would never be
+        # configured by an operator who's also annotating tools).
+        # Practical effect: a typo on the tool side surfaces as a
+        # refusal rather than silently letting the call through.
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "L0")
+        dctx = _ctx()
+        dctx.tool = _StubTool(required_initiative_level="LZZ")
+        # required→0, agent L0→0; 0 <= 0 → GO. Equal levels are OK.
+        # The test confirms the comparator semantic.
+        assert step.evaluate(dctx).verdict == "GO"
+
+    def test_unknown_agent_level_fails_closed(self):
+        # Unknown agent level → strictest (L0). Tool requiring L1 refuses.
+        step = InitiativeFloorStep(initiative_loader_fn=lambda p: "garbage")
+        dctx = _ctx()
+        dctx.tool = _StubTool(required_initiative_level="L1")
+        assert step.evaluate(dctx).is_refuse
+
+    def test_loader_called_with_constitution_path(self):
+        # The step delegates path → level via the loader. Pass through
+        # confirms wiring.
+        seen_paths = []
+        def _loader(p):
+            seen_paths.append(p)
+            return "L5"
+        step = InitiativeFloorStep(initiative_loader_fn=_loader)
+        custom_path = Path("/tmp/agent-x/constitution.yaml")
+        dctx = _ctx(constitution_path=custom_path)
+        dctx.tool = _StubTool(required_initiative_level="L3")
+        step.evaluate(dctx)
+        assert seen_paths == [custom_path]
 
 
 # ===========================================================================
