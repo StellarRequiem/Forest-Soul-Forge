@@ -1373,6 +1373,64 @@ tools:
     side_effects: read_only
     archetype_tags: [observer, guardian, researcher, software_engineer]
 
+  git_diff_read.v1:
+    name: git_diff_read
+    version: "1"
+    description: |
+      Read structured diffs via `git diff`. Read-only: inspects
+      tree/index/working-copy state; never mutates the repo. Three
+      modes: `refs` (between two refs), `staged` (--cached), and
+      `working` (default; unstaged changes). Subprocess invocation
+      of `git -C <path> diff --no-color -M -p [--cached] [refs] [-- paths]`,
+      parsed into per-file structures with hunk metadata
+      (old_start/new_start/old_count/new_count + body). A second
+      invocation with `--numstat` overlays accurate additions/
+      deletions and detects binary files. Per-agent allowed_paths
+      gates the repo path AND each paths_filter entry. Phase G.1.A
+      programming primitive — SW-track Reviewer is the primary
+      consumer (diffing a feature branch against main is the
+      canonical code-review entry point). Truncation: max_files
+      (default 100, ceiling 1000) and max_lines_per_file
+      (default 500, ceiling 5000).
+    input_schema:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: "Path inside a git repo (root or subdir); invoked via `git -C`."
+        mode:
+          type: string
+          enum: [refs, staged, working]
+          description: "Diff mode. Default 'working'."
+        ref_a:
+          type: string
+          description: "Required when mode='refs'. The 'from' ref. Must not start with '-'."
+        ref_b:
+          type: string
+          description: "Required when mode='refs'. The 'to' ref. Must not start with '-'."
+        paths_filter:
+          type: array
+          items: {type: string}
+          description: "Path filters (after `--`); each must resolve within allowed_paths."
+        max_files:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: "Cap on files in output. Default 100."
+        max_lines_per_file:
+          type: integer
+          minimum: 1
+          maximum: 5000
+          description: "Cap on hunk-body lines per file. Default 500."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 120
+          description: "Subprocess timeout. Default 30."
+    side_effects: read_only
+    archetype_tags: [observer, guardian, researcher, software_engineer]
+
   memory_challenge.v1:
     name: memory_challenge
     version: "1"

@@ -17,6 +17,7 @@ from forest_soul_forge.tools.builtin.delegate import DelegateTool
 from forest_soul_forge.tools.builtin.dns_lookup import DnsLookupTool
 from forest_soul_forge.tools.builtin.dynamic_policy import DynamicPolicyTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
+from forest_soul_forge.tools.builtin.git_diff_read import GitDiffReadTool
 from forest_soul_forge.tools.builtin.git_log_read import GitLogReadTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
@@ -73,6 +74,7 @@ __all__ = [
     "RuffLintTool",
     "PytestRunTool",
     "GitLogReadTool",
+    "GitDiffReadTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -220,3 +222,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # fields, robust against arbitrary commit-message content).
     # SW-track Architect+Engineer+Reviewer all reach (read_only).
     registry.register(GitLogReadTool())
+    # Phase G.1.A — git_diff_read.v1 (Burst 56). Read-only subprocess
+    # invocation of `git diff` with structured per-file output.
+    # Three modes: refs (between two refs), staged (--cached), working.
+    # SW-track Reviewer is the primary consumer — diffing a feature
+    # branch against main is the canonical entry point of code review.
+    registry.register(GitDiffReadTool())
