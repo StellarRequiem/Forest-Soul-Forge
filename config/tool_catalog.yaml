@@ -1245,6 +1245,50 @@ tools:
     side_effects: filesystem
     archetype_tags: [observer, guardian, security_high]
 
+  pytest_run.v1:
+    name: pytest_run
+    version: "1"
+    description: |
+      Run pytest against the agent's allowed_paths. Filesystem-tier
+      side_effects (pytest writes .pytest_cache + test fixtures may
+      mutate). required_initiative_level L4 — reversible-with-policy
+      class per ADR-0021-am §5; SW-track Engineer (Actuator default
+      L5) reaches; Reviewer at default L3 must be birthed at ceiling
+      L4 to use this tool. Subprocess invocation of `python3 -m
+      pytest` (or `pytest` PATH fallback). Default 5-minute timeout
+      (test suites take time); max 30 minutes. Output: structured
+      pass/fail/skip/error counts + per-failure traceback (capped at
+      max_failures_reported with max_failure_lines per failure).
+      Selectors arg accepts pytest's full selector syntax.
+    input_schema:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: "Absolute or relative path to test (file or dir)."
+        selectors:
+          type: array
+          items: {type: string}
+          description: "Optional pytest selectors (e.g., '-k expr', '-m mark', test_id)."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 1800
+          description: "Subprocess timeout. Default 300 (5 min)."
+        max_failures_reported:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: "Cap on failures with traceback details. Default 50."
+        max_failure_lines:
+          type: integer
+          minimum: 1
+          maximum: 500
+          description: "Cap on lines per failure traceback. Default 50."
+    side_effects: filesystem
+    archetype_tags: [actuator, software_engineer]
+
   ruff_lint.v1:
     name: ruff_lint
     version: "1"

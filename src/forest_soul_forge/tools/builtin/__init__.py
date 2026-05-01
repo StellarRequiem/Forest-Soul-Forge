@@ -34,6 +34,7 @@ from forest_soul_forge.tools.builtin.patch_check import PatchCheckTool
 from forest_soul_forge.tools.builtin.port_policy_audit import PortPolicyAuditTool
 from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
 from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
+from forest_soul_forge.tools.builtin.pytest_run import PytestRunTool
 from forest_soul_forge.tools.builtin.ruff_lint import RuffLintTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
 from forest_soul_forge.tools.builtin.tamper_detect import TamperDetectTool
@@ -69,6 +70,7 @@ __all__ = [
     "UsbDeviceAuditTool",
     "BehavioralBaselineTool",
     "RuffLintTool",
+    "PytestRunTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -207,3 +209,7 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # to land (Burst 53). Read-only subprocess invocation of the ruff
     # linter; gated only by allowed_paths constraint.
     registry.register(RuffLintTool())
+    # Phase G.1.A — pytest_run.v1 (Burst 54). Filesystem-tier (writes
+    # .pytest_cache); required_initiative_level L4. SW-track Engineer
+    # (Actuator L5/L5) is the primary kit consumer.
+    registry.register(PytestRunTool())
