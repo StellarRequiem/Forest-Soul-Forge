@@ -34,6 +34,7 @@ from forest_soul_forge.tools.builtin.patch_check import PatchCheckTool
 from forest_soul_forge.tools.builtin.port_policy_audit import PortPolicyAuditTool
 from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
 from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
+from forest_soul_forge.tools.builtin.ruff_lint import RuffLintTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
 from forest_soul_forge.tools.builtin.tamper_detect import TamperDetectTool
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
@@ -67,6 +68,7 @@ __all__ = [
     "PortPolicyAuditTool",
     "UsbDeviceAuditTool",
     "BehavioralBaselineTool",
+    "RuffLintTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -201,3 +203,7 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     registry.register(CodeReadTool())
     registry.register(CodeEditTool())
     registry.register(ShellExecTool())
+    # Phase G.1.A — programming primitives. ruff_lint.v1 is the first
+    # to land (Burst 53). Read-only subprocess invocation of the ruff
+    # linter; gated only by allowed_paths constraint.
+    registry.register(RuffLintTool())

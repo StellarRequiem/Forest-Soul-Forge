@@ -1245,6 +1245,39 @@ tools:
     side_effects: filesystem
     archetype_tags: [observer, guardian, security_high]
 
+  ruff_lint.v1:
+    name: ruff_lint
+    version: "1"
+    description: |
+      Run the `ruff` linter against the agent's allowed_paths.
+      Read-only: lint reports findings; never modifies files. Subprocess
+      invocation of `ruff check --output-format json --no-cache`. Pure
+      Phase G.1.A programming primitive — gives SW-track agents
+      (Architect, Engineer, Reviewer) a stable lint surface for their
+      work. Agent-claimed tags include the SW-track triune; other
+      genres can include via tools_add. Cap on findings (max_findings,
+      default 500) prevents pathological output. 30-second default
+      timeout (configurable up to 120s for large monorepos).
+    input_schema:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: "Absolute or relative path to lint (file or dir)."
+        max_findings:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: "Cap on findings returned. Default 500."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 120
+          description: "Subprocess timeout. Default 30."
+    side_effects: read_only
+    archetype_tags: [observer, guardian, researcher, security_low]
+
   memory_challenge.v1:
     name: memory_challenge
     version: "1"
