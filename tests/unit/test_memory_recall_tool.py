@@ -362,3 +362,176 @@ class TestBackwardCompatibility:
         out = _run(MemoryRecallTool().execute({}, env["ctx"]))
         contents = sorted(e["content"] for e in out.output["entries"])
         assert contents == ["another legacy entry", "legacy entry"]
+
+
+# ===========================================================================
+# ADR-0027-amendment §7 — epistemic metadata surfaces (T3)
+# ===========================================================================
+class TestEpistemicSurfaces:
+    """Recall always exposes claim_type, confidence, last_challenged_at on
+    every entry. Optional surface_contradictions + staleness_threshold_days
+    parameters add per-entry contradictions / staleness flags."""
+
+    def test_default_fields_always_surfaced(self, env):
+        env["memory"].append(
+            instance_id="agent_a", agent_dna="d" * 12,
+            content="default entry", layer="episodic",
+        )
+        out = _run(MemoryRecallTool().execute({}, env["ctx"]))
+        e = out.output["entries"][0]
+        # Defaults match the schema CHECK column DEFAULTs.
+        assert e["claim_type"] == "observation"
+        assert e["confidence"] == "medium"
+        assert e["last_challenged_at"] is None
+        # Without surface_contradictions / staleness, those keys absent.
+        assert "unresolved_contradictions" not in e
+        assert "is_stale" not in e
+
+    def test_explicit_claim_type_round_trips_through_recall(self, env):
+        env["memory"].append(
+            instance_id="agent_a", agent_dna="d" * 12,
+            content="my hunch", layer="semantic",
+            claim_type="agent_inference", confidence="low",
+        )
+        out = _run(MemoryRecallTool().execute({}, env["ctx"]))
+        e = out.output["entries"][0]
+        assert e["claim_type"] == "agent_inference"
+        assert e["confidence"] == "low"
+
+    def test_k1_verification_promotes_confidence_to_high(self, env):
+        # ADR-0027-amendment §7.6 — verified entries surface as high
+        # regardless of stored confidence.
+        e = env["memory"].append(
+            instance_id="agent_a", agent_dna="d" * 12,
+            content="hunch verified externally", layer="semantic",
+            claim_type="agent_inference", confidence="low",
+        )
+        env["memory"].mark_verified(
+            entry_id=e.entry_id,
+            verifier_id="external_operator",
+            seal_note="confirmed via secondary channel",
+        )
+        out = _run(MemoryRecallTool().execute({}, env["ctx"]))
+        # Stored confidence is 'low'; effective confidence is 'high'.
+        surfaced = next(
+            x for x in out.output["entries"]
+            if x["entry_id"] == e.entry_id
+        )
+        assert surfaced["confidence"] == "high"
+        # Stored confidence unchanged in DB:
+        from_db = env["memory"].get(e.entry_id)
+        assert from_db.confidence == "low"
+
+    def test_surface_contradictions_attaches_open_conflicts(self, env):
+        e1 = env["memory"].append(
+            instance_id="agent_a", agent_dna="d" * 12,
+            content="prefer mornings", layer="semantic",
+            claim_type="preference",
+        )
+        e2 = env["memory"].append(
+            instance_id="agent_a", agent_dna="d" * 12,
+            content="actually I prefer evenings", layer="semantic",
+            claim_type="preference",
+        )
+        env["memory"].conn.execute(
+            "INSERT INTO memory_contradictions ("
+            "    contradiction_id, earlier_entry_id, later_entry_id,"
+            "    contradiction_kind, detected_at, detected_by"
+            ") VALUES ('c1', ?, ?, 'updated', '2026-05-01 00:00:00Z', 'op');",
+            (e1.entry_id, e2.entry_id),
+        )
+        out = _run(MemoryRecallTool().execute(
+            {"surface_contradictions": True}, env["ctx"],
+        ))
+        # Both e1 and e2 reference the contradiction.
+        for entry in out.output["entries"]:
+            assert "unresolved_contradictions" in entry
+            if entry["entry_id"] in (e1.entry_id, e2.entry_id):
+                assert len(entry["unresolved_contradictions"]) == 1
+                c = entry["unresolved_contradictions"][0]
+                assert c["contradiction_kind"] == "updated"
+                assert c["earlier_entry_id"] == e1.entry_id
+                assert c["later_entry_id"] == e2.entry_id
+        # Metadata records the count.
+        assert out.metadata["contradicted_count"] == 2
+        assert out.metadata["surface_contradictions"] is True
+
+    def test_resolved_contradictions_not_surfaced(self, env):
+        # Resolved contradictions are intentionally excluded — recall
+        # only shows what's still open.
+        e1 = env["memory"].append(
+            instance_id="agent_a", agent_dna="d" * 12,
+            content="x", layer="episodic",
+        )
+        e2 = env["memory"].append(
+            instance_id="agent_a", agent_dna="d" * 12,
+            content="y", layer="episodic",
+        )
+        env["memory"].conn.execute(
+            "INSERT INTO memory_contradictions ("
+            "    contradiction_id, earlier_entry_id, later_entry_id,"
+            "    contradiction_kind, detected_at, detected_by,"
+            "    resolved_at, resolution_summary"
+            ") VALUES ('c2', ?, ?, 'direct', '2026-05-01 00:00:00Z', 'op',"
+            "          '2026-05-01 12:00:00Z', 'operator decided e2 wins');",
+            (e1.entry_id, e2.entry_id),
+        )
+        out = _run(MemoryRecallTool().execute(
+            {"surface_contradictions": True}, env["ctx"],
+        ))
+        for entry in out.output["entries"]:
+            assert entry["unresolved_contradictions"] == []
+        assert out.metadata["contradicted_count"] == 0
+
+    def test_staleness_threshold_flags_old_entries(self, env):
+        # Entry created at a fixed past timestamp; with a tight
+        # threshold the staleness check fires.
+        e = env["memory"].append(
+            instance_id="agent_a", agent_dna="d" * 12,
+            content="old entry", layer="semantic",
+            claim_type="preference",
+        )
+        # Force its created_at to a date long ago via direct SQL —
+        # the helper uses ISO-8601 string comparison so this is safe.
+        env["memory"].conn.execute(
+            "UPDATE memory_entries SET created_at='2020-01-01 00:00:00Z' "
+            "WHERE entry_id=?;",
+            (e.entry_id,),
+        )
+        out = _run(MemoryRecallTool().execute(
+            {"staleness_threshold_days": 30}, env["ctx"],
+        ))
+        surfaced = next(
+            x for x in out.output["entries"]
+            if x["entry_id"] == e.entry_id
+        )
+        assert surfaced["is_stale"] is True
+        assert out.metadata["stale_count"] == 1
+        assert out.metadata["staleness_threshold_days"] == 30
+
+    def test_staleness_threshold_does_not_flag_fresh_entries(self, env):
+        env["memory"].append(
+            instance_id="agent_a", agent_dna="d" * 12,
+            content="fresh entry", layer="episodic",
+        )
+        out = _run(MemoryRecallTool().execute(
+            {"staleness_threshold_days": 365}, env["ctx"],
+        ))
+        # Just-created → far inside the 365-day window.
+        for e in out.output["entries"]:
+            assert e["is_stale"] is False
+        assert out.metadata["stale_count"] == 0
+
+    def test_invalid_surface_contradictions_type_rejected(self):
+        with pytest.raises(ToolValidationError):
+            MemoryRecallTool().validate({"surface_contradictions": "true"})
+
+    def test_invalid_staleness_threshold_rejected(self):
+        with pytest.raises(ToolValidationError):
+            MemoryRecallTool().validate({"staleness_threshold_days": 0})
+        with pytest.raises(ToolValidationError):
+            MemoryRecallTool().validate({"staleness_threshold_days": -5})
+        with pytest.raises(ToolValidationError):
+            MemoryRecallTool().validate({"staleness_threshold_days": 1.5})
+        with pytest.raises(ToolValidationError):
+            MemoryRecallTool().validate({"staleness_threshold_days": True})

@@ -628,6 +628,125 @@ class Memory:
         ).fetchone()
         return _row_to_entry(row) if row is not None else None
 
+    # ---- v11 epistemic helpers (ADR-0027-amendment §7.3 + §7.4) -----------
+    def unresolved_contradictions_for(
+        self, entry_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return all open (unresolved) contradictions where ``entry_id``
+        appears as either the earlier or later side.
+
+        Each entry shape:
+          {
+            "contradiction_id":   str,
+            "earlier_entry_id":   str,
+            "later_entry_id":     str,
+            "contradiction_kind": "direct"|"updated"|"qualified"|"retracted",
+            "detected_at":        ISO timestamp,
+            "detected_by":        str,
+          }
+
+        Empty list = no open contradictions. Resolved contradictions are
+        explicitly excluded — the recall surface only shows what's still
+        open. Operators reviewing resolved history go through a separate
+        admin-grade query (deferred to v0.3).
+
+        v0.2 callers: memory_recall.v1's surface_contradictions=True
+        path. The helper is also useful directly from operator-driven
+        admin tools.
+        """
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT contradiction_id, earlier_entry_id, later_entry_id,
+                       contradiction_kind, detected_at, detected_by
+                FROM memory_contradictions
+                WHERE (earlier_entry_id = ? OR later_entry_id = ?)
+                  AND resolved_at IS NULL;
+                """,
+                (entry_id, entry_id),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # v10-shape DB without the table — return empty rather than
+            # crash. Defensive for in-memory tests that don't migrate.
+            return []
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            out.append({
+                "contradiction_id":   r["contradiction_id"],
+                "earlier_entry_id":   r["earlier_entry_id"],
+                "later_entry_id":     r["later_entry_id"],
+                "contradiction_kind": r["contradiction_kind"],
+                "detected_at":        r["detected_at"],
+                "detected_by":        r["detected_by"],
+            })
+        return out
+
+    def is_entry_stale(
+        self,
+        entry: "MemoryEntry",
+        *,
+        threshold_days: int,
+        now_iso: str | None = None,
+    ) -> bool:
+        """ADR-0027-amendment §7.4 — staleness pressure check.
+
+        An entry is stale when:
+          - its ``last_challenged_at`` is older than ``threshold_days``
+            (the entry was last touched / verified / contradicted that
+            long ago), OR
+          - its ``last_challenged_at`` is NULL AND its ``created_at``
+            is older than ``threshold_days`` (the entry has never been
+            challenged but is older than the threshold).
+
+        Threshold is in days. Caller chooses per-claim-type defaults
+        (memory_recall.v1 does this); 30 days is a reasonable default
+        for ``agent_inference`` per ADR §7.4.
+
+        ``now_iso`` injectable for deterministic testing. Defaults to
+        the current UTC time. ISO-8601 string comparison is correct
+        here because both sides use the same _now_iso() format.
+        """
+        if threshold_days <= 0:
+            return False
+        # Last touch is the latest-of(last_challenged_at, created_at).
+        # If last_challenged_at is None we fall back to created_at — an
+        # entry that's never been touched since creation IS as old as
+        # its creation.
+        last_touch = entry.last_challenged_at or entry.created_at
+        if not last_touch:
+            return False
+        # Comparison via ISO-8601 string sort (lexicographic == temporal).
+        from datetime import datetime, timedelta, timezone
+        if now_iso is None:
+            now_iso = _now_iso()
+        # _now_iso uses ISO-8601 'YYYY-MM-DDTHH:MM:SSZ' format (T
+        # separator). Parse + subtract threshold; fail-open (not stale)
+        # if the parse fails. The lexicographic compare is correct
+        # because both timestamps use the same format and the format
+        # sorts chronologically as a string.
+        try:
+            now = datetime.strptime(now_iso, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc,
+            )
+        except ValueError:
+            # Tolerate either T-separator or space-separator on the
+            # input timestamp. Tests + older fixtures may use either.
+            try:
+                now = datetime.strptime(
+                    now_iso, "%Y-%m-%d %H:%M:%SZ"
+                ).replace(tzinfo=timezone.utc)
+            except ValueError:
+                return False
+        cutoff = now - timedelta(days=threshold_days)
+        # Format the cutoff to match `last_touch` separator. Try
+        # T-separator first (the canonical _now_iso shape); fall back
+        # to space if the entry's timestamp uses the older shape.
+        if "T" in last_touch:
+            cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            cutoff_iso = cutoff.strftime("%Y-%m-%d %H:%M:%SZ")
+        return last_touch < cutoff_iso
+
     def count(
         self, instance_id: str, *, include_deleted: bool = False,
     ) -> int:

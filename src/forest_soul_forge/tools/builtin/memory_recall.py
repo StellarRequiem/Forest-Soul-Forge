@@ -60,6 +60,22 @@ class MemoryRecallTool:
                                when mode != 'private'. When omitted in
                                lineage/consented mode, the tool reads
                                agent_ancestry to compute the chain.
+      surface_contradictions (bool, optional): ADR-0027-amendment §7.3.
+                               When True, every returned entry includes
+                               an ``unresolved_contradictions`` list of
+                               open contradictions referencing it.
+                               Default False (back-compat). Independent
+                               of mode — surfaces contradictions on any
+                               entry the reader sees.
+      staleness_threshold_days (int, optional): ADR-0027-amendment §7.4.
+                               When set, every returned entry includes
+                               an ``is_stale`` boolean computed against
+                               the threshold (default per claim_type:
+                               90 for preference, 30 for agent_inference,
+                               unlimited for observation/external_fact).
+                               Caller-supplied threshold overrides the
+                               per-claim-type defaults uniformly.
+                               Defaults to None (no staleness flagging).
 
     Output:
       {
@@ -68,7 +84,11 @@ class MemoryRecallTool:
         "entries": [
           {entry_id, instance_id, layer, scope, content, tags,
            created_at, is_disclosed_copy, disclosed_from_entry,
-           disclosed_summary}, ...
+           disclosed_summary,
+           # v11 — ADR-0027-amendment §7
+           claim_type, confidence, last_challenged_at,
+           # optional (per parameter):
+           unresolved_contradictions, is_stale}, ...
         ]
       }
     """
@@ -115,6 +135,28 @@ class MemoryRecallTool:
                 raise ToolValidationError(
                     "lineage_chain must be a list of strings when provided"
                 )
+        # ADR-0027-amendment §7 — new optional parameters.
+        surface_contradictions = args.get("surface_contradictions")
+        if surface_contradictions is not None and not isinstance(
+            surface_contradictions, bool
+        ):
+            raise ToolValidationError(
+                "surface_contradictions must be a bool when provided; got "
+                f"{type(surface_contradictions).__name__}"
+            )
+        staleness = args.get("staleness_threshold_days")
+        if staleness is not None:
+            # Reject bool explicitly (isinstance(True, int) is True).
+            if isinstance(staleness, bool) or not isinstance(staleness, int):
+                raise ToolValidationError(
+                    "staleness_threshold_days must be a positive int when "
+                    f"provided; got {staleness!r} ({type(staleness).__name__})"
+                )
+            if staleness < 1:
+                raise ToolValidationError(
+                    "staleness_threshold_days must be >= 1 when provided; "
+                    f"got {staleness}"
+                )
 
     async def execute(
         self, args: dict[str, Any], ctx: ToolContext,
@@ -151,12 +193,26 @@ class MemoryRecallTool:
         )
         chain_size = 0 if mode == "private" else len(chain)
 
+        # ADR-0027-amendment §7 — new optional behaviors.
+        surface_contradictions = bool(args.get("surface_contradictions"))
+        staleness_threshold = args.get("staleness_threshold_days")
+
         out = []
         cross_agent_count = 0
+        contradicted_count = 0
+        stale_count = 0
         for e in entries:
             if e.instance_id != ctx.instance_id:
                 cross_agent_count += 1
-            out.append({
+            # ADR-0027-amendment §7.6 — K1 fold. A verified entry
+            # surfaces as confidence='high' regardless of stored value.
+            # Reverts to stored value when verification has been
+            # revoked (memory_verifications.revoked_at IS NOT NULL).
+            effective_confidence = (
+                "high" if memory.is_verified(entry_id=e.entry_id)
+                else e.confidence
+            )
+            entry_dict = {
                 "entry_id":             e.entry_id,
                 "instance_id":          e.instance_id,
                 "layer":                e.layer,
@@ -167,7 +223,47 @@ class MemoryRecallTool:
                 "is_disclosed_copy":    e.is_disclosed_copy,
                 "disclosed_from_entry": e.disclosed_from_entry,
                 "disclosed_summary":    e.disclosed_summary,
-            })
+                # v11 epistemic fields — always surfaced. Defaults are
+                # the schema CHECK column DEFAULTs ('observation',
+                # 'medium') so v10-shape rows look unchanged to
+                # callers that don't read these fields.
+                "claim_type":           e.claim_type,
+                "confidence":           effective_confidence,
+                "last_challenged_at":   e.last_challenged_at,
+            }
+            # Optional: surface unresolved contradictions per-entry.
+            if surface_contradictions:
+                conflicts = memory.unresolved_contradictions_for(e.entry_id)
+                entry_dict["unresolved_contradictions"] = conflicts
+                if conflicts:
+                    contradicted_count += 1
+            # Optional: per-entry staleness flag.
+            if staleness_threshold is not None:
+                is_stale = memory.is_entry_stale(
+                    e, threshold_days=int(staleness_threshold),
+                )
+                entry_dict["is_stale"] = is_stale
+                if is_stale:
+                    stale_count += 1
+            out.append(entry_dict)
+
+        metadata: dict[str, Any] = {
+            "layer_filter":       layer,
+            "query":              query,
+            "limit":              limit,
+            "mode":               mode,
+            "lineage_chain_size": chain_size,
+            # The runtime uses cross_agent_count to decide whether
+            # to emit memory_read on the audit chain. Same-agent-
+            # only reads stay quiet (ADR-0027 §6).
+            "cross_agent_count":  cross_agent_count,
+        }
+        if surface_contradictions:
+            metadata["surface_contradictions"] = True
+            metadata["contradicted_count"] = contradicted_count
+        if staleness_threshold is not None:
+            metadata["staleness_threshold_days"] = int(staleness_threshold)
+            metadata["stale_count"] = stale_count
 
         return ToolResult(
             output={
@@ -175,17 +271,7 @@ class MemoryRecallTool:
                 "mode":    mode,
                 "entries": out,
             },
-            metadata={
-                "layer_filter":       layer,
-                "query":              query,
-                "limit":              limit,
-                "mode":               mode,
-                "lineage_chain_size": chain_size,
-                # The runtime uses cross_agent_count to decide whether
-                # to emit memory_read on the audit chain. Same-agent-
-                # only reads stay quiet (ADR-0027 §6).
-                "cross_agent_count":  cross_agent_count,
-            },
+            metadata=metadata,
             tokens_used=None, cost_usd=None,
             side_effect_summary=None,
         )
