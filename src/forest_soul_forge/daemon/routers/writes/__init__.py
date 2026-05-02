@@ -1,4 +1,16 @@
-"""``/birth``, ``/spawn``, ``/archive`` — write endpoints (Phase 3).
+"""``/birth``, ``/spawn``, ``/regenerate-voice``, ``/archive`` — write endpoints.
+
+Package layout (ADR-0040 T3, in progress):
+
+    writes/
+      __init__.py    — this file. Currently the catch-all for all
+                       four endpoints + creation helpers + the package
+                       APIRouter symbol app.py imports. Per-endpoint
+                       sub-routers (birth.py, voice.py, archive.py) land
+                       in T3.2-T3.4 and replace the body here with a
+                       facade that include_router()s each sub-router.
+      _shared.py     — idempotency-replay helpers used by every endpoint
+                       (extracted T3.1, Burst 77).
 
 Ordering discipline — artifact-authoritative (ADR-0006):
 
@@ -38,7 +50,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from forest_soul_forge.core.audit_chain import AuditChain, ChainEntry
 from forest_soul_forge.core.constitution import build as build_constitution
@@ -90,10 +102,7 @@ from forest_soul_forge.daemon.schemas import (
 from forest_soul_forge.registry import Registry
 from forest_soul_forge.registry import ingest as _ingest
 from forest_soul_forge.registry.ingest import ParsedAuditEntry
-from forest_soul_forge.registry.registry import (
-    IdempotencyMismatchError,
-    UnknownAgentError,
-)
+from forest_soul_forge.registry.registry import UnknownAgentError
 from forest_soul_forge.soul.generator import SoulGenerator
 from forest_soul_forge.soul.voice_renderer import (
     VoiceText,
@@ -110,7 +119,6 @@ from forest_soul_forge.soul.voice_renderer import (
 from forest_soul_forge.daemon.routers.birth_pipeline import (
     chain_entry_to_parsed as _chain_entry_to_parsed,
     derive_constitution_hash as _derive_constitution_hash,
-    idempotency_now as _idempotency_now,
     instance_id_for as _instance_id_for,
     rollback_artifacts as _rollback_artifacts,
     safe_agent_name as _safe_agent_name,
@@ -184,53 +192,16 @@ def _parent_lineage_from_registry(registry: Registry, parent_instance_id: str):
     return parent_row, parent_lineage_ancestors
 
 
-def _maybe_replay_cached(
-    registry: Registry,
-    key: str | None,
-    endpoint: str,
-    request_hash: str,
-) -> Response | None:
-    """Return a cached response if this key was already served; else None.
-
-    Caller is responsible for holding the daemon's write lock before
-    invoking this — the lookup + subsequent handler execution must be
-    atomic so two concurrent replays can't both run the write path.
-    """
-    if key is None:
-        return None
-    try:
-        hit = registry.lookup_idempotency_key(key, endpoint, request_hash)
-    except IdempotencyMismatchError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    if hit is None:
-        return None
-    cached_status, cached_json = hit
-    return Response(
-        content=cached_json,
-        status_code=cached_status,
-        media_type="application/json",
-    )
-
-
-def _cache_response(
-    registry: Registry,
-    key: str | None,
-    endpoint: str,
-    request_hash: str,
-    status_code: int,
-    payload: AgentOut,
-) -> None:
-    """Store the serialized response under ``key`` for future replays."""
-    if key is None:
-        return
-    registry.store_idempotency_key(
-        key,
-        endpoint,
-        request_hash,
-        status_code,
-        payload.model_dump_json(),
-        _idempotency_now(),
-    )
+# ADR-0040 T3.1 (Burst 77, 2026-05-02): _maybe_replay_cached and
+# _cache_response moved to _shared.py so per-endpoint sub-routers
+# (birth.py / voice.py / archive.py — landing in T3.2-T3.4) can
+# import them without inheriting the creation-surface helpers below.
+# Imported as underscore aliases here so every existing call site
+# in this module is byte-stable.
+from forest_soul_forge.daemon.routers.writes._shared import (
+    _cache_response,
+    _maybe_replay_cached,
+)
 
 
 def _resolve_tool_kit(
