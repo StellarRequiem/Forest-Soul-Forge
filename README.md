@@ -27,10 +27,10 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 
 | | |
 |---:|:---|
-| **Source LoC (Python)** | ~36,400 across `src/` |
-| **Tests (lines)** | ~16,100 across unit + integration suites |
-| **ADRs filed** | **30** (`ADR-0001` → `ADR-0034` + `ADR-003X` open-web + `ADR-003Y` conversation runtime) |
-| **Built-in tools registered** | **40** (per `register_builtins()` — 9 swarm tier + 8 swarm tier + 8 swarm tier + 7 originals + 5 SW-track/ADR-003X + 3 memory + delegate + llm_think). YAML catalog declares 46; the 6-entry gap is tracked in audit doc 2026-04-30 as Finding C-1. |
+| **Source LoC (Python)** | ~46,000 across `src/` (post-v0.2.0; +9.6k from Phase G.1.A's 10 programming primitives) |
+| **Tests (passing)** | **1,968** unit + integration (was 1,567 at v0.1.2; +401 across the v0.2 arc, zero regressions) |
+| **ADRs filed** | **36** (`ADR-0001` → `ADR-0039` + `ADR-003X` open-web + `ADR-003Y` conversation runtime; **ADR-0039 Distillation Forge / Swarm Orchestrator** Proposed for v0.4) |
+| **Built-in tools registered** | **51** (was 41 at v0.1.2 + 10 Phase G.1.A primitives in v0.2.0: ruff_lint / pytest_run / git_log_read / git_diff_read / git_blame_read / mypy_typecheck / semgrep_scan / tree_sitter_query / bandit_security_scan / pip_install_isolated). The change loop is now agent-completable: code_read → static gates → code_edit → pytest_run → pip_install_isolated when a missing dep surfaces. |
 | **Genres** | **13** (7 original + 3 security tiers + 3 web tiers) |
 | **Trait roles** | **17** (5 original + 9 swarm + 3 SW-track: system_architect / software_engineer / code_reviewer) |
 | **Skill manifests shipped** | **26** chain + supporting + triune (`examples/skills/`) |

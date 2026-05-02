@@ -4,7 +4,7 @@ A self-contained snapshot for a developer joining the project. What's implemente
 
 > **Refresh cadence:** this doc + [`README.md`](README.md) update together at every phase boundary (Phase A close, Phase B close, Phase D close, etc.) and after any meaningful architectural finding. The two are designed to stay in sync; STATE.md is the developer-facing current-reality view, README.md is the product-and-mission view.
 
-Last updated: 2026-05-01, post-v0.1.2 (SarahR1 absorption release). v0.1.1 shipped 2026-04-30 (audit + hardening, 992 → 1439 tests). v0.1.2 shipped 2026-05-01 absorbing three ADRs from SarahR1 (Irisviel)'s 2026-04-30 comparative review: ADR-0027-am epistemic memory metadata (schema v11 + memory_recall enrichments + memory_challenge tool), ADR-0021-am initiative ladder (L0–L5 ladder + InitiativeFloorStep dispatcher), ADR-0038 companion harm model (min_trait_floors + voice safety filter + Companion §honesty constitutional template). Test count 1434 → 1567 (+133 net). See [CHANGELOG.md](CHANGELOG.md) and [CREDITS.md](CREDITS.md) for the full attribution + ledger.
+Last updated: 2026-05-02, post-v0.2.0 (Phase G.1.A close). v0.1.1 shipped 2026-04-30 (audit + hardening, 992 → 1439 tests). v0.1.2 shipped 2026-05-01 absorbing three ADRs from SarahR1 (Irisviel)'s 2026-04-30 comparative review (ADR-0027-am + ADR-0021-am + ADR-0038, 1434 → 1567 tests). v0.2.0 shipped 2026-05-02 closing **Phase G.1.A** — the 10 programming primitives (ruff_lint, pytest_run, git_log_read, git_diff_read, git_blame_read, mypy_typecheck, semgrep_scan, tree_sitter_query, bandit_security_scan, pip_install_isolated) that complete the SW-track agent change-loop: code_read → static gates → code_edit → pytest_run → pip_install_isolated when a missing dep surfaces. Test count 1567 → 1968 (+401 net across the v0.2 arc, zero regressions). ADR-0039 Distillation Forge / Swarm Orchestrator filed as Proposed (v0.4 candidate). See [CHANGELOG.md](CHANGELOG.md) and [CREDITS.md](CREDITS.md) for the full attribution + ledger.
 
 ---
 
@@ -28,13 +28,13 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 | | |
 |---:|:---|
 | Source LoC (Python) | ~36,400 across `src/forest_soul_forge/` (post-R-track refactors split god-objects) |
-| Tests (passing) | **1589** (was 1439 at v0.1.1; +150 across the v0.1.2 SarahR1 absorption arc + Bursts 46/49 per-tool initiative annotations) |
-| ADRs filed | 35 (`ADR-0001` → `ADR-0038`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts; ADR-0021-am + ADR-0027-am amendments + ADR-0038 companion harm model all Accepted in v0.1.2; ADR-0035 Persona Forge + ADR-0036 Verifier Loop + ADR-0037 Observability dashboard Proposed for v0.3) |
-| Builtin tools registered | 41 (was 40 + memory_challenge.v1 from ADR-0027-am T4) |
+| Tests (passing) | **1968** (was 1567 at v0.1.2; +401 across the v0.2 arc — 1567 → 1620 across Bursts 46-52, then +348 across Phase G.1.A Bursts 53-62) |
+| ADRs filed | 36 (`ADR-0001` → `ADR-0039`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts; ADR-0021-am + ADR-0027-am amendments + ADR-0038 companion harm model all Accepted in v0.1.2; ADR-0035 Persona Forge + ADR-0036 Verifier Loop + ADR-0037 Observability dashboard Proposed for v0.3; **ADR-0039 Distillation Forge / Swarm Orchestrator Proposed for v0.4**) |
+| Builtin tools registered | **51** (was 41 at v0.1.2 + 10 Phase G.1.A primitives in v0.2.0: ruff_lint / pytest_run / git_log_read / git_diff_read / git_blame_read / mypy_typecheck / semgrep_scan / tree_sitter_query / bandit_security_scan / pip_install_isolated) |
 | Skill manifests shipped | 26 (4 chain + 17 supporting + 3 triune + 2 from forge-CLI seeds) |
 | Schema version | **v11** (v8: agent_secrets / v9: memory_verifications / v10: conversations / v11: epistemic memory — claim_type + confidence + last_challenged_at + memory_contradictions table from ADR-0027-am T1) |
 | Genres | 13 (7 original + 3 security tiers + 3 web tiers); each genre now carries `max_initiative_level` + `default_initiative_level` per ADR-0021-am §3 |
-| Tools with initiative annotations | 12 of 41 (Burst 46 + 49 — shell_exec / browser_action / mcp_call / code_edit / web_fetch + isolate_process / jit_access / dynamic_policy / delegate / memory_disclose / memory_verify / memory_challenge). Remaining 29 are read-only or memory-write with no operator-relevant initiative gate; v0.3 catalog audit may add more. |
+| Tools with initiative annotations | 14 of 51 (Burst 46 + 49 — shell_exec / browser_action / mcp_call / code_edit / web_fetch + isolate_process / jit_access / dynamic_policy / delegate / memory_disclose / memory_verify / memory_challenge; v0.2.0 Phase G.1.A added pytest_run + pip_install_isolated at L4). Remaining 37 are read-only or memory-write with no operator-relevant initiative gate; v0.3 catalog audit may add more. |
 | Trait roles | 17 (5 original + 9 swarm + 3 SW-track: system_architect, software_engineer, code_reviewer) |
 | Audit event types | 54 (was 36+ added: 8 conversation_*, ambient_nudge, conversation_summarized, K-track ceremony/verify/hardware/triune, T-track governance_relaxed/posture_override, plus chain_depth metadata on conversation_turn) |
 | Frontend modules (vanilla JS) | 22 (was 18 + chat.js + cleanup) |

@@ -6,6 +6,92 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-02 (Phase G.1.A close — programming primitives)
+
+The 10 programming primitives that complete the SW-track agent
+change-loop. Where v0.1.2 absorbed external review and added the
+initiative ladder, v0.2.0 ships the actuator surface that lets
+SW-track agents (Architect / Engineer / Reviewer) actually do
+software work end-to-end on a repo: read existing source, run
+static gates, propose a change, test it, install a missing dep
+when tests reveal one. **Test suite: 1567 → 1968 passing (+401,
++25.6%).** Zero regressions across the entire v0.2 arc.
+
+### Phase G.1.A — programming primitives (10 tools)
+
+The change-loop primitives, in dependency order:
+
+| # | Tool | side_effects | init_floor | Commit |
+|---|---|---|---|---|
+| 1 | `ruff_lint.v1` | read_only | — | `97d09b3` |
+| 2 | `pytest_run.v1` | filesystem | L4 | `3628656` |
+| 3 | `git_log_read.v1` | read_only | — | `6288834` |
+| 4 | `git_diff_read.v1` | read_only | — | `b077d3e` |
+| 5 | `git_blame_read.v1` | read_only | — | `41d642c` |
+| 6 | `mypy_typecheck.v1` | read_only | — | `cfe4219` |
+| 7 | `semgrep_scan.v1` | read_only | — | `52dc571` |
+| 8 | `tree_sitter_query.v1` | read_only | — | `6b3cdcc` |
+| 9 | `bandit_security_scan.v1` | read_only | — | `90f80d5` |
+| 10 | `pip_install_isolated.v1` | filesystem | L4 | `a59d08f` |
+
+Eight read_only inspection tools + two filesystem-tier actuators
+gated at L4 (reversible-with-policy per ADR-0021-am §5). All ten
+share a common safety surface: per-agent `allowed_paths` constraint
+required, `resolve(strict=True) + is_relative_to` defense, subprocess
+invocation with explicit timeout, structured output capped at
+configurable limits, refusal-with-clear-error when the underlying
+tool isn't installed.
+
+### Architectural additions
+
+- **ADR-0039 Distillation Forge / Swarm Orchestrator (Proposed,
+  v0.4 candidate).** Hierarchical multi-agent pattern with two
+  grounding features (distillation manifest + orchestration manifest).
+  Architectural rule §4: "no god objects, grow new branches grounded
+  by a solid feature." MLX-only dependency commitment for the
+  distillation subsystem. Filed as Proposed for v0.4 — does NOT
+  ship in v0.2.0; the verifier loop (ADR-0036) is a load-bearing
+  prerequisite.
+- **`docs/audits/2026-05-01-fsf-dispatch-overhead-benchmark-plan.md`.**
+  Specifies the benchmark Burst measuring per-dispatch + audit-chain
+  serialization overhead. Primary metrics: quiet-load latency, audit
+  serialization curve, memory recall cost, gate costs. Outcome
+  scenarios A/B/C/D.
+- **External-review-readiness pass.** Updated STATE / README +
+  new `docs/external-review-readiness.md` (~390 lines) gives the
+  next external reviewer a 60-second snapshot, a "what changed
+  since last review" table, the load-bearing invariants, ground
+  rules, and a directory map.
+
+### Per-tool initiative_level annotations (round 2)
+
+Burst 49 added round 2 of per-tool `required_initiative_level`
+annotations: `isolate_process` / `jit_access` / `dynamic_policy` /
+`delegate` / `memory_disclose` / `memory_verify` / `memory_challenge`.
+Combined with Burst 46's round 1 (`shell_exec` / `browser_action` /
+`mcp_call` / `code_edit` / `web_fetch`) and v0.2.0's `pytest_run` +
+`pip_install_isolated`, **14 of 51 tools** now carry initiative
+annotations. The remaining 37 are read_only or memory-write with
+no operator-relevant initiative gate.
+
+### Catches and fixes during the run
+
+- **Burst 58 commit-message backtick gotcha.** Bash command-
+  substitution silently ate inline code spans in
+  `commit-burst58.command` (commit `cfe4219`). Substance landed
+  fine; cosmetic only. Memory entry written
+  (`feedback_commit_script_backticks.md`) so future sessions avoid
+  it. All subsequent commit scripts use single quotes for inline
+  code.
+- **Burst 61 `-llll` flag bug.** Initial bandit severity-flag
+  construction double-counted the 'l' character. Caught by my own
+  test before push; fixed by emitting the count-of-l directly with
+  a single dash prefix.
+- **Burst 62 mock-capture wrong subprocess.** Initial fake_run
+  captured the LAST subprocess call (pip --version detection), not
+  the install. Caught by my own test; fixed by capturing all calls
+  into a list and asserting on `all_calls[0]`.
+
 ## [0.1.2] — 2026-05-01 (SarahR1 absorption release)
 
 Three Proposed ADRs from external reviewer SarahR1 (Irisviel) — the
