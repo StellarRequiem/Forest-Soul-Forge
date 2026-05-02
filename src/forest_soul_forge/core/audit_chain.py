@@ -154,6 +154,12 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "conversation_summarized",  # Y7 — body purged after retention window
     "retention_policy_changed",
     "ambient_nudge",            # Y5 — proactive agent turn (opt-in + rate-gated)
+    # ADR-0036 — Verifier Loop. The Verifier agent emits one of these
+    # per scan run with the candidate-pairs-considered + classifications
+    # + flags-written counts in event_data. Operators auditing the
+    # Verifier's track record (§4.2) start from this event type.
+    #   - verifier_scan_completed: a Verifier completed a scan pass
+    "verifier_scan_completed",
 })
 
 
