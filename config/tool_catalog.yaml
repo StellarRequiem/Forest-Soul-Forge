@@ -1566,6 +1566,55 @@ tools:
     side_effects: read_only
     archetype_tags: [guardian, security_low, software_engineer]
 
+  tree_sitter_query.v1:
+    name: tree_sitter_query
+    version: "1"
+    description: |
+      AST-level structural queries via tree-sitter S-expressions.
+      Read-only: parses source files into syntax trees and runs
+      queries; nothing is mutated. Where the previous primitives
+      operate at line-and-token level, tree_sitter operates at the
+      syntax-tree level — answering questions like 'find every
+      function definition that calls deprecated_func' or 'find all
+      class methods missing docstrings' that are awkward in regex.
+      Lazy-imports tree_sitter + tree_sitter_languages so daemon
+      boots without the optional dep. Per-agent allowed_paths gates
+      both the target path and the file walk in directory mode.
+      Languages supported (v1):
+      python/javascript/typescript/rust/go/java/c/cpp/ruby/yaml/
+      json/bash. SW-track Architect's primary structural-search tool.
+    input_schema:
+      type: object
+      required: [path, query, language]
+      properties:
+        path:
+          type: string
+          description: "File or directory to query."
+        query:
+          type: string
+          description: "Tree-sitter S-expression query string."
+        language:
+          type: string
+          enum: [python, javascript, typescript, rust, go, java, c, cpp, ruby, yaml, json, bash]
+          description: "Source language."
+        max_matches:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: "Cap on matches returned. Default 100."
+        max_files:
+          type: integer
+          minimum: 1
+          maximum: 2000
+          description: "Cap on files scanned in directory mode. Default 200."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 300
+          description: "Wall-clock budget. Default 30."
+    side_effects: read_only
+    archetype_tags: [observer, researcher, software_engineer]
+
   memory_challenge.v1:
     name: memory_challenge
     version: "1"

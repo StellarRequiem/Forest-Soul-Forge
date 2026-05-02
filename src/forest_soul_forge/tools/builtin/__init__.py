@@ -45,6 +45,7 @@ from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventory
 from forest_soul_forge.tools.builtin.tamper_detect import TamperDetectTool
 from forest_soul_forge.tools.builtin.timestamp_window import TimestampWindowTool
 from forest_soul_forge.tools.builtin.traffic_flow_local import TrafficFlowLocalTool
+from forest_soul_forge.tools.builtin.tree_sitter_query import TreeSitterQueryTool
 from forest_soul_forge.tools.builtin.triage import TriageTool
 from forest_soul_forge.tools.builtin.ueba_track import UebaTrackTool
 from forest_soul_forge.tools.builtin.browser_action import BrowserActionTool
@@ -81,6 +82,7 @@ __all__ = [
     "GitBlameReadTool",
     "MypyTypecheckTool",
     "SemgrepScanTool",
+    "TreeSitterQueryTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -253,3 +255,10 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # secrets, taint-propagation issues. SW-track Reviewer (Guardian
     # genre L3) is the primary consumer.
     registry.register(SemgrepScanTool())
+    # Phase G.1.A — tree_sitter_query.v1 (Burst 60). Read-only AST-
+    # level structural queries via tree-sitter S-expressions. Lazy-
+    # imports tree_sitter + tree_sitter_languages so daemon boots
+    # without the optional dep. SW-track Architect's primary tool
+    # for "find every callsite that matches this structural pattern"
+    # questions.
+    registry.register(TreeSitterQueryTool())
