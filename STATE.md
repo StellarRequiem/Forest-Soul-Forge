@@ -4,7 +4,7 @@ A self-contained snapshot for a developer joining the project. What's implemente
 
 > **Refresh cadence:** this doc + [`README.md`](README.md) update together at every phase boundary (Phase A close, Phase B close, Phase D close, etc.) and after any meaningful architectural finding. The two are designed to stay in sync; STATE.md is the developer-facing current-reality view, README.md is the product-and-mission view.
 
-Last updated: 2026-05-02, post-Burst 70 (ADR-0036 Verifier Loop feature-complete in v0.3 arc; T4 scheduled-task substrate deferred). v0.2.0 shipped 2026-05-02 (Phase G.1.A close). v0.1.1 shipped 2026-04-30 (audit + hardening, 992 → 1439 tests). v0.1.2 shipped 2026-05-01 absorbing three ADRs from SarahR1 (Irisviel)'s 2026-04-30 comparative review (ADR-0027-am + ADR-0021-am + ADR-0038, 1434 → 1567 tests). v0.2.0 shipped 2026-05-02 closing **Phase G.1.A** — the 10 programming primitives (ruff_lint, pytest_run, git_log_read, git_diff_read, git_blame_read, mypy_typecheck, semgrep_scan, tree_sitter_query, bandit_security_scan, pip_install_isolated) that complete the SW-track agent change-loop: code_read → static gates → code_edit → pytest_run → pip_install_isolated when a missing dep surfaces. Test count 1567 → 1968 (+401 net across the v0.2 arc, zero regressions). ADR-0039 Distillation Forge / Swarm Orchestrator filed as Proposed (v0.4 candidate). See [CHANGELOG.md](CHANGELOG.md) and [CREDITS.md](CREDITS.md) for the full attribution + ledger.
+Last updated: 2026-05-02, post-Burst 81 (ADR-0040 Trust-Surface Decomposition Rule shipped end-to-end: rule filed Burst 71; memory.py decomposed into 5-mixin package Bursts 72-76; writes.py decomposed into 4-sub-router package Bursts 77-80; this STATE.md + CLAUDE.md cross-reference Burst 81). ADR-0036 Verifier Loop feature-complete in v0.3 arc Bursts 65-70 (T4 scheduled-task substrate deferred). v0.2.0 shipped 2026-05-02 (Phase G.1.A close). v0.1.1 shipped 2026-04-30 (audit + hardening, 992 → 1439 tests). v0.1.2 shipped 2026-05-01 absorbing three ADRs from SarahR1 (Irisviel)'s 2026-04-30 comparative review (ADR-0027-am + ADR-0021-am + ADR-0038, 1434 → 1567 tests). v0.2.0 shipped 2026-05-02 closing **Phase G.1.A** — the 10 programming primitives (ruff_lint, pytest_run, git_log_read, git_diff_read, git_blame_read, mypy_typecheck, semgrep_scan, tree_sitter_query, bandit_security_scan, pip_install_isolated) that complete the SW-track agent change-loop: code_read → static gates → code_edit → pytest_run → pip_install_isolated when a missing dep surfaces. Test count 1567 → 1968 (+401 net across the v0.2 arc, zero regressions). ADR-0039 Distillation Forge / Swarm Orchestrator filed as Proposed (v0.4 candidate). See [CHANGELOG.md](CHANGELOG.md) and [CREDITS.md](CREDITS.md) for the full attribution + ledger.
 
 ---
 
@@ -29,7 +29,7 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 |---:|:---|
 | Source LoC (Python) | ~36,400 across `src/forest_soul_forge/` (post-R-track refactors split god-objects) |
 | Tests (passing) | **2072** (was 1567 at v0.1.2; +505 net — +401 across the v0.2 arc, +104 across the v0.3 ADR-0036 arc Bursts 65-70) |
-| ADRs filed | 36 (`ADR-0001` → `ADR-0039`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts; ADR-0021-am + ADR-0027-am amendments + ADR-0038 companion harm model all Accepted in v0.1.2; ADR-0035 Persona Forge + ADR-0037 Observability dashboard Proposed for v0.3; **ADR-0036 Verifier Loop now feature-complete in v0.3 (T1+T2+T3a+T3b+T5+T6+T7 shipped; T4 scheduled-task substrate deferred)**; **ADR-0039 Distillation Forge / Swarm Orchestrator Proposed for v0.4**) |
+| ADRs filed | 37 (`ADR-0001` → `ADR-0040`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts; ADR-0021-am + ADR-0027-am amendments + ADR-0038 companion harm model all Accepted in v0.1.2; ADR-0035 Persona Forge + ADR-0037 Observability dashboard Proposed for v0.3; **ADR-0036 Verifier Loop now feature-complete in v0.3 (T1+T2+T3a+T3b+T5+T6+T7 shipped; T4 scheduled-task substrate deferred)**; **ADR-0039 Distillation Forge / Swarm Orchestrator Proposed for v0.4**; **ADR-0040 Trust-surface decomposition rule Accepted (T1+T2+T3+T4 all shipped 2026-05-02; memory.py + writes.py both decomposed into per-trust-surface packages)**) |
 | Builtin tools registered | **53** (was 42 at v0.1.2 [the prior STATE undercounted by one]; +10 Phase G.1.A primitives in v0.2.0; +1 memory_flag_contradiction in v0.3 ADR-0036 T2) |
 | Skill manifests shipped | 26 (4 chain + 17 supporting + 3 triune + 2 from forge-CLI seeds) |
 | Schema version | **v12** (v8: agent_secrets / v9: memory_verifications / v10: conversations / v11: epistemic memory — claim_type + confidence + last_challenged_at + memory_contradictions table from ADR-0027-am T1; **v12: flagged_state column on memory_contradictions for ADR-0036 T6 Verifier ratification dial**) |
@@ -61,7 +61,9 @@ Forest-Soul-Forge/
 │   │   ├── deps.py                # FastAPI dependency injection
 │   │   ├── schemas.py             # Pydantic request/response models (1055 LoC)
 │   │   ├── routers/               # endpoint implementations
-│   │   │   ├── writes.py          # /birth, /spawn, /archive (1127 LoC — needs split)
+│   │   │   ├── writes/            # /birth, /spawn, /regenerate-voice, /archive
+│   │   │   │                      # (ADR-0040 T3 — per-endpoint sub-routers:
+│   │   │   │                      #  birth.py, voice.py, archive.py + _shared.py)
 │   │   │   ├── tool_dispatch.py   # POST /agents/{id}/tools/call
 │   │   │   ├── skills_run.py      # POST /agents/{id}/skills/run
 │   │   │   ├── pending_calls.py   # approval queue endpoints
@@ -252,7 +254,6 @@ The full incident report — symptom, file, fix, commit — lives in [`docs/audi
 
 | Item | Status / blocker | Effort |
 |---|---|---|
-| `daemon/routers/writes.py` decomposition | 1127 LoC kitchen-sink router; smell, not bug. Should split before open-web routers add more endpoints. | ~1 day refactor |
 | Integration tests | 1 file (forge loop). Need 3–5 covering dispatcher + memory + delegate, tool_dispatch with approval queue resume, skill_run multi-tool composition. | ~1 day |
 | Open-web ADR-003X + Phase C1 (per-agent encrypted secrets store) | Design captured in `MEMORY.md`; primitives = `mcp_call.v1` + `browser_action.v1` + `web_fetch.v1` + `suggest_agent.v1`. Three new genres: `web_observer`, `web_researcher`, `web_actuator`. | ~5 rounds of build |
 | Frontend test scaffold | 0 tests for 3,500 LoC of JS. Vitest + jsdom. | ~half day |
@@ -434,11 +435,10 @@ A healthy daemon shows ~6 diagnostics, all `ok` or `disabled`. `failed` or `degr
 
 If you want to make immediate impact, pick from this list (top = highest leverage):
 
-1. **Decompose `daemon/routers/writes.py`** into per-resource routers. 1127 LoC right now; will only grow when open-web routers land. ~1 day refactor with thorough endpoint tests.
-2. **File ADR-003X** for the open-web tool family + Phase C1 (per-agent encrypted secrets store). Design is captured in memory (see [`/sessions/.auto-memory/project_open_web_integration.md`]). Three primitives: `mcp_call.v1`, `browser_action.v1`, `web_fetch.v1`. `suggest_agent.v1` for operator-facing job matching. Three new genres (`web_observer`, `web_researcher`, `web_actuator`).
-3. **Add 3–5 cross-subsystem integration tests.** Currently 1 file. Highest value: dispatcher + memory + delegate, tool_dispatch with approval-queue resume, skill_run with multi-tool composition. ~1 day.
-4. **Frontend test scaffold** (Vitest + jsdom). 3,500 LoC JS, 0 tests. ~half day for the scaffold + 2-3 example tests; future PRs add tests alongside UI changes.
-5. **JSONSchema input defaults at runtime** in the skill engine — small surface change, lets manifests rely on declared defaults instead of hard-coding values inline.
+1. **File ADR-003X** for the open-web tool family + Phase C1 (per-agent encrypted secrets store). Design is captured in memory (see [`/sessions/.auto-memory/project_open_web_integration.md`]). Three primitives: `mcp_call.v1`, `browser_action.v1`, `web_fetch.v1`. `suggest_agent.v1` for operator-facing job matching. Three new genres (`web_observer`, `web_researcher`, `web_actuator`).
+2. **Add 3–5 cross-subsystem integration tests.** Currently 1 file. Highest value: dispatcher + memory + delegate, tool_dispatch with approval-queue resume, skill_run with multi-tool composition. ~1 day.
+3. **Frontend test scaffold** (Vitest + jsdom). 3,500 LoC JS, 0 tests. ~half day for the scaffold + 2-3 example tests; future PRs add tests alongside UI changes.
+4. **JSONSchema input defaults at runtime** in the skill engine — small surface change, lets manifests rely on declared defaults instead of hard-coding values inline.
 
 If you want to read code first, start with:
 
@@ -482,6 +482,13 @@ If you want to read code first, start with:
 | 0033 | Security Swarm | **Accepted** (Phases A–E1 shipped + chain proven live 2026-04-28) |
 | 003X | Open-Web Tool Family (web_fetch + browser_action + mcp_call + secrets store + suggest_agent + 3 web genres + C8 demo) | C1 (secrets), C2 (web_fetch), C3 (browser_action), C4 (mcp_call), C6 (suggest_agent), C7 (3 web genres), C8 (open-web demo via local HTTP + 2 skills + ceremony emit) all shipped 2026-04-29 — only C5 (Sigstore provenance) deferred |
 | 003X K | K-track parallels (memory verification, ceremony events, SSE stream, triune spawn, chronicle export, hardware binding) | K1 (memory_verify), K2 (ceremony.v1), K3 (/audit/stream), K4 (triune bond + Heartwood/Branch/Leaf seeds + delegate.v1 enforcement), K5 (fsf chronicle CLI + per-agent/per-bond/full-chain HTML+MD export with sanitized-by-default payloads), K6 (opt-in hardware_binding constitution field + dispatcher quarantine + /agents/{id}/hardware/unbind operator endpoint) all shipped 2026-04-29 |
+| 0034 | SW-track triune (Atlas / Forge / Sentinel) | **Accepted** — born live 2026-04-30, 21-event audit chain |
+| 0035 | Persona Forge | Proposed (v0.3 candidate) |
+| 0036 | Verifier Loop | **Proposed (T1+T2+T3a+T3b+T5+T6+T7 implemented; T4 scheduled-task substrate deferred)** — feature-complete in v0.3 arc |
+| 0037 | Observability dashboard | Proposed (v0.3 candidate) |
+| 0038 | Companion harm model | **Accepted** (v0.1.2 — credit: SarahR1) |
+| 0039 | Distillation Forge / Swarm Orchestrator | Proposed (v0.4 candidate) |
+| 0040 | Trust-surface decomposition rule | **Accepted** — T1 (file ADR), T2 (memory.py 5-mixin decomposition, Bursts 72-76), T3 (writes.py 4-sub-router decomposition, Bursts 77-80), T4 (this STATE.md / CLAUDE.md cross-references, Burst 81) all shipped 2026-05-02 |
 
 ADRs that are `Proposed` but have `(... implemented)` are Decision-record-paper-trail proposed: the design is in flight, parts are committed, the doc itself just hasn't been promoted to `Accepted` because a few tranches remain. ADR-0033 was promoted on 2026-04-28 once the canonical Security Swarm chain fired end-to-end through the smoke.
 

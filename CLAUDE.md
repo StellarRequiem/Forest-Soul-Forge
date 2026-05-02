@@ -32,6 +32,32 @@ know this thing is intentional, not abandoned.
 
 **Default for "looks unused":** keep with a comment, not delete.
 
+**§1 Trust-surface decomposition rule — ADR-0040:**
+
+Before extracting code into a new file, or before deciding NOT to
+extract a large file, check the trust-surface count:
+
+1. **Count trust surfaces** in the file. A trust surface is one
+   coherent area of governance — agent creation, voice regeneration,
+   archival lifecycle, etc. Methods/endpoints that share the same
+   governance discipline (same write-lock semantics, same scope
+   checks, same audit event family) are ONE surface.
+2. **One surface = leave alone, even if large.** A 1000-LoC file
+   that owns one cohesive surface is fine; AI-grade governance
+   safeties (file-grained `allowed_paths`) work at file granularity.
+3. **Multiple surfaces = decompose.** Each surface gets its own
+   file so a constitution can grant `allowed_paths` to one without
+   inheriting the others. The decomposition is the governance
+   delivery mechanism.
+4. **Pattern-match to existing decomps.** Class-based: per-trust-
+   surface mixin (memory.py → memory/ package, Bursts 72-76).
+   Router-based: per-endpoint sub-router under a package facade
+   (writes.py → writes/ package, Bursts 77-80). Pick the shape
+   that matches the parent's structure.
+
+The §0 Hippocratic gate still applies — if the decomposition has
+no concrete governance harm to point to, leave in place.
+
 ## Verification discipline
 
 - After every code change: run the relevant test file
@@ -146,6 +172,12 @@ is the durable fix.
 - **Genre kit-tier ceiling.** A role's resolved tools must not
   exceed `genre.max_side_effects`. The check fires at birth time
   AND at runtime via `GenreFloorStep` in the governance pipeline.
+- **One file, one trust surface (ADR-0040).** Files that own a
+  single governance area can grow to whatever size their cohesion
+  warrants. Files with multiple trust surfaces MUST decompose so
+  `allowed_paths` can grant scoped access. memory/ and writes/
+  are the canonical decompositions; new code follows the same
+  pattern.
 
 ## Things to look up rather than guess
 
