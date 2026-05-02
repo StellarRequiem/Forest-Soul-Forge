@@ -61,6 +61,7 @@ from forest_soul_forge.core.memory._helpers import (
 # ADR-0040 T2.2 — per-trust-surface mixins. Each mixin owns one
 # trust surface; the Memory class composes them via MRO. Public
 # API is exactly preserved (memory.grant_consent(...) still works).
+from forest_soul_forge.core.memory._challenge_mixin import _ChallengeMixin
 from forest_soul_forge.core.memory._consents_mixin import _ConsentsMixin
 from forest_soul_forge.core.memory._verification_mixin import _VerificationMixin
 
@@ -77,7 +78,7 @@ __all__ = [
 
 
 @dataclass
-class Memory(_ConsentsMixin, _VerificationMixin):
+class Memory(_ConsentsMixin, _VerificationMixin, _ChallengeMixin):
     """Memory API surface. Constructed with a registry connection
     (single-writer SQLite discipline preserved). The runtime holds
     one Memory instance on app.state and routes per-agent calls
@@ -88,8 +89,10 @@ class Memory(_ConsentsMixin, _VerificationMixin):
       (cross-agent disclosure, ADR-0027 §2)
     - _VerificationMixin: mark_verified / unmark_verified /
       is_verified / get_verifier (Iron Gate, ADR-003X K1)
-    - (more mixins land in subsequent bursts: challenge,
-      contradictions, then a residual core mixin)
+    - _ChallengeMixin: mark_challenged / is_entry_stale
+      (operator scrutiny + staleness pressure, ADR-0027-am §7.4)
+    - (one more mixin lands in Burst 76: _ContradictionsMixin for
+      ADR-0027-am §7.3 + ADR-0036)
     """
 
     conn: sqlite3.Connection
@@ -383,30 +386,8 @@ class Memory(_ConsentsMixin, _VerificationMixin):
     # _VerificationMixin via the class declaration above.
 
     # ---- challenge path (ADR-0027-amendment §7.4) -------------------------
-    def mark_challenged(self, *, entry_id: str) -> str:
-        """Stamp ``last_challenged_at`` on ``entry_id`` to the current
-        UTC time and return the timestamp written.
-
-        Per ADR-0027-amendment §7.4, a challenge is an explicit operator
-        signal that an entry is in question — distinct from a
-        contradiction (which has a competing later entry). The challenge
-        itself doesn't change the entry's content or claim_type; it
-        just records "this is being scrutinized."
-
-        Idempotent in shape (always overwrites with NOW), but each call
-        produces a fresh timestamp + a fresh audit-chain event when the
-        caller emits ``memory_challenged``. Operators reviewing history
-        see every challenge in the chain.
-
-        Returns the ISO-8601 timestamp written so the caller can include
-        it in the audit-event payload without a follow-up read.
-        """
-        ts = _now_iso()
-        self.conn.execute(
-            "UPDATE memory_entries SET last_challenged_at = ? WHERE entry_id = ?;",
-            (ts, entry_id),
-        )
-        return ts
+    # mark_challenged + is_entry_stale extracted to _challenge_mixin.py
+    # per ADR-0040 §7 (Burst 75). Inherited via _ChallengeMixin.
 
     def get(self, entry_id: str) -> MemoryEntry | None:
         row = self.conn.execute(
@@ -747,71 +728,8 @@ class Memory(_ConsentsMixin, _VerificationMixin):
             })
         return out
 
-    def is_entry_stale(
-        self,
-        entry: "MemoryEntry",
-        *,
-        threshold_days: int,
-        now_iso: str | None = None,
-    ) -> bool:
-        """ADR-0027-amendment §7.4 — staleness pressure check.
-
-        An entry is stale when:
-          - its ``last_challenged_at`` is older than ``threshold_days``
-            (the entry was last touched / verified / contradicted that
-            long ago), OR
-          - its ``last_challenged_at`` is NULL AND its ``created_at``
-            is older than ``threshold_days`` (the entry has never been
-            challenged but is older than the threshold).
-
-        Threshold is in days. Caller chooses per-claim-type defaults
-        (memory_recall.v1 does this); 30 days is a reasonable default
-        for ``agent_inference`` per ADR §7.4.
-
-        ``now_iso`` injectable for deterministic testing. Defaults to
-        the current UTC time. ISO-8601 string comparison is correct
-        here because both sides use the same _now_iso() format.
-        """
-        if threshold_days <= 0:
-            return False
-        # Last touch is the latest-of(last_challenged_at, created_at).
-        # If last_challenged_at is None we fall back to created_at — an
-        # entry that's never been touched since creation IS as old as
-        # its creation.
-        last_touch = entry.last_challenged_at or entry.created_at
-        if not last_touch:
-            return False
-        # Comparison via ISO-8601 string sort (lexicographic == temporal).
-        from datetime import datetime, timedelta, timezone
-        if now_iso is None:
-            now_iso = _now_iso()
-        # _now_iso uses ISO-8601 'YYYY-MM-DDTHH:MM:SSZ' format (T
-        # separator). Parse + subtract threshold; fail-open (not stale)
-        # if the parse fails. The lexicographic compare is correct
-        # because both timestamps use the same format and the format
-        # sorts chronologically as a string.
-        try:
-            now = datetime.strptime(now_iso, "%Y-%m-%dT%H:%M:%SZ").replace(
-                tzinfo=timezone.utc,
-            )
-        except ValueError:
-            # Tolerate either T-separator or space-separator on the
-            # input timestamp. Tests + older fixtures may use either.
-            try:
-                now = datetime.strptime(
-                    now_iso, "%Y-%m-%d %H:%M:%SZ"
-                ).replace(tzinfo=timezone.utc)
-            except ValueError:
-                return False
-        cutoff = now - timedelta(days=threshold_days)
-        # Format the cutoff to match `last_touch` separator. Try
-        # T-separator first (the canonical _now_iso shape); fall back
-        # to space if the entry's timestamp uses the older shape.
-        if "T" in last_touch:
-            cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
-        else:
-            cutoff_iso = cutoff.strftime("%Y-%m-%d %H:%M:%SZ")
-        return last_touch < cutoff_iso
+    # is_entry_stale extracted to _challenge_mixin.py per ADR-0040 §7
+    # (Burst 75). Inherited via _ChallengeMixin.
 
     def count(
         self, instance_id: str, *, include_deleted: bool = False,
