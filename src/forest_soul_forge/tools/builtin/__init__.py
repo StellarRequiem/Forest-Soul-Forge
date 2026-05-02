@@ -10,6 +10,7 @@ will get implementations as the corresponding tranches land.
 """
 from forest_soul_forge.tools.builtin.anomaly_score import AnomalyScoreTool
 from forest_soul_forge.tools.builtin.audit_chain_verify import AuditChainVerifyTool
+from forest_soul_forge.tools.builtin.bandit_security_scan import BanditSecurityScanTool
 from forest_soul_forge.tools.builtin.behavioral_baseline import BehavioralBaselineTool
 from forest_soul_forge.tools.builtin.canary_token import CanaryTokenTool
 from forest_soul_forge.tools.builtin.continuous_verify import ContinuousVerifyTool
@@ -83,6 +84,7 @@ __all__ = [
     "MypyTypecheckTool",
     "SemgrepScanTool",
     "TreeSitterQueryTool",
+    "BanditSecurityScanTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -262,3 +264,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # for "find every callsite that matches this structural pattern"
     # questions.
     registry.register(TreeSitterQueryTool())
+    # Phase G.1.A — bandit_security_scan.v1 (Burst 61). Read-only
+    # subprocess invocation of bandit, the canonical Python-specific
+    # security linter. Catches use of pickle, exec, shell=True, weak
+    # hashing, hardcoded secrets, flask debug=True. SW-track Reviewer
+    # + Guardian-genre security_low consumers.
+    registry.register(BanditSecurityScanTool())

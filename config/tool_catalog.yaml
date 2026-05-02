@@ -1615,6 +1615,59 @@ tools:
     side_effects: read_only
     archetype_tags: [observer, researcher, software_engineer]
 
+  bandit_security_scan.v1:
+    name: bandit_security_scan
+    version: "1"
+    description: |
+      Python-specific security linter via bandit. Read-only:
+      bandit reports findings; nothing is mutated. Where
+      semgrep_scan covers multi-language patterns and arbitrary
+      rulesets, bandit is the canonical Python security gate —
+      OWASP-aligned rules curated for over a decade catch the
+      common Python footguns (pickle, exec, shell=True, weak
+      hashing, flask debug=True, hardcoded secrets). Subprocess
+      invocation of 'bandit -f json -q [-r] [-l/-ll/-lll]
+      [-i/-ii/-iii] [--skip ids]'. Output parsed from bandit's
+      JSON shape into structured findings (test_id / test_name /
+      severity / confidence / filename / line / message /
+      code_snippet / more_info). Optional severity_level and
+      confidence_level filters (low/medium/high). Optional
+      skip_tests list (B-codes). Phase G.1.A primitive; SW-track
+      Reviewer + Guardian-genre security_low consumers.
+    input_schema:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: "File or directory to scan."
+        severity_level:
+          type: string
+          enum: [low, medium, high]
+          description: "Minimum severity to report. Default 'low'."
+        confidence_level:
+          type: string
+          enum: [low, medium, high]
+          description: "Minimum confidence to report. Default 'low'."
+        skip_tests:
+          type: array
+          items:
+            type: string
+            pattern: '^B[0-9]{3}$'
+          description: "Bandit test IDs to skip (e.g., ['B101', 'B404'])."
+        max_findings:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: "Cap on findings returned. Default 500."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 600
+          description: "Subprocess timeout. Default 60."
+    side_effects: read_only
+    archetype_tags: [guardian, security_low, software_engineer]
+
   memory_challenge.v1:
     name: memory_challenge
     version: "1"
