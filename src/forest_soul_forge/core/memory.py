@@ -702,6 +702,147 @@ class Memory:
         )
         return contradiction_id, detected_at
 
+    def find_candidate_pairs(
+        self,
+        *,
+        instance_id: str,
+        since_iso: str | None = None,
+        max_pairs: int = 20,
+        min_overlap: int = 2,
+    ) -> list[dict[str, Any]]:
+        """Find candidate pairs for the Verifier Loop's classification
+        step. ADR-0036 §2.1.
+
+        Returns a list of pairs (earlier first by created_at) of
+        memory entries on the same ``instance_id`` that satisfy:
+
+          * Both ``claim_type`` ∈ {preference, user_statement,
+            agent_inference}. Observations and external_facts aren't
+            paired — they're directly logged events / external
+            authority and contradictions among them are operator
+            review territory, not Verifier classification territory.
+          * Their content has at least ``min_overlap`` non-stopword
+            tokens in common (cheap word-overlap heuristic; embedding
+            similarity deferred to v0.4 per ADR-0036's "trade-offs"
+            section).
+          * NOT already in ``memory_contradictions`` (avoids re-
+            flagging resolved or already-flagged-pending pairs).
+
+        Optional ``since_iso`` narrows to entries created after that
+        timestamp (useful for incremental scans on a cadence — only
+        consider what's new since last scan).
+
+        Capped at ``max_pairs`` (default 20 per ADR-0036 §3
+        "conservative defaults"). Pairs sorted by descending overlap
+        (most-similar first) so the LLM-classification step gets the
+        best candidates within the budget.
+
+        Each entry shape::
+
+            {
+              "earlier_entry_id":  str,    # the older of the two
+              "later_entry_id":    str,    # the newer of the two
+              "earlier_claim_type": str,
+              "later_claim_type":   str,
+              "shared_words":      list[str],   # the overlap tokens
+              "overlap_size":      int,
+            }
+
+        Returns empty list when no pairs match — Verifier writes a
+        "scanned, nothing flagged" audit event in that case.
+
+        Implementation notes: this is a pure-Python in-memory join.
+        A separate-table inverted index would be cheaper at scale
+        (10k+ entries per agent), but at v0.3 cadences (daily scan,
+        max_pairs=20, typical agent has ~hundreds of entries) the
+        full scan is well within budget. v0.4 may revisit if a
+        concrete operator surfaces with > 1k entries / agent.
+        """
+        if max_pairs < 1:
+            return []
+        if min_overlap < 1:
+            min_overlap = 1
+
+        # 1. Pull all eligible entries for this agent.
+        eligible_kinds = ("preference", "user_statement", "agent_inference")
+        placeholders = ",".join("?" * len(eligible_kinds))
+        sql = (
+            "SELECT entry_id, content, claim_type, created_at "
+            "FROM memory_entries "
+            f"WHERE instance_id = ? AND claim_type IN ({placeholders})"
+        )
+        params: list[Any] = [instance_id, *eligible_kinds]
+        if since_iso is not None:
+            # Strictly-after semantic: callers pass last_scan_at and
+            # want to exclude entries already considered in that prior
+            # scan. ``>`` (not ``>=``) drops the boundary entry cleanly.
+            sql += " AND created_at > ?"
+            params.append(since_iso)
+        rows = self.conn.execute(sql, params).fetchall()
+        entries = [dict(row) for row in rows]
+        if len(entries) < 2:
+            return []
+
+        # 2. Pull existing contradictions on this agent's entries to
+        # build a dedup set. We exclude any pair whose two entry_ids
+        # both appear in any single contradictions row (regardless of
+        # which side they were on). Resolved AND unresolved both block
+        # — operators don't want re-flag noise on a row they already
+        # rejected/resolved.
+        try:
+            cont_rows = self.conn.execute(
+                "SELECT earlier_entry_id, later_entry_id "
+                "FROM memory_contradictions",
+            ).fetchall()
+            dedup: set[frozenset[str]] = {
+                frozenset((r["earlier_entry_id"], r["later_entry_id"]))
+                for r in cont_rows
+            }
+        except sqlite3.OperationalError:
+            # v10-shape DB without the table — no dedup needed.
+            dedup = set()
+
+        # 3. Tokenize each entry's content into stopword-filtered
+        # lowercased words. Two entries can be paired if their token
+        # sets share >= min_overlap distinct words.
+        tokenized: list[tuple[dict[str, Any], frozenset[str]]] = []
+        for e in entries:
+            tokens = _tokenize_for_overlap(e["content"])
+            if len(tokens) >= min_overlap:
+                tokenized.append((e, tokens))
+
+        # 4. All-pairs scan. O(n²) but n is bounded; we cap at
+        # max_pairs after sorting so worst-case is small.
+        pairs: list[dict[str, Any]] = []
+        for i, (a, ta) in enumerate(tokenized):
+            for b, tb in tokenized[i + 1:]:
+                if a["entry_id"] == b["entry_id"]:
+                    continue
+                shared = ta & tb
+                if len(shared) < min_overlap:
+                    continue
+                key = frozenset((a["entry_id"], b["entry_id"]))
+                if key in dedup:
+                    continue
+                # Order earlier→later by created_at for stable output.
+                if a["created_at"] <= b["created_at"]:
+                    earlier, later = a, b
+                else:
+                    earlier, later = b, a
+                pairs.append({
+                    "earlier_entry_id":   earlier["entry_id"],
+                    "later_entry_id":     later["entry_id"],
+                    "earlier_claim_type": earlier["claim_type"],
+                    "later_claim_type":   later["claim_type"],
+                    "shared_words":       sorted(shared),
+                    "overlap_size":       len(shared),
+                })
+
+        # 5. Sort by descending overlap (most-similar first) so the
+        # downstream LLM call spends its budget on the best candidates.
+        pairs.sort(key=lambda p: p["overlap_size"], reverse=True)
+        return pairs[:max_pairs]
+
     def unresolved_contradictions_for(
         self, entry_id: str,
     ) -> list[dict[str, Any]]:
@@ -873,6 +1014,38 @@ def _now_iso() -> str:
 
 def _sha256(s: str) -> str:
     return "sha256:" + hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+_OVERLAP_STOPWORDS: frozenset[str] = frozenset({
+    # English stopwords trimmed to the high-impact set; the goal is
+    # signal-preservation for the Verifier's word-overlap heuristic
+    # (ADR-0036 §2.1), not full NLP.
+    "a", "an", "the",
+    "is", "was", "are", "were", "be", "been", "being",
+    "and", "or", "but", "not",
+    "i", "you", "he", "she", "it", "we", "they",
+    "my", "your", "his", "her", "its", "our", "their",
+    "me", "him", "us", "them",
+    "this", "that", "these", "those",
+    "of", "in", "on", "at", "to", "for", "by", "with", "from",
+    "as", "if", "than", "then",
+    "do", "does", "did", "have", "has", "had",
+    "will", "would", "should", "could", "may", "might", "can",
+    "so", "very", "just",
+})
+
+
+def _tokenize_for_overlap(content: str) -> frozenset[str]:
+    """Lowercase + split on non-alphanumerics + drop stopwords + drop
+    short tokens. Used by ``find_candidate_pairs``. Two entries pair
+    when their token sets share >= min_overlap distinct words.
+    """
+    import re
+    raw = re.findall(r"[a-zA-Z0-9]+", content.lower())
+    return frozenset(
+        t for t in raw
+        if len(t) >= 3 and t not in _OVERLAP_STOPWORDS
+    )
 
 
 def _row_to_entry(row) -> MemoryEntry:
