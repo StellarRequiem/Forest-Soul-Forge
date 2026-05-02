@@ -134,15 +134,16 @@ class TestHealth:
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
-        # schema_version bumps with each migration. Currently v10:
+        # schema_version bumps with each migration. Currently v12:
         # v6 added memory_entries (ADR-0022 v0.1), v7 added the
-        # disclosed_* columns + memory_consents (ADR-0027), and v10
-        # added conversations + participants + turns (ADR-003Y Y1
-        # conversation runtime, 2026-04-30). Daemon reports the
-        # registry's live schema_version; assertion tracks the live
-        # value rather than a stale literal. Earlier assertion of 6
-        # was stale per Phase A audit 2026-04-30.
-        assert body["schema_version"] == 11
+        # disclosed_* columns + memory_consents (ADR-0027), v10
+        # added conversations + participants + turns (ADR-003Y Y1),
+        # v11 added the epistemic-memory metadata + memory_contradictions
+        # (ADR-0027-amendment), and v12 added flagged_state on
+        # memory_contradictions (ADR-0036 T6 — Verifier ratification
+        # dial). Daemon reports the registry's live schema_version;
+        # assertion tracks the live value rather than a stale literal.
+        assert body["schema_version"] == 12
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"

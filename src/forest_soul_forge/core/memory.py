@@ -687,20 +687,79 @@ class Memory:
         """
         contradiction_id = f"contra_{uuid.uuid4().hex[:16]}"
         detected_at = _now_iso()
-        self.conn.execute(
-            """
-            INSERT INTO memory_contradictions (
-                contradiction_id, earlier_entry_id, later_entry_id,
-                contradiction_kind, detected_at, detected_by,
-                resolved_at, resolution_summary
-            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL);
-            """,
-            (
-                contradiction_id, earlier_entry_id, later_entry_id,
-                contradiction_kind, detected_at, detected_by,
-            ),
-        )
+        # ADR-0036 §4.3 + T6: new rows land at flagged_unreviewed
+        # so operators see Verifier flags as proposals, not findings.
+        # The default value comes from the column DEFAULT but we set
+        # it explicitly here to keep the SQL self-documenting and
+        # work on schemas that don't have the column yet (the
+        # try/except handles v11-shape DBs gracefully).
+        try:
+            self.conn.execute(
+                """
+                INSERT INTO memory_contradictions (
+                    contradiction_id, earlier_entry_id, later_entry_id,
+                    contradiction_kind, detected_at, detected_by,
+                    resolved_at, resolution_summary, flagged_state
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 'flagged_unreviewed');
+                """,
+                (
+                    contradiction_id, earlier_entry_id, later_entry_id,
+                    contradiction_kind, detected_at, detected_by,
+                ),
+            )
+        except sqlite3.OperationalError:
+            # v11-shape DB without the flagged_state column. Defensive
+            # for in-memory tests that don't migrate; production DBs
+            # are migrated to v12 at lifespan.
+            self.conn.execute(
+                """
+                INSERT INTO memory_contradictions (
+                    contradiction_id, earlier_entry_id, later_entry_id,
+                    contradiction_kind, detected_at, detected_by,
+                    resolved_at, resolution_summary
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL);
+                """,
+                (
+                    contradiction_id, earlier_entry_id, later_entry_id,
+                    contradiction_kind, detected_at, detected_by,
+                ),
+            )
         return contradiction_id, detected_at
+
+    # ADR-0036 §4.3 + T6 — operator ratification path.
+    VALID_FLAGGED_STATES = (
+        "flagged_unreviewed", "flagged_confirmed",
+        "flagged_rejected", "auto_resolved",
+    )
+
+    def set_contradiction_state(
+        self, *, contradiction_id: str, new_state: str,
+    ) -> bool:
+        """Move a contradiction through the ratification lifecycle.
+
+        ADR-0036 §4.3 — operators move Verifier-flagged rows from
+        ``flagged_unreviewed`` → ``flagged_confirmed`` /
+        ``flagged_rejected`` after review. ``auto_resolved`` is reserved
+        for v0.4 system-driven resolution paths.
+
+        Returns True if a row was updated, False if the
+        ``contradiction_id`` doesn't exist. Raises ValueError on an
+        invalid state value.
+        """
+        if new_state not in self.VALID_FLAGGED_STATES:
+            raise ValueError(
+                f"new_state must be one of {self.VALID_FLAGGED_STATES}; "
+                f"got {new_state!r}"
+            )
+        try:
+            cur = self.conn.execute(
+                "UPDATE memory_contradictions "
+                "SET flagged_state = ? WHERE contradiction_id = ?;",
+                (new_state, contradiction_id),
+            )
+        except sqlite3.OperationalError:
+            return False
+        return cur.rowcount > 0
 
     def find_candidate_pairs(
         self,
@@ -845,11 +904,13 @@ class Memory:
 
     def unresolved_contradictions_for(
         self, entry_id: str,
+        *,
+        include_rejected: bool = False,
     ) -> list[dict[str, Any]]:
         """Return all open (unresolved) contradictions where ``entry_id``
         appears as either the earlier or later side.
 
-        Each entry shape:
+        Each entry shape (v12+):
           {
             "contradiction_id":   str,
             "earlier_entry_id":   str,
@@ -857,34 +918,63 @@ class Memory:
             "contradiction_kind": "direct"|"updated"|"qualified"|"retracted",
             "detected_at":        ISO timestamp,
             "detected_by":        str,
+            "flagged_state":      "flagged_unreviewed"|"flagged_confirmed"|
+                                   "flagged_rejected"|"auto_resolved",
           }
 
         Empty list = no open contradictions. Resolved contradictions are
         explicitly excluded — the recall surface only shows what's still
         open. Operators reviewing resolved history go through a separate
-        admin-grade query (deferred to v0.3).
+        admin-grade query.
+
+        ADR-0036 §4.3 + T7: ``flagged_rejected`` rows are filtered out
+        by default so a known-false flag stops surfacing on every
+        recall. Pass ``include_rejected=True`` to see them (operator-
+        review surface, audit-trail queries).
 
         v0.2 callers: memory_recall.v1's surface_contradictions=True
         path. The helper is also useful directly from operator-driven
         admin tools.
         """
+        # v12 query — selects flagged_state. The except branch handles
+        # v11-shape DBs that don't have the column yet.
         try:
             rows = self.conn.execute(
                 """
                 SELECT contradiction_id, earlier_entry_id, later_entry_id,
-                       contradiction_kind, detected_at, detected_by
+                       contradiction_kind, detected_at, detected_by,
+                       flagged_state
                 FROM memory_contradictions
                 WHERE (earlier_entry_id = ? OR later_entry_id = ?)
                   AND resolved_at IS NULL;
                 """,
                 (entry_id, entry_id),
             ).fetchall()
+            has_state = True
         except sqlite3.OperationalError:
-            # v10-shape DB without the table — return empty rather than
-            # crash. Defensive for in-memory tests that don't migrate.
-            return []
+            # Either the table is missing entirely (v10-shape) or the
+            # flagged_state column doesn't exist (v11-shape). Try
+            # the v11-compatible query.
+            try:
+                rows = self.conn.execute(
+                    """
+                    SELECT contradiction_id, earlier_entry_id, later_entry_id,
+                           contradiction_kind, detected_at, detected_by
+                    FROM memory_contradictions
+                    WHERE (earlier_entry_id = ? OR later_entry_id = ?)
+                      AND resolved_at IS NULL;
+                    """,
+                    (entry_id, entry_id),
+                ).fetchall()
+                has_state = False
+            except sqlite3.OperationalError:
+                # No table at all — v10 or earlier.
+                return []
         out: list[dict[str, Any]] = []
         for r in rows:
+            state = r["flagged_state"] if has_state else "flagged_unreviewed"
+            if not include_rejected and state == "flagged_rejected":
+                continue
             out.append({
                 "contradiction_id":   r["contradiction_id"],
                 "earlier_entry_id":   r["earlier_entry_id"],
@@ -892,6 +982,7 @@ class Memory:
                 "contradiction_kind": r["contradiction_kind"],
                 "detected_at":        r["detected_at"],
                 "detected_by":        r["detected_by"],
+                "flagged_state":      state,
             })
         return out
 

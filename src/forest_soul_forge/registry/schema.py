@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 11
+SCHEMA_VERSION: int = 12
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -314,6 +314,17 @@ DDL_STATEMENTS: tuple[str, ...] = (
         detected_by        TEXT NOT NULL,
         resolved_at        TEXT,
         resolution_summary TEXT,
+        -- v12 (ADR-0036 §4.3 + T6) — ratification dial. Verifier-flagged
+        -- rows land at flagged_unreviewed; operators move them through
+        -- the lifecycle. Recall surfaces (ADR-0027-am T3 + T7) default
+        -- to filtering out flagged_rejected so a known-false flag stops
+        -- surfacing on every recall. auto_resolved is reserved for v0.4
+        -- system-driven resolution paths.
+        flagged_state      TEXT NOT NULL DEFAULT 'flagged_unreviewed'
+            CHECK (flagged_state IN (
+                'flagged_unreviewed', 'flagged_confirmed',
+                'flagged_rejected', 'auto_resolved'
+            )),
         FOREIGN KEY (earlier_entry_id) REFERENCES memory_entries(entry_id),
         FOREIGN KEY (later_entry_id)   REFERENCES memory_entries(entry_id)
     );
@@ -325,6 +336,11 @@ DDL_STATEMENTS: tuple[str, ...] = (
     # rows are kept for audit but rarely queried.
     "CREATE INDEX IF NOT EXISTS idx_contradictions_unresolved ON memory_contradictions(resolved_at) "
         "WHERE resolved_at IS NULL;",
+    # v12 — partial index over the ratification-pending rows. The
+    # operator review surface (ADR-0037 dashboard) walks these often;
+    # the index keeps the query cheap as the table grows.
+    "CREATE INDEX IF NOT EXISTS idx_contradictions_state ON memory_contradictions(flagged_state) "
+        "WHERE flagged_state = 'flagged_unreviewed';",
     # --- metadata --------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS registry_meta (
@@ -794,5 +810,24 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX IF NOT EXISTS idx_contradictions_later   ON memory_contradictions(later_entry_id);",
         "CREATE INDEX IF NOT EXISTS idx_contradictions_unresolved ON memory_contradictions(resolved_at) "
             "WHERE resolved_at IS NULL;",
+    ),
+    # v11 → v12: ADR-0036 T6 — ratification dial. Adds the
+    # ``flagged_state`` column to memory_contradictions with the four-
+    # value enum from ADR-0036 §4.3. Pure addition; existing rows
+    # land at 'flagged_unreviewed' via the column DEFAULT (which is
+    # the right semantic — pre-T6 contradictions weren't reviewed yet).
+    # Operators ratify via the future memory_set_contradiction_state
+    # admin path; the recall surface (T7) filters flagged_rejected by
+    # default.
+    12: (
+        "ALTER TABLE memory_contradictions ADD COLUMN flagged_state TEXT "
+            "NOT NULL DEFAULT 'flagged_unreviewed' "
+            "CHECK (flagged_state IN ("
+                "'flagged_unreviewed', 'flagged_confirmed', "
+                "'flagged_rejected', 'auto_resolved'"
+            "));",
+        "CREATE INDEX IF NOT EXISTS idx_contradictions_state "
+            "ON memory_contradictions(flagged_state) "
+            "WHERE flagged_state = 'flagged_unreviewed';",
     ),
 }
