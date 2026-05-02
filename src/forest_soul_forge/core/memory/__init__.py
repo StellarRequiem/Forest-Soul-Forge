@@ -62,6 +62,7 @@ from forest_soul_forge.core.memory._helpers import (
 # trust surface; the Memory class composes them via MRO. Public
 # API is exactly preserved (memory.grant_consent(...) still works).
 from forest_soul_forge.core.memory._consents_mixin import _ConsentsMixin
+from forest_soul_forge.core.memory._verification_mixin import _VerificationMixin
 
 __all__ = [
     "Memory",
@@ -76,7 +77,7 @@ __all__ = [
 
 
 @dataclass
-class Memory(_ConsentsMixin):
+class Memory(_ConsentsMixin, _VerificationMixin):
     """Memory API surface. Constructed with a registry connection
     (single-writer SQLite discipline preserved). The runtime holds
     one Memory instance on app.state and routes per-agent calls
@@ -85,8 +86,10 @@ class Memory(_ConsentsMixin):
     Per ADR-0040 §7, per-trust-surface methods live in mixin classes:
     - _ConsentsMixin: grant_consent / revoke_consent / is_consented
       (cross-agent disclosure, ADR-0027 §2)
-    - (more mixins land in subsequent bursts: verification,
-      challenge, contradictions, then a residual core mixin)
+    - _VerificationMixin: mark_verified / unmark_verified /
+      is_verified / get_verifier (Iron Gate, ADR-003X K1)
+    - (more mixins land in subsequent bursts: challenge,
+      contradictions, then a residual core mixin)
     """
 
     conn: sqlite3.Connection
@@ -374,85 +377,10 @@ class Memory(_ConsentsMixin):
     # is_consented from _ConsentsMixin via the class declaration above.
 
     # ---- verification path (ADR-003X K1 — Iron Gate equivalent) --------
-    # Reuses the consent-grant SEMANTIC (idempotent promote + revoke,
-    # external party stamps standing on an entry) but stores it in a
-    # dedicated memory_verifications table because the
-    # memory_consents FK on recipient_instance → agents would reject
-    # the verifier identifier (which is a human handle, not an
-    # agent). One row per entry; re-verification updates in place;
-    # revocation sets revoked_at + revoked_by. Caller emits
-    # ``memory_verified`` / ``memory_verification_revoked`` on the
-    # audit chain.
-
-    def mark_verified(
-        self, *, entry_id: str, verifier_id: str, seal_note: str | None = None,
-    ) -> None:
-        """Promote ``entry_id`` to verified. ``verifier_id`` is the human
-        verifier's identifier (operator handle, public key fingerprint,
-        signing handle). Idempotent — re-verification updates the
-        timestamp, clears any prior revocation, and replaces seal_note.
-        """
-        self.conn.execute(
-            """
-            INSERT INTO memory_verifications (
-                entry_id, verifier_id, verified_at, seal_note,
-                revoked_at, revoked_by
-            ) VALUES (?, ?, ?, ?, NULL, NULL)
-            ON CONFLICT(entry_id) DO UPDATE SET
-                verifier_id = excluded.verifier_id,
-                verified_at = excluded.verified_at,
-                seal_note   = excluded.seal_note,
-                revoked_at  = NULL,
-                revoked_by  = NULL;
-            """,
-            (entry_id, verifier_id, _now_iso(), seal_note),
-        )
-
-    def unmark_verified(
-        self, *, entry_id: str, revoker_id: str = "operator",
-    ) -> bool:
-        """Revoke verification on ``entry_id``. Returns True if a row
-        was updated. The row stays — only ``revoked_at`` + ``revoked_by``
-        are set — so the audit-trail of who verified and when stays
-        queryable.
-        """
-        cur = self.conn.execute(
-            """
-            UPDATE memory_verifications
-            SET revoked_at = ?, revoked_by = ?
-            WHERE entry_id = ? AND revoked_at IS NULL;
-            """,
-            (_now_iso(), revoker_id, entry_id),
-        )
-        return cur.rowcount > 0
-
-    def is_verified(self, *, entry_id: str) -> bool:
-        """True iff ``entry_id`` has an active (non-revoked) verification."""
-        row = self.conn.execute(
-            """
-            SELECT 1 FROM memory_verifications
-            WHERE entry_id = ? AND revoked_at IS NULL
-            LIMIT 1;
-            """,
-            (entry_id,),
-        ).fetchone()
-        return row is not None
-
-    def get_verifier(self, *, entry_id: str) -> str | None:
-        """Return the verifier_id for the active verification on
-        ``entry_id``, or None if not verified. Operators want to know
-        "who signed off on this" when reviewing the chain — this is
-        the lookup.
-        """
-        row = self.conn.execute(
-            """
-            SELECT verifier_id FROM memory_verifications
-            WHERE entry_id = ? AND revoked_at IS NULL
-            LIMIT 1;
-            """,
-            (entry_id,),
-        ).fetchone()
-        return row["verifier_id"] if row else None
+    # Methods extracted to _verification_mixin.py per ADR-0040 §7
+    # (Burst 74). The Memory class inherits mark_verified /
+    # unmark_verified / is_verified / get_verifier from
+    # _VerificationMixin via the class declaration above.
 
     # ---- challenge path (ADR-0027-amendment §7.4) -------------------------
     def mark_challenged(self, *, entry_id: str) -> str:
