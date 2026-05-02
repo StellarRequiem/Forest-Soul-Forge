@@ -32,6 +32,7 @@ from forest_soul_forge.tools.builtin.log_correlate import LogCorrelateTool
 from forest_soul_forge.tools.builtin.log_scan import LogScanTool
 from forest_soul_forge.tools.builtin.memory_challenge import MemoryChallengeTool
 from forest_soul_forge.tools.builtin.memory_disclose import MemoryDiscloseTool
+from forest_soul_forge.tools.builtin.memory_flag_contradiction import MemoryFlagContradictionTool
 from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
 from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
 from forest_soul_forge.tools.builtin.mypy_typecheck import MypyTypecheckTool
@@ -87,6 +88,7 @@ __all__ = [
     "TreeSitterQueryTool",
     "BanditSecurityScanTool",
     "PipInstallIsolatedTool",
+    "MemoryFlagContradictionTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -185,6 +187,12 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # operator scrutiny without writing a competing entry. Surfaces
     # through memory_recall.v1's staleness flag.
     registry.register(MemoryChallengeTool())
+    # ADR-0036 T2 — memory_flag_contradiction.v1. Action surface for
+    # the Verifier Loop. Stamps a row in memory_contradictions naming
+    # both sides (earlier + later entries) and the contradiction
+    # kind. Operator-only at v0.3 by convention via constitutional
+    # kit gating; verifier_loop role reaches autonomously.
+    registry.register(MemoryFlagContradictionTool())
     # ADR-003X Phase C3 — browser_action.v1. Drives a chromium browser
     # via Playwright. Heaviest open-web primitive; always gated
     # (side_effects=external triggers requires_human_approval). Lazy

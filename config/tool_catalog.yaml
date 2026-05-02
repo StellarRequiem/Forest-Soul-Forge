@@ -1753,6 +1753,47 @@ tools:
     side_effects: filesystem
     archetype_tags: [observer, guardian]
 
+  memory_flag_contradiction.v1:
+    name: memory_flag_contradiction
+    version: "1"
+    description: |
+      Stamp a row in memory_contradictions naming both sides of a
+      contradiction (ADR-0036 T2). Distinct from memory_challenge.v1:
+      a challenge marks ONE entry as in-question; a contradiction
+      names TWO entries (earlier + later) that disagree. Action
+      surface for the Verifier Loop role; also reachable by operators
+      via constitutional kit gating. Validates both entries exist +
+      are reachable by the calling agent, then writes through the
+      single-writer SQLite lock. detected_by = ctx.instance_id
+      so operators can audit the Verifier's track record per
+      ADR-0036 §4.2. The note (if any) lands in the audit-event
+      payload, NOT on the contradiction row.
+    input_schema:
+      type: object
+      required: [earlier_entry_id, later_entry_id, contradiction_kind, confidence]
+      properties:
+        earlier_entry_id:
+          type: string
+          description: "ID of the older memory entry (the 'former claim' side)."
+        later_entry_id:
+          type: string
+          description: "ID of the newer memory entry (the 'competing claim' side)."
+        contradiction_kind:
+          type: string
+          enum: [direct, updated, qualified, retracted]
+          description: "Kind per ADR-0027-am §7.3 CHECK enum."
+        confidence:
+          type: string
+          enum: [low, medium, high]
+          description: "Verifier confidence. Verifier role refuses below high via constitutional gate."
+        note:
+          type: string
+          maxLength: 500
+          description: "Optional free-text rationale; lands in audit payload only."
+    side_effects: filesystem
+    required_initiative_level: L3
+    archetype_tags: [guardian]
+
   llm_think.v1:
     name: llm_think
     version: "1"

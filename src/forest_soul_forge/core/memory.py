@@ -655,6 +655,53 @@ class Memory:
         return _row_to_entry(row) if row is not None else None
 
     # ---- v11 epistemic helpers (ADR-0027-amendment §7.3 + §7.4) -----------
+    def flag_contradiction(
+        self,
+        *,
+        earlier_entry_id: str,
+        later_entry_id: str,
+        contradiction_kind: str,
+        detected_by: str,
+    ) -> tuple[str, str]:
+        """Stamp a row into ``memory_contradictions``. ADR-0036 T2.
+
+        The Verifier Loop (ADR-0036) and operator-driven manual flag
+        paths both land here. ``detected_by`` is the calling agent's
+        instance_id (or operator handle for manual flags). The new
+        row's ``resolved_at`` is NULL — operators ratify / reject /
+        resolve through admin tools (deferred to v0.3+).
+
+        ``contradiction_kind`` MUST be one of {direct, updated,
+        qualified, retracted} per the §7.3 CHECK constraint. Caller
+        validates the value before calling — the SQLite CHECK is a
+        defense in depth but a clean validation error is preferable
+        to a sqlite3.IntegrityError surfacing through the dispatcher.
+
+        Returns (contradiction_id, detected_at_iso) so the caller can
+        surface both in the audit-event payload without a follow-up
+        read.
+
+        Raises sqlite3.IntegrityError if either entry_id is missing
+        from memory_entries (the FK enforces existence — the tool
+        layer should validate up-front for a friendlier error).
+        """
+        contradiction_id = f"contra_{uuid.uuid4().hex[:16]}"
+        detected_at = _now_iso()
+        self.conn.execute(
+            """
+            INSERT INTO memory_contradictions (
+                contradiction_id, earlier_entry_id, later_entry_id,
+                contradiction_kind, detected_at, detected_by,
+                resolved_at, resolution_summary
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL);
+            """,
+            (
+                contradiction_id, earlier_entry_id, later_entry_id,
+                contradiction_kind, detected_at, detected_by,
+            ),
+        )
+        return contradiction_id, detected_at
+
     def unresolved_contradictions_for(
         self, entry_id: str,
     ) -> list[dict[str, Any]]:
