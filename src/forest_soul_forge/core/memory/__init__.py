@@ -58,6 +58,11 @@ from forest_soul_forge.core.memory._helpers import (
     _OVERLAP_STOPWORDS, _tokenize_for_overlap,
 )
 
+# ADR-0040 T2.2 — per-trust-surface mixins. Each mixin owns one
+# trust surface; the Memory class composes them via MRO. Public
+# API is exactly preserved (memory.grant_consent(...) still works).
+from forest_soul_forge.core.memory._consents_mixin import _ConsentsMixin
+
 __all__ = [
     "Memory",
     "MemoryEntry",
@@ -71,11 +76,17 @@ __all__ = [
 
 
 @dataclass
-class Memory:
+class Memory(_ConsentsMixin):
     """Memory API surface. Constructed with a registry connection
     (single-writer SQLite discipline preserved). The runtime holds
     one Memory instance on app.state and routes per-agent calls
     through it.
+
+    Per ADR-0040 §7, per-trust-surface methods live in mixin classes:
+    - _ConsentsMixin: grant_consent / revoke_consent / is_consented
+      (cross-agent disclosure, ADR-0027 §2)
+    - (more mixins land in subsequent bursts: verification,
+      challenge, contradictions, then a residual core mixin)
     """
 
     conn: sqlite3.Connection
@@ -358,73 +369,9 @@ class Memory:
         return [_row_to_entry(r) for r in rows]
 
     # ---- consent path (ADR-0022 v0.2) ----------------------------------
-    def grant_consent(
-        self,
-        *,
-        entry_id: str,
-        recipient_instance: str,
-        granted_by: str,
-    ) -> None:
-        """Record a per-event consent grant from the entry's owner to
-        ``recipient_instance``. Idempotent on the (entry_id, recipient)
-        pair — re-granting an already-granted consent updates the
-        ``granted_at`` timestamp and clears any ``revoked_at`` so a
-        previously revoked consent can be re-granted cleanly.
-
-        Caller is responsible for emitting ``memory_consent_granted``
-        on the audit chain.
-        """
-        self.conn.execute(
-            """
-            INSERT INTO memory_consents (
-                entry_id, recipient_instance, granted_at, granted_by, revoked_at
-            ) VALUES (?, ?, ?, ?, NULL)
-            ON CONFLICT(entry_id, recipient_instance) DO UPDATE SET
-                granted_at = excluded.granted_at,
-                granted_by = excluded.granted_by,
-                revoked_at = NULL;
-            """,
-            (entry_id, recipient_instance, _now_iso(), granted_by),
-        )
-
-    def revoke_consent(
-        self,
-        *,
-        entry_id: str,
-        recipient_instance: str,
-    ) -> bool:
-        """Revoke a previously granted consent. Returns True if a row
-        was updated. Per ADR-0027 §2 — withdrawal does NOT propagate to
-        copies the recipient already disclosed; that's the deletion
-        contract's job. The Memory class records the revocation; the
-        runtime emits ``memory_consent_revoked`` on the chain.
-        """
-        cur = self.conn.execute(
-            """
-            UPDATE memory_consents
-            SET revoked_at = ?
-            WHERE entry_id = ? AND recipient_instance = ?
-              AND revoked_at IS NULL;
-            """,
-            (_now_iso(), entry_id, recipient_instance),
-        )
-        return cur.rowcount > 0
-
-    def is_consented(
-        self, *, entry_id: str, recipient_instance: str,
-    ) -> bool:
-        """True iff ``recipient_instance`` has an active (non-revoked)
-        consent grant on ``entry_id``."""
-        row = self.conn.execute(
-            """
-            SELECT 1 FROM memory_consents
-            WHERE entry_id = ? AND recipient_instance = ?
-              AND revoked_at IS NULL
-            LIMIT 1;
-            """,
-            (entry_id, recipient_instance),
-        ).fetchone()
-        return row is not None
+    # Methods extracted to _consents_mixin.py per ADR-0040 §7 (Burst 73).
+    # The Memory class inherits grant_consent / revoke_consent /
+    # is_consented from _ConsentsMixin via the class declaration above.
 
     # ---- verification path (ADR-003X K1 — Iron Gate equivalent) --------
     # Reuses the consent-grant SEMANTIC (idempotent promote + revoke,
