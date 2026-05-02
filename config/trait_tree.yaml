@@ -535,6 +535,23 @@ roles:
       emotional: 0.6
       embodiment: 0.5
 
+  # ---- ADR-0036 Verifier Loop role (1) -----------------------------------
+  # The Verifier is a Guardian-genre agent that scans an agent's memory
+  # for contradictions between claims (preferences / inferences /
+  # observations). Its job is auditing — peak audit weight; modest
+  # cognitive (LLM classification at moderate depth, not deep reasoning);
+  # low emotional + embodiment because it operates through the audit
+  # chain + memory tools, not user-facing surfaces. See ADR-0036 §1.
+  verifier_loop:
+    description: "Memory contradiction auditor. Walks an agent's memory log periodically, classifies entries against each other via llm_think, stamps memory_contradictions when high-confidence contradictions surface. Operator-tunable cadence. Genre: guardian."
+    domain_weights:
+      security: 1.5
+      audit: 2.5
+      cognitive: 1.5
+      communication: 0.7
+      emotional: 0.4
+      embodiment: 0.4
+
 # ---------------------------------------------------------------------------
 # META — constraints enforced by the trait engine
 # ---------------------------------------------------------------------------

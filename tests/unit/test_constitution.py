@@ -122,6 +122,78 @@ class TestHashAndDeterminism:
 
 
 # ---------------------------------------------------------------------------
+# ADR-0036 — verifier_loop role
+# ---------------------------------------------------------------------------
+class TestVerifierLoopRole:
+    """ADR-0036 T1 — the Verifier role must build a constitution with the
+    expected policies, the L3/L3 initiative posture from the Guardian
+    genre, and the min_confidence_to_act = 0.80 floor."""
+
+    def test_verifier_constitution_builds(self, engine: TraitEngine) -> None:
+        profile = engine.build_profile("verifier_loop")
+        c = build(
+            profile, engine, agent_name="Verifier-1",
+            templates_path=TEMPLATES_PATH,
+        )
+        assert c.role == "verifier_loop"
+        assert c.agent_name == "Verifier-1"
+        assert c.policies  # at least the role_base policies
+
+    def test_verifier_role_base_policies_present(self, engine: TraitEngine) -> None:
+        profile = engine.build_profile("verifier_loop")
+        c = build(
+            profile, engine, agent_name="V",
+            templates_path=TEMPLATES_PATH,
+        )
+        ids = {p.id for p in c.policies}
+        # The three role_base policies from ADR-0036 §1
+        assert "forbid_direct_memory_write" in ids
+        assert "forbid_low_confidence_flag" in ids
+        assert "require_detected_by_attribution" in ids
+
+    def test_verifier_min_confidence_floor(self, engine: TraitEngine) -> None:
+        """ADR-0036 §4.1 — Verifier must only flag at LLM confidence
+        >= 0.80. The role_base sets min_confidence_to_act accordingly."""
+        profile = engine.build_profile("verifier_loop")
+        c = build(
+            profile, engine, agent_name="V",
+            templates_path=TEMPLATES_PATH,
+        )
+        assert c.risk_thresholds.min_confidence_to_act == 0.80
+
+    def test_verifier_out_of_scope_includes_cross_agent(self, engine: TraitEngine) -> None:
+        """ADR-0036 §6 — cross-agent scan is v0.4 work; v0.3 ships
+        intra-agent only. The role_base out_of_scope list pins this."""
+        profile = engine.build_profile("verifier_loop")
+        c = build(
+            profile, engine, agent_name="V",
+            templates_path=TEMPLATES_PATH,
+        )
+        assert "cross_agent_scan" in c.out_of_scope
+        assert "modify_memory_entry" in c.out_of_scope
+        assert "flag_below_confidence_floor" in c.out_of_scope
+
+    def test_verifier_drift_monitoring_strict(self, engine: TraitEngine) -> None:
+        profile = engine.build_profile("verifier_loop")
+        c = build(
+            profile, engine, agent_name="V",
+            templates_path=TEMPLATES_PATH,
+        )
+        # Per-turn hash check + zero deviation + halt on drift —
+        # consistent with code_reviewer (also Guardian-genre).
+        assert c.drift_monitoring.profile_hash_check == "per_turn"
+        assert c.drift_monitoring.max_profile_deviation == 0
+        assert c.drift_monitoring.on_drift == "halt"
+
+    def test_verifier_birth_is_deterministic(self, engine: TraitEngine) -> None:
+        profile = engine.build_profile("verifier_loop")
+        c1 = build(profile, engine, agent_name="V", templates_path=TEMPLATES_PATH)
+        c2 = build(profile, engine, agent_name="V", templates_path=TEMPLATES_PATH)
+        # Same role + same profile = same constitution hash
+        assert c1.constitution_hash == c2.constitution_hash
+
+
+# ---------------------------------------------------------------------------
 # Trait modifiers
 # ---------------------------------------------------------------------------
 class TestTraitModifiers:

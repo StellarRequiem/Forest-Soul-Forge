@@ -514,6 +514,43 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  verifier_loop:
+    # ADR-0036 — Memory Contradiction Auditor. Guardian-genre agent
+    # that scans target memory for contradictions and stamps the
+    # memory_contradictions table. Read-only ceiling; operator-only
+    # via constitutional kit gating on memory_flag_contradiction.v1.
+    # min_confidence_to_act = 0.80 per ADR-0036 §4.1 (false-positive
+    # mitigation — low-confidence cases skipped, not auto-flagged).
+    policies:
+      - id: forbid_direct_memory_write
+        rule: forbid
+        triggers: [memory_write_to_other_agent, modify_memory_entry]
+        rationale: "Verifier never writes to another agent's memory directly. Contradictions go through memory_flag_contradiction.v1, which stamps the contradictions table only."
+      - id: forbid_low_confidence_flag
+        rule: forbid
+        triggers: [flag_below_confidence_floor]
+        rationale: "ADR-0036 §4.1 — false-positive contradiction events trigger H-6 in reverse. Flag only at LLM confidence >= 0.80."
+      - id: require_detected_by_attribution
+        rule: require
+        triggers: [memory_flag_contradiction]
+        rationale: "Every flag must carry detected_by = ctx.instance_id so operators can audit the Verifier's track record per ADR-0036 §4.2."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.80
+    out_of_scope:
+      - modify_memory_entry
+      - flag_below_confidence_floor
+      - cross_agent_scan       # v0.4 candidate per ADR-0036 §6
+    operator_duties:
+      - "Review the Verifier's track record periodically — false-positive rate is the load-bearing risk per ADR-0036 §4."
+      - "Re-birth or archive a noisy Verifier rather than tolerating low-quality flags."
+      - "Treat memory_contradictions rows with detected_by=<verifier_id> as proposals, not findings — operator confirms or rejects via flagged_state lifecycle (schema v12)."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
 
 # ---------------------------------------------------------------------------
 # Layer 2 — trait modifiers

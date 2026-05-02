@@ -42,10 +42,11 @@ class TestLoading:
         assert len(engine.list_traits()) == 29
 
     def test_expected_role_count(self, engine: TraitEngine) -> None:
-        # 17 roles total: 5 originals + 9 swarm (ADR-0033) + 3 SW-track (ADR-0034).
-        # Asserting the absolute count rather than a >= floor catches accidental
-        # role duplication / typos in trait_tree.yaml at the same time.
-        assert len(engine.roles) == 17
+        # 18 roles total: 5 originals + 9 swarm (ADR-0033) + 3 SW-track
+        # (ADR-0034) + 1 verifier (ADR-0036). Asserting the absolute count
+        # rather than a >= floor catches accidental role duplication /
+        # typos in trait_tree.yaml at the same time.
+        assert len(engine.roles) == 18
         # Spot-check one representative role from each tranche so a single
         # tranche-removal would surface here too.
         assert "network_watcher" in engine.roles       # original 5
@@ -54,6 +55,7 @@ class TestLoading:
         assert "vault_warden" in engine.roles          # ADR-0033 high swarm
         assert "system_architect" in engine.roles      # ADR-0034 SW-track
         assert "code_reviewer" in engine.roles         # ADR-0034 SW-track
+        assert "verifier_loop" in engine.roles         # ADR-0036 verifier
 
     def test_missing_yaml_raises(self, tmp_path: Path) -> None:
         with pytest.raises(SchemaError, match="not found"):
