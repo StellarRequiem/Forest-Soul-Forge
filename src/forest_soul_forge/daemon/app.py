@@ -51,6 +51,7 @@ from forest_soul_forge.daemon.routers import hardware as hardware_router
 from forest_soul_forge.daemon.routers import tools_reload as tools_reload_router
 from forest_soul_forge.daemon.routers import traits as traits_router
 from forest_soul_forge.daemon.routers import triune as triune_router
+from forest_soul_forge.daemon.routers import verifier as verifier_router
 from forest_soul_forge.daemon.routers import writes as writes_router
 from forest_soul_forge.registry import Registry
 
@@ -450,6 +451,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(skills_reload_router.router)
     app.include_router(genres_router.router)
     app.include_router(memory_consents_router.router)
+    app.include_router(verifier_router.router)
     app.include_router(character_sheet_router.router)
     app.include_router(preview_router.router)
     app.include_router(writes_router.router)

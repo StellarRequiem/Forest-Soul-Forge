@@ -246,7 +246,10 @@ def _parse_failure(reason: str) -> ClassificationResult:
 # Scan runner
 # ---------------------------------------------------------------------------
 ClassifyCallable = Callable[[str], str]
-"""Takes a prompt string, returns the LLM's raw text response."""
+"""Sync: takes a prompt, returns the LLM's raw text response."""
+
+AsyncClassifyCallable = Callable[[str], Any]
+"""Async: takes a prompt, returns an awaitable yielding the raw text."""
 
 FlagCallable = Callable[..., tuple[str, str]]
 """Same shape as Memory.flag_contradiction. Returns (id, ts)."""
@@ -284,7 +287,7 @@ class VerifierScan:
         max_pairs: int = DEFAULT_MAX_PAIRS,
         since_iso: str | None = None,
     ) -> ScanResult:
-        """One scan pass on ``target_instance_id``'s memory.
+        """One scan pass on ``target_instance_id``'s memory (sync).
 
         Walks pairs from ``find_candidate_pairs``, classifies each
         via the bound classify callable, and stamps contradictions
@@ -307,31 +310,71 @@ class VerifierScan:
 
         for pair in pairs:
             outcome = self._classify_and_act(pair)
-            result.outcomes.append(outcome)
-            if outcome.classification is not None:
-                result.pairs_classified += 1
-            if outcome.action == "flagged":
-                result.flags_written += 1
-            elif outcome.action == "skipped_low_conf":
-                result.low_confidence_skipped += 1
-            elif outcome.action == "skipped_unrelated":
-                result.unrelated_skipped += 1
-            elif outcome.action == "skipped_no_contradiction":
-                result.no_contradiction_skipped += 1
-            elif outcome.action == "error":
-                result.errors += 1
+            self._tally(result, outcome)
 
         return result
+
+    async def arun_scan(
+        self,
+        *,
+        target_instance_id: str,
+        max_pairs: int = DEFAULT_MAX_PAIRS,
+        since_iso: str | None = None,
+    ) -> ScanResult:
+        """Async variant of run_scan. The bound ``classify`` callable
+        must return an awaitable. Used by the daemon's /verifier/scan
+        endpoint where the LLM call goes through the async provider
+        without blocking the event loop.
+
+        All other behavior matches run_scan exactly.
+        """
+        result = ScanResult.empty(target_instance_id)
+        pairs = self.memory.find_candidate_pairs(
+            instance_id=target_instance_id,
+            since_iso=since_iso,
+            max_pairs=max_pairs,
+        )
+        result.pairs_considered = len(pairs)
+        if not pairs:
+            return result
+
+        for pair in pairs:
+            outcome = await self._aclassify_and_act(pair)
+            self._tally(result, outcome)
+
+        return result
+
+    def _tally(self, result: ScanResult, outcome: "PairOutcome") -> None:
+        """Update the ScanResult's counters from a single outcome.
+        Shared between run_scan and arun_scan so the aggregation logic
+        stays in one place."""
+        result.outcomes.append(outcome)
+        if outcome.classification is not None:
+            result.pairs_classified += 1
+        if outcome.action == "flagged":
+            result.flags_written += 1
+        elif outcome.action == "skipped_low_conf":
+            result.low_confidence_skipped += 1
+        elif outcome.action == "skipped_unrelated":
+            result.unrelated_skipped += 1
+        elif outcome.action == "skipped_no_contradiction":
+            result.no_contradiction_skipped += 1
+        elif outcome.action == "error":
+            result.errors += 1
 
     # -----------------------------------------------------------------
     # Per-pair logic
     # -----------------------------------------------------------------
-    def _classify_and_act(self, pair: dict[str, Any]) -> PairOutcome:
-        # Hydrate the entries so we have the content for the prompt.
+    def _prepare_pair(
+        self, pair: dict[str, Any],
+    ) -> tuple[str | None, "PairOutcome | None"]:
+        """Hydrate the two entries and build the LLM prompt. Returns
+        (prompt, None) on success or (None, error_outcome) when an
+        entry can't be hydrated."""
         earlier = self.memory.get(pair["earlier_entry_id"])
         later = self.memory.get(pair["later_entry_id"])
         if earlier is None or later is None:
-            return PairOutcome(
+            return None, PairOutcome(
                 earlier_entry_id=pair["earlier_entry_id"],
                 later_entry_id=pair["later_entry_id"],
                 overlap_size=pair.get("overlap_size", 0),
@@ -339,15 +382,20 @@ class VerifierScan:
                 action="error",
                 error="entry missing at classification time",
             )
-
         prompt = build_classification_prompt(
             earlier.content, later.content,
             earlier_claim_type=pair.get("earlier_claim_type", ""),
             later_claim_type=pair.get("later_claim_type", ""),
         )
+        return prompt, None
 
+    def _classify_and_act(self, pair: dict[str, Any]) -> "PairOutcome":
+        """Sync per-pair: hydrate, classify (sync), apply decision."""
+        prompt, err = self._prepare_pair(pair)
+        if err is not None:
+            return err
         try:
-            raw = self.classify(prompt)
+            raw = self.classify(prompt)  # type: ignore[arg-type]
         except Exception as e:  # noqa: BLE001
             logger.exception("VerifierScan: classify callable raised")
             return PairOutcome(
@@ -358,7 +406,29 @@ class VerifierScan:
                 action="error",
                 error=f"classify error: {e}",
             )
+        return self._apply_decision(pair, raw)
 
+    async def _aclassify_and_act(self, pair: dict[str, Any]) -> "PairOutcome":
+        """Async per-pair: hydrate, await classify, apply decision."""
+        prompt, err = self._prepare_pair(pair)
+        if err is not None:
+            return err
+        try:
+            raw = await self.classify(prompt)  # type: ignore[misc]
+        except Exception as e:  # noqa: BLE001
+            logger.exception("VerifierScan: async classify callable raised")
+            return PairOutcome(
+                earlier_entry_id=pair["earlier_entry_id"],
+                later_entry_id=pair["later_entry_id"],
+                overlap_size=pair.get("overlap_size", 0),
+                classification=None,
+                action="error",
+                error=f"classify error: {e}",
+            )
+        return self._apply_decision(pair, raw)
+
+    def _apply_decision(self, pair: dict[str, Any], raw: str) -> "PairOutcome":
+        """Parse the LLM output, decide the action, optionally flag."""
         clf = parse_llm_classification(raw)
 
         # Decide action.
