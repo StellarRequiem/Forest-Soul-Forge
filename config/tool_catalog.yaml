@@ -1668,6 +1668,58 @@ tools:
     side_effects: read_only
     archetype_tags: [guardian, security_low, software_engineer]
 
+  pip_install_isolated.v1:
+    name: pip_install_isolated
+    version: "1"
+    description: |
+      Install packages into an isolated venv. Filesystem-tier
+      side_effects (writes to venv site-packages + pip cache).
+      required_initiative_level L4 (reversible-with-policy per
+      ADR-0021-am §5). The only ACTUATOR in the G.1.A batch — the
+      gateway tool for any agent-driven dependency change. Where
+      the rest of G.1.A are read_only inspection tools, this is
+      what completes the change loop after code_edit + pytest_run
+      reveals a missing dependency. SW-track Engineer (Actuator
+      default L5) reaches autonomously; Reviewer (Guardian L3) does
+      NOT — must be deliberately birthed at ceiling L4 to use this.
+      Companion (L1) refused at the dispatcher.
+
+      Refuses to CREATE venvs (existing-only) — that's a separate
+      primitive. Each package spec validated against PEP-503-ish
+      grammar OR the VCS form 'name @ git+https://...' before being
+      passed to pip. 5-min default timeout, 30-min ceiling.
+    input_schema:
+      type: object
+      required: [venv_path, packages]
+      properties:
+        venv_path:
+          type: string
+          description: "Existing venv directory; must resolve within allowed_paths."
+        packages:
+          type: array
+          items: {type: string}
+          minItems: 1
+          description: "Package specs (PEP-503 form or VCS form)."
+        upgrade:
+          type: boolean
+          description: "Forward --upgrade. Default false."
+        no_deps:
+          type: boolean
+          description: "Forward --no-deps. Default false."
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 1800
+          description: "Subprocess timeout. Default 300 (5 min)."
+        max_log_lines:
+          type: integer
+          minimum: 1
+          maximum: 2000
+          description: "Cap on stdout/stderr lines. Default 200."
+    side_effects: filesystem
+    required_initiative_level: L4
+    archetype_tags: [actuator, software_engineer]
+
   memory_challenge.v1:
     name: memory_challenge
     version: "1"

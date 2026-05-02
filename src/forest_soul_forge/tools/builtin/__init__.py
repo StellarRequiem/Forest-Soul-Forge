@@ -36,6 +36,7 @@ from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
 from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
 from forest_soul_forge.tools.builtin.mypy_typecheck import MypyTypecheckTool
 from forest_soul_forge.tools.builtin.patch_check import PatchCheckTool
+from forest_soul_forge.tools.builtin.pip_install_isolated import PipInstallIsolatedTool
 from forest_soul_forge.tools.builtin.port_policy_audit import PortPolicyAuditTool
 from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
 from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
@@ -85,6 +86,7 @@ __all__ = [
     "SemgrepScanTool",
     "TreeSitterQueryTool",
     "BanditSecurityScanTool",
+    "PipInstallIsolatedTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -270,3 +272,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # hashing, hardcoded secrets, flask debug=True. SW-track Reviewer
     # + Guardian-genre security_low consumers.
     registry.register(BanditSecurityScanTool())
+    # Phase G.1.A — pip_install_isolated.v1 (Burst 62). Filesystem-tier
+    # (writes packages to venv site-packages); required_initiative_level
+    # L4 (reversible-with-policy per ADR-0021-am §5). The only
+    # actuator in the G.1.A batch — completes the change loop after
+    # code_edit + pytest_run. SW-track Engineer (Actuator L5) reaches.
+    registry.register(PipInstallIsolatedTool())
