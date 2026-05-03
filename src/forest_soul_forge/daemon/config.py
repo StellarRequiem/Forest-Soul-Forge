@@ -62,6 +62,14 @@ class DaemonSettings(BaseSettings):
         default=Path("examples/audit_chain.jsonl"),
         description="Audit chain JSONL file.",
     )
+    scheduled_tasks_path: Path = Field(
+        default=Path("config/scheduled_tasks.yaml"),
+        description=(
+            "ADR-0041 set-and-forget orchestrator config. Optional — if "
+            "absent the scheduler runs with zero tasks (no-op heartbeat). "
+            "Override via FSF_SCHEDULED_TASKS_PATH."
+        ),
+    )
     # When True, /runtime endpoints can trigger a rebuild-from-artifacts.
     # Off by default to protect registries in production-ish use.
     allow_rebuild_endpoint: bool = Field(default=False)

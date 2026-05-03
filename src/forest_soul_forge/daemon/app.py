@@ -51,6 +51,7 @@ from forest_soul_forge.daemon.routers import hardware as hardware_router
 from forest_soul_forge.daemon.routers import tools_reload as tools_reload_router
 from forest_soul_forge.daemon.routers import traits as traits_router
 from forest_soul_forge.daemon.routers import triune as triune_router
+from forest_soul_forge.daemon.routers import scheduler as scheduler_router
 from forest_soul_forge.daemon.routers import verifier as verifier_router
 from forest_soul_forge.daemon.routers import writes as writes_router
 from forest_soul_forge.registry import Registry
@@ -414,9 +415,76 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         # Phase E smoke when the canonical chain hung at the first
         # delegate.v1 call.
         app.state.write_lock = threading.RLock()
+
+        # ADR-0041 T2 — scheduler. Started here, stopped in finally.
+        # No task runners registered yet (Burst 87 adds tool_call;
+        # Burst 88 adds scenario). Default: enabled but empty config
+        # = scheduler ticks but has nothing to dispatch. Operator
+        # configures via config/scheduled_tasks.yaml; loaded if present.
+        from forest_soul_forge.daemon.scheduler import (
+            Scheduler,
+            build_task_from_config,
+        )
+        scheduler_enabled = (_os.environ.get("FSF_SCHEDULER_ENABLED") or "true").lower() == "true"
+        scheduler_poll_interval = float(_os.environ.get("FSF_SCHEDULER_POLL_INTERVAL_SECONDS") or "30")
+        scheduler = Scheduler(
+            poll_interval_seconds=scheduler_poll_interval,
+            context={
+                "registry": registry,
+                "audit_chain": audit_chain,
+                "tool_registry": tool_registry,
+                "providers": providers,
+                "settings": settings,
+            },
+        )
+        # Optional config file load — silent skip if absent.
+        scheduler_config_path = settings.scheduled_tasks_path
+        if scheduler_config_path.exists():
+            import yaml as _yaml
+            try:
+                cfg = _yaml.safe_load(scheduler_config_path.read_text()) or {}
+                for spec in cfg.get("tasks", []):
+                    try:
+                        scheduler.add_task(build_task_from_config(spec))
+                    except Exception as e:
+                        startup_diagnostics.append(
+                            {"component": "scheduler",
+                             "status": "task_skipped",
+                             "task_id": spec.get("id", "<unknown>"),
+                             "error": str(e)}
+                        )
+                startup_diagnostics.append(
+                    {"component": "scheduler",
+                     "status": "ok" if scheduler_enabled else "disabled",
+                     "task_count": len(scheduler.list_tasks()),
+                     "config_path": str(scheduler_config_path)}
+                )
+            except Exception as e:
+                startup_diagnostics.append(
+                    {"component": "scheduler",
+                     "status": "config_load_failed",
+                     "config_path": str(scheduler_config_path),
+                     "error": str(e)}
+                )
+        else:
+            startup_diagnostics.append(
+                {"component": "scheduler",
+                 "status": "ok" if scheduler_enabled else "disabled",
+                 "task_count": 0,
+                 "config_path": f"{scheduler_config_path} (absent)"}
+            )
+
+        if scheduler_enabled:
+            await scheduler.start()
+        app.state.scheduler = scheduler
+
         try:
             yield
         finally:
+            try:
+                await scheduler.stop()
+            except Exception:
+                pass
             registry.close()
 
     app = FastAPI(
@@ -459,6 +527,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(hardware_router.router)
     app.include_router(conversations_router.router)
     app.include_router(conversations_admin_router.router)
+    app.include_router(scheduler_router.router)
     return app
 
 
