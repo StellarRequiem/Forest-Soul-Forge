@@ -1636,6 +1636,11 @@ body { padding-bottom: 56px; }
   justify-content: center;
   z-index: 100;
 }
+/* The HTML [hidden] attribute defaults to display:none, but the rule
+   above sets display:flex which overrides it. Restore the toggle. */
+.chat-dialog[hidden] {
+  display: none;
+}
 .chat-dialog__inner {
   background: var(--bg, #0f141c);
   border: 1px solid var(--border, #2a3340);

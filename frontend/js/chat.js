@@ -127,14 +127,26 @@ function wireNewRoomDialog() {
   const createBtn = document.getElementById("chat-new-create");
   const partSelect = document.getElementById("chat-new-participant");
 
-  newBtn?.addEventListener("click", () => {
+  newBtn?.addEventListener("click", async () => {
     // Default operator_id from localStorage if previously used.
     const lastOp = localStorage.getItem("fsf.chat.lastOperator") || "alex";
     document.getElementById("chat-new-operator").value = lastOp;
     document.getElementById("chat-new-domain").value = "";
-    // Populate participants picker from agents state. Active agents only.
+    // Populate participants picker. Try state cache first; if empty,
+    // fetch /agents directly so the user doesn't have to visit the
+    // Agents tab to populate the cache before creating a room.
+    let agents = state.get("agents") || [];
+    if (!agents.length) {
+      try {
+        const res = await api.get("/agents");
+        agents = res.agents || [];
+        state.set("agents", agents);
+      } catch (e) {
+        // Non-fatal — dialog still opens with the placeholder option.
+      }
+    }
     const opts = ['<option value="">— none for now —</option>'];
-    for (const a of (state.get("agents") || [])) {
+    for (const a of agents) {
       if (a.status !== "active") continue;
       opts.push(`<option value="${a.instance_id}">${escapeHTML(a.agent_name)} (${escapeHTML(a.role)})</option>`);
     }
@@ -259,21 +271,44 @@ function renderParticipants() {
 }
 
 async function promptAddParticipant() {
-  // Lightweight in-place prompt — let the operator type or pick. Keeping
-  // it simple for v1; a richer search/picker is a nice-to-have for Y6.1.
-  const candidates = (state.get("agents") || []).filter((a) => a.status === "active");
+  // Lightweight in-place picker. Originally used window.prompt() with
+  // truncated 12-char instance_ids in the displayed list — but the
+  // operator would paste the truncated string and the API would
+  // 404 on it. Fixed: show full instance_id, also let the operator
+  // type just the agent_name as a shortcut.
+  let candidates = (state.get("agents") || []).filter((a) => a.status === "active");
+  if (!candidates.length) {
+    // Cache miss — fetch directly so the user doesn't have to bounce
+    // through the Agents tab.
+    try {
+      const res = await api.get("/agents");
+      candidates = (res.agents || []).filter((a) => a.status === "active");
+      state.set("agents", res.agents || []);
+    } catch (e) { /* fall through to "no agents" */ }
+  }
   if (!candidates.length) {
     toast({ title: "No agents", msg: "Birth one in the Forge tab first.", kind: "warn", ttl: 5000 });
     return;
   }
-  const choices = candidates.map((a) => `${a.agent_name} (${a.role}) — ${a.instance_id.slice(0, 12)}`).join("\n");
-  const pick = window.prompt(`Pick by typing the instance_id (paste from list):\n\n${choices}`);
+  // Show FULL instance_id so paste-from-list actually works. Also accept
+  // agent_name as a shortcut and resolve to instance_id below.
+  const choices = candidates.map((a) =>
+    `  ${a.agent_name}  →  ${a.instance_id}`
+  ).join("\n");
+  const pick = window.prompt(
+    "Add a participant. Paste the full instance_id (after the arrow), " +
+    "or type the agent_name and we'll resolve it.\n\n" + choices
+  );
   if (!pick) return;
+  const trimmed = pick.trim();
+  // Resolve agent_name -> instance_id if the operator typed a name.
+  const byName = candidates.find((a) => a.agent_name === trimmed);
+  const instance_id = byName ? byName.instance_id : trimmed;
   try {
     await writeCall(`/conversations/${activeConversationId}/participants`, {
-      instance_id: pick.trim(),
+      instance_id,
     });
-    toast({ title: "Added", msg: `${pick.slice(0, 12)}…`, kind: "info", ttl: 3000 });
+    toast({ title: "Added", msg: byName?.agent_name || `${instance_id.slice(0, 16)}…`, kind: "info", ttl: 3000 });
     await selectRoom(activeConversationId);
   } catch (e) {
     toast({ title: "Couldn't add", msg: String(e.message || e), kind: "error", ttl: 6000 });
@@ -418,13 +453,23 @@ function wireRoomActions() {
 // ---------------------------------------------------------------------------
 function wireBridgeDialog() {
   const dialog = document.getElementById("chat-bridge-dialog");
-  document.getElementById("chat-room-bridge")?.addEventListener("click", () => {
+  document.getElementById("chat-room-bridge")?.addEventListener("click", async () => {
     if (!activeConversationId) return;
     // Populate agent picker from active agents NOT already in the room.
+    // Try state cache first; if empty, fetch /agents directly so the
+    // user doesn't have to visit the Agents tab to seed the cache.
     const sel = document.getElementById("chat-bridge-instance");
+    let agents = state.get("agents") || [];
+    if (!agents.length) {
+      try {
+        const res = await api.get("/agents");
+        agents = res.agents || [];
+        state.set("agents", agents);
+      } catch (e) { /* non-fatal */ }
+    }
     const inRoom = new Set(activeParticipants.map((p) => p.instance_id));
     const opts = [];
-    for (const a of (state.get("agents") || [])) {
+    for (const a of agents) {
       if (a.status !== "active") continue;
       if (inRoom.has(a.instance_id)) continue;
       opts.push(`<option value="${a.instance_id}">${escapeHTML(a.agent_name)} (${escapeHTML(a.role)})</option>`);
