@@ -178,6 +178,33 @@ is the durable fix.
   `allowed_paths` can grant scoped access. memory/ and writes/
   are the canonical decompositions; new code follows the same
   pattern.
+- **Live audit chain is at `examples/audit_chain.jsonl`, not
+  `data/audit_chain.jsonl`.** Per `daemon/config.py` the default
+  `audit_chain_path` points to examples/. Override via
+  `FSF_AUDIT_CHAIN_PATH`. The data/ chain is a stale dev fixture.
+  Verify chain integrity via `dev-tools/check-drift.sh` (which
+  also runs every numeric drift check before tagging).
+
+## Live-test driver gotchas (Run 001 lessons)
+
+Two patterns surfaced during the FizzBuzz autonomous loop test
+that future scenario runs should know — both are silent failures
+that look like the loop is broken when actually the driver is:
+
+1. **`python3 - <<'PYEOF'` makes the heredoc replace stdin.** When
+   you need `sys.stdin.read()` to work on piped input, use
+   `python3 -c '...'` instead. The heredoc form turns the script
+   body INTO stdin, so your read returns nothing.
+2. **`curl -sf` swallows error response bodies.** When you need
+   to debug a 4xx/5xx, drop `-f` so the body surfaces. The
+   `|| echo '{}'` fallback hides the actual failure shape. Add
+   `tool_version` and unique `session_id` to every
+   `/agents/{id}/tools/call` request — they're required by
+   `ToolCallRequest` (see `src/forest_soul_forge/daemon/schemas/dispatch.py`).
+
+Reference driver: `live-test-fizzbuzz.command`. Bug ledger encoded
+in its header — five fixes captured so future scenarios reuse the
+proven pattern.
 
 ## Things to look up rather than guess
 

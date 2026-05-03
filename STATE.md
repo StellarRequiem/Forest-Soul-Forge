@@ -27,23 +27,25 @@ If you read nothing else, read [`docs/decisions/ADR-0033-security-swarm.md`](doc
 
 | | |
 |---:|:---|
-| Source LoC (Python) | ~36,400 across `src/forest_soul_forge/` (post-R-track refactors split god-objects) |
+| Source LoC (Python) | **44,648** across `src/forest_soul_forge/` (was undercounted as ~36,400 in prior STATE; corrected via 2026-05-03 audit). Per-package: tools=18,597 / daemon=10,334 / core=5,172 / registry=3,324 / forge=3,117 / cli=1,465 / soul=1,239. |
 | Tests (passing) | **2072** (was 1567 at v0.1.2; +505 net — +401 across the v0.2 arc, +104 across the v0.3 ADR-0036 arc Bursts 65-70) |
-| ADRs filed | 37 (`ADR-0001` → `ADR-0040`, with gaps; ADR-003X open-web + ADR-003Y conversation runtime drafts; ADR-0021-am + ADR-0027-am amendments + ADR-0038 companion harm model all Accepted in v0.1.2; ADR-0035 Persona Forge + ADR-0037 Observability dashboard Proposed for v0.3; **ADR-0036 Verifier Loop now feature-complete in v0.3 (T1+T2+T3a+T3b+T5+T6+T7 shipped; T4 scheduled-task substrate deferred)**; **ADR-0039 Distillation Forge / Swarm Orchestrator Proposed for v0.4**; **ADR-0040 Trust-surface decomposition rule Accepted (T1+T2+T3+T4 all shipped 2026-05-02; memory.py + writes.py both decomposed into per-trust-surface packages)**) |
-| Builtin tools registered | **53** (was 42 at v0.1.2 [the prior STATE undercounted by one]; +10 Phase G.1.A primitives in v0.2.0; +1 memory_flag_contradiction in v0.3 ADR-0036 T2) |
-| Skill manifests shipped | 26 (4 chain + 17 supporting + 3 triune + 2 from forge-CLI seeds) |
+| ADRs filed | 37 files / 35 unique numbers (`ADR-0001` → `ADR-0040`, with gaps 0009-0015; ADR-003X open-web + ADR-003Y conversation runtime drafts; ADR-0021-am + ADR-0027-am amendments + ADR-0038 companion harm model all Accepted in v0.1.2; ADR-0035 Persona Forge + ADR-0037 Observability dashboard Proposed for v0.3; **ADR-0036 Verifier Loop now feature-complete in v0.3 (T1+T2+T3a+T3b+T5+T6+T7 shipped; T4 scheduled-task substrate deferred)**; **ADR-0039 Distillation Forge / Swarm Orchestrator Proposed for v0.4**; **ADR-0040 Trust-surface decomposition rule Accepted (T1+T2+T3+T4 all shipped 2026-05-02; memory.py + writes.py both decomposed into per-trust-surface packages)**) |
+| Builtin tools registered | **53** (catalog and `tools/builtin/` source files in sync — verified 2026-05-03 audit; was 42 at v0.1.2; +10 Phase G.1.A primitives in v0.2.0; +1 memory_flag_contradiction in v0.3 ADR-0036 T2) |
+| Skill manifests | **26 shipped** in `examples/skills/` (canonical authored set), **23 installed** in `data/forge/skills/installed/` (operator-installed subset for live runs). The 3-skill gap is intentional — examples include drafts not yet promoted to installed. |
 | Schema version | **v12** (v8: agent_secrets / v9: memory_verifications / v10: conversations / v11: epistemic memory — claim_type + confidence + last_challenged_at + memory_contradictions table from ADR-0027-am T1; **v12: flagged_state column on memory_contradictions for ADR-0036 T6 Verifier ratification dial**) |
 | Genres | 13 (7 original + 3 security tiers + 3 web tiers); each genre now carries `max_initiative_level` + `default_initiative_level` per ADR-0021-am §3 |
-| Tools with initiative annotations | 15 of 53 (Burst 46 + 49 — shell_exec / browser_action / mcp_call / code_edit / web_fetch + isolate_process / jit_access / dynamic_policy / delegate / memory_disclose / memory_verify / memory_challenge; v0.2.0 Phase G.1.A added pytest_run + pip_install_isolated at L4; v0.3 ADR-0036 added memory_flag_contradiction at L3). Remaining 38 are read-only or memory-write with no operator-relevant initiative gate; v0.4 catalog audit may add more. |
+| Tools with initiative annotations | **2 in catalog YAML** (`pip_install_isolated.v1` L4 from v0.2.0, `memory_flag_contradiction.v1` L3 from v0.3) + **23 builtin source files** mention initiative inline. The catalog is the configuration of record per ADR-0018 — most annotations didn't propagate from source. Reconciliation queued for Burst 85. |
 | Trait roles | **18** (5 original + 9 swarm + 3 SW-track + 1 ADR-0036 verifier_loop) |
 | Audit event types | **55** (54 pre-v0.3 + verifier_scan_completed from ADR-0036 T3b/T5) |
 | Frontend modules (vanilla JS) | 22 (was 18 + chat.js + cleanup) |
-| `.command` operator scripts | 36 (start/stop/reset + start-demo + load-scenario + dist/build + ~25 live-tests + a5-finalize/clean-git-locks/live-triune ops) |
+| `.command` operator scripts | **88** at repo root (was undercounted as 36; commit-burst*.command files accumulated across the v0.2/v0.3 arcs and never got rotated). Includes start/stop/reset + ~25 live-tests + ~50 commit-burst* + dist/build + ops scripts. |
 | Demo scenarios | 2 (synthetic-incident + fresh-forge, both with presenter scripts) |
 | Data dirs | 2 (top-level prod via start.command + isolated demo/ via start-demo.command) |
 | Distribution | `dist/build.command` produces `forest-soul-forge-<sha>-<date>.zip` via git archive |
-| Total commits on `main` | ~155 (was 130 at Phase E; +25 across SW-track + R-track + Y-track + post-marathon docs) |
-| Audit docs filed | 2 (`docs/audits/2026-04-28-phase-d-e-review.md` + `docs/audits/2026-04-30-load-bearing-survey.md`) |
+| Total commits on `main` | **234** (was claimed ~155 — undercounted by 79 commits across SW-track + R-track + Y-track + v0.3 ADR-0036 + ADR-0040 work; corrected via 2026-05-03 audit) |
+| Audit docs filed | 13 (most recent: `docs/audits/2026-05-03-full-audit.md` — full numeric drift sweep + remediation plan; prior: `2026-04-30-load-bearing-survey.md`, `2026-04-30-comprehensive-repo-audit.md`, et al.) |
+| Live audit chain path | **`examples/audit_chain.jsonl`** (per `daemon/config.py` `audit_chain_path` default — NOT `data/audit_chain.jsonl` which is the dev fixture). Override via `FSF_AUDIT_CHAIN_PATH`. Verified 1083 entries on 2026-05-03, all hashes link cleanly. |
+| Drift sentinel | `dev-tools/check-drift.sh` — runs every numeric claim against disk reality. Run before any release tag. |
 
 ---
 

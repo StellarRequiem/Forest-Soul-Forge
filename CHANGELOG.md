@@ -6,6 +6,79 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
+(Nothing yet for the next release — v0.3.0 was tagged on 2026-05-03.)
+
+## [0.3.0] — 2026-05-03 (ADR-0036 Verifier Loop + ADR-0040 Trust-Surface Decomposition)
+
+The v0.3 arc shipped two distinct ADRs end-to-end. ADR-0036 added
+Verifier-class agents that scan memory for contradictions and flag
+them for operator ratification. ADR-0040 introduced the
+Trust-Surface Decomposition Rule and proved it by decomposing both
+of the codebase's non-cohesive god objects (memory.py and
+writes.py) into per-trust-surface packages so a constitution can
+grant `allowed_paths` to one surface without inheriting the others.
+
+**Test suite: 1968 → 2072 passing (+104).** Zero regressions
+across either arc.
+
+### ADR-0036 Verifier Loop (Bursts 65-70, 7 commits)
+
+Verifier-class agent for scanning agent memory and flagging
+contradictions for operator review. ADR-0036 §1 establishes
+contradictions as a first-class memory state; T1-T7 implement the
+detection, dispatch, ratification, and recall surfaces. T4
+(scheduled-task substrate for autonomous scanning) is deferred
+to a follow-up release.
+
+| # | Tranche | What |
+|---|---|---|
+| T1 | role + claim + template | `verifier_loop` role, Guardian-genre claim, constitutional template |
+| T2 | tool | `memory_flag_contradiction.v1` (operator-only, L3 initiative) |
+| T3a | helper | `Memory.find_candidate_pairs` pre-filter for the scan |
+| T3b | runner | `VerifierScan` LLM-dispatching scan runner |
+| T5 | endpoint | `POST /verifier/scan` daemon endpoint |
+| T6 | schema | v12 — `flagged_state` column on memory_contradictions |
+| T7 | recall | `memory_recall.v1` extension surfacing flagged_state |
+
+T4 (scheduled-task substrate / set-and-forget orchestrator) deferred — implementation queued for v0.4 along with the agent self-timing tool family (ADR-0041, drafted post-v0.3).
+
+### ADR-0040 Trust-Surface Decomposition Rule (Bursts 71-81, 11 commits)
+
+New project discipline: count trust surfaces, not LoC. A 1000-LoC
+file that owns one cohesive surface is fine. A file with multiple
+surfaces MUST decompose so `allowed_paths` can scope grants. The
+rule pattern-matched cleanly across two structurally different
+codebase shapes (mixin classes for memory, sub-routers for writes).
+
+| Tranche | Bursts | Output |
+|---|---|---|
+| T1 file the ADR | 71 | `docs/decisions/ADR-0040-trust-surface-decomposition-rule.md` |
+| T2 memory.py decomp | 72-76 | `memory/` package: 5 mixins (consents, verification, challenge, contradictions) + helpers + facade |
+| T3 writes.py decomp | 77-80 | `writes/` package: 3 sub-routers (birth, voice, archive) + shared helpers + facade |
+| T4 cross-references | 81 | STATE.md + CLAUDE.md anchored the rule for future sessions |
+
+### Audit + remediation (Burst 82, post-v0.3.0 work)
+
+`docs/audits/2026-05-03-full-audit.md` — full sweep triggered by
+the audit-chain path mystery surfaced during Run 001. Found and
+documented: README stale by entire v0.3 arc (test count, ADR
+count, trait roles, audit events all wrong), STATE LoC undercounted
+by ~8k, STATE commit count 79 stale, .command count 52 stale,
+audit chain default path never documented in published docs,
+13 zombie test agents accumulated in registry.
+
+`dev-tools/check-drift.sh` committed as the future-proofing
+sentinel — runs every numeric claim against disk reality, prints
+comparison table. Use before any release tag.
+
+### Run 001 — first autonomous coding-loop test (Burst 110)
+
+Live-test of the Forest tool dispatch infrastructure driving an
+LLM in an iterative build loop against local Ollama (qwen2.5-coder:7b).
+End-to-end success on FizzBuzz: 2 turns, 15 sec wall, 4/4 tests
+passed. Captured 5 driver bugs in `live-test-fizzbuzz.command`
+header for future scenario runs.
+
 ## [0.2.0] — 2026-05-02 (Phase G.1.A close — programming primitives)
 
 The 10 programming primitives that complete the SW-track agent
