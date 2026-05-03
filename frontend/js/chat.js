@@ -17,7 +17,7 @@
 // A future Y6.1 pass can switch to /audit/stream for live updates.
 
 import { api, ApiError, writeCall } from "./api.js";
-import { state } from "./state.js";
+import * as state from "./state.js";
 import { toast } from "./toast.js";
 
 const ACTIVE_KEY = "fsf.chat.activeConv";
@@ -134,7 +134,7 @@ function wireNewRoomDialog() {
     document.getElementById("chat-new-domain").value = "";
     // Populate participants picker from agents state. Active agents only.
     const opts = ['<option value="">— none for now —</option>'];
-    for (const a of (state.agents || [])) {
+    for (const a of (state.get("agents") || [])) {
       if (a.status !== "active") continue;
       opts.push(`<option value="${a.instance_id}">${escapeHTML(a.agent_name)} (${escapeHTML(a.role)})</option>`);
     }
@@ -261,7 +261,7 @@ function renderParticipants() {
 async function promptAddParticipant() {
   // Lightweight in-place prompt — let the operator type or pick. Keeping
   // it simple for v1; a richer search/picker is a nice-to-have for Y6.1.
-  const candidates = (state.agents || []).filter((a) => a.status === "active");
+  const candidates = (state.get("agents") || []).filter((a) => a.status === "active");
   if (!candidates.length) {
     toast({ title: "No agents", msg: "Birth one in the Forge tab first.", kind: "warn", ttl: 5000 });
     return;
@@ -424,7 +424,7 @@ function wireBridgeDialog() {
     const sel = document.getElementById("chat-bridge-instance");
     const inRoom = new Set(activeParticipants.map((p) => p.instance_id));
     const opts = [];
-    for (const a of (state.agents || [])) {
+    for (const a of (state.get("agents") || [])) {
       if (a.status !== "active") continue;
       if (inRoom.has(a.instance_id)) continue;
       opts.push(`<option value="${a.instance_id}">${escapeHTML(a.agent_name)} (${escapeHTML(a.role)})</option>`);
@@ -576,9 +576,10 @@ function wireSweepDialog() {
 // Helpers
 // ---------------------------------------------------------------------------
 async function refreshAgentLookup(instanceIds) {
-  // Use state.agents when populated; fall back to /agents/{id} for any miss.
-  if (state.agents?.length) {
-    for (const a of state.agents) agentLookupCache.set(a.instance_id, a);
+  // Use state.get("agents") when populated; fall back to /agents/{id} for any miss.
+  const cachedAgents = state.get("agents");
+  if (cachedAgents?.length) {
+    for (const a of cachedAgents) agentLookupCache.set(a.instance_id, a);
   }
   for (const iid of instanceIds) {
     if (agentLookupCache.has(iid)) continue;
