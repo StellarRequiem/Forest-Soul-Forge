@@ -39,6 +39,7 @@ export async function start() {
   wireBridgeDialog();
   wireAmbientDialog();
   wireSweepDialog();
+  wireAddParticipantDialog();
   await loadRooms();
   // Auto-resume an active conversation if one is stashed.
   const stashed = localStorage.getItem(ACTIVE_KEY);
@@ -271,48 +272,71 @@ function renderParticipants() {
 }
 
 async function promptAddParticipant() {
-  // Lightweight in-place picker. Originally used window.prompt() with
-  // truncated 12-char instance_ids in the displayed list — but the
-  // operator would paste the truncated string and the API would
-  // 404 on it. Fixed: show full instance_id, also let the operator
-  // type just the agent_name as a shortcut.
-  let candidates = (state.get("agents") || []).filter((a) => a.status === "active");
-  if (!candidates.length) {
-    // Cache miss — fetch directly so the user doesn't have to bounce
-    // through the Agents tab.
-    try {
-      const res = await api.get("/agents");
-      candidates = (res.agents || []).filter((a) => a.status === "active");
-      state.set("agents", res.agents || []);
-    } catch (e) { /* fall through to "no agents" */ }
-  }
-  if (!candidates.length) {
-    toast({ title: "No agents", msg: "Birth one in the Forge tab first.", kind: "warn", ttl: 5000 });
+  // Opens the add-participant dialog and populates the agent <select>
+  // with active agents not already in the room. Replaced the original
+  // window.prompt() flow because (a) the message text in window.prompt
+  // can't be selected/copied on macOS browsers, and (b) the truncated
+  // instance_ids previously shown didn't match what the API expected.
+  // Now: clickable dropdown, server-side resolved IDs, no copy/paste
+  // required.
+  const dialog = document.getElementById("chat-add-participant-dialog");
+  const sel = document.getElementById("chat-add-participant-instance");
+  if (!dialog || !sel) {
+    // Fallback for older index.html without the dialog markup.
+    toast({ title: "UI out of date", msg: "Refresh the page to pick up the new participant dialog.", kind: "warn", ttl: 6000 });
     return;
   }
-  // Show FULL instance_id so paste-from-list actually works. Also accept
-  // agent_name as a shortcut and resolve to instance_id below.
-  const choices = candidates.map((a) =>
-    `  ${a.agent_name}  →  ${a.instance_id}`
-  ).join("\n");
-  const pick = window.prompt(
-    "Add a participant. Paste the full instance_id (after the arrow), " +
-    "or type the agent_name and we'll resolve it.\n\n" + choices
-  );
-  if (!pick) return;
-  const trimmed = pick.trim();
-  // Resolve agent_name -> instance_id if the operator typed a name.
-  const byName = candidates.find((a) => a.agent_name === trimmed);
-  const instance_id = byName ? byName.instance_id : trimmed;
-  try {
-    await writeCall(`/conversations/${activeConversationId}/participants`, {
-      instance_id,
-    });
-    toast({ title: "Added", msg: byName?.agent_name || `${instance_id.slice(0, 16)}…`, kind: "info", ttl: 3000 });
-    await selectRoom(activeConversationId);
-  } catch (e) {
-    toast({ title: "Couldn't add", msg: String(e.message || e), kind: "error", ttl: 6000 });
+  // Fetch agents directly so the cache state is irrelevant.
+  let agents = state.get("agents") || [];
+  if (!agents.length) {
+    try {
+      const res = await api.get("/agents");
+      agents = res.agents || [];
+      state.set("agents", agents);
+    } catch (e) { /* non-fatal */ }
   }
+  const inRoom = new Set(activeParticipants.map((p) => p.instance_id));
+  const opts = [];
+  for (const a of agents) {
+    if (a.status !== "active") continue;
+    if (inRoom.has(a.instance_id)) continue;
+    opts.push(`<option value="${a.instance_id}">${escapeHTML(a.agent_name)} (${escapeHTML(a.role)})</option>`);
+  }
+  if (!opts.length) {
+    toast({ title: "No eligible agents", msg: "All active agents are already in this room, or none are born yet (Forge tab).", kind: "warn", ttl: 6000 });
+    return;
+  }
+  sel.innerHTML = opts.join("");
+  dialog.hidden = false;
+}
+
+function wireAddParticipantDialog() {
+  const dialog = document.getElementById("chat-add-participant-dialog");
+  if (!dialog) return;  // older index.html
+  document.getElementById("chat-add-participant-cancel")?.addEventListener("click", () => {
+    dialog.hidden = true;
+  });
+  document.getElementById("chat-add-participant-confirm")?.addEventListener("click", async () => {
+    const sel = document.getElementById("chat-add-participant-instance");
+    const instance_id = sel?.value;
+    if (!instance_id) {
+      toast({ title: "Pick an agent", msg: "Use the dropdown to select one.", kind: "warn", ttl: 4000 });
+      return;
+    }
+    if (!activeConversationId) {
+      toast({ title: "No active room", msg: "Pick a room first.", kind: "warn", ttl: 4000 });
+      return;
+    }
+    try {
+      await writeCall(`/conversations/${activeConversationId}/participants`, { instance_id });
+      const opt = sel.options[sel.selectedIndex];
+      toast({ title: "Added", msg: opt?.textContent || instance_id, kind: "info", ttl: 3000 });
+      dialog.hidden = true;
+      await selectRoom(activeConversationId);
+    } catch (e) {
+      toast({ title: "Couldn't add", msg: String(e.message || e), kind: "error", ttl: 6000 });
+    }
+  });
 }
 
 function renderTurns() {
@@ -394,6 +418,11 @@ async function sendTurn() {
 
   sendBtn.disabled = true;
   sendBtn.textContent = auto ? "thinking…" : "sending…";
+  // DON'T disable the input field — user can keep typing the next message
+  // while the agent is generating. The send button gates duplicate sends.
+  // (Earlier UX felt 'sticky' because the entire page seemed frozen during
+  // the LLM round-trip, which can be 5-30s on a 7B local model.)
+  const startedAt = performance.now();
   try {
     const resp = await writeCall(`/conversations/${activeConversationId}/turns`, {
       speaker: operator_id,
@@ -420,6 +449,10 @@ async function sendTurn() {
       });
     }
     await selectRoom(activeConversationId);
+    const elapsedSec = Math.round((performance.now() - startedAt) / 100) / 10;
+    if (auto && elapsedSec > 5) {
+      toast({ title: `Round-trip ${elapsedSec}s`, msg: "LLM generation latency. Lower max_tokens or switch to a smaller model to speed this up.", kind: "info", ttl: 5000 });
+    }
   } catch (e) {
     toast({ title: "Send failed", msg: String(e.message || e), kind: "error", ttl: 8000 });
   } finally {

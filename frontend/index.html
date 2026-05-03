@@ -529,6 +529,28 @@
         </div>
       </div>
 
+      <!-- Add-participant dialog. Same-domain agent join (no audit
+           bridge event). Replaces the old window.prompt() flow which
+           couldn't be copy-pasted from. Populates from /agents directly
+           so the cache state is irrelevant. -->
+      <div id="chat-add-participant-dialog" class="chat-dialog" hidden>
+        <div class="chat-dialog__inner">
+          <h3>Add participant</h3>
+          <p class="muted" style="margin-top:-8px;font-size:12px;">
+            Pick an active agent to join this room. Same-domain only —
+            for cross-domain invites use <strong>+ bridge</strong> instead.
+          </p>
+          <div class="field">
+            <label class="lbl" for="chat-add-participant-instance">agent</label>
+            <select id="chat-add-participant-instance" class="inp"></select>
+          </div>
+          <div class="chat-dialog__actions">
+            <button class="btn btn--ghost btn--sm" id="chat-add-participant-cancel" type="button">cancel</button>
+            <button class="btn btn--sm" id="chat-add-participant-confirm" type="button">add</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Y5 — ambient nudge dialog. Trigger a proactive turn. -->
       <div id="chat-ambient-dialog" class="chat-dialog" hidden>
         <div class="chat-dialog__inner">
