@@ -280,12 +280,19 @@ async function fetchEntries() {
   // Drive the dispatcher's memory_recall.v1 by POSTing a tool call.
   // The tool is read_only so it never gates — the response is
   // synchronous.
+  //
+  // session_id is REQUIRED by ToolCallRequest (min_length=1, see
+  // src/forest_soul_forge/daemon/schemas/dispatch.py:66). Latent since
+  // Burst 70 — without this the request 422s and the toast surfaces
+  // "Couldn't load memory". Pattern matches skills.js:210 (ts-suffix
+  // fallback). Memory tab is read-only so a per-call session is fine.
   try {
     const resp = await writeCall(
       `/agents/${_selectedAgent}/tools/call`,
       {
         tool_name: "memory_recall",
         tool_version: "1",
+        session_id: `memory-recall-${Date.now().toString(36)}`,
         args: { mode: _selectedMode, limit: 100 },
       },
     );

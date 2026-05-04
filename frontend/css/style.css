@@ -243,6 +243,14 @@ body {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  /* Wrap onto a second line at narrow widths instead of overflowing.
+     Latent since Burst 7: the Approvals header packs 5 controls
+     (agent + operator + show + refresh) and the agent <select> grows
+     to fit "Forge_AuditTight_01 · {dna} · software_engineer", pushing
+     the refresh button past the panel's right edge. flex-wrap lets
+     controls reflow when space runs out. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .panel__body { padding: var(--sp-4); }
 
