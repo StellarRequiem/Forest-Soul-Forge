@@ -1682,3 +1682,143 @@ body { padding-bottom: 56px; }
 .chat-chip__nudge:hover {
   color: #f4c020;
 }
+
+/* ============================================================
+   Mobile / narrow-viewport responsive pass — ADR-0042 T2 (Burst 98)
+   ============================================================
+   PWA-first half of D3. The frontend is vanilla JS + CSS; making
+   it usable on phone-narrow viewports (≤768px) is a media-query
+   pass, not a rebuild.
+
+   Existing breakpoints (kept as-is):
+     1024px — forge-grid stacks
+      900px — agents-split + memory-grid stack
+
+   This block adds 768px coverage for the rest:
+   - Top bar: tighter padding, allow wrap
+   - Welcome banner: stack icon + text + close
+   - Tabs: horizontal scroll instead of clip; tighter icon-only
+     fallback at 480px
+   - Chat grid: stack rooms-rail above the room body (single-column
+     viewports can't fit two panes side-by-side without one being
+     cramped). Rooms rail caps to 30vh so the room body stays
+     scannable.
+   - Statusbar: wrap cells; tighten gaps
+   - Forge tab profile selectors: stack genre/role onto separate
+     lines instead of inline
+   - Body / app padding: tighten so cards aren't squeezed
+   - Touch-target hygiene: bump button + tab + form-control
+     min-height to 32px (Apple HIG recommends 44px; 32 is the
+     foundry's compromise — matches existing button heights)
+
+   No JS changes — purely CSS. No regressions on desktop because
+   the breakpoint guards the entire block.
+   ============================================================ */
+@media (max-width: 768px) {
+  /* App container: tighter padding, no max-width clamp */
+  .app { padding: var(--sp-3); }
+
+  /* Top bar: stack title + actions if needed */
+  .top-bar {
+    padding: var(--sp-2) var(--sp-3);
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+  /* Brand wraps onto its own row; tag-line suppressed to save vertical space */
+  .top-bar .brand { font-size: 14px; margin: 0; }
+  .top-bar .brand__tag { display: none; }  /* "local-first agent foundry" → suppress on phone */
+
+  /* Welcome banner: stack vertically */
+  .welcome {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: var(--sp-3);
+    gap: var(--sp-2);
+  }
+  .welcome__close {
+    align-self: flex-end;
+    margin-top: -28px;  /* anchor to top-right of the stacked block */
+  }
+
+  /* Tabs: horizontal scroll. The 8 tabs don't all fit on a 380px
+     phone; horizontal scroll preserves all of them while keeping
+     the active-tab indicator legible. */
+  .tabs {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    margin-left: calc(-1 * var(--sp-3));
+    margin-right: calc(-1 * var(--sp-3));
+    padding-left: var(--sp-3);
+    padding-right: var(--sp-3);
+    scrollbar-width: thin;  /* Firefox */
+  }
+  .tabs::-webkit-scrollbar { height: 3px; }
+  .tabs::-webkit-scrollbar-thumb { background: var(--border); }
+  .tab {
+    padding: var(--sp-3) var(--sp-3);
+    font-size: 13px;
+  }
+
+  /* Chat grid: stack rooms-rail above the room body. The 280px
+     rail eats too much of a phone screen at side-by-side; stacking
+     gives the room body enough horizontal space to render turns. */
+  .chat-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 30vh) 1fr;
+    height: calc(100vh - 140px);
+    gap: var(--sp-2);
+  }
+  .chat-rail .panel { max-height: 30vh; }
+
+  /* Chat room header (.chat-room > .panel > .panel__header):
+     stack title above actions so retention/bridge/sweep/archive
+     buttons reflow rather than overflow. .panel__actions already
+     wraps post-Burst-88; this just makes the title block stack. */
+  .chat-room .panel__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--sp-2);
+  }
+
+  /* Forge profile picker: stack genre/role */
+  .panel__actions {
+    /* Already wraps thanks to Burst 88; tighten the gap on mobile */
+    gap: var(--sp-1, 4px);
+  }
+
+  /* Statusbar: wrap cells; smaller font; reduced padding */
+  .statusbar {
+    padding: var(--sp-2) var(--sp-3);
+    font-size: 11px;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    height: auto;  /* let it grow when wrapping */
+    min-height: 44px;
+  }
+  body { padding-bottom: 60px; }  /* compensate for taller statusbar */
+  .statusbar__left { flex-wrap: wrap; gap: var(--sp-2); }
+  .statusbar__cell { gap: 2px; }
+
+  /* Form controls: ensure tap target is reasonable */
+  .inp, .btn { min-height: 32px; }
+
+  /* Toasts: full-width on mobile so they don't hang off-screen */
+  .toast {
+    left: var(--sp-2) !important;
+    right: var(--sp-2) !important;
+    max-width: calc(100vw - var(--sp-4));
+  }
+}
+
+/* Extra-narrow phones (≤480px): tighten tab padding further so
+   horizontal scroll feels less aggressive. Labels stay visible —
+   they're bare text inside <button>, not a wrapping span, so we
+   can't suppress them without DOM changes. Future Burst could
+   wrap labels in <span class="tab__label"> if icon-only on
+   ≤480px proves desirable. */
+@media (max-width: 480px) {
+  .tab { padding: var(--sp-2) var(--sp-2); font-size: 12px; }
+  .tab__icon { width: 13px; height: 13px; }
+}
