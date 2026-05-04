@@ -54,6 +54,27 @@ Every action is local. Every state change is hashed and chained. Every privilege
 
 ---
 
+## 🎯 Who is this for?
+
+**Solo developers and prosumers** who want agent automation without LLM-API-key sprawl. Forest runs on your laptop, your data stays on your laptop, no subscription. Build agents that help with code review, research, daily standups, content drafting — anything you'd otherwise stitch together with a half-dozen SaaS tools. v0.5 is shipping a one-click installer (Tauri-packaged); per ADR-0042 the local tier is **free forever**.
+
+**Security and blue-team operators** who need an evidence trail for every action. The hash-chained audit log is built around the assumption that you'll need to prove what your agents did months later. The Security Swarm (ADR-0033) is the canonical multi-agent example — log-lurkers, anomaly-aces, response-rogues chained through `delegate.v1`, every escalation auditable. v0.4 added the set-and-forget orchestrator (ADR-0041) so verifier-class agents can scan memory for contradictions on a schedule unattended.
+
+**AI researchers and tinkerers** who want a substrate to play with quantified personality, governance under uncertainty, and multi-agent dynamics. The trait engine (29 traits / 6 domains), genre system (13 risk tiers), constitution compiler, and ADR-0036 verifier loop give you knobs that aren't exposed in commercial frameworks. The whole repo is open for hacking — fork it, wire your own roles, try your own genres.
+
+**Power users / advanced operators** who want a sovereign agent runtime they can extend. The plugin / MCP integration story (ADR-0043, in flight) is the v0.5 expansion path: drop in any MCP server, register its tools through Forest's governance pipeline, audit chain captures every external capability use. Forest agents will also be exportable as LangGraph nodes for users with existing LangChain stacks.
+
+**Compliance-heavy teams** evaluating audit-grade agent runtimes. The append-only chain, content-addressed identity, and explicit consent model for cross-agent memory disclosure (ADR-0027) give you the kind of provenance regulators ask about. *Note: Forest does not yet ship SOC 2 / SSO / RBAC / SIEM-shipping out of the box — those land in a v1.x enterprise tier. The substrate is here; the enterprise wrappers are not.*
+
+### Who this is NOT for (yet)
+
+- **Teams who want a hosted, multi-tenant SaaS.** Forest is local-first by design (ADR-0042 D1). You run it on your machine. Multi-machine sync is deferred; cloud-relay multi-tenant is not on the roadmap.
+- **Users who want zero technical setup.** Today's install needs Python 3.11+ and a clone. v0.5 ships a Tauri installer that removes the Python step (ADR-0042 T4); until then it's a developer-facing artifact.
+- **Organizations with strict no-LLM policies.** Forest is LLM-driven, even with a local provider. If "no AI tools" is your stance, this isn't for you.
+- **Users wanting a polished consumer chat product.** Forest's frontend is operator-grade, not consumer-grade. The Chat tab works but assumes you understand conversation runtimes; if you wanted ChatGPT-but-local, look elsewhere.
+
+---
+
 ## 🧱 The systems you actually play with
 
 ### 🎚️ Trait sliders — 29 dimensions, 6 domains
