@@ -112,8 +112,22 @@ class PluginRuntime:
     write is concurrent.
     """
 
-    def __init__(self, repository: PluginRepository) -> None:
+    def __init__(
+        self,
+        repository: PluginRepository,
+        audit_chain: Any = None,
+    ) -> None:
+        """Construct the runtime.
+
+        ``audit_chain`` is optional. When present (lifespan wires the
+        daemon's chain), every lifecycle transition emits one of the
+        ADR-0043 §"Audit events" entries — see :meth:`_emit_audit`.
+        When None (tests / chain-load failure), the runtime still
+        functions; chain coverage just goes silent. Mirrors the
+        scheduler's audit-emit policy from Burst 89.
+        """
         self._repo = repository
+        self._audit = audit_chain
         # name → PluginInfo for currently-INSTALLED (active) plugins
         self._active: dict[str, PluginInfo] = {}
         # name → PluginInfo for DISABLED plugins. Surfaced via /plugins
@@ -233,6 +247,18 @@ class PluginRuntime:
         Caller MUST hold ``app.state.write_lock`` before calling
         — single-writer discipline applies to plugin runtime
         mutations the same way it applies to the registry.
+
+        ADR-0043 audit emit (T4 / Burst 106):
+        * ``plugin_installed`` for each name in ``added``
+        * ``plugin_uninstalled`` for each name in ``removed`` —
+          these are plugins that were active and are now gone from
+          the filesystem entirely (operator ran ``fsf plugin
+          uninstall`` or moved the directory). ``plugin_disabled``
+          is a separate event emitted by :meth:`disable`.
+        Updates (manifest version or sha256 changed) are NOT
+        currently emitted as events; T5 may add a
+        ``plugin_updated`` event if operators need to see binary
+        upgrades on the chain.
         """
         result = ReloadResult()
 
@@ -252,9 +278,16 @@ class PluginRuntime:
                 new_disabled[info.name] = info
 
         with self._snapshot_lock:
-            # Diff active set.
+            # Diff against BOTH active and disabled — a plugin moved
+            # from active to disabled isn't "uninstalled", just paused;
+            # only the move-out-of-the-runtime case fires
+            # plugin_uninstalled.
+            old_known = set(self._active.keys()) | set(self._disabled.keys())
+            new_known = set(new_active.keys()) | set(new_disabled.keys())
+
             old_active_names = set(self._active.keys())
             new_active_names = set(new_active.keys())
+
             result.added = sorted(new_active_names - old_active_names)
             result.removed = sorted(old_active_names - new_active_names)
             for name in new_active_names & old_active_names:
@@ -265,8 +298,31 @@ class PluginRuntime:
                 if old_v != new_v or old_sha != new_sha:
                     result.updated.append(name)
 
+            # Capture the staged-on-disk snapshot needed for emits
+            # before we swap the in-memory state.
+            new_active_snapshot = dict(new_active)
+            uninstalled_names = old_known - new_known
+
             self._active = new_active
             self._disabled = new_disabled
+
+        # Emits happen OUTSIDE the snapshot lock — the chain.append
+        # call may take longer than a microsecond; we don't want
+        # readers blocked on it.
+        for name in result.added:
+            info = new_active_snapshot.get(name)
+            if info is not None:
+                self._emit_audit("plugin_installed", {
+                    "plugin_name": name,
+                    "version": info.manifest.version,
+                    "type": info.manifest.type.value,
+                    "side_effects": info.manifest.side_effects.value,
+                    "capabilities_count": len(info.manifest.capabilities),
+                })
+        for name in sorted(uninstalled_names):
+            self._emit_audit("plugin_uninstalled", {
+                "plugin_name": name,
+            })
 
         logger.info(
             "plugin runtime reload: +%d / -%d / ~%d (errors=%d)",
@@ -277,34 +333,91 @@ class PluginRuntime:
 
     def enable(self, name: str) -> PluginInfo:
         """Move ``name`` from disabled/ to installed/ on disk; refresh
-        the in-process snapshot. Caller holds the write lock."""
+        the in-process snapshot. Caller holds the write lock.
+
+        Emits ``plugin_enabled`` to the audit chain after the move
+        succeeds. The post-move :meth:`reload` may also emit
+        ``plugin_installed`` if this is the first time the plugin
+        appears in the active set; that's expected — they capture
+        different facts (the operator action vs. the runtime
+        registration).
+        """
         info = self._repo.enable(name)
         self.reload()
+        self._emit_audit("plugin_enabled", {
+            "plugin_name": info.name,
+            "version": info.manifest.version,
+            "type": info.manifest.type.value,
+        })
         return info
 
     def disable(self, name: str) -> PluginInfo:
-        """Inverse of :meth:`enable`."""
+        """Inverse of :meth:`enable`. Emits ``plugin_disabled``."""
         info = self._repo.disable(name)
         self.reload()
+        self._emit_audit("plugin_disabled", {
+            "plugin_name": info.name,
+            "version": info.manifest.version,
+            "type": info.manifest.type.value,
+        })
         return info
 
     def verify(self, name: str) -> tuple[bool, PluginInfo]:
         """Re-check the entry-point binary's sha256. Returns
         (matches, info). Operator action on mismatch is to either
         update the manifest's pinned sha256 (trust the new binary)
-        or restore the original binary."""
+        or restore the original binary.
+
+        On mismatch, emits ``plugin_verification_failed`` so the
+        forensic question "when did the operator first notice the
+        binary diverged?" is answerable from the chain. Successful
+        verifications do NOT emit — the chain would be flooded with
+        no-op events from periodic verify polls.
+        """
         info = self._repo.load(name)
         ok = self._repo.verify_binary(name)
+        if not ok:
+            self._emit_audit("plugin_verification_failed", {
+                "plugin_name": info.name,
+                "expected_sha256": info.manifest.entry_point.sha256,
+            })
         return ok, info
 
+    # ---- audit emit ---------------------------------------------------
 
-def build_plugin_runtime(plugin_root: Path | None = None) -> PluginRuntime:
+    def _emit_audit(self, event_type: str, payload: dict[str, Any]) -> None:
+        """Best-effort audit emit. Never raises out of the runtime.
+
+        The audit chain is the evidence layer; if it's down, the
+        runtime keeps working and the operator sees the gap on chain
+        inspection. Same posture as the scheduler's audit-emit
+        policy from Burst 89.
+        """
+        if self._audit is None:
+            return
+        try:
+            self._audit.append(event_type, payload, agent_dna=None)
+        except Exception:
+            logger.exception(
+                "plugin runtime audit emit failed for %s", event_type,
+            )
+
+
+def build_plugin_runtime(
+    plugin_root: Path | None = None,
+    audit_chain: Any = None,
+) -> PluginRuntime:
     """Construct a :class:`PluginRuntime` over the standard plugin
     root (or an override). Performs an initial reload so the runtime
     starts populated. Lifespan calls this once.
+
+    ``audit_chain`` is forwarded to the runtime; the initial reload
+    DOES emit ``plugin_installed`` events for every plugin found
+    on disk, which gives the chain a clean post-restart baseline of
+    what the daemon thinks is active.
     """
     repo = PluginRepository(root=plugin_root)
-    runtime = PluginRuntime(repo)
+    runtime = PluginRuntime(repo, audit_chain=audit_chain)
     # Initial population — equivalent to a startup reload but without
     # the write_lock since lifespan owns the only handle and there are
     # no concurrent writers yet.

@@ -283,3 +283,148 @@ def test_mcp_servers_view_passes_through_unconventional_capabilities(tmp_path: P
     rt.reload()
     view = rt.mcp_servers_view()
     assert view["github-mcp"]["allowlisted_tools"] == ["unconventional_tool_name"]
+
+
+# ---- Audit emit (Burst 106 / T4) ---------------------------------------
+
+class _FakeChain:
+    """Captures audit.append calls so tests can assert event sequence."""
+
+    def __init__(self, raise_on_append: bool = False):
+        self.events: list[tuple[str, dict]] = []
+        self._raise = raise_on_append
+
+    def append(self, event_type, payload, *, agent_dna=None):
+        if self._raise:
+            raise RuntimeError("simulated chain failure")
+        self.events.append((event_type, dict(payload)))
+
+
+def _runtime_with_chain(tmp_path: Path):
+    """Helper: PluginRuntime + a _FakeChain wired in."""
+    chain = _FakeChain()
+    repo = PluginRepository(root=tmp_path / "plugins")
+    rt = PluginRuntime(repo, audit_chain=chain)
+    return rt, chain
+
+
+def test_reload_emits_plugin_installed_for_added(tmp_path: Path):
+    rt, chain = _runtime_with_chain(tmp_path)
+    rt.reload()  # baseline empty — no events
+    assert chain.events == []
+
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
+    rt.reload()
+    types = [e[0] for e in chain.events]
+    assert types == ["plugin_installed"]
+    payload = chain.events[0][1]
+    assert payload["plugin_name"] == "alpha"
+    assert payload["version"] == "0.1.0"
+    assert payload["type"] == "mcp_server"
+    assert payload["side_effects"] == "external"
+    assert payload["capabilities_count"] == 1
+
+
+def test_reload_emits_plugin_uninstalled_for_removed(tmp_path: Path):
+    rt, chain = _runtime_with_chain(tmp_path)
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
+    rt.reload()  # plugin_installed
+    rt.repository.uninstall("alpha")
+    rt.reload()
+    types = [e[0] for e in chain.events]
+    assert types == ["plugin_installed", "plugin_uninstalled"]
+    assert chain.events[1][1]["plugin_name"] == "alpha"
+
+
+def test_reload_does_not_emit_uninstalled_when_only_disabled(tmp_path: Path):
+    """A plugin moving from active to disabled is NOT uninstalled —
+    it stays known to the runtime."""
+    rt, chain = _runtime_with_chain(tmp_path)
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
+    rt.reload()  # plugin_installed
+    chain.events.clear()
+    rt.repository.disable("alpha")
+    rt.reload()
+    # No plugin_uninstalled — alpha is still on disk in disabled/.
+    types = [e[0] for e in chain.events]
+    assert "plugin_uninstalled" not in types
+
+
+def test_enable_emits_plugin_enabled(tmp_path: Path):
+    rt, chain = _runtime_with_chain(tmp_path)
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
+    rt.reload()
+    rt.disable("alpha")
+    chain.events.clear()
+    rt.enable("alpha")
+    types = [e[0] for e in chain.events]
+    # Reload-from-disabled-to-active emits plugin_installed (alpha
+    # appears in active set again), then plugin_enabled records the
+    # operator action explicitly.
+    assert "plugin_installed" in types
+    assert "plugin_enabled" in types
+    enabled_payload = next(p for t, p in chain.events if t == "plugin_enabled")
+    assert enabled_payload["plugin_name"] == "alpha"
+    assert enabled_payload["version"] == "0.1.0"
+
+
+def test_disable_emits_plugin_disabled(tmp_path: Path):
+    rt, chain = _runtime_with_chain(tmp_path)
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
+    rt.reload()
+    chain.events.clear()
+    rt.disable("alpha")
+    types = [e[0] for e in chain.events]
+    assert "plugin_disabled" in types
+    payload = next(p for t, p in chain.events if t == "plugin_disabled")
+    assert payload["plugin_name"] == "alpha"
+
+
+def test_verify_mismatch_emits_plugin_verification_failed(tmp_path: Path):
+    rt, chain = _runtime_with_chain(tmp_path)
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
+    rt.reload()
+    chain.events.clear()
+    info = rt.get("alpha")
+    (info.directory / "server").write_bytes(b"tampered")
+    ok, _ = rt.verify("alpha")
+    assert ok is False
+    types = [e[0] for e in chain.events]
+    assert types == ["plugin_verification_failed"]
+    payload = chain.events[0][1]
+    assert payload["plugin_name"] == "alpha"
+    assert payload["expected_sha256"] == info.manifest.entry_point.sha256
+
+
+def test_verify_match_does_not_emit(tmp_path: Path):
+    """Successful verifies skip the chain — periodic polls would
+    otherwise flood it with no-ops."""
+    rt, chain = _runtime_with_chain(tmp_path)
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
+    rt.reload()
+    chain.events.clear()
+    ok, _ = rt.verify("alpha")
+    assert ok is True
+    assert chain.events == []
+
+
+def test_audit_emit_failure_does_not_break_runtime(tmp_path: Path):
+    """Same posture as the scheduler — chain failures must not block
+    runtime operations."""
+    chain = _FakeChain(raise_on_append=True)
+    repo = PluginRepository(root=tmp_path / "plugins")
+    rt = PluginRuntime(repo, audit_chain=chain)
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
+    # Should not raise even though every chain.append throws.
+    rt.reload()
+    assert {p.name for p in rt.active()} == {"alpha"}
+
+
+def test_runtime_without_chain_is_silent_no_op(tmp_path: Path):
+    """Runtime constructed without a chain handle still operates;
+    audit emits silently no-op."""
+    repo = PluginRepository(root=tmp_path / "plugins")
+    rt = PluginRuntime(repo, audit_chain=None)
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
+    rt.reload()
+    assert {p.name for p in rt.active()} == {"alpha"}

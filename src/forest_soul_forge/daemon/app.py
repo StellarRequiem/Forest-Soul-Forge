@@ -521,6 +521,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                 plugin_root=(
                     _Path(plugin_root_override) if plugin_root_override else None
                 ),
+                audit_chain=audit_chain,
             )
             app.state.plugin_runtime = plugin_runtime
             startup_diagnostics.append({
