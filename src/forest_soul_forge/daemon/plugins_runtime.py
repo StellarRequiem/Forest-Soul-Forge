@@ -1,0 +1,312 @@
+"""Daemon-side plugin runtime — ADR-0043 T3 (Burst 105).
+
+Bridges :class:`forest_soul_forge.plugins.PluginRepository` (the
+on-disk truth) into the running daemon's process state.
+
+What this module owns:
+
+* :class:`PluginRuntime` — the long-lived in-process view of
+  installed/disabled plugins. Lifespan instantiates it; HTTP
+  routes read + mutate it; hot-reload diffs it against the
+  filesystem.
+* Conversion of ``type=mcp_server`` manifests into the
+  ``mcp_servers.yaml``-shaped dict the existing
+  :mod:`mcp_call` tool consumes. T3 builds the conversion;
+  T4 (Burst 106) wires the result into the live dispatcher
+  via constraint injection. For now the conversion is exposed
+  as an introspection helper so tests can verify the bridge is
+  shaped correctly before the dispatcher path lands.
+
+What this module does NOT own (yet):
+
+* Audit-chain emit. The 6 ``plugin_*`` events listed in
+  ADR-0043 §"Audit events" emit from :class:`PluginRuntime`
+  callsites in T4.
+* Constraint injection into :class:`ToolDispatcher`. The
+  dispatcher reads MCP server config from
+  ``ctx.constraints["mcp_registry"]``; T4 will populate that
+  from :meth:`PluginRuntime.mcp_servers_view` when constructing
+  the dispatch context.
+
+Design — single-writer SQLite discipline (ADR-0001) extends to
+the plugin runtime: every mutation grabs ``app.state.write_lock``
+before touching the filesystem. Reads don't need the lock —
+:class:`PluginRepository.list` is a directory scan; momentary
+inconsistency between ``installed/`` and ``disabled/`` mid-rename
+is acceptable for read endpoints (worst case: a plugin briefly
+shows up in both states; the next refresh corrects it).
+"""
+from __future__ import annotations
+
+import logging
+import threading
+from pathlib import Path
+from typing import Any
+
+from forest_soul_forge.plugins import (
+    PluginInfo,
+    PluginRepository,
+    PluginState,
+)
+from forest_soul_forge.plugins.errors import PluginError, PluginNotFound
+from forest_soul_forge.plugins.manifest import PluginType, SideEffects
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Reload diff record — returned from PluginRuntime.reload() so /plugins/reload
+# can show the operator what changed.
+# ---------------------------------------------------------------------------
+class ReloadResult:
+    """Outcome of a hot-reload pass.
+
+    Reported by :meth:`PluginRuntime.reload` so the
+    ``POST /plugins/reload`` endpoint can return a structured
+    summary the operator (or a script) can act on.
+    """
+
+    __slots__ = ("added", "removed", "updated", "errors")
+
+    def __init__(self) -> None:
+        self.added: list[str] = []
+        self.removed: list[str] = []
+        self.updated: list[str] = []
+        # Plugin name → reason. Plugins that failed verification or
+        # had a malformed manifest at reload time are reported here
+        # rather than silently dropped.
+        self.errors: dict[str, str] = {}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "added": list(self.added),
+            "removed": list(self.removed),
+            "updated": list(self.updated),
+            "errors": dict(self.errors),
+        }
+
+    @property
+    def is_clean(self) -> bool:
+        """True iff the reload made no changes AND surfaced no errors."""
+        return (
+            not self.added
+            and not self.removed
+            and not self.updated
+            and not self.errors
+        )
+
+
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+class PluginRuntime:
+    """Long-lived in-process view of installed plugins.
+
+    One instance per daemon lifespan. The HTTP routes look it up
+    from ``app.state.plugin_runtime``.
+
+    Mutating operations (install / uninstall / enable / disable /
+    reload) acquire ``app.state.write_lock`` at the route level
+    before calling through. Read operations are lock-free and may
+    observe a snapshot that's a few microseconds out of date if a
+    write is concurrent.
+    """
+
+    def __init__(self, repository: PluginRepository) -> None:
+        self._repo = repository
+        # name → PluginInfo for currently-INSTALLED (active) plugins
+        self._active: dict[str, PluginInfo] = {}
+        # name → PluginInfo for DISABLED plugins. Surfaced via /plugins
+        # so operators can see what's paused.
+        self._disabled: dict[str, PluginInfo] = {}
+        # Snapshot lock — short-held in mutating methods so the
+        # internal dicts never get observed mid-update by a concurrent
+        # reader. Distinct from app.state.write_lock (which serializes
+        # against the wider daemon, including the audit chain).
+        self._snapshot_lock = threading.Lock()
+
+    @property
+    def repository(self) -> PluginRepository:
+        return self._repo
+
+    # ---- read ----------------------------------------------------------
+
+    def active(self) -> list[PluginInfo]:
+        """All plugins currently in the installed/ state. The order
+        is stable (sorted by name) so callers — especially the
+        frontend — can rely on consistent presentation."""
+        with self._snapshot_lock:
+            return sorted(self._active.values(), key=lambda p: p.name)
+
+    def disabled(self) -> list[PluginInfo]:
+        """All plugins currently in the disabled/ state."""
+        with self._snapshot_lock:
+            return sorted(self._disabled.values(), key=lambda p: p.name)
+
+    def all(self) -> list[PluginInfo]:
+        """Active + disabled, sorted by name."""
+        with self._snapshot_lock:
+            combined: list[PluginInfo] = []
+            combined.extend(self._active.values())
+            combined.extend(self._disabled.values())
+        return sorted(combined, key=lambda p: p.name)
+
+    def get(self, name: str) -> PluginInfo:
+        """Look up one plugin by name. Raises PluginNotFound."""
+        with self._snapshot_lock:
+            if name in self._active:
+                return self._active[name]
+            if name in self._disabled:
+                return self._disabled[name]
+        raise PluginNotFound(f"no plugin named {name!r}")
+
+    # ---- bridge to mcp_call.v1 ----------------------------------------
+
+    def mcp_servers_view(self) -> dict[str, dict[str, Any]]:
+        """Convert active mcp_server-type plugins to the dict shape
+        ``mcp_call.v1`` already consumes (the same shape
+        ``config/mcp_servers.yaml`` produces).
+
+        T3 ships the conversion + introspection. T4 wires the result
+        into the dispatch context so live calls actually use
+        plugin-registered servers.
+
+        Conversion mapping (per ADR-0043 §plugin.yaml schema):
+
+        * ``entry_point.command`` → ``url`` field (with ``stdio:`` prefix
+          if not already URL-shaped). MCP's existing convention is
+          ``stdio:./path`` for subprocess servers.
+        * ``entry_point.sha256`` → ``sha256`` (pin verification stays
+          identical to the YAML path)
+        * ``side_effects`` → ``side_effects``
+        * ``requires_human_approval`` map: a single ``True`` value
+          anywhere flips the registry-level
+          ``requires_human_approval: true`` (mcp_call.v1's current
+          field is per-server boolean, not per-tool — T4+ may extend
+          to per-tool gating that mirrors the manifest map).
+        * ``capabilities`` → ``allowlisted_tools`` (stripping the
+          ``mcp.<server>.`` prefix)
+        """
+        view: dict[str, dict[str, Any]] = {}
+        for info in self._active.values():
+            m = info.manifest
+            if m.type != PluginType.MCP_SERVER:
+                continue
+            entry = m.entry_point
+            # Default to stdio: prefix if the command doesn't already
+            # have a URL scheme. mcp_call.v1's _resolve_server logic
+            # handles 'stdio:' and 'http://' / 'https://' uniformly.
+            url = entry.command
+            if "://" not in url and not url.startswith("stdio:"):
+                url = f"stdio:{url}"
+            # Strip mcp.<server>. prefix from capabilities to recover
+            # the tool names the MCP server itself exposes.
+            tools_prefix = f"mcp.{m.name}."
+            allowlisted_tools: list[str] = []
+            for cap in m.capabilities:
+                if cap.startswith(tools_prefix):
+                    allowlisted_tools.append(cap[len(tools_prefix):])
+                else:
+                    # Capability that doesn't match the namespace
+                    # convention — pass through as-is so plugin authors
+                    # using non-conventional naming still work.
+                    allowlisted_tools.append(cap)
+            requires_approval = any(m.requires_human_approval.values())
+            view[m.name] = {
+                "url": url,
+                "sha256": entry.sha256,
+                "side_effects": m.side_effects.value,
+                "requires_human_approval": requires_approval,
+                "allowlisted_tools": allowlisted_tools,
+                "description": (
+                    f"{m.display_label()} v{m.version} (plugin)"
+                ),
+            }
+        return view
+
+    # ---- mutate --------------------------------------------------------
+
+    def reload(self) -> ReloadResult:
+        """Re-walk the plugin directory and update the in-process
+        view. Returns a :class:`ReloadResult` describing the diff.
+
+        Caller MUST hold ``app.state.write_lock`` before calling
+        — single-writer discipline applies to plugin runtime
+        mutations the same way it applies to the registry.
+        """
+        result = ReloadResult()
+
+        # Fresh disk read.
+        try:
+            disk_infos = self._repo.list()
+        except PluginError as e:
+            result.errors["__repository__"] = str(e)
+            return result
+
+        new_active: dict[str, PluginInfo] = {}
+        new_disabled: dict[str, PluginInfo] = {}
+        for info in disk_infos:
+            if info.state == PluginState.INSTALLED:
+                new_active[info.name] = info
+            else:
+                new_disabled[info.name] = info
+
+        with self._snapshot_lock:
+            # Diff active set.
+            old_active_names = set(self._active.keys())
+            new_active_names = set(new_active.keys())
+            result.added = sorted(new_active_names - old_active_names)
+            result.removed = sorted(old_active_names - new_active_names)
+            for name in new_active_names & old_active_names:
+                old_v = self._active[name].manifest.version
+                new_v = new_active[name].manifest.version
+                old_sha = self._active[name].manifest.entry_point.sha256
+                new_sha = new_active[name].manifest.entry_point.sha256
+                if old_v != new_v or old_sha != new_sha:
+                    result.updated.append(name)
+
+            self._active = new_active
+            self._disabled = new_disabled
+
+        logger.info(
+            "plugin runtime reload: +%d / -%d / ~%d (errors=%d)",
+            len(result.added), len(result.removed),
+            len(result.updated), len(result.errors),
+        )
+        return result
+
+    def enable(self, name: str) -> PluginInfo:
+        """Move ``name`` from disabled/ to installed/ on disk; refresh
+        the in-process snapshot. Caller holds the write lock."""
+        info = self._repo.enable(name)
+        self.reload()
+        return info
+
+    def disable(self, name: str) -> PluginInfo:
+        """Inverse of :meth:`enable`."""
+        info = self._repo.disable(name)
+        self.reload()
+        return info
+
+    def verify(self, name: str) -> tuple[bool, PluginInfo]:
+        """Re-check the entry-point binary's sha256. Returns
+        (matches, info). Operator action on mismatch is to either
+        update the manifest's pinned sha256 (trust the new binary)
+        or restore the original binary."""
+        info = self._repo.load(name)
+        ok = self._repo.verify_binary(name)
+        return ok, info
+
+
+def build_plugin_runtime(plugin_root: Path | None = None) -> PluginRuntime:
+    """Construct a :class:`PluginRuntime` over the standard plugin
+    root (or an override). Performs an initial reload so the runtime
+    starts populated. Lifespan calls this once.
+    """
+    repo = PluginRepository(root=plugin_root)
+    runtime = PluginRuntime(repo)
+    # Initial population — equivalent to a startup reload but without
+    # the write_lock since lifespan owns the only handle and there are
+    # no concurrent writers yet.
+    runtime.reload()
+    return runtime

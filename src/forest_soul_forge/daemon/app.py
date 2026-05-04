@@ -51,6 +51,7 @@ from forest_soul_forge.daemon.routers import hardware as hardware_router
 from forest_soul_forge.daemon.routers import tools_reload as tools_reload_router
 from forest_soul_forge.daemon.routers import traits as traits_router
 from forest_soul_forge.daemon.routers import triune as triune_router
+from forest_soul_forge.daemon.routers import plugins as plugins_router
 from forest_soul_forge.daemon.routers import scheduler as scheduler_router
 from forest_soul_forge.daemon.routers import verifier as verifier_router
 from forest_soul_forge.daemon.routers import writes as writes_router
@@ -506,6 +507,37 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
             await scheduler.start()
         app.state.scheduler = scheduler
 
+        # ADR-0043 T3 (Burst 105): plugin runtime. Walks
+        # ~/.forest/plugins/installed/ on startup and exposes the
+        # /plugins HTTP surface. Daemon-internal mutations grab
+        # write_lock before the runtime touches disk.
+        try:
+            from pathlib import Path as _Path
+            from forest_soul_forge.daemon.plugins_runtime import (
+                build_plugin_runtime,
+            )
+            plugin_root_override = _os.environ.get("FSF_PLUGIN_ROOT")
+            plugin_runtime = build_plugin_runtime(
+                plugin_root=(
+                    _Path(plugin_root_override) if plugin_root_override else None
+                ),
+            )
+            app.state.plugin_runtime = plugin_runtime
+            startup_diagnostics.append({
+                "component": "plugin_runtime",
+                "status": "ok",
+                "active_count": len(plugin_runtime.active()),
+                "disabled_count": len(plugin_runtime.disabled()),
+                "plugin_root": str(plugin_runtime.repository.directories.root),
+            })
+        except Exception as e:
+            startup_diagnostics.append({
+                "component": "plugin_runtime",
+                "status": "load_failed",
+                "error": str(e),
+            })
+            app.state.plugin_runtime = None
+
         try:
             yield
         finally:
@@ -556,6 +588,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(conversations_router.router)
     app.include_router(conversations_admin_router.router)
     app.include_router(scheduler_router.router)
+    app.include_router(plugins_router.router)
     return app
 
 
