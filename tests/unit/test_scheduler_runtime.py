@@ -522,3 +522,223 @@ def test_tool_call_runner_handles_agent_lookup_failure():
         assert "lookup failed" in out["error"]
         assert "KeyError" in out["error"]
     asyncio.run(run())
+
+
+# ---- Persistence (Burst 90) ---------------------------------------------
+
+def _fresh_persistence_db():
+    """Build an in-memory SQLite with the v13 schema for testing."""
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    # Apply only the scheduled_task_state DDL — no need for the full
+    # schema in these tests.
+    conn.execute("""
+        CREATE TABLE scheduled_task_state (
+            task_id                  TEXT PRIMARY KEY,
+            last_run_at              TEXT,
+            next_run_at              TEXT,
+            consecutive_failures     INTEGER NOT NULL DEFAULT 0,
+            circuit_breaker_open     INTEGER NOT NULL DEFAULT 0,
+            total_runs               INTEGER NOT NULL DEFAULT 0,
+            total_successes          INTEGER NOT NULL DEFAULT 0,
+            total_failures           INTEGER NOT NULL DEFAULT 0,
+            last_failure_reason      TEXT,
+            last_run_outcome         TEXT,
+            updated_at               TEXT NOT NULL
+        )
+    """)
+    return conn
+
+
+def test_persistence_repo_upsert_then_read_roundtrip():
+    from forest_soul_forge.daemon.scheduler.persistence import (
+        PersistedState,
+        SchedulerStateRepo,
+    )
+    conn = _fresh_persistence_db()
+    repo = SchedulerStateRepo(conn)
+    state = PersistedState(
+        task_id="verifier_24h",
+        last_run_at="2026-05-04T10:00:00+00:00",
+        next_run_at="2026-05-05T10:00:00+00:00",
+        consecutive_failures=2,
+        circuit_breaker_open=True,
+        total_runs=10,
+        total_successes=7,
+        total_failures=3,
+        last_failure_reason="provider_unavailable",
+        last_run_outcome="failed",
+    )
+    repo.upsert(state)
+    out = repo.read_all()
+    assert "verifier_24h" in out
+    got = out["verifier_24h"]
+    assert got.consecutive_failures == 2
+    assert got.circuit_breaker_open is True
+    assert got.total_runs == 10
+    assert got.last_failure_reason == "provider_unavailable"
+    assert got.last_run_outcome == "failed"
+
+
+def test_persistence_repo_upsert_overwrites():
+    from forest_soul_forge.daemon.scheduler.persistence import (
+        PersistedState,
+        SchedulerStateRepo,
+    )
+    conn = _fresh_persistence_db()
+    repo = SchedulerStateRepo(conn)
+    s1 = PersistedState(
+        task_id="t1", last_run_at=None, next_run_at=None,
+        consecutive_failures=1, circuit_breaker_open=False,
+        total_runs=1, total_successes=0, total_failures=1,
+        last_failure_reason="first", last_run_outcome="failed",
+    )
+    repo.upsert(s1)
+    s2 = PersistedState(
+        task_id="t1", last_run_at="2026-05-04T11:00:00+00:00",
+        next_run_at="2026-05-04T12:00:00+00:00",
+        consecutive_failures=0, circuit_breaker_open=False,
+        total_runs=2, total_successes=1, total_failures=1,
+        last_failure_reason=None, last_run_outcome="succeeded",
+    )
+    repo.upsert(s2)
+    out = repo.read_all()
+    assert len(out) == 1
+    assert out["t1"].consecutive_failures == 0
+    assert out["t1"].last_run_outcome == "succeeded"
+
+
+def test_persistence_repo_delete():
+    from forest_soul_forge.daemon.scheduler.persistence import (
+        PersistedState,
+        SchedulerStateRepo,
+    )
+    conn = _fresh_persistence_db()
+    repo = SchedulerStateRepo(conn)
+    repo.upsert(PersistedState(
+        task_id="t1", last_run_at=None, next_run_at=None,
+        consecutive_failures=0, circuit_breaker_open=False,
+        total_runs=0, total_successes=0, total_failures=0,
+        last_failure_reason=None, last_run_outcome=None,
+    ))
+    assert repo.delete("t1") is True
+    assert repo.delete("t1") is False  # idempotent on missing
+    assert repo.read_all() == {}
+
+
+def test_scheduler_persists_state_after_dispatch():
+    """Every dispatch outcome upserts to the repo. Restart-survives."""
+    from forest_soul_forge.daemon.scheduler.persistence import (
+        SchedulerStateRepo,
+    )
+    async def run():
+        async def runner(config, ctx):
+            return {"ok": False, "error": "test failure"}
+        conn = _fresh_persistence_db()
+        repo = SchedulerStateRepo(conn)
+        sched = Scheduler(state_repo=repo)
+        sched.register_task_type("test_type", runner)
+        task = _task(task_type="test_type", max_consecutive_failures=10)
+        sched.add_task(task)
+        await sched._dispatch(task, datetime.now(timezone.utc))
+        # State was persisted.
+        rows = repo.read_all()
+        assert "t1" in rows
+        assert rows["t1"].consecutive_failures == 1
+        assert rows["t1"].total_failures == 1
+        assert rows["t1"].last_failure_reason == "test failure"
+        assert rows["t1"].last_run_outcome == "failed"
+    asyncio.run(run())
+
+
+def test_scheduler_hydrates_state_on_start():
+    """On Scheduler.start, persisted rows mutate registered tasks."""
+    from forest_soul_forge.daemon.scheduler.persistence import (
+        PersistedState,
+        SchedulerStateRepo,
+    )
+    async def run():
+        conn = _fresh_persistence_db()
+        repo = SchedulerStateRepo(conn)
+        # Pre-populate as if a prior daemon had run this task and
+        # tripped its breaker.
+        repo.upsert(PersistedState(
+            task_id="t1",
+            last_run_at="2026-05-04T09:00:00+00:00",
+            next_run_at="2026-05-04T10:00:00+00:00",
+            consecutive_failures=3,
+            circuit_breaker_open=True,
+            total_runs=12, total_successes=9, total_failures=3,
+            last_failure_reason="provider_unavailable",
+            last_run_outcome="failed",
+        ))
+        sched = Scheduler(poll_interval_seconds=0.05, state_repo=repo)
+        sched.add_task(_task())  # registers t1
+        await sched.start()
+        try:
+            t = sched.get_task("t1")
+            assert t.state.consecutive_failures == 3
+            assert t.state.circuit_breaker_open is True
+            assert t.state.total_runs == 12
+            assert t.state.last_failure_reason == "provider_unavailable"
+            assert t.state.last_run_outcome == "failed"
+            # Datetime fields parsed back to aware datetimes.
+            assert t.state.last_run_at is not None
+            assert t.state.last_run_at.tzinfo is not None
+        finally:
+            await sched.stop()
+    asyncio.run(run())
+
+
+def test_scheduler_no_state_repo_works_in_memory_only():
+    """Without a state_repo, the scheduler still functions; tests
+    that don't care about persistence don't need to provide one."""
+    async def run():
+        async def runner(config, ctx):
+            return {"ok": True}
+        sched = Scheduler()
+        sched.register_task_type("test_type", runner)
+        sched.add_task(_task(task_type="test_type"))
+        await sched.start()
+        await asyncio.sleep(0.1)
+        await sched.stop()
+        # No assertion on persistence; just verify it doesn't crash.
+    asyncio.run(run())
+
+
+def test_scheduler_persist_failure_does_not_break_dispatch():
+    """A broken state_repo must not fail the dispatch."""
+    class _BrokenRepo:
+        def read_all(self):
+            return {}
+        def upsert(self, _state):
+            raise RuntimeError("disk full")
+    async def run():
+        called = []
+        async def runner(config, ctx):
+            called.append(1)
+            return {"ok": True}
+        sched = Scheduler(state_repo=_BrokenRepo())
+        sched.register_task_type("test_type", runner)
+        task = _task(task_type="test_type")
+        sched.add_task(task)
+        # Should not raise even though upsert raises.
+        await sched._dispatch(task, datetime.now(timezone.utc))
+        assert called == [1]
+        assert task.state.total_successes == 1
+    asyncio.run(run())
+
+
+def test_parse_iso_or_none_handles_z_suffix_and_offset():
+    from forest_soul_forge.daemon.scheduler.runtime import _parse_iso_or_none
+    # +00:00 form
+    dt = _parse_iso_or_none("2026-05-04T10:00:00+00:00")
+    assert dt is not None and dt.tzinfo is not None
+    # Z form (3.10 needs the Z->+00:00 fixup)
+    dt2 = _parse_iso_or_none("2026-05-04T10:00:00Z")
+    assert dt2 is not None and dt2.tzinfo is not None
+    # None passthrough
+    assert _parse_iso_or_none(None) is None
+    assert _parse_iso_or_none("") is None
+    # Garbage doesn't crash
+    assert _parse_iso_or_none("not a date") is None

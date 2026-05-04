@@ -52,6 +52,25 @@ logger = logging.getLogger(__name__)
 TaskRunner = Callable[[dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any]]]
 
 
+def _parse_iso_or_none(s: str | None) -> datetime | None:
+    """Parse an ISO-8601 datetime string back to an aware datetime.
+
+    Used by Burst 90 hydration to roundtrip ``last_run_at`` /
+    ``next_run_at`` from the persistence layer. Returns None for
+    None inputs and for unparseable strings (logged but not
+    raised — a corrupt row shouldn't sink the scheduler).
+    """
+    if not s:
+        return None
+    try:
+        # datetime.fromisoformat handles ISO 8601 with offset since 3.11;
+        # 3.10 needs a small fix-up for trailing 'Z'.
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("scheduler ignoring unparseable persisted timestamp: %r", s)
+        return None
+
+
 def _redact_outcome(outcome: dict[str, Any]) -> dict[str, Any]:
     """Drop large/noisy fields from a runner outcome before logging
     it to the audit chain.
@@ -152,7 +171,18 @@ class Scheduler:
         *,
         poll_interval_seconds: float = 30.0,
         context: dict[str, Any] | None = None,
+        state_repo: Any = None,
     ) -> None:
+        """Construct the scheduler.
+
+        ``state_repo`` (Burst 90) is an optional
+        :class:`~forest_soul_forge.daemon.scheduler.persistence.SchedulerStateRepo`.
+        When provided, :meth:`start` hydrates each task's in-memory
+        state from disk, and :meth:`_dispatch` upserts state after
+        every outcome. When None (the default — used by tests that
+        don't care about restart-survival), state lives in-memory
+        only and is lost on stop.
+        """
         self._poll_interval = poll_interval_seconds
         self._context: dict[str, Any] = dict(context or {})
         self._tasks: dict[str, ScheduledTask] = {}
@@ -161,6 +191,7 @@ class Scheduler:
         self._stop_event: asyncio.Event = asyncio.Event()
         self._started = False
         self._lock = asyncio.Lock()
+        self._state_repo = state_repo
 
     # ---- task type registration -------------------------------------------
     def register_task_type(self, name: str, runner: TaskRunner) -> None:
@@ -194,17 +225,93 @@ class Scheduler:
     async def start(self) -> None:
         if self._started:
             raise RuntimeError("scheduler already started")
+        # Hydrate persisted state BEFORE the loop starts (Burst 90).
+        # If the repo isn't wired or read fails, the scheduler still
+        # starts with default-constructed TaskState — degraded but
+        # functional. The audit chain is the source of truth, so a
+        # missed hydrate just means the next dispatch fires sooner
+        # than it would have.
+        self._hydrate_persisted_state()
         self._started = True
         self._stop_event.clear()
         self._poll_task = asyncio.create_task(
             self._run_loop(), name="forest-scheduler-poll"
         )
         logger.info(
-            "scheduler started (poll_interval=%ss, tasks=%d, runners=%s)",
+            "scheduler started (poll_interval=%ss, tasks=%d, runners=%s, persistence=%s)",
             self._poll_interval,
             len(self._tasks),
             sorted(self._runners.keys()),
+            "on" if self._state_repo is not None else "off",
         )
+
+    def _hydrate_persisted_state(self) -> None:
+        """Apply any rows in ``scheduled_task_state`` to in-memory tasks.
+
+        Tasks present in the table but not registered in-memory are
+        ignored (operator removed them from config; the row is
+        garbage-collected on the next operator-driven delete via the
+        Burst 92 endpoints). Tasks registered in-memory but not in the
+        table keep their default TaskState (next_run_at=None → fire
+        on first tick).
+        """
+        if self._state_repo is None:
+            return
+        try:
+            persisted = self._state_repo.read_all()
+        except Exception:
+            logger.exception("scheduler state hydrate failed; starting fresh")
+            return
+        for task in self._tasks.values():
+            row = persisted.get(task.id)
+            if row is None:
+                continue
+            task.state = TaskState(
+                last_run_at=_parse_iso_or_none(row.last_run_at),
+                next_run_at=_parse_iso_or_none(row.next_run_at),
+                consecutive_failures=row.consecutive_failures,
+                circuit_breaker_open=row.circuit_breaker_open,
+                total_runs=row.total_runs,
+                total_successes=row.total_successes,
+                total_failures=row.total_failures,
+                last_failure_reason=row.last_failure_reason,
+                last_run_outcome=row.last_run_outcome,
+            )
+        logger.info(
+            "scheduler hydrated state for %d/%d tasks from persistence",
+            sum(1 for t in self._tasks.values() if t.state.last_run_at is not None),
+            len(self._tasks),
+        )
+
+    def _persist_task_state(self, task: ScheduledTask) -> None:
+        """Mirror ``task.state`` to the persistence layer.
+
+        Best-effort: a persistence failure must not break dispatch.
+        The audit chain is the source of truth; a stale persisted
+        row just means a longer hydrate-replay path on next start.
+        """
+        if self._state_repo is None:
+            return
+        try:
+            from forest_soul_forge.daemon.scheduler.persistence import (
+                PersistedState,
+            )
+            self._state_repo.upsert(PersistedState(
+                task_id=task.id,
+                last_run_at=task.state.last_run_at.isoformat() if task.state.last_run_at else None,
+                next_run_at=task.state.next_run_at.isoformat() if task.state.next_run_at else None,
+                consecutive_failures=task.state.consecutive_failures,
+                circuit_breaker_open=task.state.circuit_breaker_open,
+                total_runs=task.state.total_runs,
+                total_successes=task.state.total_successes,
+                total_failures=task.state.total_failures,
+                last_failure_reason=task.state.last_failure_reason,
+                last_run_outcome=task.state.last_run_outcome,
+            ))
+        except Exception:
+            logger.exception(
+                "scheduler state persistence failed for task %s", task.id,
+            )
 
     async def stop(self) -> None:
         if not self._started:
@@ -355,6 +462,12 @@ class Scheduler:
                     "max_consecutive_failures": task.max_consecutive_failures,
                     "last_error":    task.state.last_failure_reason,
                 })
+
+        # Persist the post-outcome state once, after every branch has
+        # had a chance to mutate it (Burst 90). Single upsert per
+        # dispatch keeps the SQLite write count stable regardless of
+        # outcome shape. Failure here is best-effort — see docstring.
+        self._persist_task_state(task)
 
     def _emit_audit(self, event_type: str, payload: dict[str, Any]) -> None:
         """Best-effort audit emit. Never raises out of the scheduler."""

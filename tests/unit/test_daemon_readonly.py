@@ -139,11 +139,13 @@ class TestHealth:
         # disclosed_* columns + memory_consents (ADR-0027), v10
         # added conversations + participants + turns (ADR-003Y Y1),
         # v11 added the epistemic-memory metadata + memory_contradictions
-        # (ADR-0027-amendment), and v12 added flagged_state on
+        # (ADR-0027-amendment), v12 added flagged_state on
         # memory_contradictions (ADR-0036 T6 — Verifier ratification
-        # dial). Daemon reports the registry's live schema_version;
-        # assertion tracks the live value rather than a stale literal.
-        assert body["schema_version"] == 12
+        # dial), and v13 added scheduled_task_state for the ADR-0041
+        # scheduler's persistence (Burst 90). Daemon reports the
+        # registry's live schema_version; assertion tracks the live
+        # value rather than a stale literal.
+        assert body["schema_version"] == 13
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"

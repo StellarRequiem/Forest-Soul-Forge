@@ -58,8 +58,12 @@ def _two_entries(memory):
 # Schema v12 — bootstrap + migration
 # ===========================================================================
 class TestSchemaV12:
-    def test_schema_constant_is_12(self):
-        assert SCHEMA_VERSION == 12
+    def test_schema_constant_is_at_least_12(self):
+        # The flagged_state column landed at v12 (ADR-0036 T6, Burst 70).
+        # Subsequent bumps (v13 = ADR-0041 T5 scheduler persistence,
+        # Burst 90) MUST keep this invariant. Asserting >=12 keeps this
+        # test stable across future additive bumps.
+        assert SCHEMA_VERSION >= 12
 
     def test_fresh_db_has_flagged_state_column(self, env):
         cols = [

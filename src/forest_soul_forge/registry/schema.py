@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 12
+SCHEMA_VERSION: int = 13
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -441,6 +441,38 @@ DDL_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_turns_conversation ON conversation_turns(conversation_id);",
     "CREATE INDEX IF NOT EXISTS idx_turns_timestamp    ON conversation_turns(timestamp);",
     "CREATE INDEX IF NOT EXISTS idx_turns_speaker      ON conversation_turns(speaker);",
+    # ADR-0041 T5 (Burst 90): scheduled_task_state. Mirrors the
+    # in-memory ``ScheduledTask.state`` so the scheduler survives
+    # daemon restarts. Without persistence:
+    #   * consecutive_failures resets on restart → tripped breakers
+    #     unblock and the broken task retries immediately
+    #   * last_run_at resets → tasks fire IMMEDIATELY on restart even
+    #     if they ran 30s before the crash, double-billing budgets
+    #   * total_runs / total_successes / total_failures lose their
+    #     career history, hiding long-running flakiness
+    # The audit chain is the source of truth (every state change
+    # already emits scheduled_task_dispatched/completed/failed).
+    # This table is the indexed view — fast read on Scheduler.start
+    # without replaying the chain. Updated atomically inside
+    # _dispatch under the daemon's write_lock.
+    """
+    CREATE TABLE IF NOT EXISTS scheduled_task_state (
+        task_id                  TEXT PRIMARY KEY,
+        last_run_at              TEXT,
+        next_run_at              TEXT,
+        consecutive_failures     INTEGER NOT NULL DEFAULT 0,
+        circuit_breaker_open     INTEGER NOT NULL DEFAULT 0,
+        total_runs               INTEGER NOT NULL DEFAULT 0,
+        total_successes          INTEGER NOT NULL DEFAULT 0,
+        total_failures           INTEGER NOT NULL DEFAULT 0,
+        last_failure_reason      TEXT,
+        last_run_outcome         TEXT,
+        updated_at               TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_scheduled_task_state_breaker "
+        "ON scheduled_task_state(circuit_breaker_open) "
+        "WHERE circuit_breaker_open = 1;",
 )
 
 # Metadata rows written on bootstrap. ``canonical_contract`` is a tripwire —
@@ -829,5 +861,33 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX IF NOT EXISTS idx_contradictions_state "
             "ON memory_contradictions(flagged_state) "
             "WHERE flagged_state = 'flagged_unreviewed';",
+    ),
+    # v12 → v13 (ADR-0041 T5, Burst 90): scheduler persistence.
+    # Pure addition — new table only, no existing rows touched. On
+    # daemon restart the scheduler reads this table to rebuild
+    # in-memory ScheduledTask.state, so consecutive_failures /
+    # last_run_at / circuit_breaker_open all survive across crashes
+    # and intentional restarts. See the DDL_STATEMENTS block above
+    # for the schema and the docstring explaining why each column
+    # exists.
+    13: (
+        """
+        CREATE TABLE IF NOT EXISTS scheduled_task_state (
+            task_id                  TEXT PRIMARY KEY,
+            last_run_at              TEXT,
+            next_run_at              TEXT,
+            consecutive_failures     INTEGER NOT NULL DEFAULT 0,
+            circuit_breaker_open     INTEGER NOT NULL DEFAULT 0,
+            total_runs               INTEGER NOT NULL DEFAULT 0,
+            total_successes          INTEGER NOT NULL DEFAULT 0,
+            total_failures           INTEGER NOT NULL DEFAULT 0,
+            last_failure_reason      TEXT,
+            last_run_outcome         TEXT,
+            updated_at               TEXT NOT NULL
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_task_state_breaker "
+            "ON scheduled_task_state(circuit_breaker_open) "
+            "WHERE circuit_breaker_open = 1;",
     ),
 }

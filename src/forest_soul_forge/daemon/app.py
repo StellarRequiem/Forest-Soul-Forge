@@ -426,11 +426,19 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
             Scheduler,
             build_task_from_config,
         )
+        from forest_soul_forge.daemon.scheduler.persistence import (
+            SchedulerStateRepo,
+        )
         from forest_soul_forge.daemon.scheduler.task_types import (
             tool_call_runner,
         )
         scheduler_enabled = (_os.environ.get("FSF_SCHEDULER_ENABLED") or "true").lower() == "true"
         scheduler_poll_interval = float(_os.environ.get("FSF_SCHEDULER_POLL_INTERVAL_SECONDS") or "30")
+        # ADR-0041 T5 (Burst 90): persistence over the registry's
+        # connection. Scheduler.start() reads to hydrate in-memory
+        # state; _dispatch upserts after every outcome under the
+        # write_lock. Schema v13 added scheduled_task_state.
+        scheduler_state_repo = SchedulerStateRepo(registry._conn)  # noqa: SLF001
         scheduler = Scheduler(
             poll_interval_seconds=scheduler_poll_interval,
             context={
@@ -446,6 +454,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                 "providers": providers,
                 "settings": settings,
             },
+            state_repo=scheduler_state_repo,
         )
         # Register task-type runners. Adding a new runner is a
         # one-line change here; the runner module owns its own
