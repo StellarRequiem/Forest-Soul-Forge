@@ -118,3 +118,15 @@ apps/desktop/icons/*.png
 apps/desktop/icons/*.icns
 apps/desktop/icons/*.ico
 !apps/desktop/icons/README.md
+
+# ADR-0042 T4 (Burst 101): bundled daemon binaries. Each
+# developer / CI builds locally for their arch via
+# dist/build-daemon-binary.command — never committed because
+# they're 50-80MB and arch-specific.
+apps/desktop/binaries/
+
+# PyInstaller build artifacts. dist/build-daemon-binary.command
+# writes to dist/build/ (intermediate) and dist/dist/ (final
+# binary). Both are operator-local outputs.
+dist/build/
+dist/dist/

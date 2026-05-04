@@ -34,6 +34,12 @@ apps/desktop/
   out without real icons in `icons/`. Fix: run
   `cargo tauri icon <source.png>` once a 1024×1024 source PNG
   exists. Tracked in `icons/README.md`.
+- **Daemon binary needs to be built once before bundling.** Per
+  T4 / Burst 101, run `dist/build-daemon-binary.command` from
+  the repo root, then stage the output in `apps/desktop/binaries/`
+  with Tauri's per-arch naming convention (see "Production
+  build" below). Without that file, `cargo tauri build` errors
+  with "externalBin not found".
 - **No code signing.** macOS notarization needs an Apple
   Developer account ($99/yr); Windows code-signing needs a
   cert ($200-500/yr). Configured in T5 (Burst 102-103).
@@ -85,6 +91,36 @@ Currently exposed:
   fast-path equivalent for in-shell builds).
 
 More commands land as needed in T4-T5.
+
+## Production build (post-T4)
+
+After Burst 101's daemon-binary work, the production build flow is:
+
+```bash
+# 1. Build the daemon binary (~30-60s, one-time per arch)
+cd <repo-root>
+./dist/build-daemon-binary.command
+
+# 2. Stage the binary for Tauri sidecar bundling. Tauri's
+#    externalBin convention requires the per-arch suffix:
+mkdir -p apps/desktop/binaries
+cp dist/dist/forest-soul-forge-daemon \
+   apps/desktop/binaries/forest-soul-forge-daemon-$(uname -m)-apple-darwin
+
+# 3. Build the Tauri bundle
+cd apps/desktop
+cargo tauri build
+```
+
+The daemon binary lives in `apps/desktop/binaries/` (gitignored;
+each developer/CI builds it locally for the target arch). At
+runtime the Tauri shell looks for the bundled binary adjacent to
+its own executable and prefers it over `python3 -m`.
+
+Cross-arch caveat: build once per target. Apple Silicon →
+`aarch64-apple-darwin`. Intel → `x86_64-apple-darwin`. macOS
+Universal binaries can be assembled via `lipo` after building
+each arch separately.
 
 ## What this directory does NOT replace
 

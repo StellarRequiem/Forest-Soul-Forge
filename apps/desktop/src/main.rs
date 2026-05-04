@@ -32,18 +32,36 @@ use tauri::Manager;
 struct DaemonHandle(Mutex<Option<Child>>);
 
 fn spawn_daemon() -> Result<Child, std::io::Error> {
-    // Dev mode: invoke the project's Python module directly. The
-    // operator's PATH must have python3 + the package installed
-    // (e.g., `pip install -e .` from the repo root).
+    // ADR-0042 T4 (Burst 101): try the bundled binary first; fall
+    // back to python3 -m for development.
     //
-    // T4 replaces this with a bundled binary path:
-    //   let bin = std::env::current_exe()?
-    //       .parent().unwrap()
-    //       .join("forest-soul-forge-daemon");
-    //   Command::new(bin)
+    // Production builds bundle the daemon as a sidecar resource
+    // (Tauri's term) named like
+    //   forest-soul-forge-daemon-<arch>-<platform>
+    // e.g., forest-soul-forge-daemon-aarch64-apple-darwin on
+    // Apple Silicon. Tauri's externalBin config (tauri.conf.json)
+    // arranges for the binary to be copied into the bundle's
+    // resources directory under the bare name (no arch suffix at
+    // runtime). We look for it adjacent to the desktop app's exe.
     //
-    // For now: assume `forest-soul-forge` CLI is on PATH (set by
-    // `pip install -e .`).
+    // Dev fallback: python3 -m forest_soul_forge.daemon (requires
+    // pip install -e . on the host).
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let bundled = dir.join("forest-soul-forge-daemon");
+            if bundled.exists() {
+                return Command::new(bundled)
+                    .args(["--port", "7423"])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn();
+            }
+        }
+    }
+
+    // Dev fallback. Operator must have python3 + the package
+    // installed (pip install -e . from the repo root).
     Command::new("python3")
         .args(["-m", "forest_soul_forge.daemon", "--port", "7423"])
         .stdout(Stdio::piped())

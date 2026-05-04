@@ -38,7 +38,10 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Local-first agent foundry",
-    "longDescription": "Forest Soul Forge is a sovereign, local-first agent foundry. Drag trait sliders to build agents with cryptographically-signed identity, quantified personality, tamper-evident behavior logs, and constitutional rulebooks. Every action lands in a hash-chained audit log on your machine. No cloud, no telemetry."
+    "longDescription": "Forest Soul Forge is a sovereign, local-first agent foundry. Drag trait sliders to build agents with cryptographically-signed identity, quantified personality, tamper-evident behavior logs, and constitutional rulebooks. Every action lands in a hash-chained audit log on your machine. No cloud, no telemetry.",
+    "externalBin": [
+      "binaries/forest-soul-forge-daemon"
+    ]
   },
   "plugins": {}
 }
