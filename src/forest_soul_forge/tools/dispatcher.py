@@ -60,6 +60,7 @@ from forest_soul_forge.tools.governance_pipeline import (
     GenreFloorStep,
     GovernancePipeline,
     HardwareQuarantineStep,
+    McpPerToolApprovalStep,
     PostureOverrideStep,
     StepResult,
     TaskUsageCapStep,
@@ -367,6 +368,13 @@ class ToolDispatcher:
                 initiative_loader_fn=_load_initiative_level,
             ),
             CallCounterStep(counter_get_fn=self.counter_get),
+            # Burst 111 (ADR-0043 follow-up): per-tool
+            # requires_human_approval mirroring for plugin MCP
+            # servers. Sits BEFORE ApprovalGateStep so a per-tool
+            # match folds into the constraint-derived gate path
+            # (single source of approval truth — see step docstring).
+            # No-op when tool is not mcp_call.v1.
+            McpPerToolApprovalStep(),
             ApprovalGateStep(
                 genre_requires_approval_fn=genre_requires_approval,
             ),
@@ -406,6 +414,15 @@ class ToolDispatcher:
         # constraint resolution, posture overrides, genre floor,
         # counter pre-check, approval gate. See governance_pipeline.py
         # for the per-step rationale.
+        #
+        # Burst 111 (ADR-0043 follow-up): compute the merged MCP
+        # registry view ONCE before the pipeline runs so
+        # McpPerToolApprovalStep can consult it. The same merged dict
+        # is reused below to populate ctx.constraints["mcp_registry"]
+        # for the actual execute leg — single source of truth, no
+        # double-merge. None when plugin_runtime is unwired (test
+        # contexts) or the merge produced an empty result.
+        merged_mcp_registry = self._build_merged_mcp_registry()
         dctx = DispatchContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
@@ -418,6 +435,7 @@ class ToolDispatcher:
             args=args,
             provider=provider,
             task_caps=task_caps,
+            mcp_registry=merged_mcp_registry,
         )
         verdict = self._pipeline.run(dctx)
         if verdict.is_refuse:
@@ -488,33 +506,13 @@ class ToolDispatcher:
                 ctx_constraints["context_cap_tokens"] = ccap
 
         # ADR-0043 T4.5: inject plugin-registered MCP servers into
-        # ctx.constraints["mcp_registry"]. mcp_call.v1 reads this key
-        # instead of falling back to its YAML-only loader. Merge order:
-        # YAML (config/mcp_servers.yaml) is the base; plugin manifests
-        # override by name. Operators expressing a server via plugin
-        # are saying "this is the source of truth"; the YAML is the
-        # legacy / pre-plugin path.
-        if self.plugin_runtime is not None:
-            try:
-                plugin_view = self.plugin_runtime.mcp_servers_view()
-            except Exception:
-                # Plugin runtime issues must not break dispatch — the
-                # tool falls back to YAML-only via mcp_call's own
-                # registry loader if this key isn't set.
-                plugin_view = {}
-            if plugin_view:
-                # Lazy import; keeps the dispatcher decoupled from the
-                # tool when plugin_runtime is absent in tests.
-                try:
-                    from forest_soul_forge.tools.builtin.mcp_call import (
-                        _load_registry as _load_yaml_registry,
-                    )
-                    yaml_view = _load_yaml_registry()
-                except Exception:
-                    yaml_view = {}
-                merged: dict[str, Any] = dict(yaml_view)
-                merged.update(plugin_view)  # plugins win on name conflict
-                ctx_constraints["mcp_registry"] = merged
+        # ctx.constraints["mcp_registry"] for the execute leg. The
+        # merged view was already computed before the pipeline ran
+        # (see Burst 111 above) so McpPerToolApprovalStep and
+        # mcp_call.v1's runtime see the same registry — single source
+        # of truth. Reuse it here rather than re-merging.
+        if merged_mcp_registry:
+            ctx_constraints["mcp_registry"] = merged_mcp_registry
         ctx = ToolContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
@@ -707,6 +705,51 @@ class ToolDispatcher:
         except Exception:
             # Audit failure shouldn't mask the dispatch.
             pass
+
+    def _build_merged_mcp_registry(self) -> dict[str, Any] | None:
+        """Compute the merged MCP registry view (YAML base + plugin
+        overrides). Burst 111 (ADR-0043 follow-up).
+
+        Called once per dispatch BEFORE the pipeline runs so
+        :class:`McpPerToolApprovalStep` can consult it. The same dict
+        is reused to populate ``ctx.constraints["mcp_registry"]`` for
+        the execute leg — single source of truth.
+
+        Returns ``None`` when:
+          - ``self.plugin_runtime`` is unwired (test contexts), AND
+          - the YAML loader returns nothing (no curated registry)
+
+        Otherwise returns the merge: YAML is the base, plugin manifests
+        override by name. Operators expressing a server via plugin are
+        saying "this is the source of truth"; the YAML is the legacy
+        / pre-plugin path.
+
+        Errors swallowed: any failure in plugin_runtime or YAML loader
+        falls back to an empty contribution rather than breaking the
+        dispatch. mcp_call.v1's own registry loader is the final
+        fallback if this returns None.
+        """
+        plugin_view: dict[str, Any] = {}
+        if self.plugin_runtime is not None:
+            try:
+                plugin_view = self.plugin_runtime.mcp_servers_view() or {}
+            except Exception:
+                plugin_view = {}
+
+        yaml_view: dict[str, Any] = {}
+        try:
+            from forest_soul_forge.tools.builtin.mcp_call import (
+                _load_registry as _load_yaml_registry,
+            )
+            yaml_view = _load_yaml_registry() or {}
+        except Exception:
+            yaml_view = {}
+
+        if not plugin_view and not yaml_view:
+            return None
+        merged: dict[str, Any] = dict(yaml_view)
+        merged.update(plugin_view)  # plugins win on name conflict
+        return merged
 
     def _sum_session_tokens(self, instance_id: str, session_id: str) -> int:
         """Sum tokens_used across prior dispatches in (instance, session).

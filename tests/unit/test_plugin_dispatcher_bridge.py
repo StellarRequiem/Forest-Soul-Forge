@@ -130,28 +130,40 @@ def test_dispatcher_field_default_is_none():
 def test_dispatcher_skips_injection_when_runtime_is_none():
     """When the dispatcher has no plugin_runtime, ctx.constraints
     must NOT carry an mcp_registry key derived from plugins.
-    Verified by reading the dispatcher source — the branch is
-    gated on `self.plugin_runtime is not None`."""
+
+    Burst 111 refactor: the merge logic moved out of dispatch() into
+    the _build_merged_mcp_registry() helper so the same merged view
+    is consulted by both the pipeline (per-tool gating) and the
+    execute leg. Verify the helper's source still gates on
+    plugin_runtime presence and applies plugin-wins-on-conflict.
+    """
     import inspect
     from forest_soul_forge.tools import dispatcher as disp_mod
-    src = inspect.getsource(disp_mod.ToolDispatcher.dispatch)
-    # The injection guard is in the source.
-    assert "if self.plugin_runtime is not None:" in src
-    # Plugin view wins on name conflict (`merged.update(plugin_view)`)
-    assert "merged.update(plugin_view)" in src
+    helper_src = inspect.getsource(
+        disp_mod.ToolDispatcher._build_merged_mcp_registry,
+    )
+    # The plugin_runtime guard moved into the helper.
+    assert "if self.plugin_runtime is not None:" in helper_src
+    # Plugin view still wins on name conflict (`merged.update(plugin_view)`).
+    assert "merged.update(plugin_view)" in helper_src
 
 
 def test_dispatcher_injection_swallows_runtime_errors():
     """If plugin_runtime.mcp_servers_view() raises, the dispatcher
     falls back to whatever was already in ctx_constraints rather
-    than crashing the dispatch."""
+    than crashing the dispatch.
+
+    Burst 111 refactor: try/except + mcp_servers_view() call live in
+    _build_merged_mcp_registry() now."""
     import inspect
     from forest_soul_forge.tools import dispatcher as disp_mod
-    src = inspect.getsource(disp_mod.ToolDispatcher.dispatch)
-    # Try/except guard around mcp_servers_view present.
-    assert "try:" in src
-    assert "plugin_view = self.plugin_runtime.mcp_servers_view()" in src
-    assert "plugin_view = {}" in src
+    helper_src = inspect.getsource(
+        disp_mod.ToolDispatcher._build_merged_mcp_registry,
+    )
+    assert "try:" in helper_src
+    assert "self.plugin_runtime.mcp_servers_view()" in helper_src
+    # Defensive empty-fallback when the runtime call raises.
+    assert "plugin_view = {}" in helper_src
 
 
 # ---- End-to-end: runtime view shape matches what mcp_call expects ------

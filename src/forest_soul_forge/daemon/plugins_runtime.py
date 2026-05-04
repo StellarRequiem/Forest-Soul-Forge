@@ -193,11 +193,23 @@ class PluginRuntime:
         * ``entry_point.sha256`` → ``sha256`` (pin verification stays
           identical to the YAML path)
         * ``side_effects`` → ``side_effects``
-        * ``requires_human_approval`` map: a single ``True`` value
-          anywhere flips the registry-level
-          ``requires_human_approval: true`` (mcp_call.v1's current
-          field is per-server boolean, not per-tool — T4+ may extend
-          to per-tool gating that mirrors the manifest map).
+        * ``requires_human_approval`` map: two fields are emitted
+          for back-compat AND per-tool fidelity (Burst 111):
+
+            * ``requires_human_approval`` — per-server bool (any
+              True in the map flips it). Kept so older callers and
+              the YAML registry shape continue to work.
+            * ``requires_human_approval_per_tool`` — the full dict
+              ``{tool_name: bool, ...}`` straight from the manifest.
+              The dispatcher's ``McpPerToolApprovalStep`` consults
+              this map at dispatch time so a single
+              ``mcp.foo.write`` can gate while ``mcp.foo.read``
+              slips through, even when the YAML-style server-level
+              bool would have flipped on for both. Lookup key is the
+              bare tool name as it appears in the manifest's
+              ``requires_human_approval`` map (e.g. ``write_file``,
+              not ``mcp.fs.write_file``) — that's what an agent
+              passes as ``tool_name`` to ``mcp_call.v1``.
         * ``capabilities`` → ``allowlisted_tools`` (stripping the
           ``mcp.<server>.`` prefix)
         """
@@ -226,11 +238,18 @@ class PluginRuntime:
                     # using non-conventional naming still work.
                     allowlisted_tools.append(cap)
             requires_approval = any(m.requires_human_approval.values())
+            # Burst 111: pass the full per-tool map straight through
+            # so McpPerToolApprovalStep can gate write_file while
+            # leaving read_file ungated for the same plugin. dict()
+            # makes a shallow copy — defensive, since the manifest
+            # object is shared across calls.
+            per_tool = dict(m.requires_human_approval)
             view[m.name] = {
                 "url": url,
                 "sha256": entry.sha256,
                 "side_effects": m.side_effects.value,
                 "requires_human_approval": requires_approval,
+                "requires_human_approval_per_tool": per_tool,
                 "allowlisted_tools": allowlisted_tools,
                 "description": (
                     f"{m.display_label()} v{m.version} (plugin)"

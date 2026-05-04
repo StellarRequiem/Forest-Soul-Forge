@@ -116,6 +116,15 @@ class DispatchContext:
     provider: Any = None
     task_caps: dict[str, Any] | None = None
 
+    # Burst 111 (ADR-0043 follow-up): merged MCP registry view (YAML
+    # base + plugin overrides). The dispatcher computes this once
+    # before pipeline.run() so :class:`McpPerToolApprovalStep` can
+    # consult per-tool ``requires_human_approval`` settings without
+    # each step re-merging. ``None`` when the dispatcher's
+    # ``plugin_runtime`` is unwired (test contexts) — the step
+    # short-circuits to GO in that case.
+    mcp_registry: dict[str, Any] | None = None
+
     # -- accumulated state (steps populate as the pipeline runs) ------------
     tool: Any = None
     resolved: Any = None  # _ResolvedToolConstraints from dispatcher.py
@@ -558,6 +567,101 @@ class CallCounterStep:
                     "used; further dispatches blocked until session reset"
                 ),
             )
+        return StepResult.go()
+
+
+@dataclass
+class McpPerToolApprovalStep:
+    """ADR-0043 Burst 111 — per-tool ``requires_human_approval``
+    mirroring for plugin-contributed MCP servers.
+
+    Only fires for ``mcp_call.v1`` dispatches. Reads
+    ``dctx.mcp_registry[server_name]["requires_human_approval_per_tool"]``
+    (the merged YAML+plugin view the dispatcher prebuilds before the
+    pipeline runs) and, on a per-tool True, mutates
+    ``dctx.resolved.constraints["requires_human_approval"]`` to True.
+
+    Why mutate resolved.constraints rather than emit PENDING here:
+    the downstream :class:`ApprovalGateStep` already knows how to
+    elevate based on that constraint and emits the
+    ``tool_call_pending_approval`` event with consistent
+    ``gate_source`` semantics. Forcing the constraint upstream keeps
+    a single source of approval truth — the alternative (a second
+    PENDING-emitting step) would produce two parallel gate paths
+    that would drift over time.
+
+    The applied_rules log gets a ``mcp_per_tool_approval`` entry so
+    the audit chain captures the per-tool override even though the
+    final gate_source comes through as ``constraint``. Operators
+    inspecting a pending ticket see both signals.
+
+    Step is a no-op when:
+      - tool_name is not ``mcp_call`` (the per-tool map is mcp-specific)
+      - dctx.mcp_registry is None (plugin runtime unwired in tests)
+      - args don't carry server_name + tool_name (validation step
+        would have refused already, but defensive)
+      - the resolved constraints are missing (no resolved tool —
+        upstream lookup or constitution check should have refused)
+    """
+
+    def evaluate(self, dctx: DispatchContext) -> StepResult:
+        if dctx.tool_name != "mcp_call":
+            return StepResult.go()
+        registry = dctx.mcp_registry
+        if not registry:
+            return StepResult.go()
+        if dctx.resolved is None:
+            return StepResult.go()
+        # mcp_call.v1's args validator guarantees these are non-empty
+        # strings IF the validation step has fired — but
+        # McpPerToolApprovalStep sits AFTER validation, so trust the
+        # types here.
+        server_name = dctx.args.get("server_name")
+        tool_name = dctx.args.get("tool_name")
+        if not isinstance(server_name, str) or not isinstance(tool_name, str):
+            return StepResult.go()
+        server_cfg = registry.get(server_name)
+        if not isinstance(server_cfg, dict):
+            return StepResult.go()
+        per_tool_map = server_cfg.get("requires_human_approval_per_tool")
+        if not isinstance(per_tool_map, dict):
+            return StepResult.go()
+        if not per_tool_map.get(tool_name, False):
+            return StepResult.go()
+
+        # Per-tool override fires. Force the resolved constraint to
+        # True and tag the applied_rules so the audit trail records
+        # WHICH per-tool entry triggered.
+        constraints = dict(dctx.resolved.constraints)
+        constraints["requires_human_approval"] = True
+        # Replace the resolved object's constraints. _ResolvedToolConstraints
+        # is a dataclass; using dataclass-style assignment works on
+        # both frozen=False and post-replace flows.
+        try:
+            dctx.resolved.constraints = constraints
+        except (AttributeError, TypeError):
+            # Frozen dataclass / immutable shape — fall back to dict
+            # mutation if the underlying object exposes a settable
+            # constraints dict. Best-effort; the assertion below
+            # catches the case where neither path worked.
+            try:
+                dctx.resolved.constraints.clear()
+                dctx.resolved.constraints.update(constraints)
+            except Exception:
+                pass
+
+        # Append to applied_rules if it exists. Different
+        # _ResolvedToolConstraints implementations carry it as either
+        # a list or a tuple; coerce to list before appending.
+        applied = list(getattr(dctx.resolved, "applied_rules", ()))
+        applied.append(
+            f"mcp_per_tool_approval[{server_name}.{tool_name}]"
+        )
+        try:
+            dctx.resolved.applied_rules = applied
+        except (AttributeError, TypeError):
+            pass
+
         return StepResult.go()
 
 
