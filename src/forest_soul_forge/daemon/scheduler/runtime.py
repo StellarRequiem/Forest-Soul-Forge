@@ -483,6 +483,97 @@ class Scheduler:
             # inspection.
             logger.exception("scheduler audit emit failed for %s", event_type)
 
+    # ---- operator control (Burst 91, ADR-0041 T6) -------------------------
+    async def trigger(self, task_id: str) -> dict[str, Any]:
+        """Force-dispatch a task right now, out-of-band.
+
+        Returns a small status dict the HTTP endpoint can return
+        directly. Updates ``next_run_at`` like a normal tick — the
+        manual trigger counts as a real run, not a free one. If
+        the task is disabled or its breaker is open, returns
+        ``{"ok": False, "reason": ...}`` without dispatching;
+        operator must enable / reset first.
+
+        The audit chain captures the manual dispatch the same way
+        as a scheduled tick — operators see "manual_trigger=True"
+        is NOT something we currently emit; the chain just shows
+        scheduled_task_dispatched followed by completed/failed.
+        That's intentional for now: a triggered task IS the same
+        operation as a tick-driven one, just on the operator's
+        clock instead of the scheduler's.
+        """
+        task = self._tasks.get(task_id)
+        if task is None:
+            return {"ok": False, "reason": "task_not_found"}
+        if not task.enabled:
+            return {"ok": False, "reason": "task_disabled"}
+        if task.state.circuit_breaker_open:
+            return {"ok": False, "reason": "circuit_breaker_open"}
+        await self._dispatch(task, datetime.now(timezone.utc))
+        return {
+            "ok": True,
+            "task_id": task_id,
+            "outcome": task.state.last_run_outcome,
+            "consecutive_failures": task.state.consecutive_failures,
+            "circuit_breaker_open": task.state.circuit_breaker_open,
+        }
+
+    def set_enabled(self, task_id: str, enabled: bool) -> bool:
+        """Toggle enabled flag. Returns True if task existed,
+        False otherwise.
+
+        Disabling does NOT cancel an in-flight dispatch — the
+        scheduler dispatches serially under the write_lock, so a
+        running task finishes before the next ``due()`` check sees
+        the disabled flag. That's the correct semantics: "do not
+        START new dispatches" is what disable means; "kill the
+        current one mid-execute" is a kill, which we don't do.
+        """
+        task = self._tasks.get(task_id)
+        if task is None:
+            return False
+        task.enabled = enabled
+        # No state.* mutation, but we still want a visible audit
+        # row. The persistence layer doesn't track ``enabled`` —
+        # that lives in the YAML config — so the audit row is the
+        # only durable artifact of this change.
+        self._emit_audit(
+            "scheduled_task_enabled" if enabled else "scheduled_task_disabled",
+            {"task_id": task_id, "task_type": task.task_type},
+        )
+        return True
+
+    def reset(self, task_id: str) -> bool:
+        """Clear the circuit breaker and zero the failure counters.
+
+        Used after the operator has fixed whatever was making the
+        task fail (broken provider, bad config, missing secret).
+        Reset is the unblock; without it a tripped task stays
+        skipped forever. Counters reset because a tripped task
+        with a long failure tail would re-trip immediately on
+        next dispatch under the old streak.
+
+        Persists the cleared state and emits
+        ``scheduled_task_circuit_breaker_reset`` so the chain
+        captures the operator action.
+        """
+        task = self._tasks.get(task_id)
+        if task is None:
+            return False
+        task.state.consecutive_failures = 0
+        task.state.circuit_breaker_open = False
+        task.state.last_failure_reason = None
+        # last_run_outcome left intact — operators looking at
+        # /scheduler/tasks/{id} after reset want to see "the last
+        # outcome was 'failed', I just cleared the breaker." If we
+        # null it they lose context.
+        self._emit_audit("scheduled_task_circuit_breaker_reset", {
+            "task_id": task_id,
+            "task_type": task.task_type,
+        })
+        self._persist_task_state(task)
+        return True
+
     # ---- introspection (for /scheduler/status) ----------------------------
     def status(self) -> dict[str, Any]:
         return {

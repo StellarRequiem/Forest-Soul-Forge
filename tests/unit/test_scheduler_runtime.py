@@ -742,3 +742,121 @@ def test_parse_iso_or_none_handles_z_suffix_and_offset():
     assert _parse_iso_or_none("") is None
     # Garbage doesn't crash
     assert _parse_iso_or_none("not a date") is None
+
+
+# ---- Operator control (Burst 91, ADR-0041 T6) ---------------------------
+
+def test_trigger_dispatches_immediately():
+    """trigger() runs the task right now, even if next_run_at is future."""
+    async def run():
+        calls = []
+        async def runner(config, ctx):
+            calls.append(1)
+            return {"ok": True}
+        sched = Scheduler()
+        sched.register_task_type("test_type", runner)
+        task = _task(task_type="test_type")
+        # Make next_run_at far in the future so a normal tick wouldn't fire.
+        task.state.next_run_at = datetime(2099, 1, 1, tzinfo=timezone.utc)
+        sched.add_task(task)
+        result = await sched.trigger("t1")
+        assert result["ok"] is True
+        assert result["outcome"] == "succeeded"
+        assert len(calls) == 1
+        # Manual trigger STILL counts as a real run.
+        assert task.state.total_runs == 1
+        assert task.state.total_successes == 1
+    asyncio.run(run())
+
+
+def test_trigger_unknown_task_returns_not_found():
+    async def run():
+        sched = Scheduler()
+        result = await sched.trigger("nope")
+        assert result == {"ok": False, "reason": "task_not_found"}
+    asyncio.run(run())
+
+
+def test_trigger_disabled_task_returns_disabled():
+    async def run():
+        async def runner(config, ctx):
+            return {"ok": True}
+        sched = Scheduler()
+        sched.register_task_type("test_type", runner)
+        sched.add_task(_task(task_type="test_type", enabled=False))
+        result = await sched.trigger("t1")
+        assert result == {"ok": False, "reason": "task_disabled"}
+    asyncio.run(run())
+
+
+def test_trigger_breaker_open_refuses():
+    async def run():
+        async def runner(config, ctx):
+            return {"ok": True}
+        sched = Scheduler()
+        sched.register_task_type("test_type", runner)
+        task = _task(task_type="test_type")
+        task.state.circuit_breaker_open = True
+        sched.add_task(task)
+        result = await sched.trigger("t1")
+        assert result == {"ok": False, "reason": "circuit_breaker_open"}
+    asyncio.run(run())
+
+
+def test_set_enabled_toggles_and_emits_audit():
+    chain = _FakeChain()
+    sched = Scheduler(context={"audit_chain": chain})
+    sched.add_task(_task())
+    assert sched.set_enabled("t1", False) is True
+    assert sched.get_task("t1").enabled is False
+    assert sched.set_enabled("t1", True) is True
+    assert sched.get_task("t1").enabled is True
+    types = [e[0] for e in chain.events]
+    assert types == ["scheduled_task_disabled", "scheduled_task_enabled"]
+
+
+def test_set_enabled_unknown_task_returns_false():
+    sched = Scheduler()
+    assert sched.set_enabled("nope", True) is False
+
+
+def test_reset_clears_breaker_and_counters():
+    chain = _FakeChain()
+    sched = Scheduler(context={"audit_chain": chain})
+    task = _task()
+    task.state.consecutive_failures = 5
+    task.state.circuit_breaker_open = True
+    task.state.last_failure_reason = "old failure"
+    task.state.last_run_outcome = "failed"  # NOT cleared by reset
+    sched.add_task(task)
+    assert sched.reset("t1") is True
+    t = sched.get_task("t1")
+    assert t.state.consecutive_failures == 0
+    assert t.state.circuit_breaker_open is False
+    assert t.state.last_failure_reason is None
+    # last_run_outcome left intact so operator can see context.
+    assert t.state.last_run_outcome == "failed"
+    assert chain.events[0][0] == "scheduled_task_circuit_breaker_reset"
+
+
+def test_reset_unknown_task_returns_false():
+    sched = Scheduler()
+    assert sched.reset("nope") is False
+
+
+def test_reset_persists_cleared_state():
+    """After reset, the persisted row reflects the cleared state."""
+    from forest_soul_forge.daemon.scheduler.persistence import (
+        SchedulerStateRepo,
+    )
+    conn = _fresh_persistence_db()
+    repo = SchedulerStateRepo(conn)
+    sched = Scheduler(state_repo=repo)
+    task = _task()
+    task.state.consecutive_failures = 3
+    task.state.circuit_breaker_open = True
+    sched.add_task(task)
+    assert sched.reset("t1") is True
+    rows = repo.read_all()
+    assert rows["t1"].consecutive_failures == 0
+    assert rows["t1"].circuit_breaker_open is False
