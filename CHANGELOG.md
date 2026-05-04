@@ -6,11 +6,84 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
-T4 of ADR-0041 (scenario task type — multi-step birth + seed +
-iterate + archive DSL with FizzBuzz YAML port) is the only
-remaining tranche. v0.4.0-rc was tagged on 2026-05-04 locking the
-production-grade tool_call-only scheduler as a checkpoint before
-T4 lands.
+(Nothing yet for the next release — v0.4.0 was tagged on 2026-05-04.)
+
+## [0.4.0] — 2026-05-04 (ADR-0041 Set-and-Forget Orchestrator complete)
+
+Supersedes v0.4.0-rc. All 5 ADR-0041 implementation tranches now
+shipped, plus the FizzBuzz scenario YAML port that closes the
+Burst 81 P1 audit item.
+
+The set-and-forget orchestrator is feature-complete. Configure
+tasks (`tool_call` or `scenario`) in
+`config/scheduled_tasks.yaml`; the daemon dispatches them on
+cadence through the standard `ToolDispatcher` (so all governance
+applies); state survives daemon restarts via SQLite v13;
+operators trigger / pause / resume / unblock without bouncing
+the daemon. Scenarios are YAML-driven multi-step workflows with
+4 step types (`read_file`, `write_file`, `dispatch_tool`,
+`extract_code_block`, `iterate`) and 3 stop_when kinds
+(`var_truthy`, `var_equals`, `pytest_passed`).
+
+**Test suite: 2,072 → 2,177 passing (+105 across Bursts 86-94).**
+Zero regressions. Schema bump v12 → v13 (pure addition).
+
+### What's new since v0.4.0-rc (Bursts 93, 94)
+
+- **T4 scenario task type runtime** (Burst 93, `4493616`) —
+  YAML loader + variable interpolation + step interpreter.
+  4 step types in v0.4: read_file, write_file, dispatch_tool,
+  iterate. ScenarioRuntime owns one tick; dispatch_tool reuses
+  the cached `ToolDispatcher` via the same
+  `build_or_get_tool_dispatcher(app)` helper as `tool_call`
+  tasks. Step-level relative paths anchor to the scenario YAML's
+  parent directory (portable across operator setups). +34 unit
+  tests covering loader, interpolation, stop_when, file I/O,
+  iterate semantics, and the runner-level error mapping.
+
+- **FizzBuzz scenario YAML port** (Burst 94, `36df3f3`) — closes
+  the Burst 81 P1 audit item. Adds two extensions to the
+  scenario runtime:
+  - `extract_code_block` step — pulls the body from a
+    ` ```<lang> ``` ` fenced block in any string variable. Used
+    to extract Python from LLM responses. Optional language
+    filter; optional `fallback: passthrough` for under-instructed
+    models.
+  - `pytest_passed` stop_when kind — checks a dispatch_tool
+    result whose `pytest_run` output indicates green
+    (`passed > 0` AND `failed == 0` AND `errors == 0`).
+    Domain-specific but the canonical "exit the coding loop"
+    check. Replaces a buggy regex-over-summary_line approach
+    used by the bash driver.
+
+  Plus `config/scenarios/fizzbuzz.yaml` — the canonical scenario.
+  Idempotent seeding (writes fizzbuzz.py stub + test_fizzbuzz.py
+  + README.md every tick), then iterates the 5-step coding loop:
+  pytest_run → stop on green → read current code + tests →
+  dispatch llm_think → extract Python → write fizzbuzz.py.
+
+  Operator usage:
+  ```yaml
+  tasks:
+    - id: fizzbuzz_smoke_6h
+      type: scenario
+      schedule: 'every 6h'
+      config:
+        scenario_path: config/scenarios/fizzbuzz.yaml
+        inputs:
+          agent_id: software_engineer_<dna>
+          target_dir: /abs/path/to/test-runs/scheduled-fizzbuzz
+          max_turns: 10
+  ```
+
+  Differences from the bash live-test-fizzbuzz.command driver:
+  runs inside the daemon's asyncio loop; structured pytest
+  stop-check; daily-rotating session_id; state survives restarts;
+  operator controls via /scheduler endpoints. Bash driver
+  retained for one-shot ad-hoc runs.
+
+  +14 unit tests (extract_code_block: 7, pytest_passed
+  stop_when: 5, FizzBuzz YAML loader+contract smoke: 2).
 
 ## [0.4.0-rc] — 2026-05-04 (ADR-0041 Set-and-Forget Orchestrator)
 
