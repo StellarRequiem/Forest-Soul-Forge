@@ -257,6 +257,10 @@ def _build_parser() -> argparse.ArgumentParser:
     from forest_soul_forge.cli.chronicle import add_subparser as _chronicle_add_subparser
     _chronicle_add_subparser(sub)
 
+    # `fsf plugin ...` — install / list / enable / disable plugins (ADR-0043).
+    from forest_soul_forge.cli.plugin_cmd import add_subparser as _plugin_add_subparser
+    _plugin_add_subparser(sub)
+
     return parser
 
 
