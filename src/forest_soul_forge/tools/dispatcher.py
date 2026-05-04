@@ -304,6 +304,14 @@ class ToolDispatcher:
     # None when the dispatcher wasn't given a registry (test contexts);
     # the tool refuses cleanly with "no agent registry wired."
     agent_registry: Any = None
+    # ADR-0043 T4.5 (Burst 107): plugin runtime view. When set, the
+    # dispatcher merges PluginRuntime.mcp_servers_view() into
+    # ctx.constraints["mcp_registry"] so mcp_call.v1 sees plugin-
+    # registered MCP servers alongside the YAML-curated set. None
+    # when plugins aren't wired (test contexts); mcp_call falls
+    # back to its YAML-only path. Plugins override YAML on name
+    # conflict — the manifest is the operator's newer source of truth.
+    plugin_runtime: Any = None
 
     # R3 (2026-04-30): the pipeline of pre-execute checks. Built
     # once per dispatcher in __post_init__ from the dispatcher's
@@ -478,6 +486,35 @@ class ToolDispatcher:
             ccap = task_caps.get("context_cap_tokens")
             if ccap and isinstance(ccap, int) and ccap > 0:
                 ctx_constraints["context_cap_tokens"] = ccap
+
+        # ADR-0043 T4.5: inject plugin-registered MCP servers into
+        # ctx.constraints["mcp_registry"]. mcp_call.v1 reads this key
+        # instead of falling back to its YAML-only loader. Merge order:
+        # YAML (config/mcp_servers.yaml) is the base; plugin manifests
+        # override by name. Operators expressing a server via plugin
+        # are saying "this is the source of truth"; the YAML is the
+        # legacy / pre-plugin path.
+        if self.plugin_runtime is not None:
+            try:
+                plugin_view = self.plugin_runtime.mcp_servers_view()
+            except Exception:
+                # Plugin runtime issues must not break dispatch — the
+                # tool falls back to YAML-only via mcp_call's own
+                # registry loader if this key isn't set.
+                plugin_view = {}
+            if plugin_view:
+                # Lazy import; keeps the dispatcher decoupled from the
+                # tool when plugin_runtime is absent in tests.
+                try:
+                    from forest_soul_forge.tools.builtin.mcp_call import (
+                        _load_registry as _load_yaml_registry,
+                    )
+                    yaml_view = _load_yaml_registry()
+                except Exception:
+                    yaml_view = {}
+                merged: dict[str, Any] = dict(yaml_view)
+                merged.update(plugin_view)  # plugins win on name conflict
+                ctx_constraints["mcp_registry"] = merged
         ctx = ToolContext(
             instance_id=instance_id,
             agent_dna=agent_dna,

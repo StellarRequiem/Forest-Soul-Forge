@@ -220,6 +220,14 @@ def build_or_get_tool_dispatcher(app):
         # enumerates agents from this; other tools that need to look
         # up siblings/lineage by id will share it.
         agent_registry=fsf_registry,
+        # ADR-0043 T4.5 (Burst 107): plugin runtime. When the
+        # daemon's lifespan successfully constructed it
+        # (app.state.plugin_runtime), the dispatcher gets a
+        # reference. mcp_call.v1 then sees plugin-registered MCP
+        # servers via ctx.constraints["mcp_registry"]. None means
+        # plugins aren't wired (lifespan load failure or test
+        # context) — mcp_call falls back to its YAML-only loader.
+        plugin_runtime=getattr(app.state, "plugin_runtime", None),
     )
     # ADR-0033 A3: build the cross-agent delegator factory now that
     # the dispatcher exists, then mutate the dispatcher to hold a
