@@ -430,6 +430,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
             SchedulerStateRepo,
         )
         from forest_soul_forge.daemon.scheduler.task_types import (
+            scenario_runner,
             tool_call_runner,
         )
         scheduler_enabled = (_os.environ.get("FSF_SCHEDULER_ENABLED") or "true").lower() == "true"
@@ -460,6 +461,10 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         # one-line change here; the runner module owns its own
         # config validation + outcome shape.
         scheduler.register_task_type("tool_call", tool_call_runner)
+        # ADR-0041 T4 (Burst 93): scenario task type. YAML-driven
+        # multi-step workflows. Step types in v0.4: dispatch_tool,
+        # read_file, write_file, iterate.
+        scheduler.register_task_type("scenario", scenario_runner)
         # Optional config file load — silent skip if absent.
         scheduler_config_path = settings.scheduled_tasks_path
         if scheduler_config_path.exists():

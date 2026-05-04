@@ -26,8 +26,11 @@ Future task types (per ADR-0041):
 * ``scenario`` — multi-step birth + seed + iterate + archive
   scenario. Lands in Burst 90.
 """
+from forest_soul_forge.daemon.scheduler.task_types.scenario import (
+    scenario_runner,
+)
 from forest_soul_forge.daemon.scheduler.task_types.tool_call import (
     tool_call_runner,
 )
 
-__all__ = ["tool_call_runner"]
+__all__ = ["scenario_runner", "tool_call_runner"]
