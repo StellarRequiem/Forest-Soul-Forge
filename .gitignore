@@ -100,3 +100,21 @@ demo/
 # F8: built distribution archives. Keep dist/ + dist/build.command +
 # dist/README.md tracked, but never commit the actual .zip outputs.
 dist/forest-soul-forge-*.zip
+
+# ADR-0042 T3 (Burst 99): Tauri/Rust build artifacts. The Rust
+# crate's target/ dir can hit several GB; never commit it.
+# Cargo.lock IS tracked because this is a binary crate (not a
+# library) — Tauri's docs explicitly recommend committing it for
+# reproducible release builds.
+apps/desktop/target/
+apps/desktop/gen/
+
+# Real Tauri icons — generated locally via `cargo tauri icon
+# <source.png>`. Until a 1024×1024 source PNG exists in the repo
+# (or in a tracked design directory), the icons/ dir holds only
+# the placeholder README. Once real icons land we can revisit
+# whether they're tracked or build-time-generated.
+apps/desktop/icons/*.png
+apps/desktop/icons/*.icns
+apps/desktop/icons/*.ico
+!apps/desktop/icons/README.md

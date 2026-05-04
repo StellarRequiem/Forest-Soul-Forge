@@ -1,0 +1,49 @@
+[package]
+# Forest Soul Forge — desktop shell.
+# ADR-0042 T3 (Burst 99). The Tauri-packaged wrapper around the
+# existing daemon + frontend. Production builds bundle the daemon
+# binary (Burst 101); dev-mode spawns `python -m forest_soul_forge.daemon`.
+#
+# Operator one-time setup on host:
+#   cargo install tauri-cli --version "^2.0"
+#   (requires Rust toolchain — install via rustup if not present)
+#
+# Dev run:
+#   cd apps/desktop && cargo tauri dev
+#
+# Production build (currently spawns Python; replace with binary in T4):
+#   cd apps/desktop && cargo tauri build
+#
+# Build outputs:
+#   target/release/bundle/macos/Forest Soul Forge.app
+#   target/release/bundle/dmg/Forest Soul Forge_x.y.z_aarch64.dmg
+#   (or .msi on Windows, .deb / .AppImage on Linux)
+
+name = "forest-soul-forge-desktop"
+version = "0.5.0-dev"
+description = "Forest Soul Forge desktop shell"
+authors = ["StellarRequiem"]
+edition = "2021"
+rust-version = "1.70"
+
+[lib]
+name = "forest_soul_forge_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+# Tauri 2.x — the desktop runtime. Default features include the
+# IPC bridge, window management, and the v2-style plugin system.
+tauri = { version = "2.0", features = [] }
+tauri-plugin-shell = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[features]
+# Tauri's default custom-protocol feature for production builds.
+# Dev builds use a different mechanism; the feature is gated so
+# `cargo tauri dev` doesn't trip the production path.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
