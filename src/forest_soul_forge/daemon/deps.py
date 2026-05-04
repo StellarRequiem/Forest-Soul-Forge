@@ -136,34 +136,48 @@ def get_tool_registry(request: Request):
     return reg
 
 
-def get_tool_dispatcher(request: Request):
-    """Return the shared :class:`ToolDispatcher` or 503 if unavailable.
+class ToolDispatcherUnavailable(RuntimeError):
+    """Raised when the dispatcher's dependencies aren't all present.
 
-    The dispatcher is built lazily on first request and cached on
-    ``app.state.tool_dispatcher`` so the registry, audit chain, and
-    counter callbacks are wired up exactly once. Tests can pre-stash
-    a fake on app.state to bypass the lazy build.
+    The HTTP-flavored ``get_tool_dispatcher`` maps this to 503.
+    Non-HTTP callers (the scheduler, in particular) catch it and decide
+    what to do — typically log + skip the dispatch.
     """
-    cached = getattr(request.app.state, "tool_dispatcher", None)
+
+
+def build_or_get_tool_dispatcher(app):
+    """Build a :class:`ToolDispatcher` from ``app.state`` (or return the cached one).
+
+    Single source of truth for dispatcher construction. Two callers:
+
+    * ``get_tool_dispatcher`` — per-request HTTP dependency.
+    * ``forest_soul_forge.daemon.scheduler.task_types.tool_call`` —
+      scheduler runner for ADR-0041 T3 ``tool_call`` tasks. The
+      scheduler has no ``Request`` so it can't use the HTTP dep
+      directly; it imports this helper instead.
+
+    Raises :class:`ToolDispatcherUnavailable` if any of the required
+    sub-systems failed to load at startup. Lifespan failures are
+    surfaced via ``/healthz``; this helper just refuses to construct
+    a half-wired dispatcher.
+    """
+    cached = getattr(app.state, "tool_dispatcher", None)
     if cached is not None:
         return cached
 
-    registry = getattr(request.app.state, "tool_registry", None)
-    audit = getattr(request.app.state, "audit_chain", None)
-    fsf_registry = getattr(request.app.state, "registry", None)
+    registry = getattr(app.state, "tool_registry", None)
+    audit = getattr(app.state, "audit_chain", None)
+    fsf_registry = getattr(app.state, "registry", None)
     if registry is None or audit is None or fsf_registry is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "tool dispatcher unavailable — one of "
-                "tool_registry/audit_chain/registry failed to load at "
-                "startup. Check /healthz for the underlying error."
-            ),
+        raise ToolDispatcherUnavailable(
+            "tool dispatcher unavailable — one of "
+            "tool_registry/audit_chain/registry failed to load at "
+            "startup. Check /healthz for the underlying error."
         )
     # ADR-0019 T6: pull the loaded genre engine if it's there. Empty
     # engine (load failure / no genres.yaml) is benign — the dispatcher
     # treats a missing engine as 'no enforcement'.
-    genre_engine = getattr(request.app.state, "genre_engine", None)
+    genre_engine = getattr(app.state, "genre_engine", None)
     # ADR-0022 v0.1: build a Memory bound to the registry's connection.
     # Single-writer SQLite discipline is preserved by the daemon's
     # write lock — the dispatcher only touches Memory while holding it.
@@ -175,7 +189,7 @@ def get_tool_dispatcher(request: Request):
     # tamper_detect.v1's SIP path) refuse cleanly when ctx.priv_client
     # is None — the daemon stays up even when the helper isn't
     # installed.
-    priv_client = getattr(request.app.state, "priv_client", None)
+    priv_client = getattr(app.state, "priv_client", None)
     from forest_soul_forge.tools.dispatcher import ToolDispatcher
     dispatcher = ToolDispatcher(
         registry=registry,
@@ -215,8 +229,8 @@ def get_tool_dispatcher(request: Request):
     # is resolved by constructing the dispatcher first and patching
     # the factory in. Same instance, no need for a setter on the
     # frozen dataclass: ToolDispatcher is `@dataclass` (mutable).
-    settings = getattr(request.app.state, "settings", None)
-    write_lock = getattr(request.app.state, "write_lock", None)
+    settings = getattr(app.state, "settings", None)
+    write_lock = getattr(app.state, "write_lock", None)
     if settings is not None and write_lock is not None:
         from forest_soul_forge.tools.delegator import build_delegator_factory
         dispatcher.delegator_factory = build_delegator_factory(
@@ -226,11 +240,29 @@ def get_tool_dispatcher(request: Request):
             skill_install_dir=settings.skill_install_dir,
             write_lock=write_lock,
             provider_resolver=lambda: getattr(
-                request.app.state, "active_provider", None,
+                app.state, "active_provider", None,
             ),
         )
-    request.app.state.tool_dispatcher = dispatcher
+    app.state.tool_dispatcher = dispatcher
     return dispatcher
+
+
+def get_tool_dispatcher(request: Request):
+    """Return the shared :class:`ToolDispatcher` or 503 if unavailable.
+
+    Per-request HTTP dependency. Delegates to
+    :func:`build_or_get_tool_dispatcher`; that helper handles the
+    lazy-build + cache-on-app.state pattern. Splitting the helper out
+    lets the ADR-0041 scheduler reuse the same construction path
+    without forging a fake ``Request`` object.
+    """
+    try:
+        return build_or_get_tool_dispatcher(request.app)
+    except ToolDispatcherUnavailable as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
+        )
 
 
 def get_audit_chain(request: Request) -> "AuditChain":

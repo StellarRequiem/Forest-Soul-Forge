@@ -329,3 +329,196 @@ def test_build_task_from_config_bad_schedule():
     }
     with pytest.raises(ValueError, match="bad schedule"):
         build_task_from_config(spec)
+
+
+# ---- Audit emit (Burst 89) ----------------------------------------------
+
+class _FakeChain:
+    """Captures audit.append calls so tests can assert event sequence."""
+
+    def __init__(self, raise_on_append: bool = False):
+        self.events: list[tuple[str, dict]] = []
+        self._raise = raise_on_append
+
+    def append(self, event_type, payload, *, agent_dna=None):
+        if self._raise:
+            raise RuntimeError("simulated chain failure")
+        self.events.append((event_type, dict(payload)))
+
+
+def test_dispatch_emits_dispatched_then_completed_on_success():
+    async def run():
+        async def runner(config, ctx):
+            return {"ok": True, "agent_id": "a1", "tool": "x.v1"}
+        chain = _FakeChain()
+        sched = Scheduler(context={"audit_chain": chain})
+        sched.register_task_type("test_type", runner)
+        task = _task(task_type="test_type")
+        sched.add_task(task)
+        await sched._dispatch(task, datetime.now(timezone.utc))
+        types = [e[0] for e in chain.events]
+        assert types == ["scheduled_task_dispatched", "scheduled_task_completed"]
+        # Dispatched event has scheduled_at + total_runs
+        assert chain.events[0][1]["task_id"] == "t1"
+        assert chain.events[0][1]["total_runs"] == 1
+        # Completed event has the redacted outcome
+        assert chain.events[1][1]["outcome"] == {"ok": True, "agent_id": "a1", "tool": "x.v1"}
+    asyncio.run(run())
+
+
+def test_dispatch_emits_dispatched_then_failed_on_failure():
+    async def run():
+        async def runner(config, ctx):
+            return {"ok": False, "error": "kaboom"}
+        chain = _FakeChain()
+        sched = Scheduler(context={"audit_chain": chain})
+        sched.register_task_type("test_type", runner)
+        task = _task(task_type="test_type", max_consecutive_failures=10)
+        sched.add_task(task)
+        await sched._dispatch(task, datetime.now(timezone.utc))
+        types = [e[0] for e in chain.events]
+        assert types == ["scheduled_task_dispatched", "scheduled_task_failed"]
+        assert chain.events[1][1]["error"] == "kaboom"
+        assert chain.events[1][1]["consecutive_failures"] == 1
+    asyncio.run(run())
+
+
+def test_dispatch_emits_breaker_tripped_exactly_once_on_threshold():
+    async def run():
+        async def runner(config, ctx):
+            return {"ok": False, "error": "fail"}
+        chain = _FakeChain()
+        sched = Scheduler(context={"audit_chain": chain})
+        sched.register_task_type("test_type", runner)
+        task = _task(task_type="test_type", max_consecutive_failures=2)
+        sched.add_task(task)
+        now = datetime.now(timezone.utc)
+        await sched._dispatch(task, now)  # failure 1
+        await sched._dispatch(task, now)  # failure 2 → trip
+        types = [e[0] for e in chain.events]
+        # Each dispatch emits dispatched + failed; the second dispatch
+        # also emits breaker_tripped.
+        assert types == [
+            "scheduled_task_dispatched", "scheduled_task_failed",
+            "scheduled_task_dispatched", "scheduled_task_failed",
+            "scheduled_task_circuit_breaker_tripped",
+        ]
+        # Tripped event has the threshold + last_error
+        tripped = chain.events[-1][1]
+        assert tripped["consecutive_failures"] == 2
+        assert tripped["max_consecutive_failures"] == 2
+        assert tripped["last_error"] == "fail"
+    asyncio.run(run())
+
+
+def test_dispatch_audit_emit_failure_does_not_break_scheduler():
+    """A broken audit chain must not stop the scheduler from doing its job.
+
+    The chain is the evidence layer; if it's down, the operator sees
+    the gap on chain inspection. Better to lose the audit event than
+    to lose the dispatch entirely.
+    """
+    async def run():
+        called = []
+        async def runner(config, ctx):
+            called.append(1)
+            return {"ok": True}
+        broken_chain = _FakeChain(raise_on_append=True)
+        sched = Scheduler(context={"audit_chain": broken_chain})
+        sched.register_task_type("test_type", runner)
+        task = _task(task_type="test_type")
+        sched.add_task(task)
+        # Should not raise even though chain.append raises
+        await sched._dispatch(task, datetime.now(timezone.utc))
+        assert called == [1]
+        assert task.state.total_successes == 1
+    asyncio.run(run())
+
+
+def test_dispatch_no_audit_chain_in_context_is_silent():
+    """Scheduler still runs when audit_chain is missing entirely.
+
+    Tests that don't pass a chain should work; lifespan-failure
+    contexts where audit_chain didn't load should also work.
+    """
+    async def run():
+        async def runner(config, ctx):
+            return {"ok": True}
+        sched = Scheduler(context={})  # no audit_chain key
+        sched.register_task_type("test_type", runner)
+        task = _task(task_type="test_type")
+        sched.add_task(task)
+        await sched._dispatch(task, datetime.now(timezone.utc))
+        assert task.state.total_successes == 1
+    asyncio.run(run())
+
+
+# ---- _redact_outcome (Burst 89) -----------------------------------------
+
+def test_redact_outcome_keeps_small_fields():
+    from forest_soul_forge.daemon.scheduler.runtime import _redact_outcome
+    raw = {
+        "ok": True, "agent_id": "a1", "tool": "x.v1",
+        "session_id": "s", "tokens_used": 42,
+        "result_digest": "abc", "error": None,
+    }
+    assert _redact_outcome(raw) == raw
+
+
+def test_redact_outcome_drops_large_fields():
+    from forest_soul_forge.daemon.scheduler.runtime import _redact_outcome
+    raw = {
+        "ok": True,
+        "agent_id": "a1",
+        "raw_output": "x" * 100_000,  # huge LLM blob
+        "metadata": {"deeply": {"nested": "junk"}},
+    }
+    out = _redact_outcome(raw)
+    assert out == {"ok": True, "agent_id": "a1"}
+    assert "raw_output" not in out
+    assert "metadata" not in out
+
+
+# ---- tool_call_runner (Burst 89) ----------------------------------------
+
+def test_tool_call_runner_rejects_missing_required_keys():
+    from forest_soul_forge.daemon.scheduler.task_types.tool_call import (
+        tool_call_runner,
+    )
+    async def run():
+        out = await tool_call_runner({}, {})
+        assert out["ok"] is False
+        assert "missing required keys" in out["error"]
+        assert "agent_id" in out["error"]
+        assert "tool_name" in out["error"]
+        assert "tool_version" in out["error"]
+    asyncio.run(run())
+
+
+def test_tool_call_runner_rejects_missing_context():
+    from forest_soul_forge.daemon.scheduler.task_types.tool_call import (
+        tool_call_runner,
+    )
+    async def run():
+        config = {"agent_id": "a1", "tool_name": "x", "tool_version": "1"}
+        out = await tool_call_runner(config, {})  # empty context
+        assert out["ok"] is False
+        assert "missing 'app' or 'registry'" in out["error"]
+    asyncio.run(run())
+
+
+def test_tool_call_runner_handles_agent_lookup_failure():
+    from forest_soul_forge.daemon.scheduler.task_types.tool_call import (
+        tool_call_runner,
+    )
+    class _FakeRegistry:
+        def get_agent(self, _id):
+            raise KeyError("agent not found")
+    async def run():
+        config = {"agent_id": "a1", "tool_name": "x", "tool_version": "1"}
+        ctx = {"app": object(), "registry": _FakeRegistry()}
+        out = await tool_call_runner(config, ctx)
+        assert out["ok"] is False
+        assert "lookup failed" in out["error"]
+        assert "KeyError" in out["error"]
+    asyncio.run(run())

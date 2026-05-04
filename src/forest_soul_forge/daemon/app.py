@@ -417,19 +417,29 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.write_lock = threading.RLock()
 
         # ADR-0041 T2 — scheduler. Started here, stopped in finally.
-        # No task runners registered yet (Burst 87 adds tool_call;
-        # Burst 88 adds scenario). Default: enabled but empty config
-        # = scheduler ticks but has nothing to dispatch. Operator
-        # configures via config/scheduled_tasks.yaml; loaded if present.
+        # ADR-0041 scheduler. T2 (Burst 86) shipped runtime + lifespan
+        # integration. T3 (Burst 89, this) registers the tool_call
+        # task type so scheduled tool dispatches can fire — closes
+        # ADR-0036 T4 (verifier scheduled scans). The runner uses the
+        # standard ToolDispatcher, so all governance applies.
         from forest_soul_forge.daemon.scheduler import (
             Scheduler,
             build_task_from_config,
+        )
+        from forest_soul_forge.daemon.scheduler.task_types import (
+            tool_call_runner,
         )
         scheduler_enabled = (_os.environ.get("FSF_SCHEDULER_ENABLED") or "true").lower() == "true"
         scheduler_poll_interval = float(_os.environ.get("FSF_SCHEDULER_POLL_INTERVAL_SECONDS") or "30")
         scheduler = Scheduler(
             poll_interval_seconds=scheduler_poll_interval,
             context={
+                # ``app`` is in the context so runners can reach
+                # lazily-built subsystems (notably the tool dispatcher
+                # via build_or_get_tool_dispatcher). Holding a ref is
+                # safe — the scheduler's lifecycle is bounded by the
+                # app's lifespan.
+                "app": app,
                 "registry": registry,
                 "audit_chain": audit_chain,
                 "tool_registry": tool_registry,
@@ -437,6 +447,10 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                 "settings": settings,
             },
         )
+        # Register task-type runners. Adding a new runner is a
+        # one-line change here; the runner module owns its own
+        # config validation + outcome shape.
+        scheduler.register_task_type("tool_call", tool_call_runner)
         # Optional config file load — silent skip if absent.
         scheduler_config_path = settings.scheduled_tasks_path
         if scheduler_config_path.exists():

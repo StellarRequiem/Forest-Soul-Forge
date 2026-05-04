@@ -52,6 +52,29 @@ logger = logging.getLogger(__name__)
 TaskRunner = Callable[[dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any]]]
 
 
+def _redact_outcome(outcome: dict[str, Any]) -> dict[str, Any]:
+    """Drop large/noisy fields from a runner outcome before logging
+    it to the audit chain.
+
+    The chain stores small structured events; if a runner returns a
+    large blob (e.g., an LLM response), shoving it into ``event_data``
+    bloats the chain and slows /audit/tail. Keep the small structured
+    fields (ok, agent_id, tool, session_id, tokens_used, result_digest,
+    error) and drop everything else. Burst 89 establishes the
+    redaction discipline; future runners follow the same pattern.
+    """
+    keep = {
+        "ok",
+        "agent_id",
+        "tool",
+        "session_id",
+        "tokens_used",
+        "result_digest",
+        "error",
+    }
+    return {k: v for k, v in outcome.items() if k in keep}
+
+
 @dataclass
 class TaskState:
     """In-memory runtime state for a :class:`ScheduledTask`.
@@ -240,11 +263,27 @@ class Scheduler:
 
     async def _dispatch(self, task: ScheduledTask, now: datetime) -> None:
         """Dispatch one task. Records outcome; updates schedule;
-        flips circuit breaker on consecutive failures.
+        flips circuit breaker on consecutive failures; emits audit
+        events for every state transition.
 
-        Audit-chain emit (`scheduled_task_dispatched` etc.) lands
-        in Burst 87 alongside the first task type runner. The hook
-        below is structured so adding the emit is a one-line change.
+        Audit emit policy (Burst 89):
+        * ``scheduled_task_dispatched`` — before runner invocation,
+          mirrors the dispatcher's pre-execute event. Pairs with one
+          of completed/failed (or its absence is itself diagnostic
+          if the daemon crashes mid-runner).
+        * ``scheduled_task_completed`` — runner returned ok=True.
+        * ``scheduled_task_failed`` — runner returned ok=False or
+          raised.
+        * ``scheduled_task_circuit_breaker_tripped`` — emitted exactly
+          once when ``consecutive_failures`` first crosses
+          ``max_consecutive_failures``. Subsequent ticks while the
+          breaker is open never reach this method (``due()`` returns
+          False), so this fires once per trip.
+
+        Emits are best-effort — a failed audit append must NOT
+        cause the scheduler to lose state. The audit chain is the
+        evidence layer; if it's down, the scheduler still does its
+        job and the operator sees the gap on chain inspection.
         """
         runner = self._runners.get(task.task_type)
         if runner is None:
@@ -254,9 +293,19 @@ class Scheduler:
                 task.task_type,
             )
             return
+
         task.state.last_run_at = now
         task.state.next_run_at = task.schedule.next_after(now, now)
         task.state.total_runs += 1
+
+        self._emit_audit("scheduled_task_dispatched", {
+            "task_id":       task.id,
+            "task_type":     task.task_type,
+            "description":   task.description,
+            "scheduled_at":  now.isoformat(),
+            "total_runs":    task.state.total_runs,
+        })
+
         try:
             outcome = await runner(task.config, self._context)
             ok = bool(outcome.get("ok", True))
@@ -271,18 +320,55 @@ class Scheduler:
             task.state.total_successes += 1
             task.state.last_run_outcome = "succeeded"
             task.state.last_failure_reason = None
+            self._emit_audit("scheduled_task_completed", {
+                "task_id":       task.id,
+                "task_type":     task.task_type,
+                "outcome":       _redact_outcome(outcome),
+                "total_successes": task.state.total_successes,
+            })
         else:
             task.state.consecutive_failures += 1
             task.state.total_failures += 1
             task.state.last_run_outcome = "failed"
             task.state.last_failure_reason = str(outcome.get("error", "unknown"))
-            if task.state.consecutive_failures >= task.max_consecutive_failures:
+            self._emit_audit("scheduled_task_failed", {
+                "task_id":       task.id,
+                "task_type":     task.task_type,
+                "error":         task.state.last_failure_reason,
+                "consecutive_failures": task.state.consecutive_failures,
+                "total_failures": task.state.total_failures,
+            })
+            if (
+                task.state.consecutive_failures >= task.max_consecutive_failures
+                and not task.state.circuit_breaker_open
+            ):
                 task.state.circuit_breaker_open = True
                 logger.warning(
                     "task %s: circuit breaker tripped after %d consecutive failures",
                     task.id,
                     task.state.consecutive_failures,
                 )
+                self._emit_audit("scheduled_task_circuit_breaker_tripped", {
+                    "task_id":       task.id,
+                    "task_type":     task.task_type,
+                    "consecutive_failures": task.state.consecutive_failures,
+                    "max_consecutive_failures": task.max_consecutive_failures,
+                    "last_error":    task.state.last_failure_reason,
+                })
+
+    def _emit_audit(self, event_type: str, payload: dict[str, Any]) -> None:
+        """Best-effort audit emit. Never raises out of the scheduler."""
+        chain = self._context.get("audit_chain")
+        if chain is None:
+            return
+        try:
+            chain.append(event_type, payload, agent_dna=None)
+        except Exception:
+            # The scheduler MUST keep running even if the chain is
+            # down — it's the evidence layer, not the control plane.
+            # Log and continue; the operator sees the gap on chain
+            # inspection.
+            logger.exception("scheduler audit emit failed for %s", event_type)
 
     # ---- introspection (for /scheduler/status) ----------------------------
     def status(self) -> dict[str, Any]:
