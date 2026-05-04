@@ -6,7 +6,122 @@ Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). T
 
 ## [Unreleased]
 
-(Nothing yet for the next release — v0.3.0 was tagged on 2026-05-03.)
+T4 of ADR-0041 (scenario task type — multi-step birth + seed +
+iterate + archive DSL with FizzBuzz YAML port) is the only
+remaining tranche. v0.4.0-rc was tagged on 2026-05-04 locking the
+production-grade tool_call-only scheduler as a checkpoint before
+T4 lands.
+
+## [0.4.0-rc] — 2026-05-04 (ADR-0041 Set-and-Forget Orchestrator)
+
+The set-and-forget orchestrator the operator asked for during the
+v0.3 arc. Configure tasks in `config/scheduled_tasks.yaml`; the
+daemon dispatches them on cadence through the standard
+`ToolDispatcher` (so all governance — constitution, genre kit-tier,
+initiative ladder, per-session counters, approval gates — applies);
+state survives daemon restarts; operators trigger / pause / resume
+/ unblock without bouncing the daemon.
+
+Closes ADR-0036 T4 (Verifier Loop scheduled scans), deferred since
+Burst 67 because the scheduler substrate didn't exist. Configure a
+`tool_call` task with `tool_name: verifier_scan` and the verifier's
+24h scan runs on its own.
+
+**Test suite: 2,072 → 2,129 passing (+57).** Zero regressions
+across the 6-burst arc. Schema bump v12 → v13 (pure addition,
+new `scheduled_task_state` table only).
+
+### ADR-0041 tranches landed
+
+- **T1 design** (Burst 85, `f155c37`) — ADR-0041 filed; 5 tranches
+  specified, in-process scheduler over the daemon's asyncio loop,
+  audit-chain integration as the evidence layer.
+- **T2 runtime + lifespan** (Burst 86, `91a0012`) — `Scheduler`
+  class with poll loop, `ScheduledTask` + `TaskState` dataclasses,
+  interval-schedule parser, `GET /scheduler/status` +
+  `/scheduler/tasks` endpoints. 30 unit tests.
+- **T3 tool_call task runner + audit emit** (Burst 89, `3e5742a`)
+  — `daemon/scheduler/task_types/tool_call.py` async runner.
+  Daily-rotating `session_id` (`sched-<agent>-<tool>-<YYYYMMDD>`
+  UTC) per the ADR's rate-limit mitigation. ADR-0041 open-question
+  (a) resolved: tools requiring human approval surface as failure
+  rather than silently queueing. Six audit events. Refactor:
+  extracted `build_or_get_tool_dispatcher(app)` helper from
+  `get_tool_dispatcher(request)` so non-HTTP callers reuse the
+  construction path. +10 unit tests.
+- **T5 SQLite v13 persistence** (Burst 90, `30d26bf`) — schema
+  v12 → v13 with `scheduled_task_state` table. `SchedulerStateRepo`
+  with `read_all` / `upsert` / `delete`. Hydrate on `start()`;
+  persist on every `_dispatch` outcome inside the write_lock.
+  Without this, every restart reset `consecutive_failures`
+  (broken breakers unblocked, broken tasks immediately retried)
+  and `last_run_at` (tasks fired immediately on restart even if
+  they ran 30s before crash). +8 unit tests.
+- **T6 operator control endpoints** (Burst 91, `c2f6c91`) — four
+  POST endpoints, all `require_writes_enabled + require_api_token`
+  gated:
+  - `POST /scheduler/tasks/{id}/trigger` — force-dispatch
+    out-of-band. 404 unknown / 409 disabled or breaker-open.
+  - `POST /scheduler/tasks/{id}/enable` and `/disable` — toggle
+    flag without restart; in-flight dispatches complete normally.
+  - `POST /scheduler/tasks/{id}/reset` — clear circuit breaker +
+    zero `consecutive_failures` after operator fixes the issue.
+    Persists the cleared state. Leaves `last_run_outcome` intact
+    for context.
+  Three new `Scheduler` methods (`trigger`, `set_enabled`,
+  `reset`) back the endpoints. +9 unit tests.
+
+### Frontend hotfixes (Bursts 86.1, 86.2, 86.3, 88)
+
+The v0.3 → v0.4-rc transition surfaced 6 latent UX bugs across the
+frontend. All found via Chrome MCP tab-by-tab debugging and fixed:
+
+- **Burst 86.1** (`d569e20`) — `chat.js` had `import { state }` but
+  `state.js` only exports `{get,set,subscribe,update}`, not a
+  `state` object. ES module bind failure silently halted the
+  entire frontend graph. Switched to `import * as state` +
+  replaced `state.agents` with `state.get("agents")` in 6 sites.
+  Latent since Burst 7 (Y6 Chat tab debut).
+- **Burst 86.2** (`1a6075d`) — three latent chat-tab bugs: CSS
+  `.chat-dialog` had `display: flex` overriding `[hidden]`; the
+  new-room and bridge dialog dropdowns were populated from a
+  state cache empty unless Agents tab was visited; the
+  add-participant prompt showed truncated 12-char `instance_id`
+  values that didn't match the real IDs.
+- **Burst 86.3** (`f4eeb09`) — replaced `window.prompt()`
+  add-participant flow with a proper DOM dialog + clickable
+  `<select>`. macOS browsers can't copy text from
+  `window.prompt` message bodies. Plus a sticky-chat-bar UX
+  hint: keep input enabled during LLM round-trips and surface
+  an elapsed-time toast when generations exceed 5s.
+- **Burst 88** (`d822608`) — full frontend audit pass via Chrome
+  MCP. 8 tabs swept; 2 latent bugs found and fixed:
+  - **P0** — Memory tab `memory_recall` dispatched without
+    required `session_id` field → 422 every time. Latent since
+    Burst 70 (~2 weeks); the failure mode looked like an empty
+    state. Frontend couldn't load any agent's memory in any of
+    the 4 modes.
+  - **P2** — Approvals tab "refresh" button clipped on the
+    right edge by long agent-name selects. Latent since Burst
+    7; surfaced only after a long-named agent was birthed.
+
+### Other
+
+- **Burst 87** (`061a2c6`) — comprehensive
+  `docs/roadmap/2026-05-03-state-and-roadmap.md`. Honest status
+  doc covering tag state, what shipped, ADR-0041 progress,
+  audit-remediation backlog, frontend polish queue, v0.4
+  architectural decisions awaiting orchestrator, quality gaps,
+  side-quest detours, the recommended next-5-bursts sequence.
+
+### Method note: Chrome MCP frontend audit pattern
+
+Bursts 86.1, 86.2, 86.3, and 88 together found 6 latent UX bugs
+in one session via systematic Chrome MCP tab-by-tab clicking
+(open every tab, click every button, watch console + network).
+The pattern is durable — should become a pre-tag checklist
+before any v0.x.0 release. Cost: ~10min per audit. ROI: 1.5
+bugs per audit run on average across these 4 bursts.
 
 ## [0.3.0] — 2026-05-03 (ADR-0036 Verifier Loop + ADR-0040 Trust-Surface Decomposition)
 

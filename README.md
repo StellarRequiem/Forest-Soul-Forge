@@ -28,18 +28,18 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 | | |
 |---:|:---|
 | **Source LoC (Python)** | **44,648** across `src/` (verified 2026-05-03 audit; package breakdown: tools=18.6k / daemon=10.3k / core=5.2k / registry=3.3k / forge=3.1k / cli=1.5k / soul=1.2k) |
-| **Tests (passing)** | **2,072** unit + integration (was 1,567 at v0.1.2; +505 across the v0.2 + v0.3 arcs, zero regressions) |
-| **ADRs filed** | **37** files / **35** unique numbers (`ADR-0001` → `ADR-0040` with 0009-0015 gap + ADR-003X open-web + ADR-003Y conversation runtime; **ADR-0040 Trust-Surface Decomposition Rule** shipped 2026-05-02; **ADR-0036 Verifier Loop** feature-complete in v0.3 arc; **ADR-0039 Distillation Forge / Swarm Orchestrator** Proposed for v0.4) |
+| **Tests (passing)** | **2,129** unit + integration (was 1,567 at v0.1.2; +562 across the v0.2 + v0.3 + v0.4-rc arcs, zero regressions) |
+| **ADRs filed** | **38** files / **36** unique numbers (`ADR-0001` → `ADR-0041` with 0009-0015 gap + ADR-003X open-web + ADR-003Y conversation runtime; **ADR-0041 Set-and-Forget Orchestrator** Accepted, T1+T2+T3+T5+T6 shipped in v0.4-rc; **ADR-0040 Trust-Surface Decomposition Rule** shipped 2026-05-02; **ADR-0036 Verifier Loop** feature-complete in v0.3 arc; **ADR-0039 Distillation Forge / Swarm Orchestrator** Proposed for v0.4) |
 | **Built-in tools registered** | **53** (catalog + builtin/ source in sync — verified 2026-05-03 audit; was 41 at v0.1.2 + 10 Phase G.1.A primitives in v0.2.0 + memory_flag_contradiction in v0.3 ADR-0036 T2 + memory_verify in K1). The change loop is agent-completable: code_read → static gates → code_edit → pytest_run → pip_install_isolated when a missing dep surfaces. |
 | **Genres** | **13** (7 original + 3 security tiers + 3 web tiers); each genre carries `max_initiative_level` + `default_initiative_level` per ADR-0021-am §3 |
 | **Trait roles** | **18** (5 original + 9 swarm + 3 SW-track: system_architect / software_engineer / code_reviewer + 1 ADR-0036 verifier_loop) |
 | **Skill manifests** | **26 shipped** in `examples/skills/` (canonical authored set), **23 installed** in `data/forge/skills/installed/` (operator-installed subset for live runs) |
-| **Audit event types** | **55** (lifecycle, dispatch, memory, delegation, swarm, forge, conversation, ambient, summarization, verifier scan) |
-| **Registry schema version** | **v12** (v10: conversations / v11: epistemic memory + memory_contradictions table / v12: flagged_state column for ADR-0036 T6 Verifier ratification) |
+| **Audit event types** | **62** (lifecycle, dispatch, memory, delegation, swarm, forge, conversation, ambient, summarization, verifier scan + 7 ADR-0041 scheduler events: scheduled_task_dispatched / completed / failed / circuit_breaker_tripped / circuit_breaker_reset / enabled / disabled) |
+| **Registry schema version** | **v13** (v10: conversations / v11: epistemic memory + memory_contradictions table / v12: flagged_state column for ADR-0036 T6 Verifier ratification / **v13: scheduled_task_state for ADR-0041 T5 — scheduler state survives daemon restarts**) |
 | **Live audit chain** | **`examples/audit_chain.jsonl`** per `daemon/config.py` (override via `FSF_AUDIT_CHAIN_PATH`); 1,083 entries verified 2026-05-03, all hashes link cleanly |
 | **Frontend modules (vanilla JS)** | **22** (`frontend/js/`) |
 | **Frontend tabs** | **8** (Forge / Agents / Approvals / Skills / Tools / Memory / Audit / **Chat**) |
-| **Operator `.command` scripts** | **88** at repo root (start/stop/reset + ~25 live-tests + ~50 commit-burst* + dist/build + ops scripts) |
+| **Operator `.command` scripts** | **104** at repo root (start/stop/reset + ~25 live-tests + ~58 commit-burst* + dist/build + ops scripts; +16 across the v0.4-rc arc) |
 | **Demo scenarios** | 2 (synthetic-incident + fresh-forge, with presenter scripts) |
 | **Isolated demo dir** | `demo/` (start-demo.command points here; prod state untouched) |
 | **Distribution** | `dist/build.command` → `forest-soul-forge-<sha>-<date>.zip` |
