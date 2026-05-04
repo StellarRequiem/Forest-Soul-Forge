@@ -1,0 +1,75 @@
+# Filesystem MCP server (upstream reference implementation).
+#
+# Wraps the modelcontextprotocol/servers#filesystem reference server
+# so Forest agents can read + write files in operator-allowlisted
+# directories.
+#
+# Operator setup:
+#   1. Install the upstream MCP server. Anthropic publishes it at
+#      https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem
+#      (typically via npm: `npm install -g @modelcontextprotocol/server-filesystem`)
+#   2. Compute its sha256:
+#        shasum -a 256 $(which mcp-server-filesystem)
+#   3. Update entry_point.sha256 below with the actual value (the
+#      placeholder is all-zeros).
+#   4. Update entry_point.command to the absolute binary path.
+#   5. Set FILESYSTEM_ROOTS via fsf plugin secrets (or directly via
+#      ~/.forest/secrets) — comma-separated list of directories the
+#      server is allowed to traverse. NEVER set this to /; agents
+#      with filesystem reach should always be scoped.
+#   6. fsf plugin install examples/plugins/filesystem-reference --plugin-root ~/.forest/plugins
+#
+# Why this is a useful example:
+# - filesystem reach is high-side-effect; the requires_human_approval
+#   map shows the per-tool gating pattern (write_file gated, read_file
+#   not)
+# - the underlying server is the canonical MCP reference impl, so its
+#   shape is stable and well-documented
+
+schema_version: 1
+name: filesystem-reference
+display_name: "Filesystem (MCP reference)"
+version: "0.1.0"
+author: "@stellarrequiem"
+homepage: "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+license: "MIT"
+
+type: mcp_server
+side_effects: filesystem
+
+capabilities:
+  - mcp.filesystem-reference.read_file
+  - mcp.filesystem-reference.list_directory
+  - mcp.filesystem-reference.write_file
+  - mcp.filesystem-reference.move_file
+  - mcp.filesystem-reference.delete_file
+  - mcp.filesystem-reference.search_files
+
+# Per-tool approval gates. Read-side is left ungated (assuming the
+# allowed_paths constitution constraint already scopes reach);
+# every write or delete hits the operator approval queue.
+requires_human_approval:
+  read_file: false
+  list_directory: false
+  search_files: false
+  write_file: true
+  move_file: true
+  delete_file: true
+
+entry_point:
+  type: stdio
+  # Operator updates this to the absolute path of the installed
+  # binary. The value below is a placeholder showing the relative-
+  # path convention used during dev iteration.
+  command: ./mcp-server-filesystem
+  # Placeholder. Operator computes sha256 of the actual binary
+  # before installing.
+  sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+
+required_secrets:
+  - name: filesystem-roots
+    description: |
+      Comma-separated list of root directories the server is
+      allowed to traverse. NEVER include / unless this is a
+      sandboxed test agent.
+    env_var: FILESYSTEM_ROOTS

@@ -1,0 +1,61 @@
+# Forest Echo — operator-authored example plugin.
+#
+# A minimal "hello world" MCP server an operator might author
+# themselves. Demonstrates:
+#
+#   - Authoring a plugin from scratch (vs wrapping an upstream)
+#   - read_only side_effects (no governance gating beyond the
+#     constitution-level allowlist)
+#   - Single capability with no required secrets
+#
+# Use this as the starting template when creating your own
+# plugin:
+#
+#   cp -r examples/plugins/forest-echo my-plugin
+#   # Edit plugin.yaml: change name, version, command, sha256
+#   # Add your MCP server binary alongside plugin.yaml
+#   fsf plugin install ./my-plugin --plugin-root ~/.forest/plugins
+#
+# This plugin's "server" is intentionally trivial — it would be
+# a script that takes any input and echoes it back as output.
+# The point is showing the manifest shape, not the runtime
+# behavior.
+#
+# To actually run this plugin, the operator writes a small MCP
+# server (any language; Python + the official MCP Python SDK is
+# easiest) at ./server, makes it executable, computes its
+# sha256, and updates the manifest.
+#
+# Why this is a useful example:
+# - simplest possible manifest (1 capability, 0 secrets, 0
+#   per-call gates, read_only)
+# - shows the in-repo plugin authoring pattern
+# - serves as the canonical "starting template" for the
+#   CONTRIBUTING.md flow
+
+schema_version: 1
+name: forest-echo
+display_name: "Forest Echo"
+version: "0.1.0"
+author: "@your-handle"
+license: "MIT"
+
+type: mcp_server
+side_effects: read_only
+
+capabilities:
+  - mcp.forest-echo.echo
+
+# read_only tools default to no per-call approval; including the
+# explicit map for documentation.
+requires_human_approval:
+  echo: false
+
+entry_point:
+  type: stdio
+  command: ./server
+  # Replace with the sha256 of YOUR server binary before installing.
+  sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+
+# No required secrets — this echo server doesn't need auth.
+required_secrets: []

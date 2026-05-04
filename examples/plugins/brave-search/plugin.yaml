@@ -1,0 +1,58 @@
+# Brave Search MCP server.
+#
+# Gives Forest agents web search via Brave's API. Read-only by
+# nature — every tool returns search results without mutating
+# remote state, so side_effects=network and no per-call
+# approval gating.
+#
+# Operator setup:
+#   1. Get a Brave Search API key from https://api.search.brave.com/
+#   2. Install the MCP server (typically via npm:
+#      `npm install -g @modelcontextprotocol/server-brave-search`)
+#      or directly from
+#      https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search
+#   3. Compute its sha256:
+#        shasum -a 256 $(which mcp-server-brave-search)
+#   4. Update entry_point.sha256 with the actual value.
+#   5. fsf plugin install examples/plugins/brave-search
+#   6. fsf plugin secrets set brave-search BRAVE_API_KEY=<your-key>
+#
+# Why this is a useful example:
+# - read-only network tier — shows the lighter-touch governance
+#   posture (no per-call approval; agent constitutions still
+#   need to declare brave-search in allowed_mcp_servers)
+# - third-party API with auth — exercises the required_secrets
+#   path, which is the most-tested path during plugin install
+
+schema_version: 1
+name: brave-search
+display_name: "Brave Search (MCP)"
+version: "0.1.0"
+author: "@stellarrequiem"
+homepage: "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search"
+license: "MIT"
+
+type: mcp_server
+side_effects: network
+
+capabilities:
+  - mcp.brave-search.brave_web_search
+  - mcp.brave-search.brave_local_search
+
+# All tools are read-only; no per-call gating needed. The
+# constitution-level allowed_mcp_servers list is the agent's gate.
+requires_human_approval:
+  brave_web_search: false
+  brave_local_search: false
+
+entry_point:
+  type: stdio
+  command: ./mcp-server-brave-search
+  sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+
+required_secrets:
+  - name: brave-api-key
+    description: |
+      Brave Search API key. Get one at https://api.search.brave.com/
+      Free tier supports ~2000 queries/month.
+    env_var: BRAVE_API_KEY
