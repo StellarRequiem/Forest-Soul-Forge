@@ -390,3 +390,183 @@ steps:
     assert out["steps_executed"] == 2
     assert out["exit_reason"] == "completed"
     assert (tmp_path / "out.txt").read_text() == "payload"
+
+
+# ---- Burst 94: extract_code_block + pytest_passed + FizzBuzz YAML -------
+
+def test_extract_code_block_python(tmp_path: Path):
+    """Pull the body out of a ```python``` fence."""
+    rt = _runtime(tmp_path)
+    ctx: dict = {}
+    asyncio.run(rt.execute([
+        {"extract_code_block": {
+            "from": "Here is your code:\n```python\ndef foo():\n    return 1\n```\nDone.",
+            "into": "code",
+            "language": "python",
+        }}
+    ], ctx))
+    assert ctx["code"] == "def foo():\n    return 1"
+
+
+def test_extract_code_block_first_match_wins(tmp_path: Path):
+    rt = _runtime(tmp_path)
+    ctx: dict = {}
+    asyncio.run(rt.execute([
+        {"extract_code_block": {
+            "from": "```python\nx = 1\n```\n```python\ny = 2\n```",
+            "into": "code",
+            "language": "python",
+        }}
+    ], ctx))
+    assert ctx["code"] == "x = 1"
+
+
+def test_extract_code_block_language_filter(tmp_path: Path):
+    """Skips non-matching language fences, returns the first
+    matching one."""
+    rt = _runtime(tmp_path)
+    ctx: dict = {}
+    asyncio.run(rt.execute([
+        {"extract_code_block": {
+            "from": "```bash\necho hello\n```\n```python\nprint('ok')\n```",
+            "into": "code",
+            "language": "python",
+        }}
+    ], ctx))
+    assert ctx["code"] == "print('ok')"
+
+
+def test_extract_code_block_no_fence_raises_by_default(tmp_path: Path):
+    rt = _runtime(tmp_path)
+    with pytest.raises(ScenarioError, match="no fenced"):
+        asyncio.run(rt.execute([
+            {"extract_code_block": {
+                "from": "no fences here at all",
+                "into": "code",
+                "language": "python",
+            }}
+        ], {}))
+
+
+def test_extract_code_block_passthrough_fallback(tmp_path: Path):
+    rt = _runtime(tmp_path)
+    ctx: dict = {}
+    asyncio.run(rt.execute([
+        {"extract_code_block": {
+            "from": "no fences but still useful",
+            "into": "code",
+            "fallback": "passthrough",
+        }}
+    ], ctx))
+    assert ctx["code"] == "no fences but still useful"
+
+
+def test_extract_code_block_any_language_when_unspecified(tmp_path: Path):
+    """language: '' (default) matches the first fence regardless of tag."""
+    rt = _runtime(tmp_path)
+    ctx: dict = {}
+    asyncio.run(rt.execute([
+        {"extract_code_block": {
+            "from": "```\nbare fence\n```",
+            "into": "code",
+        }}
+    ], ctx))
+    assert ctx["code"] == "bare fence"
+
+
+def test_extract_code_block_requires_from_and_into(tmp_path: Path):
+    rt = _runtime(tmp_path)
+    with pytest.raises(ScenarioError, match="requires 'from' and 'into'"):
+        asyncio.run(rt.execute([
+            {"extract_code_block": {"into": "x"}}
+        ], {}))
+
+
+def test_stop_when_pytest_passed_matches_on_green():
+    """pytest_passed matches when failed==0, errors==0, passed>0."""
+    ctx = {
+        "test_result": {
+            "ok": True,
+            "output": {
+                "passed": 4,
+                "failed": 0,
+                "errors": 0,
+                "skipped": 0,
+            },
+        },
+    }
+    match = _evaluate_stop_when([{"pytest_passed": "test_result"}], ctx)
+    assert match is not None
+    assert match.startswith("pytest_passed:test_result")
+    assert "4 passed" in match
+
+
+def test_stop_when_pytest_passed_no_match_on_failures():
+    ctx = {
+        "test_result": {
+            "output": {"passed": 3, "failed": 1, "errors": 0},
+        },
+    }
+    assert _evaluate_stop_when([{"pytest_passed": "test_result"}], ctx) is None
+
+
+def test_stop_when_pytest_passed_no_match_on_zero_passed():
+    """A run with 0 tests passed isn't green even if failed/errors are 0.
+    Catches the corner case where the test file collected nothing."""
+    ctx = {
+        "test_result": {
+            "output": {"passed": 0, "failed": 0, "errors": 0},
+        },
+    }
+    assert _evaluate_stop_when([{"pytest_passed": "test_result"}], ctx) is None
+
+
+def test_stop_when_pytest_passed_handles_missing_var():
+    assert _evaluate_stop_when([{"pytest_passed": "absent"}], {}) is None
+
+
+def test_stop_when_pytest_passed_handles_malformed_output():
+    """A var that's not a dict, or output that's not a dict, doesn't crash."""
+    assert _evaluate_stop_when(
+        [{"pytest_passed": "x"}], {"x": "not a dict"},
+    ) is None
+    assert _evaluate_stop_when(
+        [{"pytest_passed": "x"}], {"x": {"output": "not a dict"}},
+    ) is None
+
+
+def test_fizzbuzz_yaml_loads_and_validates():
+    """Smoke: the canonical FizzBuzz scenario at config/scenarios/
+    fizzbuzz.yaml parses and has the required-input contract we
+    advertise. Catches accidental breakage during YAML edits."""
+    # repo_root from this test file (tests/unit/X.py → repo root)
+    repo_root = Path(__file__).resolve().parents[2]
+    p = repo_root / "config" / "scenarios" / "fizzbuzz.yaml"
+    assert p.exists(), f"FizzBuzz YAML missing at {p}"
+    spec = load_scenario(p)
+    assert spec.name == "fizzbuzz"
+    assert "agent_id" in spec.required_inputs
+    assert "target_dir" in spec.required_inputs
+    assert spec.defaults.get("max_turns") == 10
+    # The iterate step should be one of the top-level steps.
+    iterate_steps = [s for s in spec.steps if "iterate" in s]
+    assert len(iterate_steps) == 1
+
+
+def test_fizzbuzz_yaml_input_validation():
+    """Without required inputs, the runner refuses to execute the
+    canonical scenario — proves the input contract is enforced."""
+    from forest_soul_forge.daemon.scheduler.task_types.scenario import (
+        scenario_runner,
+    )
+    repo_root = Path(__file__).resolve().parents[2]
+    p = repo_root / "config" / "scenarios" / "fizzbuzz.yaml"
+    out = asyncio.run(scenario_runner(
+        {"scenario_path": str(p)},  # no inputs
+        {"app": object(), "registry": object()},
+    ))
+    assert out["ok"] is False
+    assert "missing required inputs" in out["error"]
+    # Both required inputs flagged.
+    assert "agent_id" in out["error"]
+    assert "target_dir" in out["error"]

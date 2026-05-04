@@ -1,0 +1,179 @@
+# FizzBuzz autonomous coding-loop scenario.
+#
+# ADR-0041 T4 / Burst 94. Replaces the bash live-test-fizzbuzz.command
+# driver for the canonical autonomous coding loop the foundry runs as
+# a smoke test of its own software-engineering capabilities.
+#
+# Operator setup (one-time):
+# 1. Birth a software_engineer agent. Pre-existing operator workflow
+#    via /birth or the Forge tab. Pass the resulting instance_id as
+#    the agent_id input below.
+# 2. Pre-seed the target_dir with test_fizzbuzz.py + a fizzbuzz.py
+#    stub. The seed step inside the scenario is intentionally
+#    explicit-content rather than file-system-touching so the
+#    scenario stays portable across operator setups.
+#
+# Operator usage (recurring, once seeded):
+#   tasks:
+#     - id: fizzbuzz_smoke_6h
+#       type: scenario
+#       schedule: "every 6h"
+#       enabled: true
+#       config:
+#         scenario_path: config/scenarios/fizzbuzz.yaml
+#         inputs:
+#           agent_id: software_engineer_<dna>
+#           target_dir: /abs/path/to/data/test-runs/scheduled-fizzbuzz
+#           max_turns: 10
+#
+# What the scenario does:
+# - Seeds fizzbuzz.py + test_fizzbuzz.py + README.md inside target_dir
+#   (every tick — idempotent, ensures a clean starting state for the
+#   loop even if a prior tick left the workspace in a partial state).
+# - Loops up to max_turns:
+#     1. Run pytest_run on test_fizzbuzz.py.
+#     2. If green, exit with stop_reason=pytest_passed.
+#     3. Read current fizzbuzz.py + test_fizzbuzz.py contents.
+#     4. Dispatch llm_think with a coding prompt.
+#     5. Extract the ```python``` block from the response.
+#     6. Write it back to fizzbuzz.py.
+#
+# Differences from the bash driver:
+# - Runs inside the daemon's asyncio loop instead of as bash. Same
+#   audit-chain integration, same dispatcher, same governance.
+# - Uses the structured pytest_run output for the stop check
+#   (failed==0 AND errors==0 AND passed>0) instead of regex over
+#   summary_line. More reliable.
+# - Daily-rotating session_id (sched-scenario-fizzbuzz-YYYYMMDD)
+#   per ADR-0041 rate-limit mitigation. Bash driver used a
+#   timestamp suffix that didn't preserve daily-counter semantics.
+
+name: fizzbuzz
+description: "Autonomous FizzBuzz coding loop — agent edits fizzbuzz.py until pytest passes."
+
+inputs:
+  required:
+    - agent_id
+    - target_dir
+  optional:
+    - max_turns
+
+defaults:
+  max_turns: 10
+
+steps:
+  # Step 1: seed the workspace. Every tick re-seeds so a partial
+  # prior run doesn't poison the loop.
+  - write_file:
+      path: "${target_dir}/fizzbuzz.py"
+      content: |
+        def fizzbuzz(n: int) -> list[str]:
+            raise NotImplementedError
+
+  - write_file:
+      path: "${target_dir}/test_fizzbuzz.py"
+      content: |
+        from fizzbuzz import fizzbuzz
+
+
+        def test_first_five():
+            assert fizzbuzz(5) == ["1", "2", "Fizz", "4", "Buzz"]
+
+
+        def test_fifteen_hits_fizzbuzz():
+            out = fizzbuzz(15)
+            assert out[14] == "FizzBuzz"
+
+
+        def test_zero_returns_empty():
+            assert fizzbuzz(0) == []
+
+
+        def test_one_returns_one():
+            assert fizzbuzz(1) == ["1"]
+
+  - write_file:
+      path: "${target_dir}/README.md"
+      content: |
+        # FizzBuzz scenario workspace
+
+        Goal: implement `fizzbuzz(n)` in `fizzbuzz.py` so that
+        `pytest test_fizzbuzz.py` passes. Output a list of strings.
+
+  # Step 2: the iterate-until-green loop.
+  - iterate:
+      max_turns: "${max_turns}"
+      stop_when:
+        - pytest_passed: test_result
+      step:
+        # 2a. Run the tests. If green, the stop_when above exits
+        # the loop after this step.
+        - dispatch_tool:
+            agent_id: "${agent_id}"
+            tool: pytest_run
+            version: "1"
+            args:
+              target: "${target_dir}/test_fizzbuzz.py"
+              max_failures: 5
+            into: test_result
+
+        # 2b. Read the current state. The LLM gets the full file
+        # plus the tests so it can iterate on its own prior output.
+        - read_file:
+            path: "${target_dir}/fizzbuzz.py"
+            into: current_code
+
+        - read_file:
+            path: "${target_dir}/test_fizzbuzz.py"
+            into: test_code
+
+        # 2c. Ask the LLM to write a complete new fizzbuzz.py.
+        # Prompt is intentionally narrow — "output ONLY the file
+        # contents, no markdown explanation" — to keep the
+        # extraction step reliable.
+        - dispatch_tool:
+            agent_id: "${agent_id}"
+            tool: llm_think
+            version: "1"
+            args:
+              prompt: |
+                You are completing a Python file so its tests pass.
+                Output ONLY the complete contents of fizzbuzz.py
+                inside a single ```python``` fenced block. No
+                explanation, no other files.
+
+                The function MUST return a list of strings, not
+                print. n=0 returns []. Multiples of 3 → "Fizz",
+                of 5 → "Buzz", of 15 → "FizzBuzz", otherwise the
+                number as a string.
+
+                CURRENT fizzbuzz.py:
+                ```python
+                ${current_code}
+                ```
+
+                test_fizzbuzz.py (do not modify, just satisfy):
+                ```python
+                ${test_code}
+                ```
+
+                Output the complete new fizzbuzz.py:
+              max_tokens: 600
+              task_kind: software_engineering
+            into: llm_result
+
+        # 2d. Extract just the Python out of the response. If the
+        # LLM didn't fence its output we fall back to writing the
+        # whole response verbatim — saves runs against an
+        # under-instructed model.
+        - extract_code_block:
+            from: "${llm_result.output.response}"
+            into: extracted_code
+            language: python
+            fallback: passthrough
+
+        # 2e. Write the new code. Next iteration's pytest_run will
+        # tell us if it worked.
+        - write_file:
+            path: "${target_dir}/fizzbuzz.py"
+            content: "${extracted_code}"

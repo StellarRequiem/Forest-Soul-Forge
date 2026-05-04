@@ -186,6 +186,13 @@ def _evaluate_stop_when(
 
     - ``var_truthy: <name>`` — stops when ctx[name] is truthy.
     - ``var_equals: {var: <name>, value: <x>}`` — stops on equality.
+    - ``pytest_passed: <name>`` — stops when ctx[name] is a
+      dispatch_tool result whose pytest_run output indicates a
+      green run: ``output.passed > 0`` AND ``output.failed == 0``
+      AND ``output.errors == 0``. Domain-specific, but the
+      canonical "exit the coding loop" check that
+      live-test-fizzbuzz.command does as a regex on `summary_line`.
+      The structured check is more reliable.
 
     Unknown shapes raise ScenarioError so typos surface loudly
     rather than as silent never-stops.
@@ -217,6 +224,26 @@ def _evaluate_stop_when(
                 got = None
             if got == target:
                 return f"var_equals:{name}={target!r}"
+        elif kind == "pytest_passed":
+            name = str(body)
+            try:
+                got = _resolve_dotted(ctx, name)
+            except KeyError:
+                got = None
+            # Expected shape from dispatch_tool result + pytest_run output.
+            if not isinstance(got, dict):
+                continue
+            output = got.get("output") if isinstance(got, dict) else None
+            if not isinstance(output, dict):
+                continue
+            try:
+                passed = int(output.get("passed", 0))
+                failed = int(output.get("failed", 0))
+                errors = int(output.get("errors", 0))
+            except (TypeError, ValueError):
+                continue
+            if passed > 0 and failed == 0 and errors == 0:
+                return f"pytest_passed:{name}({passed} passed)"
         else:
             raise ScenarioError(f"unknown stop_when kind: {kind!r}")
     return None
@@ -402,6 +429,62 @@ async def _step_dispatch_tool(
     raise ScenarioError(f"unknown dispatch outcome: {type(outcome).__name__}")
 
 
+_FENCE_RE = re.compile(
+    # Match ``` followed by optional language tag, then capture the
+    # body up to the next closing fence. DOTALL so .* spans newlines.
+    r"```(?P<lang>[a-zA-Z0-9_+-]*)\s*\n(?P<body>.*?)\n?```",
+    re.DOTALL,
+)
+
+
+async def _step_extract_code_block(
+    runtime: ScenarioRuntime,
+    body: dict[str, Any],
+    ctx: dict[str, Any],
+) -> None:
+    """Extract a fenced code block from a string variable.
+
+    Body shape::
+
+        extract_code_block:
+          from: "${llm_result.output.response}"
+          into: code
+          language: python   # optional; default "" matches any
+          fallback: passthrough  # optional; default "raise"
+
+    The extractor finds the first ```<language> ... ``` block in
+    ``from`` and stores its inner text in ``into``. If no fence
+    matches and ``fallback: passthrough`` is set, the entire input
+    is stored verbatim — useful for LLMs that don't always wrap
+    code in fences. Default ``fallback: raise`` aborts the
+    scenario with ScenarioError.
+
+    This is the load-bearing extractor for coding-loop scenarios:
+    LLMs return Python wrapped in ```python ... ``` and we need
+    just the body to write back to fizzbuzz.py.
+    """
+    if not isinstance(body, dict):
+        raise ScenarioError(f"extract_code_block body must be a mapping, got {body!r}")
+    src = body.get("from")
+    into = body.get("into")
+    language = body.get("language", "")
+    fallback = body.get("fallback", "raise")
+    if src is None or not into:
+        raise ScenarioError("extract_code_block requires 'from' and 'into'")
+    text = str(src)
+    for match in _FENCE_RE.finditer(text):
+        if not language or match.group("lang") == language:
+            ctx[str(into)] = match.group("body")
+            return
+    if fallback == "passthrough":
+        ctx[str(into)] = text
+        return
+    raise ScenarioError(
+        f"extract_code_block: no fenced "
+        f"{'```' + language if language else 'code'} block found in 'from'"
+    )
+
+
 async def _step_iterate(
     runtime: ScenarioRuntime,
     body: dict[str, Any],
@@ -463,5 +546,6 @@ _STEP_DISPATCH: dict[str, Any] = {
     "read_file": _step_read_file,
     "write_file": _step_write_file,
     "dispatch_tool": _step_dispatch_tool,
+    "extract_code_block": _step_extract_code_block,
     "iterate": _step_iterate,
 }
