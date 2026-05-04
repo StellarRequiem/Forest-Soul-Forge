@@ -4,9 +4,141 @@ All notable changes to Forest Soul Forge are documented in this file.
 
 Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). This project uses [Semantic Versioning](https://semver.org/); until 1.0.0 the API is unstable.
 
-## [Unreleased]
+## [Unreleased] — v0.5 arc (Bursts 95-108, ADR-0042 + ADR-0043)
 
-(Nothing yet for the next release — v0.4.0 was tagged on 2026-05-04.)
+The v0.5 arc resolves the strategic decisions for the desktop
+distribution and the plugin protocol. Two new ADRs (Accepted),
+two implementation arcs in flight, one checkpoint tag
+(`v0.5.0-rc`) marking the implementation-complete portion.
+
+**Test suite: 2,177 → 2,289 passing (+112 across Bursts 95-108).**
+Zero regressions. No schema changes.
+
+### ADR-0042 — v0.5 Product Direction (Burst 97)
+
+Locks five strategic decisions: Tauri installer (D1), SMB +
+prosumer thesis (D2), PWA-first mobile (D3), local-only-free
+forever (D4), single repository (D5). Single source of truth
+for the v0.5 product posture; downstream tranches (T2, T3, T4,
+T5) implement against it.
+
+- **T2 — Frontend responsive pass** (Burst 98). PWA-first
+  narrow-viewport CSS so the same frontend works in a phone's
+  browser without a separate mobile codebase. Audited at 4
+  viewport sizes Burst 100. No new JS modules; pure CSS +
+  meta-viewport additions.
+
+- **T3 part 1 — Tauri 2.x shell scaffolding** (Burst 99).
+  `apps/desktop/` with `Cargo.toml`, `tauri.conf.json`, Rust
+  `main.rs` that spawns the daemon as a sidecar (bundled binary
+  preferred, `python3` fallback). Drag-to-dock-style installer
+  shape ready; signing + auto-updater (T5) deferred pending the
+  Apple Developer account decision.
+
+- **T4 — Daemon-as-binary build** (Burst 101). PyInstaller spec
+  + `dist/build-daemon-binary.command` operator helper produces
+  a single-file daemon binary suitable for bundling under Tauri's
+  `externalBin`. New `daemon/__main__.py` argparse entrypoint so
+  the binary launches without import gymnastics.
+
+- **T5 — Signing + auto-updater** — deferred. Gated on the
+  Apple Developer account decision (cost, alternatives like
+  unsigned downloads with operator manual approval, sigstore-
+  style community signing).
+
+### ADR-0043 — MCP-First Plugin Protocol (Burst 103)
+
+Plugin protocol designed around the existing MCP ecosystem
+(modelcontextprotocol/servers etc.) rather than a Forest-specific
+shape. `~/.forest/plugins/` operator-managed root, `plugin.yaml`
+manifest with `schema_version: 1`, sha256 entry-point pinning,
+side_effects classification (read_only / network / filesystem /
+external), per-tool `requires_human_approval` map. Five
+implementation tranches T2-T5 plus a T4.5 inline tranche, all
+shipped:
+
+- **T2 — Plugin directory + manifest schema + `fsf plugin` CLI**
+  (Burst 104). New `forest_soul_forge/plugins/` package with
+  `manifest.py` (Pydantic v2, `extra="forbid"`), `repository.py`
+  (idempotent install/uninstall/enable/disable/verify),
+  `errors.py` (PluginError hierarchy mapped to exit codes 4/5/6/7),
+  `paths.py` (`default_plugin_root()` with `$FSF_PLUGIN_ROOT`
+  override). `fsf plugin {list,info,install,uninstall,enable,
+  disable,verify}` argparse subparser wired into `cli/main.py`.
+  Module-top-level error import in `manifest.py` (pytest class-
+  identity fix).
+
+- **T3 — Daemon hot-reload + `/plugins` HTTP endpoints**
+  (Burst 105). `daemon/plugins_runtime.py` with `PluginRuntime`
+  (active/disabled state dicts + `mcp_servers_view()` for
+  mcp_call.v1 compatibility) and `ReloadResult` dataclass.
+  Daemon lifespan instantiates `app.state.plugin_runtime`.
+  Routers: `GET /plugins`, `GET /plugins/{name}`,
+  `POST /plugins/reload`, `POST /plugins/{name}/{enable,disable,
+  verify}`. POSTs gated by `require_writes_enabled` +
+  `require_api_token`.
+
+- **T4 — Audit-chain integration** (Burst 106). 5 new event
+  types: `plugin_installed`, `plugin_uninstalled`,
+  `plugin_enabled`, `plugin_disabled`, `plugin_verification_failed`.
+  Best-effort emit OUTSIDE the snapshot lock; never raises.
+  Reload diffs the active set and emits `plugin_installed` /
+  `plugin_uninstalled` for newly-arrived / departed manifests.
+  `plugin_secret_set` deferred (no secrets surface yet).
+
+- **T4.5 — Dispatcher bridge** (Burst 107). `ToolDispatcher`
+  takes an optional `plugin_runtime` field. At dispatch time,
+  the YAML mcp registry merges with `plugin_runtime.mcp_servers_view()`
+  (plugins win on conflict) into `ctx.constraints["mcp_registry"]`.
+  No changes to `mcp_call.v1` itself — the bridge is purely a
+  ctx-injection at the call site, so any existing mcp_call test
+  keeps passing while plugin-contributed servers become reachable
+  through the same tool. `daemon/deps.py` forwards
+  `app.state.plugin_runtime` to the dispatcher.
+
+- **T5 — Canonical example plugins + contribution guide**
+  (Burst 108, this commit's predecessor). Three example
+  manifests cover the governance posture spectrum:
+  - `forest-echo/` — minimal authoring template (read_only,
+    1 capability, 0 secrets). The starting point in CONTRIBUTING's
+    submission flow.
+  - `brave-search/` — third-party API with auth (network read-only,
+    `BRAVE_API_KEY` required_secret, no per-call gating).
+  - `filesystem-reference/` — wraps modelcontextprotocol/servers#filesystem
+    (filesystem side_effects, per-tool `requires_human_approval`
+    map with read ungated and write/move/delete gated).
+
+  Plus `examples/plugins/README.md` (manifest format reference)
+  and `examples/plugins/CONTRIBUTING.md` (registry submission
+  flow with Ed25519 signature scheme; sigstore deferred).
+
+  `tests/unit/test_example_plugins.py` — 25 parametrized smoke
+  tests verifying every example parses, name matches dir,
+  type/side_effects are valid enum members, capabilities follow
+  the `mcp.<plugin>.<tool>` namespace convention, sha256 has
+  the right shape, README + CONTRIBUTING are present.
+
+  **Deferred ADR-0043 follow-ups** (documented in the ADR):
+  per-tool `requires_human_approval` mirroring (currently flips
+  per-server bool when ANY tool requires approval),
+  `allowed_mcp_servers` auto-grant flow, frontend Tools-tab
+  plugin awareness (so plugin-contributed servers visually
+  distinguish from YAML-registered ones), `plugin_secret_set`
+  audit event.
+
+### Other (Bursts 95-96, 102)
+
+- **Burst 95 — v0.4.0 final docs refresh + tag** (post-Burst 94).
+  Closes the v0.4 arc.
+- **Burst 96 — v0.5 planning doc** (`docs/roadmap-v0.5.md` or
+  equivalent — frame strategic decisions + technical backlog
+  before opening ADR-0042).
+- **Burst 102 — README "Who is this for?" section + integrations
+  strategy roadmap doc**. Audience clarification (SMB / prosumer /
+  advanced operators) plus an integrations roadmap touching
+  LangGraph / Kubernetes / CrewAI as positioning targets.
+
+
 
 ## [0.4.0] — 2026-05-04 (ADR-0041 Set-and-Forget Orchestrator complete)
 
