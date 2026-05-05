@@ -39,8 +39,19 @@ tools:
   #                         (already implemented). Same conceptual
   #                         surface — flow records, 5-tuple aggregation.
   #                         Removed from catalog + kits.
+  #
+  # Post-ADR-0044 ownership clarification (Burst 126):
+  # tshark_pcap_query.v1 is USERSPACE, not kernel. It's a security-
+  # observation tool that lives in the SoulUX security distribution
+  # alongside the rest of the swarm (network_watcher, log_lurker,
+  # net_ninja). The kernel ships the dispatcher + governance pipeline
+  # + audit chain + plugin protocol; concrete tools live in userspace
+  # tool packs (default = SoulUX). When tshark_pcap_query.v1 lands,
+  # it goes in the SoulUX security pack, not the kernel ABI surface.
+  #
   # See docs/audits/2026-04-30-c1-zombie-tool-dissection.md for the
-  # per-tool §0 verdict, and ADR-0018 for the tool-catalog contract.
+  # per-tool §0 verdict, ADR-0018 for the tool-catalog contract, and
+  # ADR-0044 for the kernel/userspace boundary.
   dns_lookup.v1:
     name: dns_lookup
     version: "1"
@@ -2107,6 +2118,22 @@ archetypes:
       - memory_recall.v1
       - delegate.v1
       - code_read.v1            # SW.A.5 — read diffs to review them
+
+  # ---- ADR-0036 verification track --------------------------------------
+  # Backfilled in Burst 126 after Phase A audit (2026-04-30) flagged the
+  # missing archetype. verifier_loop was previously falling through to
+  # the verification genre's genre_default_tools — functional but the
+  # operator surface (character sheet "kit" view) showed an empty
+  # standard_tools list. Explicit archetype matches the established
+  # pattern for every other named role.
+  verifier_loop:
+    standard_tools:
+      - memory_recall.v1        # walk lineage memory for contradictions
+      - memory_verify.v1        # ADR-0036 T1 epistemic verification
+      - memory_flag_contradiction.v1  # ADR-0036 T2 flag-not-rewrite
+      - audit_chain_verify.v1   # tamper-evidence check on the chain
+      - llm_think.v1            # reasoning over verification candidates
+      - delegate.v1             # cross-tier escalation when contradictions surface
 
   # ---- v0.6 role expansion (Burst 124, ADR-0044 §"role inventory") ------
   # 24 roles fleshing out the 8 remaining genre buckets with kits sized
