@@ -159,7 +159,12 @@ class SkillRuntime:
         # ---- 2. walk steps ---------------------------------------------
         # bindings: the in-flight context. ``inputs`` is bound at
         # entry, each completed step adds a binding under its id.
-        bindings: dict[str, Any] = {"inputs": dict(inputs)}
+        # Burst 133: apply JSONSchema-declared input defaults before
+        # binding. Operator-supplied values always win; defaults fill
+        # only for keys the operator omitted. See
+        # _apply_schema_defaults() docstring for the policy details.
+        inputs_with_defaults = _apply_schema_defaults(inputs, skill.inputs_schema)
+        bindings: dict[str, Any] = {"inputs": inputs_with_defaults}
         steps_executed = 0
         steps_skipped = 0
         try:
@@ -597,3 +602,56 @@ def _strip_inputs(bindings: dict[str, Any]) -> dict[str, Any]:
     surface bindings_at_failure to the operator, the inputs are
     already in their request payload, no point echoing them back."""
     return {k: v for k, v in bindings.items() if k != "inputs"}
+
+
+def _apply_schema_defaults(
+    inputs: dict[str, Any], inputs_schema: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge JSONSchema-declared ``default`` values into the operator's
+    ``inputs`` for any keys the operator omitted.
+
+    Burst 133 fix for the long-standing skill-engine gap documented in
+    STATE.md ('JSONSchema input defaults at runtime'): manifest authors
+    declare defaults in their inputs schema like::
+
+        inputs:
+          type: object
+          properties:
+            threshold:
+              type: integer
+              default: 5
+            window_minutes:
+              type: integer
+              default: 60
+
+    Pre-Burst-133 those defaults were *not* applied at runtime — every
+    skill author had to either hard-code the value inline or require
+    the operator to pass the field explicitly. This helper walks the
+    schema's top-level ``properties`` and fills in defaults for keys
+    the operator didn't supply. Operator-supplied values always win
+    (defaults never overwrite an explicit value).
+
+    Only top-level scalar/object/list defaults are applied — we do
+    NOT recursively descend into nested object properties, because the
+    semantics there get muddy (do nested defaults override per-key
+    operator-provided values inside a partial object?). For now,
+    skill authors who need nested defaults provide a complete object
+    or pre-merge themselves. Future extension if integrators ask for
+    deeper application.
+    """
+    if not isinstance(inputs_schema, dict):
+        return dict(inputs)
+    properties = inputs_schema.get("properties")
+    if not isinstance(properties, dict):
+        return dict(inputs)
+    merged: dict[str, Any] = dict(inputs)
+    for key, prop_schema in properties.items():
+        if key in merged:
+            continue
+        if not isinstance(prop_schema, dict):
+            continue
+        if "default" not in prop_schema:
+            continue
+        # JSON Schema permits any JSON value as a default — pass through.
+        merged[key] = prop_schema["default"]
+    return merged

@@ -262,18 +262,20 @@ The full incident report — symptom, file, fix, commit — lives in [`docs/audi
 
 | Item | Status / blocker | Effort |
 |---|---|---|
-| **ADR-0044 P2 — formal kernel API spec** | Next major milestone. `docs/architecture/kernel-api-v0.6.md` pinning every stable interface (governance pipeline, audit chain, plugin protocol, posture, trust grants) with version numbers, error envelopes, and ABI compatibility commitments. Stands on the 42-role inventory + KERNEL.md + boundary doc shipped in Bursts 118-124. | ~3-5 bursts |
-| **ADR-0044 P3 — headless + SoulUX split** | Once P2 lands, separate the kernel package from the default-distribution UX. SoulUX becomes the reference implementation; third-party UX layers can swap in. | ~5+ bursts |
-| **ADR-0044 P4 — conformance test suite** | A test pack any external integrator can run against their build of the kernel to verify ABI compatibility. Gated on P2 API spec stability. | ~3+ bursts |
-| **Housekeeping bundle (Burst 126)** | audit_chain.jsonl uncommitted entries, verifier_loop archetype backfill, KERNEL.md cross-references, Phase G zombie comment ownership clarification, .command scripts archival decision. | small |
+| **ADR-0044 P2 — formal kernel API spec** | ✅ **Shipped Burst 127** — `docs/spec/kernel-api-v0.6.md`, 1,042 lines, all 7 ABI surfaces specified. |
+| **ADR-0044 P3 — headless + SoulUX split** | ✅ **Shipped Burst 129** — `docs/runbooks/headless-install.md` + `scripts/headless-smoke.sh` + kernel-first docstrings. Kernel runs without SoulUX. |
+| **ADR-0044 P4 — conformance test suite** | ✅ **Shipped Bursts 130 + 132** — `tests/conformance/` HTTP-only suite, JSONSchema fixtures, idempotency probe, markdown report generator. |
+| **Housekeeping bundle (Burst 126)** | ✅ **Shipped Burst 126** — verifier_loop archetype backfilled, Phase G ownership clarified, audit chain synced. |
+| **.command scripts archival** | ✅ **Shipped Burst 128** — 100 commit-* + tag-* scripts moved to `dev-tools/commit-bursts/`. |
+| **JSONSchema input defaults at runtime in the skill engine** | ✅ **Shipped Burst 133** — `_apply_schema_defaults` helper in `skill_runtime.py` + 11 unit tests. Operator-supplied values always win; defaults fill omitted keys. |
+| **Frontend test scaffold** | ✅ **Shipped Burst 133** — Vitest + jsdom scaffold at `frontend/`. `npm test` runs sanity + api seed tests; future PRs add tests alongside UI changes. |
 | Integration tests | 1 file (forge loop). Need 3–5 covering dispatcher + memory + delegate, tool_dispatch with approval queue resume, skill_run multi-tool composition. | ~1 day |
-| Frontend test scaffold | 0 tests for 3,500 LoC of JS. Vitest + jsdom. | ~half day |
+| **ADR-0044 P6 outreach materials** | ✅ **Shipped Burst 131** — `docs/integrator-pitch.md` + `docs/integrator-quickstart.md`. Actual integrator validation (cold-emailing) is months not bursts; pitch is the asset. |
 | ADR-0042 T5 — Tauri code-signing + auto-updater | Gated on Apple Developer account decision. | gated |
 | ADR-0043 #4 — `plugin_secret_set` audit event | Deferred pending secrets-storage decision. | small once unblocked |
 | ADR-0036 cross-agent contradiction scan | Deferred to v0.4 per ADR-0036 trade-offs. | medium |
 | ADR-0038 T4-T6 telemetry/disclosure_intent_check/external_support_redirect | Deferred to v0.3 per ADR-0038 status. | medium |
 | `mfa_check.v1` | Deferred — operator hasn't scoped "MFA posture" target. | unknown |
-| JSONSchema input defaults at runtime in the skill engine | Manifests rely on hard-coded values inline until this lands. | small |
 | Pytest version of the smoke (E2) | Shell script suffices; pytest fixture would let CI gate on the chain. | ~1 day |
 | Frontend Swarm tab (E3) | Per-tier agent listing + recent chain events viewer. | ~1 day |
 | Companion-tier real-time A/V | Mission pillar 2. Designed in ADRs (0008 + 0021), no implementation yet. | unknown, large |

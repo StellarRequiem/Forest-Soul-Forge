@@ -4,6 +4,13 @@ __pycache__/
 *$py.class
 *.so
 .Python
+
+# Frontend (SoulUX userspace) — Vitest + jsdom scaffold from Burst 133.
+# package.json + vitest.config.js + tests/ are tracked; the install
+# tree and coverage output are not.
+frontend/node_modules/
+frontend/tests/coverage/
+frontend/.vitest-cache/
 build/
 develop-eggs/
 # F8: dist/ used to be a blanket ignore (Python sdist convention). We
