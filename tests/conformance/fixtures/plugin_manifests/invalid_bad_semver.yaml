@@ -1,0 +1,11 @@
+# Invalid: version is not valid semver per spec §3.2.
+schema_version: 1
+name: example-bad-semver
+version: "1.0"
+type: mcp_server
+description: "Spec §3.2 requires valid semver 2.0; '1.0' is missing the patch component."
+side_effects: read_only
+entry_point:
+  type: stdio
+  command: ["python", "-m", "example"]
+  sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

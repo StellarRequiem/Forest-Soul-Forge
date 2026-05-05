@@ -1,0 +1,27 @@
+# Full valid plugin manifest exercising every documented optional field.
+schema_version: 1
+name: example-full
+version: "2.3.4-rc.1+build.42"
+type: mcp_server
+description: "A complete plugin manifest exercising every field documented in spec §3."
+author: "Example Author <author@example.com>"
+license: "Apache-2.0"
+homepage: "https://example.com/forest-plugin"
+side_effects: filesystem
+capabilities: [tools, prompts]
+trust_tier: 2
+required_secrets: [example_api_key]
+entry_point:
+  type: stdio
+  command: ["node", "./server.js", "--port", "8080"]
+  cwd: "."
+  env:
+    NODE_ENV: production
+  sha256: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+requires_human_approval:
+  read_file: false
+  write_file: true
+  delete_file: true
+allowed_paths:
+  - "${HOME}/.allowlisted/**"
+  - "/var/log/forest/*"

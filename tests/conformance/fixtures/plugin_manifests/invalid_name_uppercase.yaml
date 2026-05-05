@@ -1,0 +1,11 @@
+# Invalid: name has uppercase letters; spec §3.2 regex requires kebab-case.
+schema_version: 1
+name: ExampleBadName
+version: "1.0.0"
+type: mcp_server
+description: "Name regex per spec §3.2 forbids uppercase letters."
+side_effects: read_only
+entry_point:
+  type: stdio
+  command: ["python", "-m", "example"]
+  sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

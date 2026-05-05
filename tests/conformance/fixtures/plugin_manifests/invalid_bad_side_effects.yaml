@@ -1,0 +1,11 @@
+# Invalid: side_effects=admin is not in the documented enum per spec §3.2.
+schema_version: 1
+name: example-bad-side-effects
+version: "1.0.0"
+type: mcp_server
+description: "side_effects must be one of read_only|network|filesystem|external per spec §3.2."
+side_effects: admin
+entry_point:
+  type: stdio
+  command: ["python", "-m", "example"]
+  sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

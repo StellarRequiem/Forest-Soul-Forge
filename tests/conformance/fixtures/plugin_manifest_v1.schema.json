@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forest-plugin-manifest-v1",
+  "title": "Forest plugin manifest v1",
+  "description": "JSON Schema enforcing the contract specified in docs/spec/kernel-api-v0.6.md §3 (plugin manifest schema v1). Conformance tests validate sample manifests against this schema.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "name",
+    "version",
+    "type",
+    "description",
+    "side_effects",
+    "entry_point"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "description": "Per spec §3.2, must equal 1 at v0.6.",
+      "const": 1
+    },
+    "name": {
+      "description": "Per spec §3.2, kebab-case slug, 3-64 chars.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$"
+    },
+    "version": {
+      "description": "Per spec §3.2, valid semver 2.0.",
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "type": {
+      "description": "Per spec §3.2, only mcp_server at v1.",
+      "enum": ["mcp_server"]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "author": {
+      "type": "string"
+    },
+    "license": {
+      "description": "SPDX identifier",
+      "type": "string"
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri"
+    },
+    "side_effects": {
+      "description": "Per spec §3.2, worst-case posture across all tools the plugin exposes.",
+      "enum": ["read_only", "network", "filesystem", "external"]
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "trust_tier": {
+      "description": "Per spec §3.2, default tier when operator grants the plugin. Per ADR-0045 the per-grant value takes precedence over this default.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5
+    },
+    "required_secrets": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "entry_point": {
+      "description": "Per spec §3.3.",
+      "type": "object",
+      "required": ["type", "sha256"],
+      "properties": {
+        "type": {
+          "enum": ["stdio", "http"]
+        },
+        "command": {
+          "description": "argv list — required for type=stdio.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "cwd": { "type": "string" },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "url": {
+          "description": "required for type=http",
+          "type": "string",
+          "format": "uri"
+        },
+        "health_path": { "type": "string" },
+        "sha256": {
+          "description": "Per spec §3.3 — the trust boundary. 64-char hex.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "stdio" } } },
+          "then": { "required": ["command"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "http" } } },
+          "then": { "required": ["url"] }
+        }
+      ]
+    },
+    "requires_human_approval": {
+      "description": "Optional per-tool override map. Tool name → bool.",
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "allowed_paths": {
+      "description": "Optional, only meaningful for filesystem-side-effect plugins.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "allowed_hosts": {
+      "description": "Optional, only meaningful for network-side-effect plugins.",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

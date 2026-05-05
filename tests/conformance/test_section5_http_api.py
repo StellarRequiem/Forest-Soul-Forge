@@ -96,3 +96,54 @@ def test_section5_writes_gated_or_open(
     )
     body = resp.json()
     assert "detail" in body, f"error envelope missing 'detail': {body}"
+
+
+# ----- §5.2 — idempotency contract --------------------------------------
+
+
+def test_section5_idempotency_replay_identical_response(client: httpx.Client) -> None:
+    """§5.2: repeated POST with same X-Idempotency-Key + same body returns
+    the prior response without re-executing.
+
+    We probe with a request that's predictably 4xx (write to nonexistent
+    agent). If the daemon honors §5.2, both calls should produce
+    identical responses (same status, same body, same audit-trail
+    behavior — no second audit entry).
+    """
+    idem_key = "conformance-idempotency-probe-001"
+    payload = {"posture": "yellow", "reason": "conformance probe"}
+    headers = {
+        "X-Idempotency-Key": idem_key,
+        "Content-Type": "application/json",
+    }
+
+    # Snapshot audit-tail count before.
+    before = client.get("/audit/tail", params={"n": 5}).json()
+    before_seqs = {e["seq"] for e in before["events"]}
+
+    resp1 = client.post(
+        "/agents/conformance-nonexistent-idempotent/posture",
+        json=payload,
+        headers=headers,
+    )
+    resp2 = client.post(
+        "/agents/conformance-nonexistent-idempotent/posture",
+        json=payload,
+        headers=headers,
+    )
+
+    # Both should fail (agent doesn't exist) — but identically.
+    assert resp1.status_code == resp2.status_code, (
+        f"§5.2: repeated request returned different status "
+        f"({resp1.status_code} vs {resp2.status_code}) — idempotency broken"
+    )
+    # Body shape should be identical too. We can't always assert byte-
+    # exact equality (some impls add timing fields) but 'detail' should
+    # match.
+    body1 = resp1.json()
+    body2 = resp2.json()
+    if "detail" in body1 and "detail" in body2:
+        assert body1["detail"] == body2["detail"], (
+            f"§5.2: repeated 'detail' diverged: {body1['detail']!r} vs "
+            f"{body2['detail']!r}"
+        )

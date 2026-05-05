@@ -1,0 +1,12 @@
+# Minimal valid plugin manifest per spec §3.
+# All required fields, no optional flourishes.
+schema_version: 1
+name: example-minimal
+version: "1.0.0"
+type: mcp_server
+description: "A minimal plugin manifest exercising every required field per spec §3.1."
+side_effects: read_only
+entry_point:
+  type: stdio
+  command: ["python", "-m", "example_minimal"]
+  sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

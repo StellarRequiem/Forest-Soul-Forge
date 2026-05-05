@@ -1,0 +1,11 @@
+# Invalid: schema_version 2 — at v0.6 only schema_version: 1 is valid per spec §3.2.
+schema_version: 2
+name: example-bad-schema-version
+version: "1.0.0"
+type: mcp_server
+description: "schema_version=2 reserved for future per spec §3.2 'rejected if 0 or 2'."
+side_effects: read_only
+entry_point:
+  type: stdio
+  command: ["python", "-m", "example"]
+  sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
