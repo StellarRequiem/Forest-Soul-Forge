@@ -4,7 +4,97 @@ All notable changes to Forest Soul Forge are documented in this file.
 
 Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). This project uses [Semantic Versioning](https://semver.org/); until 1.0.0 the API is unstable.
 
-## [Unreleased] — v0.5 arc (Bursts 95-108, ADR-0042 + ADR-0043)
+## [Unreleased] — v0.5 arc continued (Bursts 109-115)
+
+Follow-up tranche on the v0.5 arc. ADR-0043 follow-ups #1/#2/#3
+shipped end-to-end; ADR-0045 Agent Posture / Trust-Light System
+filed and implemented across 4 sub-tranches. Test count 2,289 →
+2,386 (+97), zero regressions.
+
+**Schema bumps:** v13 → v14 (agent_plugin_grants table) → v15
+(agents.posture column).
+
+**3 new audit event types** (67 → 70): agent_plugin_granted,
+agent_plugin_revoked, agent_posture_changed.
+
+### ADR-0043 follow-ups (Bursts 111, 112, 113a, 113b)
+
+- **#1 Per-tool requires_human_approval mirroring** (Burst 111).
+  mcp_servers_view() emits the full per-tool dict; new
+  McpPerToolApprovalStep consults it at dispatch and forces
+  resolved.constraints["requires_human_approval"]=True on a
+  per-tool match. Closes the gap where plugin manifests'
+  per-tool gating settings were governance theater.
+
+- **#3 Frontend Tools-tab plugin awareness** (Burst 112). New
+  "MCP plugins" panel renders one row per plugin from /plugins
+  with source-pill (plugin vs yaml), state-pill, side-effects,
+  truncated sha256, per-capability list with per-tool approval
+  badges, secrets reminder, verified/unverified status.
+
+- **#2 Plugin grants substrate + operator surface** (Bursts 113a
+  + 113b). Post-birth grants of MCP plugin access without
+  rebirthing the agent (preserves the immutable-constitution
+  invariant). New schema v14 agent_plugin_grants table with
+  forward-compat trust_tier field. Dispatcher unions
+  constitution.allowed_mcp_servers ∪ active grants and injects
+  as ctx.constraints. Closes the long-standing gap where
+  mcp_call.v1 read this constraint but nothing populated it.
+  HTTP POST/DELETE/GET /agents/{id}/plugin-grants + CLI
+  `fsf plugin grant/revoke/grants` + 2 new audit events.
+
+- **#4 plugin_secret_set audit event** — still deferred. Gated
+  on a separate secrets-storage decision.
+
+### ADR-0045 — Agent Posture / Trust-Light System (Bursts 114-115)
+
+Three-state per-agent posture (green / yellow / red). Operator-
+mutable runtime state, NOT part of constitution_hash. Default is
+'yellow' (matches de-facto pre-Burst-114 behavior). Implementation
+across 4 sub-tranches:
+
+- **T1 — schema v15 + agents.posture + PostureGateStep agent-only**
+  (Burst 114). ALTER TABLE agents ADD COLUMN posture TEXT NOT NULL
+  DEFAULT 'yellow' CHECK (posture IN ('green', 'yellow', 'red'))
+  + idx_agents_posture. New PostureGateStep at the END of the
+  governance pipeline (outermost authority). Reads
+  dctx.agent_posture (populated before pipeline.run() from the
+  agents.posture column). Read-only tools always pass through
+  regardless of posture.
+
+- **T2 — operator surface** (Burst 114b). HTTP GET (ungated) +
+  POST (gated) /agents/{id}/posture. CLI `fsf agent posture
+  get/set --tier ...`. agent_posture_changed audit event with
+  prior_posture captured for forensic queries. Frontend dial
+  deferred — pure UI work, no backend coupling.
+
+- **T3+T4 — per-grant trust_tier enforcement + precedence matrix**
+  (Burst 115). PostureGateStep.enforce_per_grant=True flipped at
+  the dispatcher level. trust_tier on agent_plugin_grants moves
+  from forward-compat storage (Burst 113a) to live enforcement.
+  Red-dominates precedence:
+
+      agent →    │ green       │ yellow      │ red
+      grant ↓    │             │             │
+      ───────────┼─────────────┼─────────────┼────────────
+      green      │ GO          │ GO (1)      │ REFUSE
+      yellow     │ PENDING     │ PENDING     │ REFUSE
+      red        │ REFUSE      │ REFUSE      │ REFUSE
+      none       │ GO          │ PENDING     │ REFUSE
+
+  (1) Per-grant green for THIS plugin downgrades agent-yellow
+  gating — operator explicitly vouched for the server.
+
+  +28 tests covering the 9 precedence combinations + 12 read-only
+  short-circuits + non-mcp_call ignores per-grant + grant
+  isolation by plugin name.
+
+**Outstanding deferred to ADR-0045 amendments:** operator-session
+posture, programmatic posture changes (verifier-driven self-
+demotion), time-bounded posture, multi-operator audit policy on
+red→green transitions, frontend dial widget.
+
+### Pre-existing v0.5 arc — Bursts 95-108, ADR-0042 + ADR-0043 initial
 
 The v0.5 arc resolves the strategic decisions for the desktop
 distribution and the plugin protocol. Two new ADRs (Accepted),
