@@ -344,7 +344,6 @@ breaking for the same reason.
 ```
 canonical_event = canonical_json({
     "seq": seq,
-    "timestamp": timestamp,
     "agent_dna": agent_dna,
     "event_type": event_type,
     "event_data": event_data,
@@ -353,11 +352,20 @@ canonical_event = canonical_json({
 entry_hash = sha256(canonical_event).hexdigest()
 ```
 
-`canonical_json` is sorted-keys, separators `(',', ':')`,
-ensure_ascii=True. The `entry_hash` field itself is excluded from
-the hash input.
+`canonical_json` is sorted-keys, separators `(',', ':')`. The
+`entry_hash` field itself is excluded from the hash input.
 
-For `seq=1`, `prev_hash` is `"0" * 64`.
+**`timestamp` is deliberately NOT hashed.** Clock skew between the
+daemon and any verifier would otherwise corrupt verification —
+timestamps are informational, not part of the cryptographic chain.
+This is part of the v1.0 freeze: a future kernel that hashes
+timestamps would break every existing verifier and is therefore a
+breaking change.
+
+For `seq=1`, `prev_hash` is the literal string `"GENESIS"` (not
+all-zeros). The chain links back to this constant so that any
+verifier can compute the first entry's hash deterministically
+without out-of-band genesis state.
 
 **Hash chain integrity** is verifiable independently via
 `scripts/verify_audit_chain.py`. Tampering breaks the chain at the

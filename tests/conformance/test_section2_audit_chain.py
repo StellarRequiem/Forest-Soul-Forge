@@ -54,16 +54,21 @@ def test_section2_seq_monotonic(client: httpx.Client) -> None:
 
 
 def _canonical_event(entry: dict) -> str:
-    """Compute the canonical-JSON form per spec §2.2 (excluding entry_hash)."""
+    """Compute the canonical-JSON form per spec §2.2.
+
+    Excludes ``entry_hash`` (self-reference) AND ``timestamp`` (clock
+    skew protection — timestamps are informational, not part of the
+    cryptographic chain). Genesis ``prev_hash`` is the literal string
+    "GENESIS" per spec §2.2.
+    """
     body = {
         "seq": entry["seq"],
-        "timestamp": entry["timestamp"],
         "agent_dna": entry["agent_dna"],
         "event_type": entry["event_type"],
         "event_data": entry["event_data"],
         "prev_hash": entry["prev_hash"],
     }
-    return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return json.dumps(body, sort_keys=True, separators=(",", ":"))
 
 
 def test_section2_hash_chain_integrity(client: httpx.Client) -> None:
