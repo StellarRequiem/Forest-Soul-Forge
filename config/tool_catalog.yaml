@@ -2108,6 +2108,240 @@ archetypes:
       - delegate.v1
       - code_read.v1            # SW.A.5 — read diffs to review them
 
+  # ---- v0.6 role expansion (Burst 124, ADR-0044 §"role inventory") ------
+  # 24 roles fleshing out the 8 remaining genre buckets with kits sized
+  # to each role's purpose. Tool selection respects each role's genre
+  # tier (observer=read_only, investigator=read_only, communicator=read_only,
+  # actuator=external w/ approval, guardian=read_only, researcher=memory_write,
+  # companion=memory_write, web_*=read_only/external w/ approval per ADR-003X).
+  #
+  # Roles bound to ADR-0038 companion safeguards (journaling_partner,
+  # day_companion, learning_partner, accessibility_runtime) get
+  # memory_write but no memory_disclose — they can journal, not leak.
+  #
+  # Web roles (ADR-003X open-web posture) start with web_fetch + dns_lookup
+  # only; web_actuator additionally gets browser_action + mcp_call (both
+  # approval-gated by constitution policy).
+
+  # -- Tranche 1 — observer extension --------------------------------------
+  dashboard_watcher:
+    standard_tools:
+      - web_fetch.v1
+      - timestamp_window.v1
+      - posture_check.v1
+      - log_scan.v1
+      - llm_think.v1
+      - memory_recall.v1
+
+  signal_listener:
+    standard_tools:
+      - log_scan.v1
+      - log_aggregate.v1
+      - anomaly_score.v1
+      - behavioral_baseline.v1
+      - timestamp_window.v1
+      - llm_think.v1
+      - memory_recall.v1
+
+  # -- Tranche 2 — investigator extension ----------------------------------
+  incident_correlator:
+    standard_tools:
+      - log_correlate.v1
+      - log_scan.v1
+      - anomaly_score.v1
+      - behavioral_baseline.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - llm_think.v1
+
+  threat_hunter:
+    standard_tools:
+      - log_scan.v1
+      - log_correlate.v1
+      - lateral_movement_detect.v1
+      - ueba_track.v1
+      - behavioral_baseline.v1
+      - timestamp_window.v1
+      - memory_recall.v1
+      - llm_think.v1
+      - web_fetch.v1
+
+  # -- Tranche 3 — communicator extension ----------------------------------
+  # Communicator genre is read_only; these roles compose summaries, not
+  # external sends. mcp_call belongs to actuator-tier roles (alert_dispatcher
+  # etc.) where the genre admits side effects.
+  briefer:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - timestamp_window.v1
+
+  notifier:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - timestamp_window.v1
+
+  status_reporter:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - timestamp_window.v1
+      - log_aggregate.v1
+
+  translator:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+
+  # -- Tranche 4 — actuator extension --------------------------------------
+  # Actuator genre admits external side effects. Constitution policies
+  # gate per-action approval (approval_per_action) so birth-time grant
+  # of mcp_call/shell_exec is safe — the runtime layer enforces consent.
+  alert_dispatcher:
+    standard_tools:
+      - mcp_call.v1
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - timestamp_window.v1
+
+  deploy_runner:
+    standard_tools:
+      - shell_exec.v1
+      - code_read.v1
+      - git_log_read.v1
+      - pytest_run.v1
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+
+  ticket_creator:
+    standard_tools:
+      - mcp_call.v1
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+
+  # -- Tranche 5 — guardian extension --------------------------------------
+  # Guardian genre is read_only — these roles review and flag, never
+  # mutate. memory_flag_contradiction lets refusal_arbiter mark a
+  # contradiction without rewriting the original entry.
+  content_review:
+    standard_tools:
+      - code_read.v1
+      - llm_think.v1
+      - memory_recall.v1
+      - semgrep_scan.v1
+      - bandit_security_scan.v1
+
+  refusal_arbiter:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_flag_contradiction.v1
+      - posture_check.v1
+
+  safety_check:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_verify.v1
+      - posture_check.v1
+      - audit_chain_verify.v1
+
+  # -- Tranche 6 — researcher extension ------------------------------------
+  # Researcher genre admits memory_write at scope='lineage'; constitutions
+  # may further constrain via allowed_paths.
+  knowledge_consolidator:
+    standard_tools:
+      - web_fetch.v1
+      - code_read.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - llm_think.v1
+
+  paper_summarizer:
+    standard_tools:
+      - web_fetch.v1
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+
+  vendor_research:
+    standard_tools:
+      - web_fetch.v1
+      - dns_lookup.v1
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+
+  # -- Tranche 7 — companion extension (ADR-0038 strict) -------------------
+  # Companion genre admits memory_write but NOT memory_disclose — these
+  # agents can journal but cannot exfiltrate. Constitutions add the
+  # non-clinical disclaimer + crisis-topic refusal policies.
+  accessibility_runtime:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+
+  day_companion:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - timestamp_window.v1
+
+  learning_partner:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - web_fetch.v1
+
+  journaling_partner:
+    # ADR-0038 companion harm model. NO web_fetch — keep the surface
+    # narrow. NO memory_disclose — journals stay private to the user.
+    # The constitution (journaling_partner role_base) enforces the
+    # non-clinical disclaimer + crisis-topic refusal at policy layer.
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+
+  # -- Tranche 8 — open-web genres (ADR-003X) ------------------------------
+  # web_watcher is observer-tier (read_only): just fetch + observe.
+  # web_researcher is researcher-tier (memory_write at lineage scope).
+  # web_actuator is actuator-tier (external side effects, approval-gated).
+  web_watcher:
+    standard_tools:
+      - web_fetch.v1
+      - dns_lookup.v1
+      - timestamp_window.v1
+      - llm_think.v1
+      - memory_recall.v1
+
+  web_researcher:
+    standard_tools:
+      - web_fetch.v1
+      - dns_lookup.v1
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+
+  web_actuator:
+    # ADR-003X §"actuator posture". browser_action + mcp_call are
+    # external side effects; the constitution policy approval_per_action
+    # gates each invocation in the dispatcher. forbid_unallowlisted_domain
+    # narrows web_fetch + browser_action targets to the allowlist.
+    standard_tools:
+      - browser_action.v1
+      - mcp_call.v1
+      - web_fetch.v1
+      - llm_think.v1
+      - memory_recall.v1
+
 # Per-genre fallback kits (ADR-0021 T4). Used by the kit resolver as
 # the LAST step in the chain when a role has no archetype-specific
 # standard_tools entry above. Lets a freshly-declared role inherit a

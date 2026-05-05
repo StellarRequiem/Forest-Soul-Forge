@@ -216,7 +216,7 @@ genres:
     memory_pattern: long_consolidated
     spawn_compatibility: [companion]
     roles:
-      - therapist
+      - journaling_partner   # renamed from therapist (ADR-0044 Burst 124, scope tightened to non-clinical journaling per ADR-0038)
       - accessibility_runtime
       - day_companion
       - learning_partner
@@ -347,7 +347,7 @@ genres:
     memory_pattern: episodic_focused
     spawn_compatibility: [web_observer, web_researcher]
     roles:
-      - web_observer_root
+      - web_watcher          # renamed from web_observer_root (ADR-0044 Burst 124)
 
   web_researcher:
     description: |
@@ -370,7 +370,7 @@ genres:
     memory_pattern: long_consolidated
     spawn_compatibility: [web_researcher, web_actuator]
     roles:
-      - web_researcher_root
+      - web_researcher       # renamed from web_researcher_root (ADR-0044 Burst 124)
 
   web_actuator:
     description: |
@@ -396,4 +396,4 @@ genres:
     memory_pattern: long_consolidated
     spawn_compatibility: [web_actuator]
     roles:
-      - web_actuator_root
+      - web_actuator         # renamed from web_actuator_root (ADR-0044 Burst 124)

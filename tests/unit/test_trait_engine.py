@@ -42,11 +42,14 @@ class TestLoading:
         assert len(engine.list_traits()) == 29
 
     def test_expected_role_count(self, engine: TraitEngine) -> None:
-        # 18 roles total: 5 originals + 9 swarm (ADR-0033) + 3 SW-track
-        # (ADR-0034) + 1 verifier (ADR-0036). Asserting the absolute count
-        # rather than a >= floor catches accidental role duplication /
-        # typos in trait_tree.yaml at the same time.
-        assert len(engine.roles) == 18
+        # 42 roles total:
+        #   5 originals + 9 swarm (ADR-0033) + 3 SW-track (ADR-0034)
+        #   + 1 verifier (ADR-0036) + 24 Burst 124 role-expansion roles
+        #   (ADR-0044 §"role inventory")
+        # Asserting the absolute count rather than a >= floor catches
+        # accidental role duplication / typos in trait_tree.yaml at the
+        # same time.
+        assert len(engine.roles) == 42
         # Spot-check one representative role from each tranche so a single
         # tranche-removal would surface here too.
         assert "network_watcher" in engine.roles       # original 5
@@ -56,6 +59,15 @@ class TestLoading:
         assert "system_architect" in engine.roles      # ADR-0034 SW-track
         assert "code_reviewer" in engine.roles         # ADR-0034 SW-track
         assert "verifier_loop" in engine.roles         # ADR-0036 verifier
+        # Burst 124 — one per tranche (8 tranches × ~3 roles each)
+        assert "dashboard_watcher" in engine.roles     # T1 observer ext
+        assert "incident_correlator" in engine.roles   # T2 investigator ext
+        assert "briefer" in engine.roles               # T3 communicator ext
+        assert "alert_dispatcher" in engine.roles      # T4 actuator ext
+        assert "refusal_arbiter" in engine.roles       # T5 guardian ext
+        assert "knowledge_consolidator" in engine.roles  # T6 researcher ext
+        assert "journaling_partner" in engine.roles    # T7 companion ext (ADR-0038)
+        assert "web_actuator" in engine.roles          # T8 web (ADR-003X)
 
     def test_missing_yaml_raises(self, tmp_path: Path) -> None:
         with pytest.raises(SchemaError, match="not found"):

@@ -551,6 +551,654 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  # ============================================================
+  # ADR-0044 Burst 124 — role expansion arc (24 new role_base entries)
+  # Wires the previously-aspirational roles in genres.yaml.
+  # ============================================================
+
+  # ---- Tranche 1: observer extensions ----------------------------------
+  dashboard_watcher:
+    policies:
+      - id: forbid_dashboard_mutation
+        rule: forbid
+        triggers: [modify_dashboard, modify_panel, dispatch_alert]
+        rationale: "Watcher is read-only; alert dispatch belongs to actuator-class roles."
+      - id: approval_for_alert_emit
+        rule: require_human_approval
+        triggers: [emit_alert, emit_finding]
+        rationale: "Findings flow to a human before downstream agents see them."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - modify_dashboard
+      - dispatch_alert_external
+    operator_duties:
+      - "Review flagged dashboard anomalies within 24h."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  signal_listener:
+    policies:
+      - id: forbid_signal_mutation
+        rule: forbid
+        triggers: [modify_event_stream, drop_event, replay_event]
+        rationale: "Listener observes; never mutates upstream signal sources."
+      - id: approval_for_pattern_emit
+        rule: require_human_approval
+        triggers: [emit_pattern_alert]
+        rationale: "Pattern matches are claims about the world; humans verify."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_event_stream
+      - dispatch_alert_external
+    operator_duties:
+      - "Review pattern-alert false-positive rate weekly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  # ---- Tranche 2: investigator extensions ------------------------------
+  incident_correlator:
+    policies:
+      - id: forbid_remediation
+        rule: forbid
+        triggers: [remediate, quarantine_host, block_address]
+        rationale: "Correlation is investigative; remediation is a separate-duty actuator role."
+      - id: approval_for_pivot
+        rule: require_human_approval
+        triggers: [pivot_to_lineage, expand_query_scope]
+        rationale: "Cross-lineage pivots involve memory disclosure; humans authorize."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.45
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - remediate_autonomously
+      - modify_production_systems
+    operator_duties:
+      - "Audit cross-lineage pivots monthly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  threat_hunter:
+    policies:
+      - id: forbid_active_scan
+        rule: forbid
+        triggers: [active_scan, exploit_attempt, lateral_pivot_unauthorized]
+        rationale: "Hunting is investigative; active scanning + exploitation belong to red-team roles outside this hunter's scope."
+      - id: approval_for_high_severity_finding
+        rule: require_human_approval
+        triggers: [emit_finding_high_severity, escalate_to_security_mid]
+        rationale: "High-severity findings trigger human review before escalation."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - active_scan
+      - exploit_attempt
+      - remediate_autonomously
+    operator_duties:
+      - "Review hunter's high-severity findings within SLA."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  # ---- Tranche 3: communicator extensions ------------------------------
+  briefer:
+    policies:
+      - id: forbid_external_send
+        rule: forbid
+        triggers: [send_message_external, dispatch_email, post_to_channel]
+        rationale: "Briefer outputs are for in-system handoff; external delivery belongs to actuator-class."
+      - id: require_uncertainty_in_briefs
+        rule: require_explicit_uncertainty
+        triggers: [emit_brief]
+        rationale: "Briefs are summarization; explicit uncertainty prevents downstream over-reliance."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Spot-check brief accuracy weekly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  notifier:
+    policies:
+      - id: forbid_actual_send
+        rule: forbid
+        triggers: [send_message_external, dispatch_email, post_to_channel, sms_send]
+        rationale: "Notifier prepares messages; alert_dispatcher actually sends. Separation of duties."
+      - id: approval_for_notification_template
+        rule: require_human_approval
+        triggers: [register_notification_template]
+        rationale: "Template registration affects future dispatches; humans authorize."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Review notification-template registry monthly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  status_reporter:
+    policies:
+      - id: forbid_state_mutation
+        rule: forbid
+        triggers: [modify_state, mutate_metric, override_metric]
+        rationale: "Reporter aggregates; never mutates the underlying state it reports on."
+      - id: require_timestamp_provenance
+        rule: require_metadata
+        triggers: [emit_report]
+        rationale: "Status reports without timestamps mislead downstream readers."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_state
+      - send_message_external
+    operator_duties:
+      - "Audit status-report cadence weekly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  translator:
+    policies:
+      - id: forbid_external_send
+        rule: forbid
+        triggers: [send_message_external]
+        rationale: "Translator transforms text in-system; external delivery is downstream concern."
+      - id: forbid_unsupported_target_domain
+        rule: forbid
+        triggers: [translate_to_unsupported_domain]
+        rationale: "Translation outside trained domains produces hallucinated outputs; refuse."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_production_systems
+      - send_message_external
+    operator_duties:
+      - "Spot-check translation accuracy on critical domains weekly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  # ---- Tranche 4: actuator extensions ----------------------------------
+  alert_dispatcher:
+    policies:
+      - id: approval_per_send
+        rule: require_human_approval
+        triggers: [send_alert, send_message_external, dispatch_email, post_to_channel]
+        rationale: "Every external alert send is gated. Volume + content + recipient all reviewed."
+      - id: rate_limit_alerts
+        rule: rate_limit
+        triggers: [send_alert]
+        rationale: "Alert flooding masks signal in noise; rate-limit per channel."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - modify_production_systems
+      - exfiltrate_data
+    operator_duties:
+      - "Audit alert dispatch log weekly."
+      - "Verify constitution_hash weekly."
+      - "Review rate-limit thresholds monthly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  deploy_runner:
+    policies:
+      - id: approval_per_deploy
+        rule: require_human_approval
+        triggers: [deploy, run_deployment_script, shell_exec_outside_test_runner]
+        rationale: "Every deploy is approval-gated. Even rollbacks."
+      - id: forbid_arbitrary_shell
+        rule: forbid
+        triggers: [shell_exec_arbitrary, sudo, exec_with_modified_env]
+        rationale: "Deploy runner has tightly-scoped allowed_commands; arbitrary shell is out-of-scope."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - shell_exec_arbitrary
+      - sudo
+      - modify_production_systems_directly
+    operator_duties:
+      - "Review every deploy's audit chain entry within SLA."
+      - "Audit allowed_commands list quarterly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  ticket_creator:
+    policies:
+      - id: approval_per_ticket
+        rule: require_human_approval
+        triggers: [create_ticket, create_issue, mcp_call_jira_create, mcp_call_linear_create]
+        rationale: "Every external ticket creation is approval-gated to prevent ticket-spam attacks."
+      - id: rate_limit_tickets
+        rule: rate_limit
+        triggers: [create_ticket]
+        rationale: "Ticket flooding spams the operator's queue; rate-limit per service."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.45
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - delete_ticket
+      - modify_production_systems
+    operator_duties:
+      - "Audit ticket-creation log weekly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  # ---- Tranche 5: guardian extensions ----------------------------------
+  content_review:
+    policies:
+      - id: forbid_content_mutation
+        rule: forbid
+        triggers: [modify_content, edit_content, redact_content_unauthorized]
+        rationale: "Reviewer flags; only authorized operators redact. Separation of duties."
+      - id: require_explicit_violation_type
+        rule: require_metadata
+        triggers: [flag_content]
+        rationale: "Flags without violation-type are noise; require classification."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.45
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - modify_content
+      - send_message_external
+    operator_duties:
+      - "Audit reviewer's flag rate weekly; high false-positive rate triggers re-birth."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  refusal_arbiter:
+    policies:
+      - id: forbid_state_mutation
+        rule: forbid
+        triggers: [modify_state, override_policy, modify_audit_chain]
+        rationale: "Arbiter outputs decisions; never mutates the things it reasons about."
+      - id: require_explicit_rationale
+        rule: require_metadata
+        triggers: [emit_refusal_decision]
+        rationale: "Decisions without rationale are unreviewable; require explicit reasoning."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - modify_state
+      - modify_audit_chain
+    operator_duties:
+      - "Audit arbiter's decisions vs. operator overrides quarterly."
+      - "Re-birth if override rate exceeds threshold (drifted alignment)."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  safety_check:
+    policies:
+      - id: forbid_state_mutation
+        rule: forbid
+        triggers: [modify_state, modify_constitution, modify_audit_chain]
+        rationale: "Safety-check outputs go/no-go advisories; never mutates the action it gates."
+      - id: approval_for_no_go_override
+        rule: require_human_approval
+        triggers: [override_no_go_advisory]
+        rationale: "Operators can override no-go advisories; the override itself is auditable."
+    risk_thresholds:
+      auto_halt_risk: 0.85
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - modify_state
+      - modify_constitution
+    operator_duties:
+      - "Audit safety-check vs. actual-outcome track record monthly."
+      - "Re-birth if false-negative rate exceeds threshold (missed real risks)."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  # ---- Tranche 6: researcher extensions --------------------------------
+  knowledge_consolidator:
+    policies:
+      - id: forbid_external_mutation
+        rule: forbid
+        triggers: [modify_production_systems, send_message_external]
+        rationale: "Consolidation produces structured knowledge; external mutation is out-of-scope."
+      - id: scope_memory_writes_to_private
+        rule: scope_memory
+        triggers: [memory_write]
+        rationale: "Consolidator's outputs land in private scope until consent is granted explicitly."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_production_systems
+      - send_message_external
+    operator_duties:
+      - "Sample-check consolidated entries for accuracy weekly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  paper_summarizer:
+    policies:
+      - id: forbid_external_mutation
+        rule: forbid
+        triggers: [modify_production_systems, send_message_external]
+        rationale: "Summarizer is read + memory_write only; never mutates external state."
+      - id: require_paper_provenance
+        rule: require_metadata
+        triggers: [emit_summary]
+        rationale: "Summaries without source provenance can't be re-verified; require source URL + access date."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_production_systems
+      - send_message_external
+    operator_duties:
+      - "Spot-check summaries against original papers monthly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  vendor_research:
+    policies:
+      - id: forbid_external_mutation
+        rule: forbid
+        triggers: [modify_production_systems, send_message_external, contact_vendor]
+        rationale: "Researcher gathers info; vendor outreach belongs to communicator/actuator roles."
+      - id: scope_memory_writes_to_private
+        rule: scope_memory
+        triggers: [memory_write]
+        rationale: "Vendor findings land in private scope until consent granted."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_production_systems
+      - contact_vendor
+    operator_duties:
+      - "Audit vendor-research findings for staleness quarterly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  # ---- Tranche 7: companion extensions ---------------------------------
+  # All companion-class roles inherit ADR-0038's harm model: refuse
+  # crisis topics, mandatory non-clinical disclaimer, scoped tools.
+  accessibility_runtime:
+    policies:
+      - id: forbid_external_mutation
+        rule: forbid
+        triggers: [modify_production_systems, send_message_external]
+        rationale: "Accessibility runtime is in-session; never mutates the host environment."
+      - id: refuse_medical_advice
+        rule: forbid
+        triggers: [emit_medical_advice, emit_clinical_recommendation]
+        rationale: "Accessibility tooling is non-clinical per ADR-0038."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.55
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_production_systems
+      - emit_medical_advice
+    operator_duties:
+      - "Review user-feedback on accessibility responses monthly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  day_companion:
+    policies:
+      - id: forbid_external_mutation
+        rule: forbid
+        triggers: [modify_production_systems, send_message_external]
+        rationale: "Day companion is read + memory_write only; never sends external messages on user's behalf."
+      - id: refuse_crisis_topics
+        rule: forbid
+        triggers: [crisis_topic_engagement]
+        rationale: "Crisis topics route to the operator's escalation channel per ADR-0038, not the day-companion's normal flow."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.55
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_production_systems
+      - emit_medical_advice
+    operator_duties:
+      - "Spot-check day-companion outputs for crisis-topic-leakage monthly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  learning_partner:
+    policies:
+      - id: forbid_external_mutation
+        rule: forbid
+        triggers: [modify_production_systems, send_message_external]
+        rationale: "Learning partner is in-session; never mutates the host."
+      - id: refuse_unverifiable_claims
+        rule: require_explicit_uncertainty
+        triggers: [emit_factual_claim]
+        rationale: "Educational claims need explicit uncertainty so learners can calibrate trust."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.55
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - modify_production_systems
+      - emit_medical_advice
+    operator_duties:
+      - "Sample-check learning-partner factual accuracy weekly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  # journaling_partner — narrowed scope from the original `therapist`
+  # role per ADR-0044 Burst 124 + ADR-0038 harm model. Strict crisis-
+  # topic refusal, mandatory non-clinical disclaimer, no medical
+  # claims.
+  journaling_partner:
+    policies:
+      - id: refuse_crisis_topics
+        rule: forbid
+        triggers: [crisis_topic_engagement, suicidal_ideation_topic, self_harm_topic, abuse_topic]
+        rationale: "Per ADR-0038 companion harm model: crisis topics route to professional resources, not the journaling-partner. Refusal includes the suggestion to seek help."
+      - id: mandatory_non_clinical_disclaimer
+        rule: require_metadata
+        triggers: [first_user_turn, every_session_start]
+        rationale: "Journaling partner is NOT therapy. Disclaimer at session start makes the scope explicit."
+      - id: refuse_medical_or_clinical_advice
+        rule: forbid
+        triggers: [emit_medical_advice, emit_diagnosis, emit_clinical_recommendation]
+        rationale: "Per ADR-0038: companion-class agents do not emit medical or clinical guidance."
+      - id: forbid_external_mutation
+        rule: forbid
+        triggers: [modify_production_systems, send_message_external, contact_third_party]
+        rationale: "All journaling stays in private memory; no third-party disclosure."
+    risk_thresholds:
+      auto_halt_risk: 0.85
+      escalate_risk: 0.45
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - emit_medical_advice
+      - emit_diagnosis
+      - crisis_intervention
+      - contact_third_party
+    operator_duties:
+      - "Audit journaling-partner sessions for crisis-topic-leakage weekly. Any leakage = re-birth or archive."
+      - "Verify constitution_hash weekly."
+      - "Confirm non-clinical disclaimer rendered at every session start."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  # ---- Tranche 8: web genres (renamed from _root placeholders) ---------
+  web_watcher:
+    policies:
+      - id: forbid_active_request
+        rule: forbid
+        triggers: [http_post, http_put, http_delete, mcp_call_mutating, browser_action]
+        rationale: "Watcher is read-only HTTP GET. Active methods belong to web_actuator."
+      - id: scope_to_allowlist
+        rule: forbid
+        triggers: [fetch_outside_allowlist]
+        rationale: "Per ADR-003X open-web posture: every web fetch is allowlist-gated."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - fetch_outside_allowlist
+      - browser_action
+      - mcp_call_mutating
+    operator_duties:
+      - "Audit web_watcher's fetch log for allowlist violations weekly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  web_researcher:
+    policies:
+      - id: forbid_active_mutation
+        rule: forbid
+        triggers: [http_post, http_put, http_delete, mcp_call_mutating, browser_action]
+        rationale: "Researcher reads from web; web_actuator-class is the role for mutating calls."
+      - id: scope_memory_writes_to_consented
+        rule: scope_memory
+        triggers: [memory_write]
+        rationale: "Web research outputs go to consented scope per ADR-003X — explicit grant required for cross-agent disclosure."
+      - id: scope_to_allowlist
+        rule: forbid
+        triggers: [fetch_outside_allowlist]
+        rationale: "Allowlisted hosts only; same posture as web_watcher."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - fetch_outside_allowlist
+      - browser_action
+      - mcp_call_mutating
+    operator_duties:
+      - "Audit web_researcher's allowlist + memory consent grants quarterly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  web_actuator:
+    policies:
+      - id: approval_per_action
+        rule: require_human_approval
+        triggers: [browser_action, http_post, http_put, http_delete, mcp_call_mutating]
+        rationale: "Per ADR-003X open-web posture: every web-side action is approval-gated. No exceptions."
+      - id: forbid_unallowlisted_domain
+        rule: forbid
+        triggers: [browser_action_outside_allowlist, fetch_outside_allowlist]
+        rationale: "Domain allowlist is the trust boundary; out-of-allowlist actions are refused."
+      - id: forbid_credential_input
+        rule: require_human_approval
+        triggers: [type_credential, type_payment_info, submit_form_with_secrets]
+        rationale: "Credential entry by an agent always hits the operator first."
+    risk_thresholds:
+      auto_halt_risk: 0.85
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - browser_action_outside_allowlist
+      - exfiltrate_data
+      - financial_transaction_unattended
+    operator_duties:
+      - "Review every web_actuator approval ticket within SLA."
+      - "Audit allowlisted domains + secret_names quarterly."
+      - "Verify constitution_hash weekly."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
 
 # ---------------------------------------------------------------------------
 # Layer 2 — trait modifiers

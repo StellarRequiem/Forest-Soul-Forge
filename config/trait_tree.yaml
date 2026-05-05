@@ -552,6 +552,270 @@ roles:
       emotional: 0.4
       embodiment: 0.4
 
+  # ============================================================
+  # ADR-0044 Burst 124 — role expansion arc (24 new roles)
+  # Wires the previously-aspirational roles in genres.yaml so
+  # the forge UI surfaces all of them as selectable.
+  # ============================================================
+
+  # ---- Tranche 1: observer extensions ----------------------------------
+  dashboard_watcher:
+    description: "Passively monitors operator dashboards + status panels for UI/state anomalies. Read-only; raises alerts but never acts."
+    domain_weights:
+      security: 1.2
+      audit: 1.8
+      cognitive: 1.0
+      communication: 0.8
+      emotional: 0.4
+      embodiment: 0.5
+
+  signal_listener:
+    description: "Monitors signal/event streams (logs, queues, broadcasts) for pattern alerts. Read-only with classification."
+    domain_weights:
+      security: 1.5
+      audit: 1.5
+      cognitive: 1.2
+      communication: 0.7
+      emotional: 0.4
+      embodiment: 0.6
+
+  # ---- Tranche 2: investigator extensions ------------------------------
+  incident_correlator:
+    description: "Cross-references incidents across time windows + lineages to find correlated patterns. Read-heavy investigator."
+    domain_weights:
+      security: 1.3
+      audit: 1.8
+      cognitive: 2.0
+      communication: 0.6
+      emotional: 0.4
+      embodiment: 0.4
+
+  threat_hunter:
+    description: "Proactive threat search given seed indicators; expands hypothesis-driven via correlation + lateral-movement detection."
+    domain_weights:
+      security: 2.0
+      audit: 1.5
+      cognitive: 2.0
+      communication: 0.5
+      emotional: 0.4
+      embodiment: 0.5
+
+  # ---- Tranche 3: communicator extensions ------------------------------
+  briefer:
+    description: "Produces concise summaries of complex events for human consumption. Output-only; forbid mutation."
+    domain_weights:
+      security: 0.5
+      audit: 1.0
+      cognitive: 1.5
+      communication: 2.0
+      emotional: 0.7
+      embodiment: 0.4
+
+  notifier:
+    description: "Prepares alert messages for downstream dispatch. Does NOT send — actuator-class role does. Output-only."
+    domain_weights:
+      security: 0.8
+      audit: 1.0
+      cognitive: 1.0
+      communication: 1.8
+      emotional: 0.5
+      embodiment: 0.4
+
+  status_reporter:
+    description: "Generates structured status reports (JSON / markdown / metrics) on system state. Read-only aggregator."
+    domain_weights:
+      security: 0.5
+      audit: 1.5
+      cognitive: 1.2
+      communication: 1.8
+      emotional: 0.4
+      embodiment: 0.4
+
+  translator:
+    description: "Cross-domain explanation: technical → operator-friendly, or vice versa. Pure communicator."
+    domain_weights:
+      security: 0.4
+      audit: 0.7
+      cognitive: 1.5
+      communication: 2.0
+      emotional: 0.8
+      embodiment: 0.4
+
+  # ---- Tranche 4: actuator extensions ----------------------------------
+  alert_dispatcher:
+    description: "Sends alerts via configured channels (slack/email/pagerduty via mcp_call). Every send gated by approval."
+    domain_weights:
+      security: 1.5
+      audit: 1.5
+      cognitive: 1.0
+      communication: 1.5
+      emotional: 0.4
+      embodiment: 0.5
+
+  deploy_runner:
+    description: "Runs deployment scripts under controlled shell access. Approval-gated; allowed_commands strictly scoped."
+    domain_weights:
+      security: 1.8
+      audit: 1.8
+      cognitive: 1.2
+      communication: 0.7
+      emotional: 0.4
+      embodiment: 0.7
+
+  ticket_creator:
+    description: "Creates external tickets in JIRA/Linear/etc via mcp_call. Every create gated by approval."
+    domain_weights:
+      security: 1.0
+      audit: 1.3
+      cognitive: 1.0
+      communication: 1.5
+      emotional: 0.4
+      embodiment: 0.4
+
+  # ---- Tranche 5: guardian extensions ----------------------------------
+  content_review:
+    description: "Reviews content (text/code) for policy violations + safety concerns. Read-only; flags don't auto-act."
+    domain_weights:
+      security: 1.5
+      audit: 1.8
+      cognitive: 1.5
+      communication: 1.0
+      emotional: 0.6
+      embodiment: 0.4
+
+  refusal_arbiter:
+    description: "Meta-role: decides when to refuse a requested action based on policies + harm model. Output-only."
+    domain_weights:
+      security: 1.8
+      audit: 2.0
+      cognitive: 1.5
+      communication: 0.8
+      emotional: 0.7
+      embodiment: 0.4
+
+  safety_check:
+    description: "Pre-action safety verification — runs before any high-risk dispatch. Outputs go/no-go advisories."
+    domain_weights:
+      security: 2.0
+      audit: 2.0
+      cognitive: 1.3
+      communication: 0.5
+      emotional: 0.5
+      embodiment: 0.4
+
+  # ---- Tranche 6: researcher extensions --------------------------------
+  knowledge_consolidator:
+    description: "Extracts + structures knowledge from raw research (papers, docs, conversations). Memory-write only; no external mutation."
+    domain_weights:
+      security: 0.5
+      audit: 1.2
+      cognitive: 2.0
+      communication: 1.3
+      emotional: 0.4
+      embodiment: 0.4
+
+  paper_summarizer:
+    description: "Summarizes academic papers into structured key-points. Pure researcher; web_fetch + memory_write."
+    domain_weights:
+      security: 0.4
+      audit: 0.8
+      cognitive: 2.0
+      communication: 1.5
+      emotional: 0.4
+      embodiment: 0.4
+
+  vendor_research:
+    description: "Vendor/product research — fact-find about external vendors + tools. Web fetch + memory write."
+    domain_weights:
+      security: 0.6
+      audit: 1.3
+      cognitive: 1.7
+      communication: 1.2
+      emotional: 0.4
+      embodiment: 0.4
+
+  # ---- Tranche 7: companion extensions ---------------------------------
+  # All companion-class roles inherit ADR-0038's harm model: refuse
+  # crisis topics, mandatory non-clinical disclaimer, scoped tools.
+  accessibility_runtime:
+    description: "Runtime accessibility helper (screen reader, voice, visual cue mediation). Memory-write scoped; harm-model strict."
+    domain_weights:
+      security: 0.5
+      audit: 0.8
+      cognitive: 1.2
+      communication: 1.7
+      emotional: 1.8
+      embodiment: 0.7
+
+  day_companion:
+    description: "Daily-life assistant — calendar, reminders, light task tracking. Memory-write scoped; harm-model strict."
+    domain_weights:
+      security: 0.4
+      audit: 0.7
+      cognitive: 1.3
+      communication: 1.7
+      emotional: 1.6
+      embodiment: 0.5
+
+  learning_partner:
+    description: "Learning-oriented assistant for educational content. Memory-write scoped; harm-model strict."
+    domain_weights:
+      security: 0.4
+      audit: 0.7
+      cognitive: 1.8
+      communication: 1.7
+      emotional: 1.2
+      embodiment: 0.4
+
+  # journaling_partner (renamed from `therapist` in genres.yaml at this
+  # burst; per ADR-0038 the original therapist scope was too broad —
+  # journaling-partner narrows to non-clinical reflective writing.
+  # Mandatory non-clinical disclaimer + crisis-topic refusal in
+  # constitution_templates.yaml below).
+  journaling_partner:
+    description: "Structured journaling support — prompts, reflective writing scaffolds. Explicitly NOT therapy. Refuses crisis topics, redirects to professional resources."
+    domain_weights:
+      security: 0.6
+      audit: 0.9
+      cognitive: 1.2
+      communication: 1.6
+      emotional: 1.5
+      embodiment: 0.4
+
+  # ---- Tranche 8: web genres (renamed from _root placeholders) ---------
+  # Per ADR-0044 Burst 124 §"Web genres," the placeholder _root names
+  # are renamed to concrete role names. Open-web guards from ADR-003X
+  # apply per genre; per-role policies tighten further.
+  web_watcher:
+    description: "Passive web monitoring — feeds, status pages, dashboards. Read-only via web_fetch with allowlist."
+    domain_weights:
+      security: 1.2
+      audit: 1.8
+      cognitive: 1.0
+      communication: 0.7
+      emotional: 0.4
+      embodiment: 0.5
+
+  web_researcher:
+    description: "Active web research — search, fetch, synthesize from N allowlisted hosts. Memory-write to consented scope."
+    domain_weights:
+      security: 0.8
+      audit: 1.2
+      cognitive: 1.8
+      communication: 1.3
+      emotional: 0.4
+      embodiment: 0.4
+
+  web_actuator:
+    description: "Web-side actions — form submission, account management. Strict approval gating per ADR-003X open-web posture."
+    domain_weights:
+      security: 2.0
+      audit: 2.0
+      cognitive: 1.3
+      communication: 0.8
+      emotional: 0.4
+      embodiment: 0.6
+
 # ---------------------------------------------------------------------------
 # META — constraints enforced by the trait engine
 # ---------------------------------------------------------------------------
