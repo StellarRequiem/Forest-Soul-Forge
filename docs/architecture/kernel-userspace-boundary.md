@@ -29,7 +29,7 @@ could replace any userspace component without touching the kernel.
 | `src/forest_soul_forge/security/` | **kernel** | PrivClient (sudo helper). The privileged-ops boundary. |
 | `src/forest_soul_forge/agents/` | **kernel** | Bound-agent classes (placeholder + Phase D blue-team agents). |
 | `config/` | **kernel-adjacent** | YAML configuration *schema* (trait_tree, genres, tool_catalog, constitution_templates) is part of the v1.0 freeze. The specific *values* in these files are operator-customizable — they're not part of the freeze. |
-| `examples/` | **userspace** | Canonical example configs / plugins / skills / scenarios. Authoring guidance and reference shapes for operators. Free to evolve. |
+| `examples/` | **hybrid** | Mostly userspace (canonical example plugins, scenarios — narrative content for operators). Two exceptions are **kernel-adjacent seed state**: `examples/audit_chain.jsonl` is the default `audit_chain_path` per `daemon/config.py` (the live chain operators read; CLAUDE.md notes this), and `examples/skills/*` are the canonical authored skill manifests the install scripts copy into runtime `data/forge/skills/installed/`. Both are kernel-adjacent because the daemon's defaults and CLI fallbacks reference them. The rest (plugins, scenarios, README content) is userspace and free to evolve. |
 | `apps/desktop/` | **userspace (SoulUX)** | The Tauri 2.x desktop shell that bundles the daemon as a sidecar. The flagship distribution's installer surface. ADR-0042 T3.1 + T4. |
 | `frontend/` | **userspace (SoulUX)** | Vanilla-JS reference frontend. Not part of the kernel — a different distribution could replace it entirely with no kernel impact. |
 | `docs/decisions/` | **kernel** | ADRs are the kernel's design record. |

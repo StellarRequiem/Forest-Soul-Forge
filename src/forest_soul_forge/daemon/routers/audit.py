@@ -1,7 +1,9 @@
 """``/audit`` — read-only audit chain mirror.
 
-Source of truth is the canonical JSONL at ``data/audit_chain.jsonl``.
-Per ADR-0006 the registry is a derived index over that file. This router
+Source of truth is the canonical JSONL at the configured
+``audit_chain_path`` (default ``examples/audit_chain.jsonl`` per
+``daemon/config.py``; override via ``FSF_AUDIT_CHAIN_PATH``). Per
+ADR-0006 the registry is a derived index over that file. This router
 reflects the split:
 
 * ``/audit/tail`` reads the canonical JSONL directly via :meth:`AuditChain.tail`.

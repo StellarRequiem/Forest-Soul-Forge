@@ -1,17 +1,27 @@
 # Forest Soul Forge — docker compose stack.
 #
 # Three services:
-#   daemon    — FastAPI control plane (always on)
-#   frontend  — nginx serving the vanilla-JS UI (always on)
+#   daemon    — Forest kernel FastAPI control plane (always on)
+#   frontend  — SoulUX reference UI (always on by default; see headless note)
 #   ollama    — local LLM backend, opt-in via --profile llm
 #
 # Quickstart:
-#   docker compose up              # daemon + frontend
-#   docker compose --profile llm up # + ollama
+#   docker compose up                # daemon + frontend (SoulUX flagship)
+#   docker compose up daemon         # daemon only (headless / kernel-only)
+#   docker compose --profile llm up  # + ollama
 #
-# The browser talks directly to both the daemon (7423) and frontend (5173)
-# on the host. This preserves the frontend's ?api=... contract and the
-# daemon's CORS allowlist, which already includes http://127.0.0.1:5173.
+# Per ADR-0044 (kernel positioning), the daemon is the kernel — installable
+# and runnable without the frontend. The frontend is the SoulUX reference
+# distribution's UI; a different distribution could replace it entirely
+# without touching the kernel. `docker compose up daemon` is the canonical
+# headless invocation; it brings up only the kernel control plane and is
+# what external integrators / second distributions target.
+# See docs/runbooks/headless-install.md for the kernel-only install path.
+#
+# The browser (when SoulUX is up) talks directly to both the daemon (7423)
+# and frontend (5173) on the host. This preserves the frontend's ?api=...
+# contract and the daemon's CORS allowlist, which already includes
+# http://127.0.0.1:5173.
 #
 # Persistent state:
 #   ./data/ holds registry.sqlite, audit_chain.jsonl, and generated souls.

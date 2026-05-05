@@ -1,21 +1,30 @@
 """Daemon entry point for ``python -m forest_soul_forge.daemon``.
 
-ADR-0042 T4 (Burst 101). Two callers need a single-file
-launchable entry point:
+This is the **kernel's** entry point — `python -m
+forest_soul_forge.daemon` boots the FastAPI control plane with no
+userspace dependencies. Headless installs (kernel-only consumers,
+external integrators, second distributions) use this directly.
+
+ADR-0042 T4 (Burst 101) added the entry to support two specific
+SoulUX-distribution callers:
 
 1. The Tauri desktop shell (``apps/desktop/src/main.rs``) spawns
    ``python -m forest_soul_forge.daemon --port 7423`` as a
-   subprocess in dev mode. Without ``__main__.py`` this errors
-   out as "No module named forest_soul_forge.daemon.__main__".
+   subprocess in dev mode.
 2. PyInstaller (``dist/daemon-pyinstaller.spec``) packages this
-   file as the binary's entry point. Production Tauri builds
-   spawn the bundled binary instead of ``python3``.
+   file as the SoulUX binary's entry point.
 
-Equivalent to the existing ``run.command``'s
-``uvicorn forest_soul_forge.daemon.app:app --host 127.0.0.1 --port 7423``,
-but plumbed through Python so PyInstaller has a single function
-to bundle. ``run.command`` keeps working unchanged for
-developers running from source.
+Both are SoulUX-distribution concerns (ADR-0044), but the entry
+point itself is kernel — anyone can ``pip install
+forest-soul-forge[daemon] && python -m forest_soul_forge.daemon``
+and have a running kernel. See ``docs/runbooks/headless-install.md``
+for the headless install runbook.
+
+Equivalent to ``uvicorn forest_soul_forge.daemon.app:app --host
+127.0.0.1 --port 7423``, but plumbed through Python so PyInstaller
+has a single function to bundle. ``run.command`` (a SoulUX
+operator script) keeps working unchanged for developers running
+from source.
 """
 from __future__ import annotations
 
@@ -41,7 +50,10 @@ def main(argv: list[str] | None = None) -> int:
         "--port",
         type=int,
         default=7423,
-        help="Bind port (default 7423; matches frontend's API expectation)",
+        help=(
+            "Bind port (default 7423; the SoulUX reference frontend "
+            "expects this port, but any consumer can override)"
+        ),
     )
     parser.add_argument(
         "--log-level",

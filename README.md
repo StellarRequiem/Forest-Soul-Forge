@@ -264,6 +264,14 @@ The follow-up audit at [`docs/audits/2026-04-30-end-of-session-stack-review.md`]
 
 ## 🚀 Quick start
 
+Two install paths per ADR-0044 (kernel positioning):
+
+### Path A — SoulUX flagship (recommended for first-time use)
+
+The polished operator experience: Tauri shell + reference frontend +
+all the operator `.command` scripts. This is what most people want
+when they're evaluating Forest.
+
 ```bash
 # 1. Clone and enter
 git clone https://github.com/StellarRequiem/Forest-Soul-Forge.git
@@ -278,10 +286,42 @@ docker compose --profile llm up -d
 open "http://127.0.0.1:5173/?api=http://127.0.0.1:7423"
 ```
 
-That's it. `start.command` is the safe entry point for first-time
-contributors and evaluators — it bootstraps the venv on first run and
-fast-paths after that. For day-to-day "venv is built, just bring it
-up" use, `run.command` is still the direct shortcut.
+`start.command` is the safe entry point — it bootstraps the venv on
+first run and fast-paths after that. For day-to-day "venv is built,
+just bring it up" use, `run.command` is the direct shortcut.
+
+### Path B — Headless kernel (for integrators + second distributions)
+
+Forest is a kernel; the daemon runs without any of SoulUX's userspace
+artifacts (no frontend, no Tauri shell, no `.command` scripts). External
+integrators, server-headless deployments, CI/CD pipelines, and anyone
+building a second distribution on top of Forest target this path.
+
+```bash
+git clone https://github.com/StellarRequiem/Forest-Soul-Forge.git
+cd Forest-Soul-Forge
+
+# pip install kernel + daemon extras only (no frontend dependencies fetched)
+pip install -e ".[daemon]"
+
+# Boot the kernel daemon
+python -m forest_soul_forge.daemon
+# Daemon serves at 127.0.0.1:7423 with no frontend assumptions.
+
+# OR via Docker — bring up only the daemon service:
+docker compose up daemon
+```
+
+Verify the kernel runs end-to-end without SoulUX:
+
+```bash
+./scripts/headless-smoke.sh   # 6-stage curl-only validation
+```
+
+See [`docs/runbooks/headless-install.md`](docs/runbooks/headless-install.md)
+for the full headless install runbook (CORS tightening, auth tokens,
+PyInstaller binary, etc.) and [`docs/spec/kernel-api-v0.6.md`](docs/spec/kernel-api-v0.6.md)
+for the contract-grade ABI specification of all seven kernel surfaces.
 
 ### macOS double-click ops (`.command` scripts)
 

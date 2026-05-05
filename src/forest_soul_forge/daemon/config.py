@@ -248,8 +248,11 @@ class DaemonSettings(BaseSettings):
     )
 
     # ----- cors ------------------------------------------------------------
-    # Allow the local frontend (file:// and localhost) to call the daemon
-    # during dev. Tighten for any non-local deployment.
+    # Default allowlist serves the SoulUX reference frontend (port 5173) +
+    # local file:// loads. Per ADR-0044 the kernel runs without a frontend
+    # — headless installs that don't need browser access can override to
+    # ``[]`` via ``FSF_CORS_ALLOW_ORIGINS=""``. Tighten for any non-local
+    # deployment regardless of distribution.
     cors_allow_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173", "null"],
     )
