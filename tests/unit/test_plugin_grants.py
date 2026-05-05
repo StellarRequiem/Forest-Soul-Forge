@@ -61,7 +61,7 @@ def reg(tmp_path: Path):
 # ---- schema layer ----------------------------------------------------------
 
 def test_schema_version_is_14():
-    assert REGISTRY_SCHEMA_VERSION == 14
+    assert REGISTRY_SCHEMA_VERSION == 15
 
 
 def test_agent_plugin_grants_table_exists(reg: Registry):

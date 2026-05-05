@@ -133,7 +133,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 14
+            assert r.schema_version() == 15
             assert r.list_agents() == []
             assert r.audit_tail() == []
         assert db.exists()
@@ -147,7 +147,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 14
+            assert r.schema_version() == 15
 
     def test_empty_existing_file_gets_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
@@ -158,7 +158,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 14
+            assert r.schema_version() == 15
 
     def test_schema_downgrade_raises(self, tmp_path: Path):
         """A file stamped at a version *newer* than the code refuses to open.
@@ -262,7 +262,7 @@ class TestBootstrap:
         # disclosure). The assertion tests that all migration steps
         # landed on the same pass.
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 14
+            assert r.schema_version() == 15
 
             # Data survives.
             row = r.get_agent(pre_existing)
@@ -416,7 +416,7 @@ class TestBootstrap:
 
         # Reopen — bootstrap should run MIGRATIONS[7].
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 14
+            assert r.schema_version() == 15
 
             raw = sqlite3.connect(str(db))
             raw.execute("PRAGMA foreign_keys = ON")
@@ -492,6 +492,23 @@ class TestBootstrap:
         # recreates them via CREATE INDEX IF NOT EXISTS.
         conn.execute("DROP INDEX IF EXISTS idx_memory_last_challenged;")
         conn.execute("DROP INDEX IF EXISTS idx_memory_claim_type;")
+        # ADR-0045 (v15): drop the posture index + column too, so the
+        # MIGRATIONS[15] ADD COLUMN runs against a clean shape.
+        conn.execute("DROP INDEX IF EXISTS idx_agents_posture;")
+        conn.execute("ALTER TABLE agents DROP COLUMN posture;")
+        # Drop the v14 plugin-grants table + its partial index — they
+        # were created by DDL_STATEMENTS during bootstrap and need to
+        # be absent so MIGRATIONS[14] runs cleanly.
+        conn.execute("DROP INDEX IF EXISTS idx_plugin_grants_active;")
+        conn.execute("DROP TABLE IF EXISTS agent_plugin_grants;")
+        # Drop the v13 scheduler-state table + its partial index too.
+        conn.execute("DROP INDEX IF EXISTS idx_scheduled_task_state_breaker;")
+        conn.execute("DROP TABLE IF EXISTS scheduled_task_state;")
+        # Drop the v12 flagged_state column on contradictions before
+        # we drop the v11 contradictions table itself.
+        # (memory_contradictions doesn't exist at v10, so DROP TABLE
+        # below is the actual cleanup; this DROP INDEX is defensive.)
+        conn.execute("DROP INDEX IF EXISTS idx_contradictions_state;")
         # Drop the v11 columns. None have FKs, so DROP COLUMN is safe —
         # no internal table rebuild that would break referential
         # integrity (unlike the v6→v7 test setup).
@@ -531,7 +548,7 @@ class TestBootstrap:
 
         # Reopen through bootstrap — should run MIGRATIONS[11].
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 14
+            assert r.schema_version() == 15
 
             raw = sqlite3.connect(str(db))
             raw.execute("PRAGMA foreign_keys = ON")

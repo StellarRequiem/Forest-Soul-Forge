@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 14
+SCHEMA_VERSION: int = 15
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -44,12 +44,19 @@ DDL_STATEMENTS: tuple[str, ...] = (
         status           TEXT NOT NULL DEFAULT 'active',
         legacy_minted    INTEGER NOT NULL DEFAULT 0,
         sibling_index    INTEGER NOT NULL DEFAULT 1,
+        -- ADR-0045 (Burst 114): per-agent posture (traffic light).
+        -- Mutable runtime state, NOT part of constitution_hash.
+        -- green=honor existing policy / yellow=force pending on
+        -- non-read_only / red=refuse non-read_only outright.
+        posture          TEXT NOT NULL DEFAULT 'yellow'
+                         CHECK (posture IN ('green', 'yellow', 'red')),
         FOREIGN KEY (parent_instance) REFERENCES agents(instance_id)
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_agents_dna    ON agents(dna);",
     "CREATE INDEX IF NOT EXISTS idx_agents_role   ON agents(role);",
     "CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);",
+    "CREATE INDEX IF NOT EXISTS idx_agents_posture ON agents(posture);",
     "CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_instance);",
     # Sibling-index lookup is hot on the birth write path — every birth does
     # MAX(sibling_index) WHERE dna=? inside the write lock to pick the next
@@ -966,5 +973,18 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX IF NOT EXISTS idx_plugin_grants_active "
             "ON agent_plugin_grants(instance_id) "
             "WHERE revoked_at_seq IS NULL;",
+    ),
+    # v14 → v15 (ADR-0045 T1, Burst 114): per-agent posture.
+    # ADD COLUMN with DEFAULT 'yellow' is safe — existing rows get
+    # the default which matches their de-facto behavior pre-Burst-114
+    # (gating is per-tool config; yellow doesn't override that).
+    # CHECK constraint matches the DDL_STATEMENTS shape so reopen
+    # path matches fresh-install path.
+    15: (
+        "ALTER TABLE agents ADD COLUMN posture TEXT NOT NULL "
+            "DEFAULT 'yellow' "
+            "CHECK (posture IN ('green', 'yellow', 'red'));",
+        "CREATE INDEX IF NOT EXISTS idx_agents_posture "
+            "ON agents(posture);",
     ),
 }

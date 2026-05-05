@@ -61,6 +61,7 @@ from forest_soul_forge.tools.governance_pipeline import (
     GovernancePipeline,
     HardwareQuarantineStep,
     McpPerToolApprovalStep,
+    PostureGateStep,
     PostureOverrideStep,
     StepResult,
     TaskUsageCapStep,
@@ -418,6 +419,13 @@ class ToolDispatcher:
             ApprovalGateStep(
                 genre_requires_approval_fn=genre_requires_approval,
             ),
+            # ADR-0045 T1 (Burst 114): per-agent posture (traffic
+            # light). Outermost gate. Sits AFTER ApprovalGateStep so
+            # it can override an upstream GO with REFUSE (red) or
+            # PENDING (yellow). Read-only tools always pass through
+            # regardless of posture. T3 (Burst 115) flips
+            # enforce_per_grant=True to layer per-grant tier on top.
+            PostureGateStep(),
         ])
 
     async def dispatch(
@@ -463,6 +471,18 @@ class ToolDispatcher:
         # double-merge. None when plugin_runtime is unwired (test
         # contexts) or the merge produced an empty result.
         merged_mcp_registry = self._build_merged_mcp_registry()
+        # ADR-0045 T1 (Burst 114): load per-agent posture for the
+        # PostureGateStep at the end of the pipeline. None when no
+        # agent_registry is wired (test contexts) — step short-
+        # circuits to GO. Defensive: any read failure returns None
+        # so a corrupt agents row doesn't break dispatch.
+        agent_posture = self._load_agent_posture(instance_id)
+        # ADR-0045 T3 hook (forward-compat for Burst 115): per-grant
+        # trust_tier view. T1 doesn't enforce per-grant, so this is
+        # populated but dead. Burst 115 flips PostureGateStep.enforce_per_grant
+        # and starts consulting it. Loading here keeps the pipeline
+        # interface stable.
+        plugin_grants_view = self._load_plugin_grants_view(instance_id)
         dctx = DispatchContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
@@ -476,6 +496,8 @@ class ToolDispatcher:
             provider=provider,
             task_caps=task_caps,
             mcp_registry=merged_mcp_registry,
+            agent_posture=agent_posture,
+            plugin_grants_view=plugin_grants_view,
         )
         verdict = self._pipeline.run(dctx)
         if verdict.is_refuse:
@@ -768,6 +790,58 @@ class ToolDispatcher:
         except Exception:
             # Audit failure shouldn't mask the dispatch.
             pass
+
+    def _load_agent_posture(self, instance_id: str) -> str | None:
+        """Read agents.posture for the given agent. ADR-0045 T1.
+
+        Returns ``None`` when:
+          - self.agent_registry is unwired (test contexts)
+          - the agent doesn't exist in the registry
+          - the row exists but lacks a posture column (shouldn't
+            happen post-v15 but defensive)
+          - any DB read fails
+
+        On any None return, PostureGateStep short-circuits to GO —
+        posture enforcement requires positive evidence.
+        """
+        if self.agent_registry is None:
+            return None
+        try:
+            conn = getattr(self.agent_registry, "_conn", None)
+            if conn is None:
+                return None
+            row = conn.execute(
+                "SELECT posture FROM agents WHERE instance_id = ?;",
+                (instance_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            posture = row[0]
+            if posture not in ("green", "yellow", "red"):
+                return None
+            return posture
+        except Exception:
+            return None
+
+    def _load_plugin_grants_view(
+        self, instance_id: str,
+    ) -> dict[str, str] | None:
+        """Read active plugin grants for the agent as a
+        plugin_name → trust_tier dict. ADR-0045 T3 forward-compat.
+
+        Returns ``None`` when self.plugin_grants is unwired or any
+        read fails. Empty dict (no active grants) returns as ``{}``,
+        which is distinct from None — the step then knows the table
+        IS wired but the agent has no grants, so per-grant tier is
+        irrelevant for any tool call.
+        """
+        if self.plugin_grants is None:
+            return None
+        try:
+            grants = self.plugin_grants.list_active(instance_id)
+            return {g.plugin_name: g.trust_tier for g in grants}
+        except Exception:
+            return None
 
     def _build_merged_mcp_registry(self) -> dict[str, Any] | None:
         """Compute the merged MCP registry view (YAML base + plugin

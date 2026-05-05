@@ -125,6 +125,22 @@ class DispatchContext:
     # short-circuits to GO in that case.
     mcp_registry: dict[str, Any] | None = None
 
+    # ADR-0045 T1 (Burst 114): per-agent posture (traffic light).
+    # Populated by the dispatcher BEFORE pipeline.run() from the
+    # agents.posture column. Consumed by PostureGateStep at the end
+    # of the pipeline. ``None`` when the agent isn't in the registry
+    # (test contexts) — the step short-circuits to GO in that case.
+    # See ADR-0045 §"Dispatcher integration" for the gate semantics.
+    agent_posture: str | None = None
+
+    # ADR-0045 T3 (Burst 115): per-grant trust_tier view. Maps
+    # plugin_name → trust_tier for active grants on this agent.
+    # Populated alongside agent_posture. Consumed by PostureGateStep
+    # ONLY when the dispatched tool is mcp_call.v1 (the per-grant
+    # tier is plugin-specific, not agent-wide). ``None`` when no
+    # plugin_grants table is wired (test contexts).
+    plugin_grants_view: dict[str, str] | None = None
+
     # -- accumulated state (steps populate as the pipeline runs) ------------
     tool: Any = None
     resolved: Any = None  # _ResolvedToolConstraints from dispatcher.py
@@ -700,4 +716,107 @@ class ApprovalGateStep:
                 else ("genre" if genre_requires else "constraint")
             )
             return StepResult.pending(gate_source=gate_source, side_effects=side_effects)
+        return StepResult.go()
+
+
+@dataclass
+class PostureGateStep:
+    """ADR-0045 T1 (Burst 114) — per-agent posture (traffic light).
+
+    Outermost gate in the governance pipeline. Sits AFTER
+    :class:`ApprovalGateStep` so it can override upstream GO verdicts
+    with REFUSE (red) or PENDING (yellow) for non-read-only tools.
+
+    Posture semantics:
+      green:  honor existing per-tool / per-genre / per-grant policy
+              as-is. Step adds no override → propagate upstream verdict.
+      yellow: force ``pending_approval`` on every dispatch with
+              ``side_effects != read_only``, regardless of per-tool
+              config. The "I'm watching" mode.
+      red:    refuse every dispatch with ``side_effects != read_only``
+              outright. The "agent on probation" mode.
+
+    Read-only tools (memory_recall, code_read, llm_think, etc.) pass
+    through regardless of posture — the agent can still think and
+    inspect even when its action authority is paused.
+
+    Per-grant trust_tier (Burst 115 / ADR-0045 T3) folds in here when
+    the dispatched tool is ``mcp_call.v1``. Precedence is
+    red-dominates: the strongest signal across (agent posture,
+    per-grant tier) wins. Burst 114 implements agent-only enforcement;
+    Burst 115 layers per-grant on top.
+
+    No-op when:
+      - dctx.agent_posture is None (test contexts; agent not registered)
+      - dctx.tool is None (upstream lookup step refused)
+      - tool.side_effects == 'read_only' (always allowed)
+      - upstream verdict already terminal (we don't double-handle —
+        but we sit AFTER the upstream step that returns the verdict,
+        so by the time we run, GO is the only state we see)
+    """
+
+    # T3 (Burst 115) wires this; T1 leaves it false.
+    enforce_per_grant: bool = False
+
+    def evaluate(self, dctx: DispatchContext) -> StepResult:
+        posture = dctx.agent_posture
+        if posture is None or posture == "green":
+            return StepResult.go()
+        if dctx.tool is None:
+            return StepResult.go()
+        # Resolve effective side_effects (constitutional override or
+        # tool default). Read-only ALWAYS bypasses posture — even a
+        # red-postured agent can think + read.
+        side_effects = (
+            (dctx.resolved.side_effects if dctx.resolved else None)
+            or dctx.tool.side_effects
+        )
+        if side_effects == "read_only":
+            return StepResult.go()
+
+        # T3 hook: per-grant trust_tier override for mcp_call.v1.
+        # When enforce_per_grant=False (T1/T2), this branch is dead
+        # and only the agent-wide posture decides.
+        effective_posture = posture
+        if (
+            self.enforce_per_grant
+            and dctx.tool_name == "mcp_call"
+            and dctx.plugin_grants_view is not None
+        ):
+            server_name = dctx.args.get("server_name")
+            if isinstance(server_name, str):
+                grant_tier = dctx.plugin_grants_view.get(server_name)
+                if grant_tier is not None:
+                    # Red-dominates precedence: the strongest signal
+                    # across (agent, grant) wins.
+                    rank = {"green": 0, "yellow": 1, "red": 2}
+                    if rank.get(grant_tier, 0) > rank.get(effective_posture, 0):
+                        effective_posture = grant_tier
+                    # Per-grant green doesn't OVERRIDE a yellow agent
+                    # for non-MCP tools — but for THIS mcp_call,
+                    # green can downgrade an agent-yellow gate to GO.
+                    # Per ADR-0045 §"Interaction with per-grant
+                    # trust_tier": agent-yellow + grant-green for the
+                    # specific plugin = ungated for that mcp_call.
+                    elif (
+                        grant_tier == "green"
+                        and effective_posture == "yellow"
+                    ):
+                        effective_posture = "green"
+                        return StepResult.go()
+
+        if effective_posture == "red":
+            return StepResult.refuse(
+                "agent_posture_red",
+                (
+                    f"agent posture is RED — non-read-only dispatch "
+                    f"refused. Operator must raise the posture before "
+                    f"this agent can act."
+                ),
+            )
+        if effective_posture == "yellow":
+            return StepResult.pending(
+                gate_source="posture_yellow",
+                side_effects=side_effects,
+            )
         return StepResult.go()
