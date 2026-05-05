@@ -58,6 +58,9 @@ from forest_soul_forge.registry.tables import (
     SecretsTable,
     ToolCountersTable,
 )
+from forest_soul_forge.registry.tables.plugin_grants import (
+    PluginGrantsTable,
+)
 from forest_soul_forge.registry.tables._helpers import transaction as _transaction
 
 REGISTRY_SCHEMA_VERSION: int = schema.SCHEMA_VERSION
@@ -116,6 +119,12 @@ class Registry:
         self.secrets = SecretsTable(conn)
         # ADR-003Y Y1: conversation runtime substrate.
         self.conversations = ConversationsTable(conn)
+        # ADR-0043 follow-up #2 (Burst 113): post-birth plugin grants.
+        # Augments constitution.allowed_mcp_servers without mutating
+        # constitution_hash. The dispatcher unions grants() with the
+        # constitution-declared list before mcp_call.v1's allowlist
+        # check runs.
+        self.plugin_grants = PluginGrantsTable(conn)
 
     # ============ construction / teardown ===================================
     @classmethod

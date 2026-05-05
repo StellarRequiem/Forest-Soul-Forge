@@ -228,6 +228,17 @@ def build_or_get_tool_dispatcher(app):
         # plugins aren't wired (lifespan load failure or test
         # context) — mcp_call falls back to its YAML-only loader.
         plugin_runtime=getattr(app.state, "plugin_runtime", None),
+        # ADR-0043 follow-up #2 (Burst 113): post-birth plugin grants.
+        # The Registry's PluginGrantsTable is the same SQLite
+        # connection-bound accessor everything else uses; the
+        # dispatcher reads active_plugin_names() once per dispatch to
+        # union with constitution.allowed_mcp_servers. None when
+        # fsf_registry is None (test contexts) — dispatcher falls
+        # back to constitution-only allowlist.
+        plugin_grants=(
+            getattr(fsf_registry, "plugin_grants", None)
+            if fsf_registry is not None else None
+        ),
     )
     # ADR-0033 A3: build the cross-agent delegator factory now that
     # the dispatcher exists, then mutate the dispatcher to hold a

@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 13
+SCHEMA_VERSION: int = 14
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -473,6 +473,50 @@ DDL_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_scheduled_task_state_breaker "
         "ON scheduled_task_state(circuit_breaker_open) "
         "WHERE circuit_breaker_open = 1;",
+    # ADR-0043 follow-up #2 (Burst 113): agent_plugin_grants.
+    # Post-birth grants of MCP plugin access without rebirthing the
+    # agent (constitution_hash is immutable per agent — see CLAUDE.md
+    # architectural invariants — so we add an explicit augmentation
+    # layer rather than mutate the constitution).
+    #
+    # Effective allowed_mcp_servers at dispatch time =
+    #   constitution.allowed_mcp_servers ∪ {grants where revoked_at_seq IS NULL}
+    #
+    # ``trust_tier`` is forward-compatible storage for ADR-0045
+    # (Agent Posture / Trust-Light System, queued next). For Burst 113
+    # the value is recorded but the dispatcher only treats it as
+    # informational — gating still flows through the existing
+    # per-tool requires_human_approval path. ADR-0045's
+    # PostureGateStep will start consulting it once filed.
+    #
+    # Composite primary key (instance_id, plugin_name) — at most one
+    # ACTIVE grant per (agent, plugin). Re-granting an already-active
+    # grant is idempotent (ON CONFLICT no-op). Revoking flips
+    # revoked_at_seq from NULL → an audit seq; granting after a
+    # revoke creates a fresh row (the previous revoked row stays as
+    # historical record, replaced via INSERT OR REPLACE only when
+    # the operator explicitly re-grants).
+    """
+    CREATE TABLE IF NOT EXISTS agent_plugin_grants (
+        instance_id      TEXT NOT NULL,
+        plugin_name      TEXT NOT NULL,
+        trust_tier       TEXT NOT NULL DEFAULT 'yellow'
+                         CHECK (trust_tier IN ('green', 'yellow', 'red')),
+        granted_at_seq   INTEGER NOT NULL,
+        granted_by       TEXT,
+        granted_at       TEXT NOT NULL,
+        revoked_at_seq   INTEGER,
+        revoked_at       TEXT,
+        revoked_by       TEXT,
+        reason           TEXT,
+        PRIMARY KEY (instance_id, plugin_name),
+        FOREIGN KEY (instance_id)
+            REFERENCES agents(instance_id) ON DELETE CASCADE
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_plugin_grants_active "
+        "ON agent_plugin_grants(instance_id) "
+        "WHERE revoked_at_seq IS NULL;",
 )
 
 # Metadata rows written on bootstrap. ``canonical_contract`` is a tripwire —
@@ -889,5 +933,38 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX IF NOT EXISTS idx_scheduled_task_state_breaker "
             "ON scheduled_task_state(circuit_breaker_open) "
             "WHERE circuit_breaker_open = 1;",
+    ),
+    # v13 → v14 (ADR-0043 follow-up #2, Burst 113): plugin grants.
+    # Pure addition — new table only, no existing rows touched. The
+    # immutable-constitution invariant is preserved: this table
+    # AUGMENTS the constitution's allowed_mcp_servers list rather
+    # than mutating it. Effective set at dispatch time is the union
+    # of (constitution-declared) ∪ (active grants here).
+    #
+    # ``trust_tier`` is forward-compatible storage for ADR-0045
+    # (Agent Posture / Trust-Light System). Burst 113 records the
+    # value; ADR-0045's PostureGateStep will start consulting it.
+    14: (
+        """
+        CREATE TABLE IF NOT EXISTS agent_plugin_grants (
+            instance_id      TEXT NOT NULL,
+            plugin_name      TEXT NOT NULL,
+            trust_tier       TEXT NOT NULL DEFAULT 'yellow'
+                             CHECK (trust_tier IN ('green', 'yellow', 'red')),
+            granted_at_seq   INTEGER NOT NULL,
+            granted_by       TEXT,
+            granted_at       TEXT NOT NULL,
+            revoked_at_seq   INTEGER,
+            revoked_at       TEXT,
+            revoked_by       TEXT,
+            reason           TEXT,
+            PRIMARY KEY (instance_id, plugin_name),
+            FOREIGN KEY (instance_id)
+                REFERENCES agents(instance_id) ON DELETE CASCADE
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_plugin_grants_active "
+            "ON agent_plugin_grants(instance_id) "
+            "WHERE revoked_at_seq IS NULL;",
     ),
 }

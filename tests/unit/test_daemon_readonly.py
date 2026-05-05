@@ -145,7 +145,7 @@ class TestHealth:
         # scheduler's persistence (Burst 90). Daemon reports the
         # registry's live schema_version; assertion tracks the live
         # value rather than a stale literal.
-        assert body["schema_version"] == 13
+        assert body["schema_version"] == 14
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"

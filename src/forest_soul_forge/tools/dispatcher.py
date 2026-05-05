@@ -201,6 +201,33 @@ def _load_initiative_level(constitution_path: Path) -> str:
     return level.strip()
 
 
+def _load_constitution_mcp_allowlist(constitution_path: Path) -> tuple[str, ...]:
+    """ADR-0043 follow-up #2 (Burst 113): read top-level
+    ``allowed_mcp_servers`` from the agent's constitution.yaml.
+
+    Returns an empty tuple when:
+      - constitution file is missing
+      - YAML parsing fails
+      - the field is absent (most current constitutions — feature is new)
+      - the field is present but not a list
+
+    The dispatcher unions this with active grants from the
+    ``agent_plugin_grants`` table to produce the effective allowlist
+    that mcp_call.v1 sees. Pure function, defensive against any read
+    failure — same posture as :func:`_load_initiative_level`.
+    """
+    if not constitution_path.exists():
+        return ()
+    try:
+        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return ()
+    raw = data.get("allowed_mcp_servers")
+    if not isinstance(raw, list):
+        return ()
+    return tuple(s for s in raw if isinstance(s, str) and s)
+
+
 def _load_resolved_constraints(
     constitution_path: Path, tool_name: str, tool_version: str
 ) -> _ResolvedToolConstraints | None:
@@ -313,6 +340,19 @@ class ToolDispatcher:
     # back to its YAML-only path. Plugins override YAML on name
     # conflict — the manifest is the operator's newer source of truth.
     plugin_runtime: Any = None
+    # ADR-0043 follow-up #2 (Burst 113): post-birth plugin grants
+    # accessor. When set, the dispatcher unions
+    # ``constitution.allowed_mcp_servers`` with active grants from
+    # ``self.plugin_grants.active_plugin_names(instance_id)`` and
+    # injects the result as ``ctx.constraints["allowed_mcp_servers"]``.
+    # mcp_call.v1's existing allowlist check then sees the union
+    # without modification. None when grants aren't wired (test
+    # contexts) — the helper falls back to the constitution-only
+    # value, which itself defaults to an empty set when the agent
+    # was born without an allowed_mcp_servers field. Closes the
+    # pre-Burst-113 gap where mcp_call.v1 read this constraint but
+    # nothing populated it.
+    plugin_grants: Any = None
 
     # R3 (2026-04-30): the pipeline of pre-execute checks. Built
     # once per dispatcher in __post_init__ from the dispatcher's
@@ -513,6 +553,29 @@ class ToolDispatcher:
         # of truth. Reuse it here rather than re-merging.
         if merged_mcp_registry:
             ctx_constraints["mcp_registry"] = merged_mcp_registry
+
+        # ADR-0043 follow-up #2 (Burst 113): effective allowed_mcp_servers.
+        # Union of (constitution top-level allowed_mcp_servers) ∪
+        # (active grants from agent_plugin_grants). mcp_call.v1's
+        # existing allowlist check reads
+        # ``ctx.constraints["allowed_mcp_servers"]``. Pre-Burst-113
+        # nothing populated this key — the constitution-side allowlist
+        # was documented but never wired into dispatch. Burst 113
+        # closes that gap AND adds post-birth augmentation via grants.
+        constitution_servers = _load_constitution_mcp_allowlist(constitution_path)
+        granted_servers: set[str] = set()
+        if self.plugin_grants is not None:
+            try:
+                granted_servers = self.plugin_grants.active_plugin_names(
+                    instance_id,
+                )
+            except Exception:
+                # Grants table issues must not break dispatch — fall
+                # back to constitution-only.
+                granted_servers = set()
+        effective = set(constitution_servers) | granted_servers
+        if effective:
+            ctx_constraints["allowed_mcp_servers"] = tuple(sorted(effective))
         ctx = ToolContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
