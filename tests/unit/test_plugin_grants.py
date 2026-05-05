@@ -2,8 +2,9 @@
 
 Three coverage layers:
 
-1. **Schema bump** — v14 stamp, agent_plugin_grants table exists,
-   the partial index covers active rows.
+1. **Schema bump** — v15 stamp (was v14 at Burst 113a; bumped to v15
+   for ADR-0045 agents.posture column at Burst 114), agent_plugin_grants
+   table exists, the partial index covers active rows.
 
 2. **PluginGrantsTable semantics** — grant/revoke/list/active_plugin_names
    with correct INSERT OR REPLACE on re-grant, NULL ↔ seq transitions
@@ -60,7 +61,11 @@ def reg(tmp_path: Path):
 
 # ---- schema layer ----------------------------------------------------------
 
-def test_schema_version_is_14():
+def test_schema_version_is_15():
+    """Locked at v15 post-Burst 114 (ADR-0045 agents.posture).
+    Function name was test_schema_version_is_14 historically — file
+    moved through v14 (Burst 113a, agent_plugin_grants) → v15
+    (Burst 114, agents.posture). Renamed for honesty."""
     assert REGISTRY_SCHEMA_VERSION == 15
 
 
