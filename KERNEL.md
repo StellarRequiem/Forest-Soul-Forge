@@ -237,6 +237,10 @@ distribution can replace it entirely.
 
 ## References
 
+- **`docs/spec/kernel-api-v0.6.md`** — formal kernel API spec
+  (Burst 127, ADR-0044 Phase 2). Field-by-field schemas, error
+  envelopes, version-compatibility commitments. Read this when you
+  need the contract-grade detail beyond KERNEL.md's overview.
 - ADR-0044 — Kernel Positioning + SoulUX Flagship Branding (the
   parent strategic ADR)
 - `docs/architecture/kernel-userspace-boundary.md` — directory-

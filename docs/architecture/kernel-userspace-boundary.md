@@ -36,7 +36,7 @@ could replace any userspace component without touching the kernel.
 | `docs/architecture/` | **kernel** | Architectural overview docs (incl. this one). |
 | `docs/audits/` | **kernel** | Phase-boundary audit timeline. |
 | `docs/runbooks/` | **kernel-adjacent** | Operational runbooks. Some apply to kernel ops; some to SoulUX-distribution ops. |
-| `docs/spec/` | **kernel** | Reserved. Phase 2 of the ADR-0044 roadmap publishes the formal kernel API spec here. Empty at v0.6. |
+| `docs/spec/` | **kernel** | Formal kernel API spec lives here. `kernel-api-v0.6.md` (Burst 127, 2026-05-05) is the contract-grade specification of all seven ABI surfaces. Future spec versions (v1.0 once external integrator validation arrives per ADR-0044 Phase 6) ship as additional version-tagged files. |
 | `dist/` | **userspace (SoulUX)** | Build helpers for the SoulUX distribution: PyInstaller spec, daemon-binary build script, zip-archive builder. |
 | `data/` | **operator state** | Live registry, audit chain (dev fallback), generated agents, installed skills, installed plugins. Not part of the kernel API. |
 | `soul_generated/` | **operator state** | Generated soul.md + constitution.yaml artifacts. Output of the kernel; not source. |
