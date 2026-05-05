@@ -1322,6 +1322,110 @@ body { padding-bottom: 56px; }
 
 
 /* ============================================================
+   MCP plugins panel — ADR-0043 follow-up #3 (Burst 112).
+   Sits in the Tools tab below "Registered tools".
+   ============================================================ */
+.mcp-plugins-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3, 12px);
+}
+
+.mcp-plugins-group__title {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+  margin: 12px 0 4px 0;
+}
+
+.mcp-plugin-row {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: var(--radius-md, 6px);
+  padding: var(--sp-3, 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface, transparent);
+}
+
+/* YAML-only entries get a slightly different border so the visual
+   delta is immediate even if the operator misses the source pill. */
+.mcp-plugin-row--yaml {
+  border-style: dashed;
+  border-color: var(--fg-faint);
+}
+
+.mcp-plugin-row__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-plugin-row__name {
+  font-weight: 600;
+  font-size: 1.02em;
+}
+
+.mcp-plugin-row__version,
+.mcp-plugin-row__meta,
+.mcp-plugin-row__secrets,
+.mcp-plugin-row__unverified {
+  display: block;
+}
+
+.mcp-plugin-row__caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mcp-plugin-cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Pill variants used by the MCP plugins panel.
+   - source-yaml: dashed-style pill matching the row's dashed border.
+   - state-installed / state-disabled: green / muted.
+   - ok / sha / xs: utility variants. */
+.pill--source-yaml {
+  border-color: var(--fg-faint);
+  color: var(--fg-faint);
+  border-style: dashed;
+}
+.pill--state-installed {
+  border-color: var(--ok, #4caf50);
+  color: var(--ok, #4caf50);
+}
+.pill--state-disabled {
+  border-color: var(--fg-faint);
+  color: var(--fg-faint);
+  opacity: 0.7;
+}
+.pill--ok {
+  border-color: var(--ok, #4caf50);
+  color: var(--ok, #4caf50);
+}
+.pill--sha {
+  border-color: var(--fg-faint);
+  color: var(--fg-faint);
+  font-family: var(--mono, monospace);
+  font-size: 0.78em;
+}
+.pill--xs {
+  font-size: 0.7em;
+  padding: 1px 4px;
+}
+
+
+/* ============================================================
    Memory tab — ADR-0022 v0.2 / ADR-0033 T17
    ============================================================ */
 .memory-grid {

@@ -15,6 +15,7 @@ import * as genresPanel from "./genres.js";
 import * as pendingPanel from "./pending.js";
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
+import * as mcpPluginsPanel from "./mcp-plugins.js";
 import * as memoryPanel from "./memory.js";
 import * as chatPanel from "./chat.js";
 import * as welcome from "./welcome.js";
@@ -69,6 +70,7 @@ async function boot() {
     pendingPanel.start();
     skillsPanel.start();
     toolRegistryPanel.start();
+    mcpPluginsPanel.start();
     memoryPanel.start();
     chatPanel.start().catch(() => {});
     return;
@@ -106,6 +108,10 @@ async function boot() {
   // forever. Demo-friction audit 2026-04-28 P0 #1.
   skillsPanel.start();
   toolRegistryPanel.start();
+  // MCP plugins tab section — ADR-0043 follow-up #3 (Burst 112). Sits
+  // alongside the registered-tools view in the Tools tab. Non-fatal
+  // — degrades cleanly when the daemon's plugin runtime is absent.
+  mcpPluginsPanel.start();
   // Memory tab (ADR-0022 v0.2 T17) — depends on state.agents being
   // populated by agentsPanel; subscribes to keep its picker in sync.
   // Non-fatal posture — tab degrades to empty state if the daemon

@@ -343,6 +343,33 @@
           </div>
         </div>
       </div>
+
+      <!-- ===================================================== -->
+      <!-- MCP plugins panel (ADR-0043 follow-up #3, Burst 112).  -->
+      <!-- Sibling to "Registered tools" — surfaces every MCP     -->
+      <!-- server the dispatcher will route to via mcp_call.v1,   -->
+      <!-- distinguishing plugin-contributed servers from         -->
+      <!-- YAML-curated ones. Operators get a single-pane view    -->
+      <!-- of the agent's reachable external surface.             -->
+      <!-- ===================================================== -->
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">MCP plugins</h2>
+          <div class="panel__actions">
+            <span class="muted" id="mcp-plugins-status">—</span>
+            <button class="btn btn--ghost btn--sm" id="mcp-plugins-refresh" type="button">refresh</button>
+            <button class="btn btn--primary btn--sm" id="mcp-plugins-reload" type="button"
+                    title="Re-walk ~/.forest/plugins/ and rebuild the in-process plugin runtime">
+              reload from disk
+            </button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="mcp-plugins-list" class="mcp-plugins-list">
+            <div class="empty">Loading plugins…</div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ========================================================== -->
