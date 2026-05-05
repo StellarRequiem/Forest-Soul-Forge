@@ -2,7 +2,9 @@
 
 > **For developers:** the live state of the codebase — what's implemented, what's blocked, conventions, where to start contributing — lives in [`STATE.md`](STATE.md). It's the companion to this README; this one is product-oriented, that one is current-reality-oriented. Both refresh at every phase boundary.
 
-**A local-first agent foundry where every agent has cryptographically-signed identity, quantified personality, a tamper-evident behavior log, a constitutional rulebook compiled from sliders you set yourself, a runtime that can dispatch tools, run skills, remember across sessions, and delegate work to other agents — all gated, audited, reversible.**
+> **Strategic posture (ADR-0044, accepted 2026-05-05):** Forest is **the agent governance kernel** — substrate-shape, not product-shape. The flagship distribution that ships Forest with a polished operator experience is named **SoulUX** (Tauri shell + reference frontend; lives under `apps/desktop/` and `frontend/`). Forest:SoulUX is the same relationship as Linux:Ubuntu or Postgres:Supabase — kernel and distribution. Other distributions can build on the same Forest kernel; SoulUX is the reference one. See [`docs/decisions/ADR-0044-kernel-positioning-soulux.md`](docs/decisions/ADR-0044-kernel-positioning-soulux.md) for the full positioning + 7-phase roadmap to v1.0.
+
+**The agent governance kernel: every agent has cryptographically-signed identity, quantified personality, a tamper-evident behavior log, a constitutional rulebook compiled from sliders you set yourself, a runtime-mutable trust dial (green/yellow/red posture), per-(agent, plugin) trust grants, a versioned tool registry with per-tool human-approval gates, and a single governance pipeline every dispatch flows through — all gated, audited, reversible, locally-grounded.**
 
 ```
 ┌────────────────┐ build ┌────────────────┐ spawn ┌────────────────┐
