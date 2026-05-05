@@ -261,6 +261,10 @@ def _build_parser() -> argparse.ArgumentParser:
     from forest_soul_forge.cli.plugin_cmd import add_subparser as _plugin_add_subparser
     _plugin_add_subparser(sub)
 
+    # `fsf agent ...` — agent runtime state (posture per ADR-0045).
+    from forest_soul_forge.cli.agent_cmd import add_subparser as _agent_add_subparser
+    _agent_add_subparser(sub)
+
     return parser
 
 

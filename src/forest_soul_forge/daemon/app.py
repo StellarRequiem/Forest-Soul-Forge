@@ -55,6 +55,9 @@ from forest_soul_forge.daemon.routers import plugins as plugins_router
 from forest_soul_forge.daemon.routers import (
     plugin_grants as plugin_grants_router,
 )
+from forest_soul_forge.daemon.routers import (
+    agent_posture as agent_posture_router,
+)
 from forest_soul_forge.daemon.routers import scheduler as scheduler_router
 from forest_soul_forge.daemon.routers import verifier as verifier_router
 from forest_soul_forge.daemon.routers import writes as writes_router
@@ -594,6 +597,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(scheduler_router.router)
     app.include_router(plugins_router.router)
     app.include_router(plugin_grants_router.router)
+    app.include_router(agent_posture_router.router)
     return app
 
 
