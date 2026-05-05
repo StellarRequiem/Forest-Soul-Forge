@@ -142,6 +142,81 @@ def add_subparser(parent_subparsers: argparse._SubParsersAction) -> None:
     p_verify.add_argument("name")
     p_verify.set_defaults(_run=_run_verify)
 
+    # ---- grant / revoke / grants list (ADR-0043 fu#2 — Burst 113b) -
+    # These talk to the running daemon's HTTP surface (the audit
+    # event must land in the chain, which lives daemon-side). The
+    # other plugin subcommands above operate directly on the
+    # filesystem repository because plugin install/uninstall is a
+    # disk operation; grants are agent-state mutations and so live
+    # in the daemon.
+    def _add_daemon_flag(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--daemon-url",
+            default="http://127.0.0.1:7423",
+            help="Daemon base URL (default: http://127.0.0.1:7423).",
+        )
+        p.add_argument(
+            "--api-token",
+            default=None,
+            help=(
+                "Daemon API token. Falls back to $FSF_API_TOKEN, then "
+                "no token (works against deployments that don't "
+                "require auth)."
+            ),
+        )
+
+    p_grant = plugin_sub.add_parser(
+        "grant",
+        help=(
+            "Issue a plugin grant to an agent. Adds the plugin to the "
+            "agent's effective allowed_mcp_servers without rebirthing."
+        ),
+    )
+    _add_daemon_flag(p_grant)
+    p_grant.add_argument("plugin_name")
+    p_grant.add_argument(
+        "--to", dest="instance_id", required=True,
+        help="Target agent's instance_id.",
+    )
+    p_grant.add_argument(
+        "--tier", dest="trust_tier", default="yellow",
+        choices=("green", "yellow", "red"),
+        help=(
+            "Trust tier for the grant. Forward-compat per ADR-0045; "
+            "enforcement lands in Burst 115."
+        ),
+    )
+    p_grant.add_argument("--reason", default=None)
+    p_grant.set_defaults(_run=_run_grant)
+
+    p_revoke = plugin_sub.add_parser(
+        "revoke",
+        help="Revoke an active plugin grant.",
+    )
+    _add_daemon_flag(p_revoke)
+    p_revoke.add_argument("plugin_name")
+    p_revoke.add_argument(
+        "--from", dest="instance_id", required=True,
+        help="Target agent's instance_id.",
+    )
+    p_revoke.add_argument("--reason", default=None)
+    p_revoke.set_defaults(_run=_run_revoke)
+
+    p_grants = plugin_sub.add_parser(
+        "grants",
+        help="List active plugin grants for an agent.",
+    )
+    _add_daemon_flag(p_grants)
+    p_grants.add_argument(
+        "--for", dest="instance_id", required=True,
+        help="Target agent's instance_id.",
+    )
+    p_grants.add_argument(
+        "--history", action="store_true",
+        help="Include revoked grants in the output.",
+    )
+    p_grants.set_defaults(_run=_run_grants_list)
+
 
 # ---------------------------------------------------------------------------
 # Runners. Exit codes per errors.py docstring.
@@ -302,3 +377,122 @@ def _run_verify(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return 1
+
+
+# ---- HTTP-backed grant runners (ADR-0043 fu#2 — Burst 113b) ---------------
+#
+# These hit the daemon HTTP surface so the audit chain emit happens
+# server-side. Same urllib pattern as cli/triune.py + cli/install.py.
+# Operator authentication: --api-token flag overrides $FSF_API_TOKEN
+# overrides nothing (works on no-auth deployments).
+
+def _http_call(args, method: str, path: str,
+               body: dict | None = None) -> tuple[int, dict | None]:
+    """Issue an HTTP request to the daemon. Returns (status, body_json).
+    Body is None on non-JSON responses. Network failures map to
+    (-1, None) with the error printed to stderr."""
+    import json as _json
+    import os as _os
+    import urllib.error as _ue
+    import urllib.request as _ur
+
+    token = (
+        getattr(args, "api_token", None)
+        or _os.environ.get("FSF_API_TOKEN")
+    )
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    url = args.daemon_url.rstrip("/") + path
+    data = _json.dumps(body).encode("utf-8") if body is not None else None
+    req = _ur.Request(url, data=data, headers=headers, method=method)
+    try:
+        with _ur.urlopen(req, timeout=10.0) as resp:
+            raw = resp.read().decode("utf-8")
+            try:
+                return resp.status, _json.loads(raw) if raw else None
+            except _json.JSONDecodeError:
+                return resp.status, None
+    except _ue.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            return e.code, _json.loads(raw) if raw else None
+        except _json.JSONDecodeError:
+            return e.code, {"detail": raw}
+    except _ue.URLError as e:
+        print(
+            f"fsf plugin: cannot reach daemon at {args.daemon_url}: {e}",
+            file=sys.stderr,
+        )
+        return -1, None
+
+
+def _run_grant(args: argparse.Namespace) -> int:
+    body = {
+        "plugin_name": args.plugin_name,
+        "trust_tier": args.trust_tier,
+    }
+    if args.reason:
+        body["reason"] = args.reason
+    status_code, payload = _http_call(
+        args, "POST",
+        f"/agents/{args.instance_id}/plugin-grants",
+        body=body,
+    )
+    if status_code == -1:
+        return 7
+    if status_code == 200 and payload and payload.get("ok"):
+        g = payload["grant"]
+        print(
+            f"granted: {g['plugin_name']} (tier={g['trust_tier']}) "
+            f"to {g['instance_id']}"
+        )
+        return 0
+    detail = (payload or {}).get("detail", f"HTTP {status_code}")
+    print(f"fsf plugin grant: {detail}", file=sys.stderr)
+    return 7 if status_code >= 500 else 4
+
+
+def _run_revoke(args: argparse.Namespace) -> int:
+    body = {"reason": args.reason} if args.reason else None
+    status_code, payload = _http_call(
+        args, "DELETE",
+        f"/agents/{args.instance_id}/plugin-grants/{args.plugin_name}",
+        body=body,
+    )
+    if status_code == -1:
+        return 7
+    if status_code == 200 and payload and payload.get("ok"):
+        print(
+            f"revoked: {payload['plugin_name']} from {payload['instance_id']}"
+        )
+        return 0
+    detail = (payload or {}).get("detail", f"HTTP {status_code}")
+    print(f"fsf plugin revoke: {detail}", file=sys.stderr)
+    return 7 if status_code >= 500 else 4
+
+
+def _run_grants_list(args: argparse.Namespace) -> int:
+    suffix = "?history=true" if args.history else ""
+    status_code, payload = _http_call(
+        args, "GET",
+        f"/agents/{args.instance_id}/plugin-grants{suffix}",
+    )
+    if status_code == -1:
+        return 7
+    if status_code == 200 and payload:
+        grants = payload.get("grants", [])
+        if not grants:
+            print(f"no grants for {args.instance_id}")
+            return 0
+        for g in grants:
+            state = "active" if g.get("is_active") else "revoked"
+            tier = g.get("trust_tier", "?")
+            print(
+                f"{g['plugin_name']:30s} {tier:6s} {state:8s} "
+                f"granted_at={g.get('granted_at', '?')}"
+            )
+        return 0
+    detail = (payload or {}).get("detail", f"HTTP {status_code}")
+    print(f"fsf plugin grants: {detail}", file=sys.stderr)
+    return 7 if status_code >= 500 else 4
