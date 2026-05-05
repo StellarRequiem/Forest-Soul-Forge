@@ -760,7 +760,9 @@ class PostureGateStep:
 
     def evaluate(self, dctx: DispatchContext) -> StepResult:
         posture = dctx.agent_posture
-        if posture is None or posture == "green":
+        if posture is None:
+            # Test contexts (no agent_registry wired) — skip
+            # posture entirely.
             return StepResult.go()
         if dctx.tool is None:
             return StepResult.go()
@@ -774,9 +776,20 @@ class PostureGateStep:
         if side_effects == "read_only":
             return StepResult.go()
 
-        # T3 hook: per-grant trust_tier override for mcp_call.v1.
-        # When enforce_per_grant=False (T1/T2), this branch is dead
-        # and only the agent-wide posture decides.
+        # Compute effective posture per ADR-0045 §"Interaction with
+        # per-grant trust_tier":
+        #
+        #   1. Default to agent posture.
+        #   2. If this is an mcp_call.v1 dispatch AND there's a
+        #      grant for the specific server, FOLD in the per-grant
+        #      tier per the precedence rule below.
+        #   3. Resolve to a final action: GO / PENDING / REFUSE.
+        #
+        # Precedence rule: red dominates > yellow > green, EXCEPT
+        # for the special downgrade case where agent-yellow +
+        # grant-green for THIS plugin = ungated for this mcp_call
+        # (operator explicitly extended trust for this server).
+        # Red on either side dominates regardless of the other.
         effective_posture = posture
         if (
             self.enforce_per_grant
@@ -787,23 +800,19 @@ class PostureGateStep:
             if isinstance(server_name, str):
                 grant_tier = dctx.plugin_grants_view.get(server_name)
                 if grant_tier is not None:
-                    # Red-dominates precedence: the strongest signal
-                    # across (agent, grant) wins.
                     rank = {"green": 0, "yellow": 1, "red": 2}
-                    if rank.get(grant_tier, 0) > rank.get(effective_posture, 0):
-                        effective_posture = grant_tier
-                    # Per-grant green doesn't OVERRIDE a yellow agent
-                    # for non-MCP tools — but for THIS mcp_call,
-                    # green can downgrade an agent-yellow gate to GO.
-                    # Per ADR-0045 §"Interaction with per-grant
-                    # trust_tier": agent-yellow + grant-green for the
-                    # specific plugin = ungated for that mcp_call.
-                    elif (
-                        grant_tier == "green"
-                        and effective_posture == "yellow"
-                    ):
+                    agent_rank = rank.get(posture, 0)
+                    grant_rank = rank.get(grant_tier, 0)
+                    # Special downgrade: agent yellow + grant green
+                    # = green for THIS mcp_call. Operator explicitly
+                    # vouched for this plugin, so ungate it.
+                    if posture == "yellow" and grant_tier == "green":
                         effective_posture = "green"
-                        return StepResult.go()
+                    else:
+                        # Otherwise red-dominates: stronger signal wins.
+                        effective_posture = (
+                            grant_tier if grant_rank > agent_rank else posture
+                        )
 
         if effective_posture == "red":
             return StepResult.refuse(

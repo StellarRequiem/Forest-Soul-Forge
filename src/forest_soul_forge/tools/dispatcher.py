@@ -419,13 +419,17 @@ class ToolDispatcher:
             ApprovalGateStep(
                 genre_requires_approval_fn=genre_requires_approval,
             ),
-            # ADR-0045 T1 (Burst 114): per-agent posture (traffic
+            # ADR-0045 (Bursts 114-115): per-agent posture (traffic
             # light). Outermost gate. Sits AFTER ApprovalGateStep so
             # it can override an upstream GO with REFUSE (red) or
             # PENDING (yellow). Read-only tools always pass through
-            # regardless of posture. T3 (Burst 115) flips
-            # enforce_per_grant=True to layer per-grant tier on top.
-            PostureGateStep(),
+            # regardless of posture. enforce_per_grant=True (Burst
+            # 115 / ADR-0045 T3) layers per-grant trust_tier on top
+            # for mcp_call.v1 dispatches: red-dominates precedence
+            # across (agent posture, per-grant tier) so a green
+            # grant on a yellow agent ungates that specific mcp_call,
+            # and a red grant on any agent refuses that mcp_call.
+            PostureGateStep(enforce_per_grant=True),
         ])
 
     async def dispatch(
