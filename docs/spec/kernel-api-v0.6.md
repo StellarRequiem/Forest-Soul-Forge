@@ -960,16 +960,28 @@ not at v1 yet, so v2 planning is premature.
 ## 9. Conformance
 
 This spec is the *what*. The conformance test suite (ADR-0044
-Phase 4) will be the *enforceable check* that any build of the
-kernel actually honors what this document promises.
+Phase 4, **shipped Burst 130 at `tests/conformance/`**) is the
+*enforceable check* that any build of the kernel actually honors
+what this document promises.
 
-Until Phase 4 lands, the unit suite (`tests/unit/`, 2,386 tests at
-v0.5.0) is the closest enforceable check. Each surface's section
-above includes pointers to the test files that exercise it; an
-external integrator can use those as a starting point for their
-own conformance pass.
+The conformance suite is HTTP-only (no internal Python imports);
+it can run against any Forest-kernel build, including non-Python
+implementations, PyInstaller binaries, and second distributions.
+Install via:
 
-Phase 4 will produce:
+```bash
+pip install "forest-soul-forge[conformance]"
+pytest tests/conformance/ -v
+```
+
+By default it tests `http://127.0.0.1:7423`; override via
+`FSF_DAEMON_URL` env var. See `tests/conformance/README.md` for
+full usage.
+
+The unit suite (`tests/unit/`, 2,386 tests at v0.5.0) remains the
+internal regression gate; conformance is the external one.
+
+Phase 4 produces:
 - A conformance test runner that an external build can install
   and run against its own kernel implementation.
 - A pass/fail report keyed to this spec's section numbers.

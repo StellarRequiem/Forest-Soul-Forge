@@ -59,6 +59,19 @@ browser = [
     "playwright>=1.40",
 ]
 
+# ADR-0044 P4 — kernel API conformance test suite. External integrators
+# install with `pip install forest-soul-forge[conformance]` and run
+# pytest tests/conformance/ against any Forest-kernel build's running
+# daemon. Tests are HTTP-only (no internal Python imports); they
+# exercise the seven ABI surfaces enumerated in docs/spec/kernel-api-v0.6.md
+# and produce a pass/fail report keyed to spec section numbers.
+conformance = [
+    "pytest>=8.0",
+    "httpx>=0.26",
+    "jsonschema>=4.20",
+    "pyyaml>=6.0",
+]
+
 [project.urls]
 Repository = "https://github.com/StellarRequiem/Forest-Soul-Forge"
 
