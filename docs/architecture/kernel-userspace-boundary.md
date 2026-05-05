@@ -42,7 +42,8 @@ could replace any userspace component without touching the kernel.
 | `soul_generated/` | **operator state** | Generated soul.md + constitution.yaml artifacts. Output of the kernel; not source. |
 | `tests/` | **kernel** | Unit + integration tests target the kernel. Conformance test suite (ADR-0044 Phase 4) lands here under a separate subdir. |
 | `dev-tools/` | **kernel** | Drift sentinel, repo-hygiene scripts. Used to verify kernel claims in `STATE.md` etc. against disk. |
-| Repo-root `*.command` scripts | **userspace (operator)** | One-shot operator commands (start, stop, reset, install, live-test, commit-burst*). Not part of the kernel API. |
+| Repo-root `*.command` scripts | **userspace (operator)** | Day-to-day operator commands (start, stop, reset, run, push, live-test-*, swarm-bringup, clean-git-locks, etc.). Not part of the kernel API. |
+| `dev-tools/commit-bursts/*.command` | **userspace (developer history)** | Per-burst commit scripts + release-tag scripts. Archived from repo root in Burst 128. One-shot history; not operationally re-runnable. Not part of the kernel API. |
 
 ## What "kernel" commits to
 

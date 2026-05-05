@@ -41,7 +41,7 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 | **Live audit chain** | **`examples/audit_chain.jsonl`** per `daemon/config.py` (override via `FSF_AUDIT_CHAIN_PATH`); 1,083 entries verified 2026-05-03, all hashes link cleanly |
 | **Frontend modules (vanilla JS)** | **22** (`frontend/js/`) |
 | **Frontend tabs** | **8** (Forge / Agents / Approvals / Skills / Tools / Memory / Audit / **Chat**) |
-| **Operator `.command` scripts** | **107** at repo root (start/stop/reset + ~25 live-tests + ~61 commit-burst* + dist/build + ops scripts; +19 across the v0.4 arc) |
+| **Operator `.command` scripts** | **43 at repo root** (start/stop/reset/push/run + ~15 live-tests + ~10 ops scripts including swarm-bringup / docker-up / kill-ollama / clean-git-locks / close-stale-terminals + 2 stack/frontend rebuilds + a5/sw/track miscellany) plus **100 archived** in `dev-tools/commit-bursts/` (per-burst commit scripts + release tag scripts; one-shot history). Burst 128 (2026-05-05) moved them under dev-tools/ to keep the repo root operationally clean. |
 | **Demo scenarios** | 2 (synthetic-incident + fresh-forge, with presenter scripts) |
 | **Isolated demo dir** | `demo/` (start-demo.command points here; prod state untouched) |
 | **Distribution** | `dist/build.command` → `forest-soul-forge-<sha>-<date>.zip` |
