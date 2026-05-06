@@ -95,6 +95,15 @@ config/scheduled_tasks.yaml
 # log fragments here for debugging — ephemeral, not source-of-truth).
 _diagnostic_*.txt
 
+# B150 (T26 security hardening): allow-list dependency lockfiles +
+# SBOM. The pip-tools-generated requirements*.txt and the
+# CycloneDX SBOM at dependencies/sbom.json are operator-generated
+# artifacts but ARE meant to be committed once stable (so CI and
+# external integrators reproduce the same dep tree). Don't add
+# requirements*.txt or dependencies/sbom.json to gitignore — they
+# need to be tracked. This comment exists to flag the intent for
+# future grep.
+
 # Docker
 docker-compose.override.yml
 
