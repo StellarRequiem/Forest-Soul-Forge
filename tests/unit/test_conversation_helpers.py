@@ -145,6 +145,63 @@ class TestBuildConversationPrompt:
         assert "do not pretend" in p.lower()
         assert "speak only as yourself" in p.lower()
 
+    # -----------------------------------------------------------------
+    # ADR-0047 T5 (B157) — optional memories block. Used by the
+    # Persistent Assistant to surface memory_recall.v1 hits in the
+    # prompt as "Persistent context (from your memory)". Multi-agent
+    # rooms keep the existing prompt shape (memories=None default).
+    # -----------------------------------------------------------------
+    def test_no_memories_no_context_block(self):
+        """Default path: omitting memories must produce the exact same
+        prompt shape as before — no `Persistent context` header. This
+        is the byte-shape guarantee for multi-agent rooms (where the
+        T5 path explicitly does NOT fire)."""
+        p = build_conversation_prompt(
+            agent_name="A", agent_role="r", domain="multi", turns=[],
+        )
+        assert "Persistent context" not in p
+
+    def test_memories_renders_context_block(self):
+        mems = [
+            {"content": "Alex's project: Forest-Soul-Forge"},
+            {"content": "Prefers terse, fact-grounded answers"},
+        ]
+        p = build_conversation_prompt(
+            agent_name="A", agent_role="assistant", domain="assistant",
+            turns=[], memories=mems,
+        )
+        assert "Persistent context" in p
+        assert "Alex's project: Forest-Soul-Forge" in p
+        assert "Prefers terse, fact-grounded answers" in p
+
+    def test_memories_accepts_alternate_keys(self):
+        """Real memory_recall outputs can use ``content`` / ``body`` /
+        ``summary`` depending on tool version. The prompt builder
+        should accept any of those without crashing or silently
+        dropping rows."""
+        mems = [
+            {"body": "via body field"},
+            {"summary": "via summary field"},
+            {"content": "via content field"},
+            {},                           # empty — must be skipped
+        ]
+        p = build_conversation_prompt(
+            agent_name="A", agent_role="r", domain="assistant",
+            turns=[], memories=mems,
+        )
+        assert "via body field" in p
+        assert "via summary field" in p
+        assert "via content field" in p
+
+    def test_empty_memories_list_no_block(self):
+        """A truthy-but-empty memories list still suppresses the
+        block — the predicate is `if memories:`, not `is not None`."""
+        p = build_conversation_prompt(
+            agent_name="A", agent_role="r", domain="d",
+            turns=[], memories=[],
+        )
+        assert "Persistent context" not in p
+
 
 # ===========================================================================
 # build_ambient_prompt — Y5 proactive nudge

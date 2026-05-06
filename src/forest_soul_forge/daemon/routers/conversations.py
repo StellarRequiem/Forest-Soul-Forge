@@ -525,14 +525,64 @@ async def append_turn(
             recent_turns = registry.conversations.list_turns(
                 conversation_id, limit=body.history_limit, offset=0,
             )
+
+            constitution_path = Path(agent.constitution_path)
+
+            # ADR-0047 T5 (B157): memory_recall integration for the
+            # Persistent Assistant. Only fires when domain == 'assistant'
+            # — multi-agent rooms keep their existing prompt shape
+            # (memory_recall is per-agent opt-in via the assistant's
+            # explicit tool kit there, not auto-injected). The query
+            # is the operator's most recent body; private mode keeps
+            # the cross-agent boundary closed unless an operator
+            # explicitly invokes memory_recall via a different surface.
+            # All failure paths fall back to no-memories; the chat
+            # works either way.
+            assistant_memories: list[dict] = []
+            if domain == "assistant":
+                op_body = (op_row.body or "").strip()
+                if op_body:
+                    try:
+                        mem_outcome = await tool_dispatcher.dispatch(
+                            instance_id=agent.instance_id,
+                            agent_dna=agent.dna,
+                            role=agent.role,
+                            genre=None,
+                            session_id=f"conv-{conversation_id}",
+                            constitution_path=constitution_path,
+                            tool_name="memory_recall",
+                            tool_version="1",
+                            args={
+                                "query": op_body[:500],
+                                "limit": 5,
+                                "mode": "private",
+                            },
+                        )
+                        if isinstance(mem_outcome, _DispatchSucceeded):
+                            output = mem_outcome.result.output or {}
+                            entries = (
+                                output.get("entries")
+                                or output.get("results")
+                                or output.get("rows")
+                                or []
+                            )
+                            if isinstance(entries, list):
+                                assistant_memories = [
+                                    e for e in entries
+                                    if isinstance(e, dict)
+                                ]
+                    except Exception:
+                        # Recall is best-effort context; never block the
+                        # operator's reply on a memory subsystem hiccup.
+                        assistant_memories = []
+
             prompt = _build_conversation_prompt(
                 agent_name=agent.agent_name,
                 agent_role=agent.role,
                 domain=domain,
                 turns=recent_turns,
+                memories=assistant_memories or None,
             )
-
-            constitution_path = Path(agent.constitution_path)
             try:
                 outcome = await tool_dispatcher.dispatch(
                     instance_id=agent.instance_id,

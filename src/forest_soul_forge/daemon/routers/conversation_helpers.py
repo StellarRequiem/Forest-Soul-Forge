@@ -93,20 +93,49 @@ def build_conversation_prompt(
     agent_role: str,
     domain:     str,
     turns:      list,
+    memories:   list[dict] | None = None,
 ) -> str:
     """Build the llm_think prompt for a Y2/Y3 conversation reply.
 
-    Layout: a brief frame ("you are <name> in domain <X>"), the
-    conversation history rendered as 'speaker: body' lines (oldest
-    first), and a closing instruction. Purged turns surface as
-    'speaker: [summarized] <summary>' so the agent has continuity
-    even past the retention window.
+    Layout: a brief frame ("you are <name> in domain <X>"), an
+    optional persistent-context block (ADR-0047 T5 — used by the
+    Persistent Assistant chat to expose memory_recall.v1 results
+    in the prompt), the conversation history rendered as
+    'speaker: body' lines (oldest first), and a closing instruction.
+    Purged turns surface as 'speaker: [summarized] <summary>' so the
+    agent has continuity even past the retention window.
+
+    ``memories`` is an optional list of memory entries (each a dict
+    with at minimum a ``content`` field). Empty / None means no
+    persistent-context block emits — preserves byte-for-byte prompt
+    shape for multi-agent rooms where memory_recall stays opt-in
+    per-agent rather than auto-injected.
     """
     lines: list[str] = []
     lines.append(
         f"You are {agent_name}, an agent in role '{agent_role}' "
         f"participating in a conversation in domain '{domain}'."
     )
+    if memories:
+        lines.append("")
+        lines.append(
+            "Persistent context (from your memory — facts you've "
+            "accumulated across earlier sessions):"
+        )
+        for m in memories:
+            content = (
+                m.get("content")
+                or m.get("body")
+                or m.get("summary")
+                or ""
+            )
+            if not content:
+                continue
+            # One bullet per memory; keep each on a single visual line
+            # for the model. Long memories get truncated only if they
+            # would blow up the prompt budget — recall already returns
+            # at limit so this is usually a no-op.
+            lines.append(f"  - {content}")
     lines.append("")
     lines.append("Recent conversation (oldest → newest):")
     for t in turns:
