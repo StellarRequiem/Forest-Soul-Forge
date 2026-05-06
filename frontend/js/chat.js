@@ -493,10 +493,156 @@ async function loadAssistantConversation(instanceId) {
       assistantAgentName = agent?.agent_name || null;
     } catch (_) { /* non-fatal — turns still render with instance_id */ }
 
-    // Load + render turns.
+    // Load + render turns + settings panel content. Settings load
+    // is best-effort (non-fatal on per-card error) so the chat
+    // surface is never blocked on a settings-card failure.
     await loadAssistantTurns();
+    loadAssistantSettings(instanceId).catch(() => {});
   } finally {
     assistantLoading = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0047 T4 (B158, partial) — Settings panel.
+// ---------------------------------------------------------------------------
+// Three sub-cards ship against existing kernel substrate; the fourth
+// (allowances) stubs until ADR-0048 implementation tranches land.
+//
+//   1. Identity card  — GET /agents/{id}
+//   2. Posture dial   — GET/POST /agents/{id}/posture (ADR-0045)
+//   3. Memory consents — GET /agents/{id}/memory/consents (ADR-0027)
+//   4. Allowances     — placeholder copy (ADR-0048 pending)
+//
+// All loads are best-effort: a per-card fetch failure renders an
+// inline error in that card without blocking the others. The panel
+// is collapsed by default (operator opens via the <summary>); state
+// persists in localStorage so each entry into Assistant mode shows
+// the same posture/identity at a glance.
+
+const ASSISTANT_SETTINGS_OPEN_KEY = "fsf.chat.assistantSettingsOpen";
+
+async function loadAssistantSettings(instanceId) {
+  if (!instanceId) return;
+
+  // Restore the operator's last-seen open/closed preference for the
+  // settings <details> block.
+  const det = document.getElementById("chat-assistant-settings");
+  if (det) {
+    det.open = localStorage.getItem(ASSISTANT_SETTINGS_OPEN_KEY) === "true";
+    if (!det.dataset.wired) {
+      det.addEventListener("toggle", () => {
+        localStorage.setItem(ASSISTANT_SETTINGS_OPEN_KEY, String(det.open));
+      });
+      det.dataset.wired = "1";
+    }
+  }
+
+  // Three independent fetches; render each on completion.
+  await Promise.allSettled([
+    renderAssistantIdentity(instanceId),
+    renderAssistantPosture(instanceId),
+    renderAssistantConsents(instanceId),
+  ]);
+
+  // Wire posture buttons (idempotent; only attaches once per pane).
+  wireAssistantPostureButtons(instanceId);
+}
+
+async function renderAssistantIdentity(instanceId) {
+  try {
+    const a = await api.get(`/agents/${instanceId}`);
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = val ?? "—";
+    };
+    set("chat-asst-name", a.agent_name);
+    set("chat-asst-role", a.role);
+    // Genre is implicit from the role's claim in genres.yaml; we
+    // keep the static "companion" copy in HTML — no per-row API.
+    set("chat-asst-dna", a.dna ? `${a.dna.slice(0, 16)}…` : "—");
+    set("chat-asst-cons-hash",
+        a.constitution_hash ? `${a.constitution_hash.slice(0, 16)}…` : "—");
+    set("chat-asst-created", a.created_at ? a.created_at.slice(0, 19).replace("T", " ") : "—");
+  } catch (e) {
+    const el = document.getElementById("chat-asst-name");
+    if (el) el.textContent = `error: ${String(e.message || e).slice(0, 80)}`;
+  }
+}
+
+async function renderAssistantPosture(instanceId) {
+  const cur = document.getElementById("chat-assistant-posture-current");
+  try {
+    const r = await api.get(`/agents/${instanceId}/posture`);
+    const posture = r.posture || "—";
+    if (cur) cur.textContent = `current: ${posture}`;
+    // Highlight the active posture button.
+    document.querySelectorAll("#chat-assistant-posture [data-posture]").forEach((b) => {
+      b.classList.toggle("chat-assistant-posture-btn--active", b.dataset.posture === posture);
+    });
+  } catch (e) {
+    if (cur) cur.textContent = `error: ${String(e.message || e).slice(0, 80)}`;
+  }
+}
+
+function wireAssistantPostureButtons(instanceId) {
+  const row = document.getElementById("chat-assistant-posture");
+  if (!row || row.dataset.wired === instanceId) return;
+  row.dataset.wired = instanceId;
+  row.querySelectorAll("[data-posture]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const next = btn.dataset.posture;
+      if (!next) return;
+      const reason = window.prompt(
+        `Switching posture → ${next}. Reason for the audit chain (optional, max 200 chars):`,
+        "",
+      );
+      // window.prompt returns null on cancel — abort then.
+      if (reason === null) return;
+      btn.disabled = true;
+      try {
+        await writeCall(`/agents/${instanceId}/posture`, {
+          posture: next,
+          reason: (reason || "").slice(0, 200) || null,
+        });
+        toast({
+          title: `Posture: ${next}`,
+          msg: "Audit event emitted; takes effect immediately.",
+          kind: "info", ttl: 4000,
+        });
+        await renderAssistantPosture(instanceId);
+      } catch (e) {
+        toast({ title: "Posture change failed", msg: String(e.message || e), kind: "error", ttl: 8000 });
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+async function renderAssistantConsents(instanceId) {
+  const list = document.getElementById("chat-assistant-consents");
+  if (!list) return;
+  try {
+    const r = await api.get(`/agents/${instanceId}/memory/consents`);
+    const all = r.consents || [];
+    const active = all.filter((c) => !c.revoked_at);
+    if (!active.length) {
+      list.innerHTML = `<span class="muted">No active consent grants. The assistant's memory stays private to itself.</span>`;
+      return;
+    }
+    const html = [];
+    for (const c of active) {
+      const recip = c.recipient_instance ? c.recipient_instance.slice(0, 8) + "…" : "—";
+      html.push(`<div class="chat-assistant-consent-row">
+        <code>${escapeHTML(c.entry_id.slice(0, 12))}…</code>
+        → <code>${escapeHTML(recip)}</code>
+        <span class="muted" style="margin-left: 8px;">${escapeHTML(c.granted_at.slice(0, 19).replace("T", " "))}</span>
+      </div>`);
+    }
+    list.innerHTML = html.join("");
+  } catch (e) {
+    list.innerHTML = `<span class="muted">consents fetch failed: ${escapeHTML(String(e.message || e))}</span>`;
   }
 }
 

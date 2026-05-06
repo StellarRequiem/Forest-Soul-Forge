@@ -1744,6 +1744,86 @@ body { padding-bottom: 56px; }
   justify-content: space-between;
   gap: 12px;
 }
+
+/* ADR-0047 T4 (B158) — settings panel inside the assistant pane.
+   Collapsible <details>; each card is a stacked block separated by
+   a soft divider. The posture buttons reuse the global .btn shape
+   plus a per-card "active" highlight. */
+.chat-assistant-settings {
+  border: 1px solid var(--border, #2a3340);
+  border-radius: 6px;
+  background: var(--panel-bg, #1a2230);
+  padding: 0;
+}
+.chat-assistant-settings > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-weight: 600;
+  user-select: none;
+  list-style: none;
+}
+.chat-assistant-settings > summary::-webkit-details-marker { display: none; }
+.chat-assistant-settings > summary::before {
+  content: "▸ ";
+  color: var(--muted, #7d8a99);
+}
+.chat-assistant-settings[open] > summary::before {
+  content: "▾ ";
+}
+.chat-assistant-settings__body {
+  padding: 4px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.chat-assistant-card {
+  border-top: 1px solid var(--border, #2a3340);
+  padding-top: 10px;
+}
+.chat-assistant-card:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.chat-assistant-card__title {
+  margin: 0 0 6px 0;
+  font-size: 0.95em;
+}
+.chat-assistant-card__hint {
+  font-weight: normal;
+  font-size: 0.8em;
+  margin-left: 8px;
+}
+.chat-assistant-identity {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  margin: 0;
+  font-size: 0.9em;
+}
+.chat-assistant-identity dt {
+  color: var(--muted, #7d8a99);
+}
+.chat-assistant-identity dd {
+  margin: 0;
+}
+.chat-assistant-identity .mono {
+  font-family: var(--mono, monospace);
+}
+.chat-assistant-posture-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.chat-assistant-posture-btn--active {
+  outline: 2px solid var(--accent, #4a90e2);
+  outline-offset: 1px;
+}
+.chat-assistant-consent-row {
+  font-size: 0.85em;
+  padding: 2px 0;
+}
 .chat-rooms__item-id {
   font-family: var(--mono, monospace);
   font-size: 0.85em;

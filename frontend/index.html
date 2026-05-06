@@ -525,6 +525,61 @@
                   </div>
                 </div>
 
+                <!-- B158 / ADR-0047 T4 (partial): settings panel.
+                     Posture + identity + memory consents ship against
+                     existing endpoints (ADR-0045 posture, ADR-0027
+                     consents). Allowances pane stubs until ADR-0048
+                     implementation lands. Collapsible <details> so the
+                     chat surface stays uncluttered by default. -->
+                <details id="chat-assistant-settings" class="chat-assistant-settings">
+                  <summary>Settings</summary>
+                  <div class="chat-assistant-settings__body">
+                    <section class="chat-assistant-card">
+                      <h4 class="chat-assistant-card__title">Identity</h4>
+                      <dl id="chat-assistant-identity" class="chat-assistant-identity">
+                        <dt>name</dt><dd id="chat-asst-name" class="muted">—</dd>
+                        <dt>role</dt><dd id="chat-asst-role" class="muted">—</dd>
+                        <dt>genre</dt><dd id="chat-asst-genre" class="muted">companion</dd>
+                        <dt>dna</dt><dd id="chat-asst-dna" class="muted mono">—</dd>
+                        <dt>constitution</dt><dd id="chat-asst-cons-hash" class="muted mono">—</dd>
+                        <dt>created</dt><dd id="chat-asst-created" class="muted">—</dd>
+                      </dl>
+                    </section>
+
+                    <section class="chat-assistant-card">
+                      <h4 class="chat-assistant-card__title">Posture
+                        <span class="chat-assistant-card__hint muted">(ADR-0045 — runtime trust dial; every change audited)</span>
+                      </h4>
+                      <div class="chat-assistant-posture-row" id="chat-assistant-posture">
+                        <button class="btn btn--sm" data-posture="green"  type="button">green</button>
+                        <button class="btn btn--sm" data-posture="yellow" type="button">yellow</button>
+                        <button class="btn btn--sm" data-posture="red"    type="button">red</button>
+                        <span class="muted" id="chat-assistant-posture-current" style="margin-left: 12px;">—</span>
+                      </div>
+                    </section>
+
+                    <section class="chat-assistant-card">
+                      <h4 class="chat-assistant-card__title">Memory consents
+                        <span class="chat-assistant-card__hint muted">(ADR-0027 — full surface in Memory tab)</span>
+                      </h4>
+                      <div id="chat-assistant-consents" class="muted">—</div>
+                    </section>
+
+                    <section class="chat-assistant-card">
+                      <h4 class="chat-assistant-card__title">Computer-control allowances</h4>
+                      <p class="muted">
+                        Per-(agent, plugin) grant toggles — implementation pending
+                        per <code>ADR-0048</code>. Until that lands, the assistant
+                        operates with its constitutional kit only
+                        (<code>llm_think</code> + <code>memory_recall</code> +
+                        <code>memory_write</code> + <code>timestamp_window</code>).
+                        Computer-control plugins layer on top via per-(agent,
+                        plugin) grants when ADR-0048 implementation tranches ship.
+                      </p>
+                    </section>
+                  </div>
+                </details>
+
                 <div id="chat-assistant-turns" class="chat-assistant-turns">
                   <p class="muted">Loading conversation…</p>
                 </div>
