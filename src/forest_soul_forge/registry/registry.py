@@ -32,6 +32,7 @@ R4 architecture (post-split):
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -81,6 +82,122 @@ __all__ = [
     "Registry",
     "REGISTRY_SCHEMA_VERSION",
 ]
+
+
+# ---------------------------------------------------------------------------
+# B143: per-thread SQLite connection proxy
+# ---------------------------------------------------------------------------
+class _ThreadLocalConn:
+    """Per-thread sqlite3.Connection proxy. Fixes SQLITE_MISUSE under
+    concurrent reads (B143, surfaced live 2026-05-05).
+
+    Why: Python's sqlite3 module reports ``threadsafety=1``, meaning
+    connections cannot be shared across threads at the DB-API level
+    even with ``check_same_thread=False`` (which only disables
+    Python's own safety check, not the DB-API contract). Sharing
+    one connection across the FastAPI threadpool produces
+    ``sqlite3.InterfaceError: bad parameter or other API misuse``
+    under concurrent access — confirmed live 2026-05-05 in the chat
+    tab's ``GET /conversations/{id}/turns`` path while scheduled
+    tasks were dispatching concurrently. Bug surfaces as a 422 to
+    the chat client because subsequent reads on the corrupted
+    connection return all-None rows that fail Pydantic validation
+    (``ConversationOut`` literal-type checks).
+
+    What: implement just the bits of ``sqlite3.Connection`` Forest's
+    table accessors actually use (execute / executemany /
+    executescript / cursor / commit / rollback / close) and dispatch
+    each to a thread-local underlying connection. Each thread gets
+    its own real ``sqlite3.Connection`` on first access; WAL mode on
+    the file lets multiple connections coexist safely (which is what
+    the registry.py docstring already promised — "Multiple reader
+    connections against WAL-mode SQLite are fine").
+
+    Lifecycle: connections are opened lazily per thread. ``close()``
+    only closes the *current* thread's connection — sibling threads'
+    connections leak until process exit, which is acceptable for the
+    daemon's one-process-per-host model. If you need to close ALL
+    thread connections (e.g., shutting down the daemon cleanly),
+    iterate ``_get_all_conns()`` (test-only helper).
+
+    Transaction safety: ``BEGIN``/``COMMIT``/``ROLLBACK`` (via the
+    ``transaction()`` context manager in tables/_helpers.py) all run
+    on the same calling thread, which means they all hit the same
+    per-thread connection. Cross-thread transactions are not
+    supported and were never used in Forest's design.
+    """
+
+    def __init__(self, db_path: str, pragmas: tuple[str, ...]) -> None:
+        self._db_path = db_path
+        self._pragmas = pragmas
+        self._local = threading.local()
+        # All-thread tracker for diagnostics + close(). NOT used for
+        # serialization — that's the point of this class.
+        self._all_conns: list[sqlite3.Connection] = []
+        self._all_conns_lock = threading.Lock()
+
+    def _get(self) -> sqlite3.Connection:
+        """Return this thread's connection, opening one if needed."""
+        c = getattr(self._local, "conn", None)
+        if c is None:
+            c = sqlite3.connect(
+                self._db_path,
+                isolation_level=None,
+                check_same_thread=False,
+            )
+            c.row_factory = sqlite3.Row
+            for p in self._pragmas:
+                c.execute(p)
+            self._local.conn = c
+            with self._all_conns_lock:
+                self._all_conns.append(c)
+        return c
+
+    # ---- proxied sqlite3.Connection surface ----------------------------
+    def execute(self, *args, **kwargs):
+        return self._get().execute(*args, **kwargs)
+
+    def executemany(self, *args, **kwargs):
+        return self._get().executemany(*args, **kwargs)
+
+    def executescript(self, *args, **kwargs):
+        return self._get().executescript(*args, **kwargs)
+
+    def cursor(self, *args, **kwargs):
+        return self._get().cursor(*args, **kwargs)
+
+    def commit(self) -> None:
+        return self._get().commit()
+
+    def rollback(self) -> None:
+        return self._get().rollback()
+
+    def close(self) -> None:
+        """Close the *current* thread's connection. Sibling threads'
+        connections leak until process exit (acceptable for daemon's
+        one-process-per-host model)."""
+        c = getattr(self._local, "conn", None)
+        if c is not None:
+            try:
+                c.close()
+            finally:
+                del self._local.conn
+                with self._all_conns_lock:
+                    try:
+                        self._all_conns.remove(c)
+                    except ValueError:
+                        pass
+
+    def _close_all(self) -> None:
+        """Test-only: close every thread's connection. Don't use in
+        production code paths — connection lifecycles are per-thread."""
+        with self._all_conns_lock:
+            for c in self._all_conns:
+                try:
+                    c.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._all_conns.clear()
 
 
 class Registry:
@@ -144,16 +261,25 @@ class Registry:
         """
         db_path.parent.mkdir(parents=True, exist_ok=True)
         is_new = not db_path.exists()
-        # check_same_thread=False is required because FastAPI dispatches
-        # sync route handlers onto a threadpool — the connection opened
-        # here (on the lifespan thread) will be used from handler threads.
-        # Concurrent write safety is the caller's job (see class docstring).
-        conn = sqlite3.connect(
-            str(db_path), isolation_level=None, check_same_thread=False
-        )
-        conn.row_factory = sqlite3.Row
-        for pragma in schema.CONNECTION_PRAGMAS:
-            conn.execute(pragma)
+        # B143 (2026-05-05): per-thread connection proxy. Replaces a
+        # single shared connection that worked at the SQLite C level
+        # (check_same_thread=False + WAL) but violated Python's
+        # sqlite3 DB-API contract (threadsafety=1 → connections may
+        # not be shared across threads). The bug manifested as
+        # SQLITE_MISUSE on chat reads under concurrent scheduled-task
+        # dispatches.
+        #
+        # Each thread that calls into the registry gets its own real
+        # sqlite3.Connection lazily on first execute. WAL mode on the
+        # file (set via CONNECTION_PRAGMAS) lets the connections
+        # coexist safely — which is what this module's docstring
+        # always promised: "Multiple reader connections against
+        # WAL-mode SQLite are fine."
+        #
+        # The schema install/verify below runs on THIS (lifespan)
+        # thread, using its per-thread connection. FastAPI worker
+        # threads each get their own connection on first request.
+        conn = _ThreadLocalConn(str(db_path), schema.CONNECTION_PRAGMAS)
 
         if is_new:
             cls._install_schema(conn)
