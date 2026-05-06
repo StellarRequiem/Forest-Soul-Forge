@@ -1,0 +1,121 @@
+# Forest Soul Forge — scheduled tasks for the 24/7 specialist stable.
+#
+# This is an EXAMPLE. To activate, copy to scheduled_tasks.yaml (this
+# file's name minus the .example) and restart the daemon. Default path
+# read by the daemon is config/scheduled_tasks.yaml; override via
+# FSF_SCHEDULED_TASKS_PATH env var.
+#
+# Each task fires the named tool against the named agent on the given
+# schedule. The scheduler refuses tools that require human approval, so
+# only read_only or pre-approved tools belong here. See
+# src/forest_soul_forge/daemon/scheduler/task_types/tool_call.py for
+# the runner.
+#
+# To find your specific agent_ids after running birth-specialist-stable.sh:
+#   curl -s http://127.0.0.1:7423/agents | jq '.agents[] | {role, instance_id}'
+# Then substitute into the agent_id fields below.
+#
+# Schedule formats supported:
+#   "every 30s" / "every 5m" / "every 1h" / "every 24h"
+#   (interval-based; cron-style not implemented at v0.4)
+#
+# Circuit breaker default trips after 3 consecutive failures. The
+# /scheduler/tasks/{id}/reset endpoint (sudo + write_token gated)
+# clears it.
+#
+# Status:  curl -s http://127.0.0.1:7423/scheduler/tasks | jq '.tasks[] | {id, enabled, state}'
+# Trigger now:  curl -X POST http://127.0.0.1:7423/scheduler/tasks/<id>/trigger -H "X-FSF-Token: $FSF_API_TOKEN"
+
+tasks:
+
+  # ---- dashboard_watcher: poll daemon /healthz every 5 minutes ----------
+  # Sanity-check that Forest itself is up. Result lands in audit chain
+  # via tool_call_succeeded events; lineage-scope memory writes accumulate
+  # a passive history.
+  - id: dashboard_watcher_healthz_5m
+    description: "DashboardWatcher: poll /healthz every 5 minutes"
+    schedule: "every 5m"
+    enabled: false   # ← set true after replacing agent_id
+    type: tool_call
+    config:
+      agent_id: REPLACE_WITH_DASHBOARD_WATCHER_INSTANCE_ID
+      tool_name: llm_think
+      tool_version: "1"
+      args:
+        prompt: "Daemon is alive. Note timestamp + any anomalies."
+        max_tokens: 200
+
+  # ---- signal_listener: scan recent audit chain entries hourly ----------
+  - id: signal_listener_audit_hourly
+    description: "SignalListener: scan last hour of audit chain for anomalies"
+    schedule: "every 1h"
+    enabled: false
+    type: tool_call
+    config:
+      agent_id: REPLACE_WITH_SIGNAL_LISTENER_INSTANCE_ID
+      tool_name: llm_think
+      tool_version: "1"
+      args:
+        prompt: "Review the past hour of agent activity. Flag anything unusual."
+        max_tokens: 400
+
+  # ---- incident_correlator: cross-window scan every 6 hours -------------
+  - id: incident_correlator_6h
+    description: "IncidentCorrelator: cross-reference patterns across 6h windows"
+    schedule: "every 6h"
+    enabled: false
+    type: tool_call
+    config:
+      agent_id: REPLACE_WITH_INCIDENT_CORRELATOR_INSTANCE_ID
+      tool_name: llm_think
+      tool_version: "1"
+      args:
+        prompt: "Cross-reference the last 6 hours of agent activity. Identify correlated patterns."
+        max_tokens: 600
+
+  # ---- paper_summarizer: idle-time research summary, daily ---------------
+  # Keep disabled until you wire it to a real source (RSS, arxiv API,
+  # etc.). The current llm_think prompt is a placeholder.
+  - id: paper_summarizer_daily
+    description: "PaperSummarizer: daily research-feed summary"
+    schedule: "every 24h"
+    enabled: false
+    type: tool_call
+    config:
+      agent_id: REPLACE_WITH_PAPER_SUMMARIZER_INSTANCE_ID
+      tool_name: llm_think
+      tool_version: "1"
+      args:
+        prompt: "Summarize key research developments. (Wire this to real sources.)"
+        max_tokens: 800
+
+  # ---- vendor_research: weekly vendor scan -------------------------------
+  - id: vendor_research_weekly
+    description: "VendorResearch: weekly vendor/product fact-find"
+    schedule: "every 168h"   # 7 days
+    enabled: false
+    type: tool_call
+    config:
+      agent_id: REPLACE_WITH_VENDOR_RESEARCH_INSTANCE_ID
+      tool_name: llm_think
+      tool_version: "1"
+      args:
+        prompt: "Weekly check for vendor/product changes. (Wire to real sources.)"
+        max_tokens: 600
+
+  # ---- status_reporter: daily 7am audit-chain summary --------------------
+  # Most-useful starter task. Generates a brief of what happened in the
+  # audit chain since yesterday. Memory.write to lineage scope so other
+  # agents in the family can read.
+  - id: status_reporter_daily_brief
+    description: "StatusReporter: daily brief of audit-chain activity"
+    schedule: "every 24h"
+    enabled: false
+    type: tool_call
+    config:
+      agent_id: REPLACE_WITH_STATUS_REPORTER_INSTANCE_ID
+      tool_name: llm_think
+      tool_version: "1"
+      args:
+        prompt: "Generate a daily brief: what happened in the audit chain since yesterday? Sections: (1) tool dispatches by role/tool, (2) births/spawns/archives, (3) any refusals or failures, (4) memory writes, (5) anything noteworthy."
+        max_tokens: 1000

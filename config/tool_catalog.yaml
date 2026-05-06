@@ -2153,7 +2153,15 @@ archetypes:
   # -- Tranche 1 — observer extension --------------------------------------
   dashboard_watcher:
     standard_tools:
-      - web_fetch.v1
+      # web_fetch.v1 removed 2026-05-05 (B140 follow-on): it's
+      # network-class, but dashboard_watcher is in the observer
+      # genre (max_side_effects=read_only). Kit-tier validation
+      # refused birth with "tools that exceed that ceiling: web_fetch
+      # (network)". The role description says "passively monitors
+      # operator dashboards + status panels" — that's local-resource
+      # observation, no web reach needed. If a future variant needs
+      # web reach, move that role to the web_observer genre instead
+      # of widening the observer-genre ceiling.
       - timestamp_window.v1
       - posture_check.v1
       - log_scan.v1
