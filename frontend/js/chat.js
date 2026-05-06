@@ -685,7 +685,11 @@ async function renderAssistantAllowances(instanceId) {
 
     let preset = "restricted";
     if (sccGrant) {
-      preset = (sccGrant.trust_tier === "elevated") ? "full" : "specific";
+      // Mapping: green=Full, yellow=Specific. Anything else
+      // (including stale rows from earlier 'standard'/'elevated'
+      // experiments before B175) defaults to Specific so the UI
+      // doesn't silently downgrade an operator's intent.
+      preset = (sccGrant.trust_tier === "green") ? "full" : "specific";
     }
 
     if (sccGrant) {
@@ -815,8 +819,20 @@ async function applyAssistantAllowancePreset(instanceId, preset) {
     }
     return;
   }
-  // Specific or Full → issue/upsert a grant. trust_tier differs.
-  const trust_tier = (preset === "full") ? "elevated" : "standard";
+  // Specific or Full → issue/upsert a grant. trust_tier uses the
+  // same green/yellow/red traffic-light dial as posture per ADR-0045
+  // T3 (B115 substrate) — the GrantRequest schema validates against
+  // that exact regex. Mapping:
+  //   Specific → "yellow" (cautious; per-call approval fires for
+  //                        non-read tools regardless of agent posture)
+  //   Full     → "green"  (trusted; combined with agent posture
+  //                        green, downgrades approval to "granted-
+  //                        skip" per the posture × per-grant matrix)
+  // B175 fix: previously mistakenly sent "standard"/"elevated"
+  // which got rejected with 422. The ADR-0048 Decision 3 amendment
+  // text described the abstraction in operator terms; the substrate
+  // uses green/yellow/red.
+  const trust_tier = (preset === "full") ? "green" : "yellow";
   await writeCall(`/agents/${instanceId}/plugin-grants`, {
     plugin_name: ALLOW_PLUGIN_NAME,
     trust_tier,

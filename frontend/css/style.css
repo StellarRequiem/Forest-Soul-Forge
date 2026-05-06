@@ -1562,6 +1562,16 @@ body { padding-bottom: 56px; }
   height: calc(100vh - 180px);
   min-height: 420px;
 }
+/* B175 — `display: grid` above outranks the `[hidden]` UA rule
+   (class specificity beats attribute specificity for the same
+   element). Without this the chat-pane-rooms grid renders
+   alongside the assistant pane when Assistant mode is active —
+   surfaced live during the e2e test 2026-05-06. The
+   class+attribute combined selector here has higher specificity
+   so `display: none` wins when hidden is set. */
+.chat-grid[hidden] {
+  display: none !important;
+}
 
 .chat-rail .panel,
 .chat-room .panel {
