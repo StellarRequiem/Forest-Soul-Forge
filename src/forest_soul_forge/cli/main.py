@@ -265,6 +265,11 @@ def _build_parser() -> argparse.ArgumentParser:
     from forest_soul_forge.cli.agent_cmd import add_subparser as _agent_add_subparser
     _agent_add_subparser(sub)
 
+    # `fsf secret ...` — manage plugin secrets via the ADR-0052
+    # pluggable backend (resolved per FSF_SECRET_STORE env var).
+    from forest_soul_forge.cli.secret_cmd import add_subparser as _secret_add_subparser
+    _secret_add_subparser(sub)
+
     return parser
 
 
