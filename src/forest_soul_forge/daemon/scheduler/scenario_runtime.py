@@ -425,7 +425,18 @@ async def _step_dispatch_tool(
             "use read_only-class tools"
         )
     if isinstance(outcome, DispatchFailed):
-        raise ScenarioError(f"dispatch failed: {outcome.reason}")
+        # Bug fix B144 (sibling of B142): DispatchFailed exposes
+        # tool_key / exception_type / audit_seq. There is no .reason
+        # attribute. The earlier `outcome.reason` reference would have
+        # raised AttributeError every time a scenario step's tool
+        # crashed, masking the real failure. B142 fixed the same bug
+        # in tool_call.py:209; this is its scenario_runtime.py twin,
+        # surfaced via the Task #24 audit triggered by Task #22's
+        # investigation 2026-05-05.
+        raise ScenarioError(
+            f"dispatch failed: {outcome.exception_type} "
+            f"(tool={outcome.tool_key}, audit_seq={outcome.audit_seq})"
+        )
     raise ScenarioError(f"unknown dispatch outcome: {type(outcome).__name__}")
 
 

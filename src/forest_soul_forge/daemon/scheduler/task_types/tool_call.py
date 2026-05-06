@@ -126,10 +126,30 @@ async def tool_call_runner(
 
     # ---- provider resolution -----------------------------------------
     # llm_think and other model-using tools need a provider on the
-    # ToolContext. Pull the active provider off app.state if present;
-    # tools that don't need it ignore the field, tools that do but
-    # didn't get one refuse cleanly.
-    provider = getattr(app.state, "active_provider", None)
+    # ToolContext. Mirror the chat / tool-dispatch / skills-run /
+    # pending-calls path's _resolve_active_provider helper:
+    # app.state.providers.active() is the canonical accessor (a
+    # ProviderRegistry, not a single provider object on app.state).
+    #
+    # Bug fix B144 (2026-05-05): the prior `getattr(app.state,
+    # "active_provider", None)` referenced an attribute that's never
+    # set anywhere — the daemon's lifespan stores the registry as
+    # `app.state.providers`, not `app.state.active_provider`. This
+    # silently returned None on every dispatch, surfacing as
+    # ToolValidationError("no LLM provider wired into this dispatcher")
+    # inside llm_think.v1's validate(). Surfaced live 2026-05-05 by
+    # the freshly-activated specialist-stable scheduled tasks via
+    # B141 + the B142 fix that finally let the real exception type
+    # bubble out (instead of crashing the runner with AttributeError
+    # on outcome.reason).
+    providers = getattr(app.state, "providers", None)
+    if providers is None:
+        provider = None
+    else:
+        try:
+            provider = providers.active()
+        except Exception:
+            provider = None
 
     # ---- write-lock + dispatch ---------------------------------------
     # Single-writer SQLite discipline. The dispatcher mutates registry
