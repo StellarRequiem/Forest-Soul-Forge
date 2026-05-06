@@ -32,6 +32,10 @@
 #   1  any birth failed; partial output preserved on stderr
 
 set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$HERE"
+# B149 (T25 follow-on): load FSF_API_TOKEN from .env if not in shell env
+if [[ -f dev-tools/_fsf-env.sh ]]; then source dev-tools/_fsf-env.sh; fi
 
 DAEMON="${FSF_DAEMON_URL:-http://127.0.0.1:7423}"
 TOKEN="${FSF_API_TOKEN:-}"

@@ -13,6 +13,8 @@ set -uo pipefail
 # directory. cd to repo root so relative paths resolve correctly.
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
+# B149 (T25 follow-on): load FSF_API_TOKEN from .env if not in shell env
+if [[ -f dev-tools/_fsf-env.sh ]]; then source dev-tools/_fsf-env.sh; fi
 
 bar() { printf '\n========== %s ==========\n' "$1"; }
 
