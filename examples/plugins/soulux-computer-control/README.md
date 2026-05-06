@@ -114,19 +114,54 @@ The grant is an explicit operator action through the Chat-tab settings
 panel (T4 / ADR-0048 UI). It is revocable at runtime without
 rebirthing the agent.
 
-## Install (after T2 ships)
+## Install
+
+The repo ships a turnkey installer:
 
 ```bash
-cd examples/plugins/soulux-computer-control
-sha256=$(shasum -a 256 ./server | cut -d ' ' -f 1)
-sed -i '' "s/^  sha256:.*/  sha256: \"$sha256\"/" plugin.yaml
-fsf plugin install ./examples/plugins/soulux-computer-control \
-    --plugin-root ~/.forest/plugins
+~/Forest-Soul-Forge/dev-tools/install-soulux-computer-control.command
 ```
 
-Then issue grants per agent via the Chat-tab settings panel (once
-ADR-0048 T4 lands) or via the existing
-`POST /agents/{instance_id}/plugin-grants` HTTP surface.
+It picks the daemon's venv Python (so dependencies resolve),
+runs `plugin install` against `~/.forest/plugins`, hits
+`POST /plugins/reload` to pick up the new server, and verifies
+the daemon's active list includes the entry. Output goes to
+`/tmp/fsf-plugin-install.log`.
+
+If you want to run the steps by hand:
+
+```bash
+cd ~/Forest-Soul-Forge
+
+# Use the daemon's venv Python — the system python3 typically
+# doesn't have the runtime deps (pydantic, etc.) installed.
+.venv/bin/python -m forest_soul_forge.cli.main \
+    plugin install ./examples/plugins/soulux-computer-control \
+    --plugin-root ~/.forest/plugins
+
+# Reload the daemon's plugin runtime so it picks up the new server.
+TOKEN=$(grep ^FSF_API_TOKEN= .env | cut -d= -f2)
+curl -X POST http://127.0.0.1:7423/plugins/reload \
+    -H "X-FSF-Token: $TOKEN" \
+    -H "Content-Type: application/json" \
+    -H "X-Idempotency-Key: install-$(date +%s)"
+```
+
+The `fsf` console script registered in `pyproject.toml` only ends
+up on PATH when the package was `pip install -e .`'d. Operators
+running just the daemon's venv don't have it; using
+`.venv/bin/python -m forest_soul_forge.cli.main` is the same code
+path with no PATH dependency. (Surfaced live during the 2026-05-06
+e2e test: B176 added the wrapper script + this note.)
+
+After install:
+
+- The plugin appears in the daemon's active list (`GET /plugins`).
+- Issue grants per agent via the Chat-tab Assistant settings
+  panel's "Computer-control allowances" preset row (Restricted /
+  Specific / Full) — see B165 / B175.
+- Or via the `POST /agents/{instance_id}/plugin-grants` HTTP
+  surface directly.
 
 ## Audit + reverse engineering
 
