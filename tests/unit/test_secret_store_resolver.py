@@ -89,11 +89,20 @@ def test_keychain_on_darwin_resolves(monkeypatch):
         assert "macOS-only" in str(exc.value)
 
 
-def test_vaultwarden_raises_with_pointer_to_t3(monkeypatch):
+def test_vaultwarden_resolves_or_errors_on_missing_bw(monkeypatch):
+    """T3 (B174) shipped VaultWardenStore. Resolver constructs it
+    if `bw` is on PATH; otherwise the constructor raises a
+    SecretStoreError pointing the operator at the install path."""
+    import shutil as _shutil
     monkeypatch.setenv("FSF_SECRET_STORE", "vaultwarden")
-    with pytest.raises(SecretStoreError) as exc:
-        resolve_secret_store(force_reload=True)
-    assert "T3" in str(exc.value)
+    if _shutil.which("bw") is None:
+        with pytest.raises(SecretStoreError) as exc:
+            resolve_secret_store(force_reload=True)
+        msg = str(exc.value)
+        assert "bw" in msg.lower() or "bitwarden" in msg.lower()
+    else:
+        store = resolve_secret_store(force_reload=True)
+        assert store.name == "vaultwarden"
 
 
 # ---------------------------------------------------------------------------

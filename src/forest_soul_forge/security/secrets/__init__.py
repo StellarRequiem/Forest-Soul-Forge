@@ -21,6 +21,10 @@ T1 scope (B167):
 T2 scope (B168):
   - KeychainStore — macOS Keychain via the `security` CLI
   - Default backend flips to `keychain` on Darwin (file elsewhere)
+
+T3 scope (B174):
+  - VaultWardenStore — Bitwarden / VaultWarden via the `bw` CLI
+  - Cross-platform; operator pre-installs bw + runs login + unlock
 """
 from __future__ import annotations
 
@@ -28,11 +32,13 @@ from .file_store import FileStore
 from .keychain_store import KeychainStore
 from .protocol import SecretStoreError, SecretStoreProtocol
 from .resolver import resolve_secret_store
+from .vaultwarden_store import VaultWardenStore
 
 __all__ = [
     "FileStore",
     "KeychainStore",
     "SecretStoreError",
     "SecretStoreProtocol",
+    "VaultWardenStore",
     "resolve_secret_store",
 ]

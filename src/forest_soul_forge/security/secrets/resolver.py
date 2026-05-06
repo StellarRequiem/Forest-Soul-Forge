@@ -32,6 +32,7 @@ from typing import Any
 from .file_store import FileStore
 from .keychain_store import KeychainStore
 from .protocol import SecretStoreError, SecretStoreProtocol
+from .vaultwarden_store import VaultWardenStore
 
 
 def _platform_default() -> str:
@@ -85,11 +86,7 @@ def _build(backend_id: str) -> SecretStoreProtocol:
     if backend_id == "keychain":
         return KeychainStore()
     if backend_id == "vaultwarden":
-        # T3 will replace this stub.
-        raise SecretStoreError(
-            "FSF_SECRET_STORE=vaultwarden not implemented yet "
-            "(ADR-0052 T3)."
-        )
+        return VaultWardenStore()
     if backend_id.startswith("module:"):
         return _build_byo(backend_id[len("module:"):])
 
