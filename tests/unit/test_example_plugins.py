@@ -88,13 +88,12 @@ def test_example_uses_known_side_effects(plugin_dir: Path):
 #: the ADR that names the deferral and MUST be removed once tools
 #: arrive — staying on this list past the relevant tranche means
 #: the example has gone stale.
-SCAFFOLD_ONLY_PLUGINS = {
-    # ADR-0048 T1 (B159) — soulux-computer-control plugin scaffold.
-    # T2 lands the read tools (computer_screenshot.v1 +
-    # computer_read_clipboard.v1), at which point this entry MUST be
-    # removed and the smoke test should re-fire as non-empty.
-    "soulux-computer-control",
-}
+#:
+#: B163 emptied this set when ADR-0048 T2 landed two tools in
+#: soulux-computer-control. Future scaffold-only commits add their
+#: plugin name here + the link to their tracking ADR; subsequent
+#: tool tranches remove the entry.
+SCAFFOLD_ONLY_PLUGINS: set[str] = set()
 
 
 @pytest.mark.parametrize("plugin_dir", _example_dirs(), ids=lambda p: p.name)

@@ -21,13 +21,13 @@ discipline:
 - **Audit chain** captures every dispatch + approval / refusal /
   posture-change so the operator can reconstruct what happened
 
-## Status: T1 scaffold (B159) — no tools yet
+## Status: T2 read tools shipped (B163)
 
-The plugin manifest declares `capabilities: []` until T2 lands the
-read tools. The server entry point at `./server` is a stub that
-raises until T2 ships. This commit exists to lock in the plugin
-identity, manifest shape, and documentation skeleton so subsequent
-tranches land cleanly.
+`computer_screenshot.v1` and `computer_read_clipboard.v1` are live.
+The server is a single-file stdlib-only Python script that handles
+JSON-RPC stdio per the MCP wire protocol Forest's `mcp_call.v1`
+expects. T3 will append the four action tools (click / type /
+run_app / launch_url) on top of the same server.
 
 ## Tranche roadmap
 
@@ -36,10 +36,10 @@ Per [ADR-0048 §Implementation tranches](../../../docs/decisions/ADR-0048-comput
 | # | Tranche | Status | Tools added |
 |---|---|---|---|
 | T1 | Scaffold | **DONE (B159)** | — |
-| T2 | Read tools | pending | `computer_screenshot.v1`, `computer_read_clipboard.v1` |
+| T2 | Read tools | **DONE (B163)** | `computer_screenshot.v1`, `computer_read_clipboard.v1` |
 | T3 | Action tools | pending | `computer_click.v1`, `computer_type.v1`, `computer_run_app.v1`, `computer_launch_url.v1` |
-| T4 | Allowance UI | pending | (frontend) Chat-tab settings panel category toggles |
-| T5 | Posture clamp logic | pending | (daemon) PostureGateStep aware of computer-control |
+| T4 | Allowance UI | pending | (frontend) Chat-tab three-preset settings panel + Advanced disclosure |
+| T5 | Posture clamp logic | **DONE (B160)** | docs + 12 ADR-0048 coverage tests in PostureGateStep |
 | T6 | Documentation + safety | pending | per-tool docs + `docs/runbooks/` operator safety guide |
 
 ## Why this isn't bundled in the kernel

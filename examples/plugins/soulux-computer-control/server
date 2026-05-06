@@ -1,35 +1,317 @@
 #!/usr/bin/env python3
-# SoulUX Computer Control — server stub.
-#
-# T1 (B159) scaffold. The real MCP server arrives in T2 + T3:
-#
-#   T2 implements computer_screenshot.v1 + computer_read_clipboard.v1
-#       (wraps `screencapture -x` and `pbpaste`)
-#   T3 implements computer_click.v1 + computer_type.v1 +
-#       computer_run_app.v1 + computer_launch_url.v1
-#       (wraps `osascript` / `cliclick` / `open`)
-#
-# Until then, running this stub raises immediately with a pointer to
-# the tranche roadmap so any installation attempt fails loudly rather
-# than silently exposing an empty server.
-#
-# When T2 ships, this file becomes a real MCP server (stdio JSON-RPC
-# per ADR-0043). The operator MUST recompute the sha256 in plugin.yaml
-# after replacing this stub — the plugin loader rejects mismatched
-# checksums (ADR-0043 supply-chain-swap defense).
+"""SoulUX Computer Control — MCP stdio server (T2).
 
+ADR-0048 T2 ships the read tools:
+
+  - computer_screenshot.v1   — capture the visible screen via macOS
+                               screencapture, save under
+                               ~/.forest/screenshots/, return path +
+                               size + format
+  - computer_read_clipboard.v1 — read the current clipboard contents
+                               via macOS pbpaste, return text
+
+Both tools are read_only (no operator approval required by the
+plugin's requires_human_approval map). Posture clamps still apply
+via Forest's PostureGateStep — but read_only bypasses posture
+unconditionally per ADR-0048 Decision 4 + B160 coverage tests.
+
+Wire protocol: Forest's mcp_call.v1 dispatches as a single-shot
+subprocess per call (see src/forest_soul_forge/tools/builtin/
+mcp_call.py:230-260). The contract:
+
+  - Read ONE JSON-RPC line from stdin
+  - Method: 'tools/call', params: {name, arguments}
+  - Write ONE JSON-RPC response line to stdout
+  - Exit 0
+
+Single-file by design: zero non-stdlib imports so the operator's
+sha256 pin stays stable when no upstream packages move.
+"""
+from __future__ import annotations
+
+import base64
+import datetime as _dt
+import json
+import os
+import platform
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# Tool implementations
+# ---------------------------------------------------------------------------
+
+SCREENSHOT_DIR = Path.home() / ".forest" / "screenshots"
+
+
+def _ts() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _macos_only(tool_name: str) -> dict:
+    """Build a JSON-RPC error result for non-macOS platforms."""
+    return {
+        "isError": True,
+        "error": {
+            "code": "platform_unsupported",
+            "message": (
+                f"{tool_name} is macOS-only. Detected platform: "
+                f"{platform.system()}. The soulux-computer-control "
+                f"plugin v0.1 wraps macOS-specific binaries "
+                f"(screencapture, pbpaste); a future tranche will add "
+                f"Linux/Windows fallbacks."
+            ),
+        },
+    }
+
+
+def computer_screenshot(args: dict) -> dict:
+    """Capture the visible screen.
+
+    Args:
+      filename: optional filename suffix (default: timestamp).
+      include_base64: if True, embed the PNG bytes in the response
+                      as base64 in addition to writing to disk. The
+                      bytes inflate the response — use sparingly.
+                      Default False; the caller reads from path.
+
+    Returns:
+      { path, size_bytes, format: 'png', captured_at, base64? }
+    """
+    if platform.system() != "Darwin":
+        return _macos_only("computer_screenshot")
+
+    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    suffix = (args.get("filename") or _ts()).strip()
+    # Defense in depth: forbid path traversal in operator-supplied name.
+    if "/" in suffix or ".." in suffix:
+        return {
+            "isError": True,
+            "error": {
+                "code": "bad_filename",
+                "message": "filename must not contain '/' or '..'",
+            },
+        }
+    out_path = SCREENSHOT_DIR / f"{suffix}.png"
+
+    # screencapture flags:
+    #   -x = no shutter sound
+    #   -t png = explicit PNG format
+    # No -i (interactive) and no -w (window picker) — those would
+    # block on user input and break the stateless tool-call model.
+    try:
+        proc = subprocess.run(
+            ["screencapture", "-x", "-t", "png", str(out_path)],
+            capture_output=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "isError": True,
+            "error": {
+                "code": "screencapture_timeout",
+                "message": "screencapture did not return within 10s",
+            },
+        }
+    if proc.returncode != 0:
+        return {
+            "isError": True,
+            "error": {
+                "code": "screencapture_failed",
+                "message": (
+                    proc.stderr.decode("utf-8", errors="replace")[:200]
+                    or f"screencapture exited {proc.returncode}"
+                ),
+            },
+        }
+
+    if not out_path.exists():
+        return {
+            "isError": True,
+            "error": {
+                "code": "screencapture_no_output",
+                "message": (
+                    "screencapture returned 0 but the output PNG was "
+                    "not written. macOS may have denied screen-recording "
+                    "permission to the calling process. Grant Screen "
+                    "Recording in System Settings → Privacy & Security."
+                ),
+            },
+        }
+
+    size_bytes = out_path.stat().st_size
+    result = {
+        "path": str(out_path),
+        "size_bytes": size_bytes,
+        "format": "png",
+        "captured_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+    }
+    if args.get("include_base64"):
+        # Operator-driven (the assistant requested embedded bytes).
+        # Cap inline payload at 4 MB to avoid blowing up the JSON-RPC
+        # response — a 5K monitor screenshot can hit 8-10 MB.
+        if size_bytes > 4 * 1024 * 1024:
+            result["base64_truncated"] = True
+            result["base64"] = None
+        else:
+            result["base64"] = base64.b64encode(out_path.read_bytes()).decode("ascii")
+    return result
+
+
+def computer_read_clipboard(args: dict) -> dict:
+    """Read the current clipboard contents (text only).
+
+    Args: none — clipboard read is parameterless.
+
+    Returns:
+      { text, length_chars, read_at }
+    """
+    _ = args  # explicitly unused
+    if platform.system() != "Darwin":
+        return _macos_only("computer_read_clipboard")
+
+    try:
+        proc = subprocess.run(
+            ["pbpaste"],
+            capture_output=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "isError": True,
+            "error": {
+                "code": "pbpaste_timeout",
+                "message": "pbpaste did not return within 5s",
+            },
+        }
+    if proc.returncode != 0:
+        return {
+            "isError": True,
+            "error": {
+                "code": "pbpaste_failed",
+                "message": (
+                    proc.stderr.decode("utf-8", errors="replace")[:200]
+                    or f"pbpaste exited {proc.returncode}"
+                ),
+            },
+        }
+
+    text = proc.stdout.decode("utf-8", errors="replace")
+    return {
+        "text": text,
+        "length_chars": len(text),
+        "read_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# JSON-RPC dispatch
+# ---------------------------------------------------------------------------
+
+TOOLS = {
+    "computer_screenshot": computer_screenshot,
+    "computer_read_clipboard": computer_read_clipboard,
+}
+
+
+def handle(request: dict) -> dict:
+    """Build a JSON-RPC response for the given request."""
+    req_id = request.get("id", 1)
+    method = request.get("method", "")
+
+    if method == "tools/list":
+        # Optional MCP method — Forest's mcp_call.v1 doesn't currently
+        # invoke this on each call (the plugin manifest is the source
+        # of truth for capabilities), but supporting it lets an
+        # operator hand-debug the server with a stock MCP client.
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "tools": [
+                    {
+                        "name": "computer_screenshot",
+                        "description": "Capture the visible screen via macOS screencapture; return path + size.",
+                    },
+                    {
+                        "name": "computer_read_clipboard",
+                        "description": "Read the current clipboard contents (text only) via macOS pbpaste.",
+                    },
+                ],
+            },
+        }
+
+    if method != "tools/call":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {
+                "code": -32601,
+                "message": f"method not found: {method!r}",
+            },
+        }
+
+    params = request.get("params") or {}
+    name = params.get("name", "")
+    arguments = params.get("arguments") or {}
+
+    impl = TOOLS.get(name)
+    if impl is None:
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {
+                "code": -32602,
+                "message": (
+                    f"unknown tool: {name!r}. Known tools: "
+                    f"{sorted(TOOLS)}"
+                ),
+            },
+        }
+
+    try:
+        result = impl(arguments)
+    except Exception as e:                    # noqa: BLE001
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {
+                "code": -32000,
+                "message": f"tool {name!r} raised: {type(e).__name__}: {e}",
+            },
+        }
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "result": result,
+    }
 
 
 def main() -> int:
-    sys.stderr.write(
-        "soulux-computer-control: T1 scaffold — server not implemented.\n"
-        "T2 lands the read tools (computer_screenshot.v1 +\n"
-        "computer_read_clipboard.v1); T3 lands the action tools.\n"
-        "See examples/plugins/soulux-computer-control/README.md for\n"
-        "the tranche roadmap.\n"
-    )
-    return 1
+    line = sys.stdin.readline()
+    if not line.strip():
+        sys.stderr.write("soulux-computer-control: empty stdin (no JSON-RPC request)\n")
+        return 1
+    try:
+        request = json.loads(line)
+    except json.JSONDecodeError as e:
+        response = {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {
+                "code": -32700,
+                "message": f"parse error: {e}",
+            },
+        }
+        sys.stdout.write(json.dumps(response) + "\n")
+        return 1
+    response = handle(request)
+    sys.stdout.write(json.dumps(response) + "\n")
+    sys.stdout.flush()
+    return 0
 
 
 if __name__ == "__main__":

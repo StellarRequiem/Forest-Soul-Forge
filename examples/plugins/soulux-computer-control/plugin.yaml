@@ -57,35 +57,40 @@ type: mcp_server
 # (added in T2/T3) are what the dispatcher actually checks.
 side_effects: external
 
-# Capability list — empty for T1 by design. Each tranche appends:
-#
-#   T2 adds:
-#     - mcp.soulux-computer-control.computer_screenshot
-#     - mcp.soulux-computer-control.computer_read_clipboard
-#
-#   T3 adds:
+# Capability list — T2 (B163) adds the read tools. T3 will append:
 #     - mcp.soulux-computer-control.computer_click
 #     - mcp.soulux-computer-control.computer_type
 #     - mcp.soulux-computer-control.computer_run_app
 #     - mcp.soulux-computer-control.computer_launch_url
-capabilities: []
+capabilities:
+  - mcp.soulux-computer-control.computer_screenshot
+  - mcp.soulux-computer-control.computer_read_clipboard
 
-# Per-tool approval map. Empty for T1; populated as tools land.
-# Per ADR-0048 Decision 2:
-#   computer_screenshot, computer_read_clipboard → false (read_only)
+# Per-tool approval map. Per ADR-0048 Decision 2:
+#   computer_screenshot, computer_read_clipboard → false (read_only;
+#       operator can grant freely without per-call approval friction.
+#       Posture clamps still apply via PostureGateStep — but read_only
+#       bypasses posture per ADR-0048 Decision 4 + B160 coverage.)
 #   computer_click, computer_type, computer_run_app, computer_launch_url
-#       → true (external — operator approves each call by default;
-#               per-(agent, plugin) grants can bypass per ADR-0043 #1)
-requires_human_approval: {}
+#       → true (external — added in T3; operator approves each call by
+#               default; per-(agent, plugin) grants can bypass per
+#               ADR-0043 #1)
+requires_human_approval:
+  computer_screenshot: false
+  computer_read_clipboard: false
 
 entry_point:
   type: stdio
-  # The server stub at ./server raises NotImplementedError until T2.
-  # Operators MUST replace this sha256 with the real one after T2
-  # lands an actual server binary; the loader rejects mismatched
-  # checksums by design (ADR-0043 supply-chain-swap defense).
+  # T2 (B163): real JSON-RPC stdio server handling computer_screenshot
+  # and computer_read_clipboard. Single-file Python; stdlib-only (no
+  # mcp SDK dependency) so the sha256 stays stable across upstream
+  # package moves. Operator MUST recompute sha256 after editing the
+  # server — the plugin loader rejects mismatched checksums by design
+  # (ADR-0043 supply-chain-swap defense). Recompute with:
+  #   sha256=$(shasum -a 256 ./server | cut -d ' ' -f 1)
+  #   sed -i '' "s/^  sha256:.*/  sha256: \"$sha256\"/" plugin.yaml
   command: ./server
-  sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256: "3248d910dddbd048f5a2b7753cff37b8be7e01561e879b6e668be561312803c3"
 
 # No required secrets — macOS automation tools don't need auth.
 # The osascript / screencapture / pbpaste binaries are system-level
