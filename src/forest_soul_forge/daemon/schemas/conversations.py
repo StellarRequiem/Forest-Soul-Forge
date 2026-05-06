@@ -273,6 +273,21 @@ class TurnListOut(BaseModel):
     offset: int
 
 
+# ADR-0054 T5b (Burst 183) — chat-tab thumbs surface read model.
+# Returned by GET /conversations/{id}/last-shortcut. None / 404
+# when no recent tool_call_shortcut event exists for this
+# conversation; otherwise the most recent one's identifying
+# fields so the frontend can render a thumbs widget + dispatch
+# memory_tag_outcome.v1 with the correct shortcut_id.
+class LastShortcutOut(BaseModel):
+    shortcut_id:          str
+    shortcut_similarity:  float
+    shortcut_action_kind: str
+    audit_seq:            int
+    timestamp:            str
+    instance_id:          str
+
+
 AmbientRate = Literal["minimal", "normal", "heavy"]
 
 # Per ADR-003Y Y5: per-agent-per-day quotas keyed by operator rate.

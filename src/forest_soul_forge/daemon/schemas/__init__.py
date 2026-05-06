@@ -114,6 +114,7 @@ from forest_soul_forge.daemon.schemas.conversations import (
     ConversationOut,
     ConversationListOut,
     ConversationStatusUpdateRequest,
+    LastShortcutOut,
     ParticipantAddRequest,
     ParticipantOut,
     ParticipantListOut,
@@ -220,4 +221,5 @@ __all__ = [
     "TurnDispatchResponse",
     "TurnOut",
     "TurnListOut",
+    "LastShortcutOut",
 ]
