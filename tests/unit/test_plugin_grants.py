@@ -61,12 +61,12 @@ def reg(tmp_path: Path):
 
 # ---- schema layer ----------------------------------------------------------
 
-def test_schema_version_is_15():
-    """Locked at v15 post-Burst 114 (ADR-0045 agents.posture).
-    Function name was test_schema_version_is_14 historically — file
-    moved through v14 (Burst 113a, agent_plugin_grants) → v15
-    (Burst 114, agents.posture). Renamed for honesty."""
-    assert REGISTRY_SCHEMA_VERSION == 15
+def test_schema_version_is_16():
+    """Locked at v16 post-Burst 178 (ADR-0054 T1, memory_procedural_shortcuts).
+    Function name moved through v14 (Burst 113a, agent_plugin_grants)
+    → v15 (Burst 114, agents.posture) → v16 (Burst 178,
+    memory_procedural_shortcuts). Renamed each time for honesty."""
+    assert REGISTRY_SCHEMA_VERSION == 16
 
 
 def test_agent_plugin_grants_table_exists(reg: Registry):

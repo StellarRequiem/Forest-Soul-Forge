@@ -141,6 +141,18 @@ class DispatchContext:
     # plugin_grants table is wired (test contexts).
     plugin_grants_view: dict[str, str] | None = None
 
+    # ADR-0054 T3 (Burst 180): pre-computed procedural-shortcut match.
+    # The dispatcher resolves this BEFORE running the pipeline because
+    # embed_situation + search_by_cosine are async and the pipeline is
+    # sync. ``None`` when no shortcut substrate is wired, the master
+    # switch is off, eligibility gates fail, the prompt has no high-
+    # confidence stored shortcut, or any pre-resolution path raised.
+    # When set, ``ProceduralShortcutStep`` (placed last) converts the
+    # tuple into a SHORTCUT terminal verdict that the dispatcher
+    # branches on to substitute the recorded action without firing
+    # llm_think. See ``ToolDispatcher._resolve_shortcut_match``.
+    shortcut_match: Any = None  # tuple[ProceduralShortcut, float] | None
+
     # -- accumulated state (steps populate as the pipeline runs) ------------
     tool: Any = None
     resolved: Any = None  # _ResolvedToolConstraints from dispatcher.py
@@ -160,15 +172,23 @@ class StepResult:
     """One step's verdict.
 
     ``verdict`` is one of:
-      - ``"GO"``      — proceed to the next step (or, after the last
-                        step, to the dispatcher's execute leg).
-      - ``"REFUSE"``  — terminal. Dispatcher emits ``tool_call_refused``
-                        and returns :class:`DispatchRefused`.
-      - ``"PENDING"`` — terminal. Dispatcher emits
-                        ``tool_call_pending_approval`` and returns
-                        :class:`DispatchPendingApproval`.
+      - ``"GO"``       — proceed to the next step (or, after the last
+                         step, to the dispatcher's execute leg).
+      - ``"REFUSE"``   — terminal. Dispatcher emits ``tool_call_refused``
+                         and returns :class:`DispatchRefused`.
+      - ``"PENDING"``  — terminal. Dispatcher emits
+                         ``tool_call_pending_approval`` and returns
+                         :class:`DispatchPendingApproval`.
+      - ``"SHORTCUT"`` — terminal. ADR-0054 T3 (Burst 180). Dispatcher
+                         substitutes the recorded action_payload from
+                         the matched ProceduralShortcut row instead of
+                         firing the underlying tool. Emits dispatched
+                         + succeeded events with shortcut_applied=True
+                         metadata; T4 will graduate to a dedicated
+                         ``tool_call_shortcut`` event type.
 
-    Reason / detail / gate_source / side_effects are all optional;
+    Reason / detail / gate_source / side_effects /
+    shortcut_candidate / shortcut_similarity are all optional;
     different terminal kinds populate different subsets.
     """
 
@@ -177,6 +197,12 @@ class StepResult:
     detail: str | None = None
     gate_source: str | None = None
     side_effects: str | None = None
+    # ADR-0054 T3 (Burst 180): SHORTCUT verdict carries the matched
+    # ProceduralShortcut + cosine score. Typed as ``Any`` to keep
+    # this module free of a registry-tables import (governance_pipeline
+    # is in the dependency floor; tables sit above it).
+    shortcut_candidate: Any = None  # ProceduralShortcut | None
+    shortcut_similarity: float | None = None
 
     @classmethod
     def go(cls) -> "StepResult":
@@ -192,6 +218,23 @@ class StepResult:
             verdict="PENDING", gate_source=gate_source, side_effects=side_effects,
         )
 
+    @classmethod
+    def shortcut(cls, candidate: Any, similarity: float) -> "StepResult":
+        """ADR-0054 T3 (Burst 180) — terminal verdict carrying a
+        matched procedural shortcut.
+
+        Caller (dispatcher) is responsible for substituting the
+        recorded action_payload + emitting the audit pair + calling
+        record_match() on the table. Step itself is purely a
+        verdict-converter — the heavy lifting (embed + search) ran
+        before the pipeline started.
+        """
+        return cls(
+            verdict="SHORTCUT",
+            shortcut_candidate=candidate,
+            shortcut_similarity=similarity,
+        )
+
     @property
     def terminal(self) -> bool:
         return self.verdict != "GO"
@@ -203,6 +246,10 @@ class StepResult:
     @property
     def is_pending(self) -> bool:
         return self.verdict == "PENDING"
+
+    @property
+    def is_shortcut(self) -> bool:
+        return self.verdict == "SHORTCUT"
 
 
 # ---------------------------------------------------------------------------
@@ -850,3 +897,58 @@ class PostureGateStep:
                 side_effects=side_effects,
             )
         return StepResult.go()
+
+
+@dataclass
+class ProceduralShortcutStep:
+    """ADR-0054 T3 (Burst 180) — fast-path bypass via procedural memory.
+
+    Sits LAST in the pipeline. Reads the dispatcher-pre-computed
+    :attr:`DispatchContext.shortcut_match`; on a non-None match,
+    returns a ``SHORTCUT`` terminal verdict that the dispatcher
+    branches on to substitute the recorded action_payload without
+    firing the underlying tool (typically ``llm_think.v1``).
+
+    Why the heavy lifting lives in the dispatcher rather than the
+    step:
+
+      The pipeline is sync (``evaluate(dctx) -> StepResult``), but
+      ``embed_situation`` awaits ``provider.embed`` and
+      ``search_by_cosine`` reads SQLite on the same connection the
+      dispatcher already holds the write lock for. Async-ifying the
+      whole pipeline would touch all 11 step classes for one async
+      step's benefit. Pre-computing in the dispatcher (which is
+      already async) and threading the result through dctx keeps the
+      step protocol uniform AND the pipeline composition stable.
+
+    This step's ONLY job is to convert a populated dctx field into a
+    SHORTCUT verdict so the dispatcher's verdict switch sees it
+    alongside REFUSE / PENDING / GO.
+
+    Pipeline placement is LAST so:
+
+      - All upstream gates fire first (hardware, args, constitution,
+        posture, genre, counter, approval). A shortcut never bypasses
+        governance — it only bypasses the LLM round-trip when the
+        agent is already cleared to make this call.
+      - The pre-resolution step also encodes posture in its
+        eligibility: shortcuts only resolve when posture is green
+        (or unset for tests). A yellow/red agent never sees a
+        shortcut even if one would match — it goes through the LLM
+        path so the operator-installed monitoring/refusal triggers
+        fire normally.
+    """
+
+    def evaluate(self, dctx: DispatchContext) -> StepResult:
+        match = dctx.shortcut_match
+        if match is None:
+            return StepResult.go()
+        # match shape: tuple[ProceduralShortcut, float (cosine)]
+        try:
+            candidate, similarity = match
+        except (TypeError, ValueError):
+            # Defensive: a future caller-bug that stuffs the wrong
+            # shape into shortcut_match must NOT crash dispatch —
+            # fall through to the normal path.
+            return StepResult.go()
+        return StepResult.shortcut(candidate, float(similarity))

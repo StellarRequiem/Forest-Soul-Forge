@@ -141,11 +141,14 @@ class TestHealth:
         # v11 added the epistemic-memory metadata + memory_contradictions
         # (ADR-0027-amendment), v12 added flagged_state on
         # memory_contradictions (ADR-0036 T6 — Verifier ratification
-        # dial), and v13 added scheduled_task_state for the ADR-0041
-        # scheduler's persistence (Burst 90). Daemon reports the
-        # registry's live schema_version; assertion tracks the live
-        # value rather than a stale literal.
-        assert body["schema_version"] == 15
+        # dial), v13 added scheduled_task_state for the ADR-0041
+        # scheduler's persistence (Burst 90), v14 added
+        # agent_plugin_grants (Burst 113a), v15 added agents.posture
+        # (Burst 114), and v16 added memory_procedural_shortcuts
+        # (Burst 178, ADR-0054 T1). Daemon reports the registry's
+        # live schema_version; assertion tracks the live value
+        # rather than a stale literal.
+        assert body["schema_version"] == 16
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"

@@ -63,6 +63,7 @@ from forest_soul_forge.tools.governance_pipeline import (
     McpPerToolApprovalStep,
     PostureGateStep,
     PostureOverrideStep,
+    ProceduralShortcutStep,
     StepResult,
     TaskUsageCapStep,
     ToolLookupStep,
@@ -354,6 +355,29 @@ class ToolDispatcher:
     # pre-Burst-113 gap where mcp_call.v1 read this constraint but
     # nothing populated it.
     plugin_grants: Any = None
+    # ADR-0054 T3 (Burst 180): procedural-shortcut substrate. The
+    # dispatcher pre-resolves a shortcut match BEFORE the pipeline
+    # runs (the pipeline is sync; embed + search are async) and
+    # threads it through DispatchContext. ProceduralShortcutStep
+    # converts the pre-computed match into a SHORTCUT verdict that
+    # the dispatcher branches on to substitute the recorded action
+    # without firing the underlying tool. ALL of these knobs default
+    # to a no-op posture so a daemon built without procedural memory
+    # behaves identically to pre-T3:
+    #   - shortcuts_table=None     → resolver short-circuits to None
+    #   - enabled_fn() False       → resolver never calls embed
+    #   - tools other than llm_think.v1 → resolver short-circuits
+    # See ``_resolve_shortcut_match`` for the full eligibility chain
+    # and ``_shortcut_substitute`` for the recorded-action playback.
+    procedural_shortcuts_table: Any = None
+    # Closures returning the live env-var read so an operator who flips
+    # FSF_PROCEDURAL_SHORTCUT_ENABLED at runtime sees the change without
+    # restarting the daemon. Default closures keep the substrate OFF
+    # for backward compat — operator must opt in (per ADR-0054).
+    procedural_shortcut_enabled_fn: Any = None  # callable() -> bool
+    procedural_cosine_floor_fn: Any = None      # callable() -> float
+    procedural_reinforcement_floor_fn: Any = None  # callable() -> int
+    procedural_embed_model_fn: Any = None       # callable() -> str | None
 
     # R3 (2026-04-30): the pipeline of pre-execute checks. Built
     # once per dispatcher in __post_init__ from the dispatcher's
@@ -430,6 +454,18 @@ class ToolDispatcher:
             # grant on a yellow agent ungates that specific mcp_call,
             # and a red grant on any agent refuses that mcp_call.
             PostureGateStep(enforce_per_grant=True),
+            # ADR-0054 T3 (Burst 180): procedural-shortcut bypass.
+            # LAST in the pipeline so all upstream gates (hardware,
+            # args, constitution, posture, genre, counter, approval)
+            # have cleared before a shortcut can fire. Returns
+            # SHORTCUT terminal verdict only when ``dctx.shortcut_match``
+            # was populated by ``_resolve_shortcut_match`` before the
+            # pipeline started; otherwise GO and the dispatch falls
+            # through to the underlying tool's execute leg. The step
+            # itself is trivial — the heavy lifting (embed + search)
+            # is async and lives in the dispatcher to keep the
+            # pipeline sync.
+            ProceduralShortcutStep(),
         ])
 
     async def dispatch(
@@ -487,6 +523,21 @@ class ToolDispatcher:
         # and starts consulting it. Loading here keeps the pipeline
         # interface stable.
         plugin_grants_view = self._load_plugin_grants_view(instance_id)
+        # ADR-0054 T3 (Burst 180): pre-resolve any procedural-shortcut
+        # match for this dispatch. Async (embed + cosine search) so
+        # it runs HERE rather than inside the sync pipeline.
+        # Returns ``None`` for any of: substrate unwired, master
+        # switch off, ineligible (wrong tool/task_kind/posture/provider),
+        # no match above floors, embed/search exception. None means
+        # the pipeline's ProceduralShortcutStep returns GO and
+        # dispatch proceeds to the normal execute leg.
+        shortcut_match = await self._resolve_shortcut_match(
+            instance_id=instance_id,
+            tool_name=tool_name,
+            args=args,
+            provider=provider,
+            agent_posture=agent_posture,
+        )
         dctx = DispatchContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
@@ -502,6 +553,7 @@ class ToolDispatcher:
             mcp_registry=merged_mcp_registry,
             agent_posture=agent_posture,
             plugin_grants_view=plugin_grants_view,
+            shortcut_match=shortcut_match,
         )
         verdict = self._pipeline.run(dctx)
         if verdict.is_refuse:
@@ -521,6 +573,21 @@ class ToolDispatcher:
                 instance_id=instance_id, agent_dna=agent_dna,
                 gate_source=verdict.gate_source or "",
                 session_id=session_id,
+            )
+        if verdict.is_shortcut:
+            # ADR-0054 T3 (Burst 180). All upstream gates cleared GO
+            # AND a high-confidence procedural shortcut matched the
+            # situation. Substitute the recorded action_payload
+            # without firing the underlying tool. T4 will graduate
+            # the audit emission to a dedicated tool_call_shortcut
+            # event type; T3 reuses the standard dispatched +
+            # succeeded pair with shortcut_applied=True metadata so
+            # an operator inspecting the chain can already filter on
+            # shortcut hits.
+            return await self._shortcut_substitute(
+                dctx,
+                candidate=verdict.shortcut_candidate,
+                similarity=verdict.shortcut_similarity or 0.0,
             )
 
         # ---- GO — execute leg uses dctx-accumulated state ---------------
@@ -826,6 +893,345 @@ class ToolDispatcher:
             return posture
         except Exception:
             return None
+
+    async def _resolve_shortcut_match(
+        self,
+        *,
+        instance_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        provider: Any,
+        agent_posture: str | None,
+    ) -> tuple[Any, float] | None:
+        """ADR-0054 T3 (Burst 180) — pre-pipeline procedural-shortcut
+        resolver.
+
+        Walks the eligibility chain and, when all gates pass, awaits
+        the embed + cosine search to produce a candidate match.
+        Returns the (ProceduralShortcut, cosine) tuple on a high-
+        confidence hit; ``None`` for every other outcome.
+
+        Eligibility (ALL must hold; first failure short-circuits):
+
+          1. ``self.procedural_shortcuts_table`` is wired (None in
+             tests/legacy daemons).
+          2. ``self.procedural_shortcut_enabled_fn`` exists AND
+             returns truthy. The fn typically reads
+             ``FSF_PROCEDURAL_SHORTCUT_ENABLED`` so an operator can
+             flip the master switch at runtime without rebuild.
+          3. Tool is ``llm_think`` (the only conversational dispatch
+             path; shortcuts are about bypassing LLM round-trips).
+          4. ``args.task_kind`` is "conversation" or unset (defaults
+             to "conversation"). classify/safety_check/generate
+             shouldn't shortcut — those task_kinds are typically
+             pipeline-internal and need fresh model output.
+          5. ``args.prompt`` is a non-empty string.
+          6. ``provider`` exists AND has an ``embed`` method.
+             Frontier providers without embed() fall through.
+          7. ``agent_posture`` is None (test contexts) or "green".
+             Yellow/red postures bypass shortcuts so operator-
+             installed monitoring/refusal triggers fire normally
+             on every conversation turn.
+
+        Resolution failures (after eligibility passed):
+
+          * ``EmbeddingError`` from ``embed_situation`` — Ollama
+            offline, malformed response, all-zero vector, etc. Logs
+            nothing (tests would be noisy) and returns None. The
+            dispatch falls through to ``llm_think`` which surfaces
+            the underlying provider failure cleanly. The shortcut
+            substrate degrades silently to no-shortcut.
+          * Search returns empty — no row above the cosine +
+            reinforcement floors.
+          * Any unexpected exception — defensive None return; never
+            crash dispatch on a shortcut-substrate bug.
+
+        The cosine_floor + reinforcement_floor are read from
+        injected closures so an operator's runtime knob change is
+        seen immediately. Defaults track ADR-0054 D2: 0.92 cosine,
+        2 net reinforcement.
+        """
+        # 1. Substrate wired?
+        table = self.procedural_shortcuts_table
+        if table is None:
+            return None
+        # 2. Master switch on?
+        enabled_fn = self.procedural_shortcut_enabled_fn
+        if enabled_fn is None or not enabled_fn():
+            return None
+        # 3. Right tool?
+        if tool_name != "llm_think":
+            return None
+        # 4. Right task_kind? (default "conversation" matches
+        #    llm_think.DEFAULT_TASK_KIND so an unset arg is treated
+        #    as conversation, consistent with the tool's own logic.)
+        task_kind = args.get("task_kind", "conversation")
+        if task_kind != "conversation":
+            return None
+        # 5. Non-empty prompt?
+        prompt = args.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            return None
+        # 6. Provider has embed()?
+        if provider is None or not hasattr(provider, "embed"):
+            return None
+        # 7. Posture eligible?
+        if agent_posture is not None and agent_posture != "green":
+            return None
+
+        # All gates passed. Try to resolve a match.
+        try:
+            from forest_soul_forge.core.memory.procedural_embedding import (
+                EmbeddingError,
+                embed_situation,
+            )
+            embed_model = (
+                self.procedural_embed_model_fn()
+                if self.procedural_embed_model_fn else None
+            )
+            query_vec = await embed_situation(
+                provider, prompt, model=embed_model,
+            )
+        except EmbeddingError:
+            return None
+        except Exception:
+            # Defensive — never crash dispatch on shortcut bugs.
+            return None
+
+        try:
+            cosine_floor = (
+                float(self.procedural_cosine_floor_fn())
+                if self.procedural_cosine_floor_fn else 0.92
+            )
+            reinforcement_floor = (
+                int(self.procedural_reinforcement_floor_fn())
+                if self.procedural_reinforcement_floor_fn else 2
+            )
+            matches = table.search_by_cosine(
+                instance_id,
+                query_vec,
+                cosine_floor=cosine_floor,
+                reinforcement_floor=reinforcement_floor,
+                top_k=1,
+            )
+        except Exception:
+            return None
+        if not matches:
+            return None
+        # search_by_cosine returns list[tuple[ProceduralShortcut, float]]
+        return matches[0]
+
+    async def _shortcut_substitute(
+        self,
+        dctx: DispatchContext,
+        *,
+        candidate: Any,
+        similarity: float,
+    ) -> "DispatchSucceeded":
+        """ADR-0054 T3 (Burst 180) — substitute the recorded action.
+
+        Called when ``ProceduralShortcutStep`` returns SHORTCUT.
+        Mirrors the structure of the GO leg:
+
+          1. Increment the counter (a shortcut still costs a slot —
+             otherwise an adversarial pattern would bypass
+             max_calls_per_session by always matching).
+          2. Emit ``tool_call_dispatched`` with shortcut_applied
+             metadata so an operator can already grep the chain for
+             shortcut hits before T4's dedicated event lands.
+          3. Build a synthetic ToolResult from the recorded
+             ``action_payload``. For action_kind="response" the
+             payload is ``{"response": "...", ...}`` matching the
+             llm_think.v1 output shape, so callers don't notice a
+             difference.
+          4. Emit ``tool_call_succeeded`` with the same shortcut
+             metadata.
+          5. Update the shortcut row's last_matched_at +
+             last_matched_seq via ``record_match()`` so reinforcement
+             telemetry (T5) can see this was used.
+
+        Action-kind handling: T3 only substitutes for ``"response"``.
+        ``"tool_call"`` (substituting one tool dispatch for another)
+        and ``"no_op"`` (suppress the call entirely) are deferred to
+        a later sub-tranche — they would change the audit shape
+        (a tool_call dispatch could turn into a different tool's
+        events; a no_op needs to NOT increment the counter). For
+        anything other than "response", silently fall through to
+        the normal execute leg by raising and letting the dispatcher
+        retry without the shortcut. (We don't actually retry — at
+        this point the pipeline already returned SHORTCUT; the
+        cleanest fallback is to emit a regular failed event with
+        a clear reason. Operators inspecting the chain will see
+        ``shortcut_unsupported_kind`` in the failed metadata and
+        know exactly which row needs operator attention.)
+        """
+        action_kind = getattr(candidate, "action_kind", None)
+        action_payload = getattr(candidate, "action_payload", None) or {}
+        shortcut_id = getattr(candidate, "shortcut_id", None)
+
+        when = _now_iso()
+        post_count = int(self.counter_inc(
+            dctx.instance_id, dctx.session_id, when,
+        ))
+
+        # Common metadata header for both audit events. T4 will
+        # graduate to a dedicated event type but the keys here stay
+        # stable so an operator's grep keeps working post-graduation.
+        shortcut_meta = {
+            "shortcut_applied": True,
+            "shortcut_id": shortcut_id,
+            "shortcut_similarity": round(float(similarity), 6),
+            "shortcut_action_kind": action_kind,
+        }
+
+        if action_kind != "response":
+            # Out-of-scope action_kind for T3. Emit a failed event
+            # with a precise reason so the operator can find + fix
+            # the row.
+            failed_entry = self.audit.append(
+                EVENT_FAILED,
+                {
+                    "tool_key": dctx.key,
+                    "instance_id": dctx.instance_id,
+                    "session_id": dctx.session_id,
+                    "exception_type": "ShortcutUnsupportedKind",
+                    "exception_message": (
+                        f"shortcut_id={shortcut_id} has action_kind="
+                        f"{action_kind!r} which is not yet supported "
+                        f"by the dispatcher (T3 covers 'response' only)"
+                    ),
+                    **shortcut_meta,
+                },
+                agent_dna=dctx.agent_dna,
+            )
+            self._record_call_safe(
+                audit_seq=failed_entry.seq,
+                instance_id=dctx.instance_id,
+                session_id=dctx.session_id,
+                tool_key=dctx.key,
+                status="failed",
+                tokens_used=None,
+                cost_usd=None,
+                side_effect_summary=None,
+                finished_at=failed_entry.timestamp,
+            )
+            return DispatchFailed(
+                tool_key=dctx.key,
+                exception_type="ShortcutUnsupportedKind",
+                audit_seq=failed_entry.seq,
+            )
+
+        # Build the synthetic dispatched event. resolved/applied_rules
+        # may not be populated here if the upstream gates ran on a
+        # tool that didn't surface them — but for llm_think.v1 they
+        # will be set (ConstraintResolutionStep ran).
+        side_effects = (
+            (dctx.resolved.side_effects if dctx.resolved else None)
+            or (dctx.tool.side_effects if dctx.tool else "read_only")
+        )
+        applied_rules = (
+            list(dctx.resolved.applied_rules) if dctx.resolved else []
+        )
+        dispatched_entry = self.audit.append(
+            EVENT_DISPATCHED,
+            {
+                "tool_key": dctx.key,
+                "instance_id": dctx.instance_id,
+                "session_id": dctx.session_id,
+                "args_digest": _digest(dctx.args),
+                "call_count": post_count,
+                "side_effects": side_effects,
+                "applied_rules": applied_rules,
+                **shortcut_meta,
+            },
+            agent_dna=dctx.agent_dna,
+        )
+
+        # Build the synthetic ToolResult. The payload is the recorded
+        # action_payload — for action_kind="response" it should
+        # contain at minimum a "response" string. Defensive: if a
+        # malformed row is missing the field, surface an empty
+        # response rather than crashing — the failed-vs-empty
+        # distinction is operator-visible via the chain.
+        response_text = ""
+        if isinstance(action_payload, dict):
+            response_text = str(action_payload.get("response") or "")
+        synthetic_output = {
+            "response":   response_text,
+            "model":      "shortcut",
+            "task_kind":  dctx.args.get("task_kind", "conversation"),
+            "elapsed_ms": 0,
+        }
+        # Preserve any extra fields the recorded payload carried
+        # (e.g., model identifier from the original dispatch) so the
+        # operator's downstream consumers see them, but never let
+        # them clobber the four canonical keys above.
+        if isinstance(action_payload, dict):
+            for k, v in action_payload.items():
+                if k not in synthetic_output:
+                    synthetic_output[k] = v
+
+        result = ToolResult(
+            output=synthetic_output,
+            metadata={
+                "prompt_chars":    len(dctx.args.get("prompt", "")),
+                "response_chars":  len(response_text),
+                "shortcut_id":     shortcut_id,
+                "shortcut_similarity": round(float(similarity), 6),
+            },
+            tokens_used=0,  # zero — the LLM never ran
+            cost_usd=None,
+            side_effect_summary=(
+                f"shortcut: id={shortcut_id} cosine="
+                f"{similarity:.4f} (no LLM round-trip)"
+            ),
+        )
+
+        succeeded_entry = self.audit.append(
+            EVENT_SUCCEEDED,
+            {
+                "tool_key": dctx.key,
+                "instance_id": dctx.instance_id,
+                "session_id": dctx.session_id,
+                "dispatched_seq": dispatched_entry.seq,
+                "result_digest": result.result_digest(),
+                "tokens_used": result.tokens_used,
+                "cost_usd": result.cost_usd,
+                "side_effect_summary": result.side_effect_summary,
+                **shortcut_meta,
+            },
+            agent_dna=dctx.agent_dna,
+        )
+        self._record_call_safe(
+            audit_seq=succeeded_entry.seq,
+            instance_id=dctx.instance_id,
+            session_id=dctx.session_id,
+            tool_key=dctx.key,
+            status="succeeded",
+            tokens_used=result.tokens_used,
+            cost_usd=result.cost_usd,
+            side_effect_summary=result.side_effect_summary,
+            finished_at=succeeded_entry.timestamp,
+        )
+
+        # Update last_matched_at + last_matched_seq on the row so
+        # reinforcement tools (T5) and the chat-tab thumbs surface
+        # see this match. Best-effort — a write failure here doesn't
+        # invalidate the dispatch the operator already saw succeed.
+        try:
+            if shortcut_id and self.procedural_shortcuts_table is not None:
+                self.procedural_shortcuts_table.record_match(
+                    shortcut_id, at_seq=succeeded_entry.seq,
+                )
+        except Exception:
+            pass
+
+        return DispatchSucceeded(
+            tool_key=dctx.key,
+            result=result,
+            call_count_after=post_count,
+            audit_seq=succeeded_entry.seq,
+        )
 
     def _load_plugin_grants_view(
         self, instance_id: str,
