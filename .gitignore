@@ -91,6 +91,10 @@ registry.sqlite-wal
 # .example for shape; the activated file is local-only.
 config/scheduled_tasks.yaml
 
+# Session-specific diagnostic dumps (operator-side tools dump host
+# log fragments here for debugging — ephemeral, not source-of-truth).
+_diagnostic_*.txt
+
 # Docker
 docker-compose.override.yml
 

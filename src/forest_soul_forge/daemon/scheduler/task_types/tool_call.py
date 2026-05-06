@@ -204,9 +204,22 @@ async def tool_call_runner(
             "session_id": session_id,
         }
     if isinstance(outcome, DispatchFailed):
+        # Bug fix B142 (2026-05-05): DispatchFailed exposes
+        # tool_key / exception_type / audit_seq — there is no .reason
+        # attribute. The earlier `outcome.reason` reference raised
+        # AttributeError every time a dispatch crashed, masking the
+        # real failure with a runner crash and silently tripping
+        # the scheduler's circuit breaker after 3 hits.
+        # Surfaced 2026-05-05 by activated-scheduled-tasks live test
+        # — dashboard_watcher_healthz_5m tripped within 15 minutes
+        # of going live. See _diagnostic_err_dump.txt for the
+        # original traceback.
         return {
             "ok": False,
-            "error": f"dispatch failed: {outcome.reason}",
+            "error": (
+                f"dispatch failed: {outcome.exception_type} "
+                f"(tool={outcome.tool_key}, audit_seq={outcome.audit_seq})"
+            ),
             "session_id": session_id,
         }
     # Defensive fallthrough — dispatch should always return one of the
