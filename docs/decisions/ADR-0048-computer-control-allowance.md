@@ -241,11 +241,11 @@ operator approved.
 
 | # | Tranche | Description | Effort |
 |---|---|---|---|
-| T1 | Plugin scaffold | `examples/plugins/soulux-computer-control/` directory + plugin.yaml + entry point. No tools yet — empty MCP server. | 0.5 burst |
+| T1 | Plugin scaffold | **DONE B159** — `examples/plugins/soulux-computer-control/` directory + plugin.yaml + entry point + README. No tools yet — empty MCP server (capabilities: []). | 0.5 burst |
 | T2 | Read tools | `computer_screenshot.v1` + `computer_read_clipboard.v1`. side_effects=read_only, no approval. Wraps `screencapture` and `pbpaste`. | 1 burst |
 | T3 | Action tools | `computer_click.v1` + `computer_type.v1` + `computer_run_app.v1` + `computer_launch_url.v1`. side_effects=external (or network for launch_url), all `requires_human_approval=true`. Wraps AppleScript/cliclick/osascript. | 1-2 bursts |
 | T4 | Allowance UI | Chat-tab settings panel category toggles. Maps to ADR-0043 grant POST/DELETE. Posture dial + grants summary visible. | 1 burst |
-| T5 | Posture clamp logic | Add posture-aware approval-gate logic in the dispatcher's PostureGateStep (ADR-0045 substrate); document the new posture-clamp rules. | 1 burst |
+| T5 | Posture clamp logic | **DONE B160** — ADR-0045's existing PostureGateStep already implements Decision 4 via its side_effects-based logic (B114 + B115). T5 reduced to a doc + test-coverage pass: docstring updated to cite ADR-0048 + 12 new tests confirm coverage of computer_screenshot/clipboard/click/type/run_app/launch_url across green/yellow/red. No new gate code needed — substrate "just works" because it operates on side_effects, not tool name. | shipped |
 | T6 | Documentation + safety | Plugin README documenting each tool's args, output, safety considerations. Operator-facing safety guide ("what to grant when") in `docs/runbooks/`. | 0.5 burst |
 
 Total estimate: 5-6 bursts. Can ship in pieces — T1+T2 (read-only)

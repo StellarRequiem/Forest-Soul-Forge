@@ -215,3 +215,138 @@ class TestPostureGateStep:
         )
         assert result.verdict == "PENDING"
         assert result.gate_source == "posture_yellow"
+
+
+# ===========================================================================
+# ADR-0048 T5 (B160) — soulux-computer-control coverage. The existing
+# PostureGateStep handles the entire ADR-0048 Decision 4 surface via
+# its side_effects-based logic; these tests confirm the substrate
+# applies cleanly to the (forthcoming) computer-control tools.
+# When ADR-0048 T2/T3 land actual tool dispatch, the same posture
+# semantics fire automatically — no new gate code required.
+#
+# Coverage matrix (matches ADR-0048 Decision 4):
+#
+#   read tools (computer_screenshot, computer_read_clipboard):
+#     posture green/yellow/red → all GO (read_only bypasses)
+#
+#   action tools (computer_click, computer_type, computer_run_app):
+#     posture green                    → GO (grants decide upstream)
+#     posture yellow                   → PENDING (force approval)
+#     posture red                      → REFUSE (block outright)
+#
+#   url-launch tool (computer_launch_url, side_effects=network):
+#     same as action tools — yellow=PENDING, red=REFUSE
+# ===========================================================================
+class TestPostureGateStep_ADR0048Coverage:
+    """ADR-0048 T5 — confirms the existing posture gate covers the
+    computer-control plugin's tool surface without any new code."""
+
+    # ---- read tools — bypass posture entirely ----------------------------
+    def test_screenshot_passes_red_posture(self):
+        """computer_screenshot.v1 is read_only — must fire even with
+        the assistant in red posture so the operator can still
+        screenshot to debug what the assistant is "seeing"."""
+        result = PostureGateStep().evaluate(_dctx(
+            posture="red",
+            side_effects="read_only",
+            tool_name="computer_screenshot",
+        ))
+        assert result.verdict == "GO"
+
+    def test_read_clipboard_passes_red_posture(self):
+        result = PostureGateStep().evaluate(_dctx(
+            posture="red",
+            side_effects="read_only",
+            tool_name="computer_read_clipboard",
+        ))
+        assert result.verdict == "GO"
+
+    # ---- action tools — yellow elevates ----------------------------------
+    def test_click_yellow_pending(self):
+        """Yellow assistant clicking → operator must approve each call
+        even if a per-(agent, plugin) grant exists. Posture wins."""
+        result = PostureGateStep().evaluate(_dctx(
+            posture="yellow",
+            side_effects="external",
+            tool_name="computer_click",
+        ))
+        assert result.verdict == "PENDING"
+        assert result.gate_source == "posture_yellow"
+
+    def test_type_yellow_pending(self):
+        result = PostureGateStep().evaluate(_dctx(
+            posture="yellow",
+            side_effects="external",
+            tool_name="computer_type",
+        ))
+        assert result.verdict == "PENDING"
+
+    def test_run_app_yellow_pending(self):
+        result = PostureGateStep().evaluate(_dctx(
+            posture="yellow",
+            side_effects="external",
+            tool_name="computer_run_app",
+        ))
+        assert result.verdict == "PENDING"
+
+    def test_launch_url_yellow_pending(self):
+        """computer_launch_url.v1 is network-classified, not external.
+        Yellow still elevates because the gate's side_effects branch
+        treats anything non-read-only the same."""
+        result = PostureGateStep().evaluate(_dctx(
+            posture="yellow",
+            side_effects="network",
+            tool_name="computer_launch_url",
+        ))
+        assert result.verdict == "PENDING"
+
+    # ---- action tools — red refuses outright -----------------------------
+    def test_click_red_refuses(self):
+        """Red assistant CANNOT click. The "global brake" semantic
+        from ADR-0048 Decision 4: the operator flips to red to STOP
+        the assistant during a sensitive operation."""
+        result = PostureGateStep().evaluate(_dctx(
+            posture="red",
+            side_effects="external",
+            tool_name="computer_click",
+        ))
+        assert result.verdict == "REFUSE"
+        assert result.reason == "agent_posture_red"
+
+    def test_type_red_refuses(self):
+        result = PostureGateStep().evaluate(_dctx(
+            posture="red",
+            side_effects="external",
+            tool_name="computer_type",
+        ))
+        assert result.verdict == "REFUSE"
+
+    def test_run_app_red_refuses(self):
+        result = PostureGateStep().evaluate(_dctx(
+            posture="red",
+            side_effects="external",
+            tool_name="computer_run_app",
+        ))
+        assert result.verdict == "REFUSE"
+
+    def test_launch_url_red_refuses(self):
+        result = PostureGateStep().evaluate(_dctx(
+            posture="red",
+            side_effects="network",
+            tool_name="computer_launch_url",
+        ))
+        assert result.verdict == "REFUSE"
+
+    # ---- green is permissive ---------------------------------------------
+    def test_click_green_passes(self):
+        """Green = grants decide. The posture gate adds no override;
+        whether the click fires depends on whether the operator has
+        granted computer_click.v1 to this agent (handled by upstream
+        constitution + grants steps)."""
+        result = PostureGateStep().evaluate(_dctx(
+            posture="green",
+            side_effects="external",
+            tool_name="computer_click",
+        ))
+        assert result.verdict == "GO"

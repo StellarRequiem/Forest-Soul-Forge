@@ -746,6 +746,27 @@ class PostureGateStep:
     per-grant tier) wins. Burst 114 implements agent-only enforcement;
     Burst 115 layers per-grant on top.
 
+    **ADR-0048 T5 (B160) — soulux-computer-control coverage.** This
+    gate is the load-bearing safety surface for the Persistent
+    Assistant's computer-control tools (per ADR-0048 Decision 4):
+
+      - ``computer_screenshot.v1`` + ``computer_read_clipboard.v1``
+        (side_effects=read_only) — pass through any posture, including
+        red. The assistant can always *see*; that's not the dangerous
+        capability.
+      - ``computer_click.v1`` + ``computer_type.v1`` +
+        ``computer_run_app.v1`` (side_effects=external) — yellow
+        elevates to PENDING; red refuses outright.
+      - ``computer_launch_url.v1`` (side_effects=network) — same.
+
+    No new code is required for ADR-0048 T5: the gate's side_effects-
+    based logic was correct from B114/B115. T5 is therefore a doc +
+    test-coverage commit (B160) that confirms the substrate covers
+    the new tool surface. When ADR-0048 T2/T3 land actual computer-
+    control tools, they automatically inherit posture clamps with no
+    additional gate code — the substrate "just works" because it
+    operates on side_effects, not tool name.
+
     No-op when:
       - dctx.agent_posture is None (test contexts; agent not registered)
       - dctx.tool is None (upstream lookup step refused)
