@@ -208,12 +208,321 @@ def computer_read_clipboard(args: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# T3 (B164) — Action tools.
+#
+# These four cross from "the assistant can see" (T2) to "the assistant
+# can act." Per ADR-0048 Decision 2, all four declare
+# requires_human_approval=true at the plugin manifest level — the
+# operator approves each call by default. A per-(agent, plugin) grant
+# (ADR-0043 #1) can downgrade approval for trusted-tier setups.
+#
+# Posture clamps still apply per ADR-0048 Decision 4:
+#   green  → grants decide (approval-gated unless granted-skip)
+#   yellow → all non-read calls become PENDING approval
+#   red    → all non-read calls REFUSED outright
+# Read-only T2 tools bypass posture; T3 action tools do not.
+#
+# Implementation choices:
+#   - osascript with System Events for click + type. Needs the
+#     calling process to have macOS Accessibility permission. If
+#     missing, surface a clear actionable error (System Settings →
+#     Privacy & Security → Accessibility).
+#   - `open -a "App Name"` for run_app. Built-in macOS surface; no
+#     third-party deps.
+#   - `open <url>` for launch_url. Same.
+#
+# Defense in depth:
+#   - Click coordinates clamped to int range; refuses non-numeric
+#     args before invoking osascript.
+#   - Type text length capped at 4000 chars to bound impact of a
+#     runaway loop.
+#   - run_app rejects names containing path separators (a 'malicious'
+#     constitution might whitelist run_app and then operator grant
+#     it; defense-in-depth keeps `open -a` from being tricked into
+#     launching an executable file path).
+#   - launch_url requires http://, https://, or mailto:// schemes.
+#     Blocks file:// and javascript:// which are common attack vectors
+#     in browser-bound URL handlers.
+# ---------------------------------------------------------------------------
+
+
+def _osascript_run(script: str, *, timeout: float = 10) -> tuple[int, str, str]:
+    """Run an AppleScript via osascript -e. Returns (rc, stdout, stderr)."""
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, "", "osascript timed out"
+    return (
+        proc.returncode,
+        proc.stdout.decode("utf-8", errors="replace"),
+        proc.stderr.decode("utf-8", errors="replace"),
+    )
+
+
+def computer_click(args: dict) -> dict:
+    """Left-click at (x, y) on the screen.
+
+    Args:
+      x, y: integer pixel coordinates. Required.
+
+    Returns:
+      { clicked_at: 'YYYY-MM-DDTHH:MM:SSZ', x, y } on success.
+    """
+    if platform.system() != "Darwin":
+        return _macos_only("computer_click")
+
+    x = args.get("x")
+    y = args.get("y")
+    if not isinstance(x, int) or not isinstance(y, int):
+        return {
+            "isError": True,
+            "error": {
+                "code": "bad_args",
+                "message": "computer_click requires integer x and y arguments",
+            },
+        }
+
+    # AppleScript via System Events. The escape-quote dance keeps
+    # x/y substituted as numbers without ever interpolating strings
+    # back into the script body.
+    script = f'tell application "System Events" to click at {{{x}, {y}}}'
+    rc, _stdout, stderr = _osascript_run(script)
+    if rc != 0:
+        msg = stderr.strip()[:300] or f"osascript exited {rc}"
+        # Common failure: missing Accessibility permission. Recognize
+        # the symptom + provide actionable guidance.
+        if "1002" in msg or "not authorized" in msg.lower() or "assistive" in msg.lower():
+            msg = (
+                "macOS denied Accessibility access to the calling process. "
+                "Grant it in System Settings → Privacy & Security → "
+                "Accessibility for the daemon's parent process. "
+                f"Underlying error: {msg}"
+            )
+        return {
+            "isError": True,
+            "error": {"code": "click_failed", "message": msg},
+        }
+    return {
+        "clicked_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "x": x,
+        "y": y,
+    }
+
+
+def computer_type(args: dict) -> dict:
+    """Type a string into the focused application.
+
+    Args:
+      text: string to type. Required. Capped at 4000 chars.
+
+    Returns:
+      { typed_at, length_chars } on success.
+    """
+    if platform.system() != "Darwin":
+        return _macos_only("computer_type")
+
+    text = args.get("text")
+    if not isinstance(text, str):
+        return {
+            "isError": True,
+            "error": {
+                "code": "bad_args",
+                "message": "computer_type requires a 'text' string argument",
+            },
+        }
+    if len(text) > 4000:
+        return {
+            "isError": True,
+            "error": {
+                "code": "text_too_long",
+                "message": (
+                    f"text length {len(text)} exceeds 4000-char cap. "
+                    f"Bound the input or use multiple computer_type calls "
+                    f"for legitimate long inputs."
+                ),
+            },
+        }
+
+    # Escape backslash + double-quote for safe AppleScript-string
+    # embedding. Newlines pass through as-is (System Events keystroke
+    # interprets \n as a literal Return key when typed).
+    safe = text.replace("\\", "\\\\").replace('"', '\\"')
+    script = f'tell application "System Events" to keystroke "{safe}"'
+    rc, _stdout, stderr = _osascript_run(script)
+    if rc != 0:
+        msg = stderr.strip()[:300] or f"osascript exited {rc}"
+        if "1002" in msg or "not authorized" in msg.lower() or "assistive" in msg.lower():
+            msg = (
+                "macOS denied Accessibility access to the calling process. "
+                "Grant it in System Settings → Privacy & Security → "
+                "Accessibility. " + msg
+            )
+        return {
+            "isError": True,
+            "error": {"code": "type_failed", "message": msg},
+        }
+    return {
+        "typed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "length_chars": len(text),
+    }
+
+
+def computer_run_app(args: dict) -> dict:
+    """Launch an app by display name via `open -a`.
+
+    Args:
+      app_name: string app name (e.g. 'Safari', 'Mail', 'Visual Studio Code').
+                Must NOT contain '/' — defense-in-depth against
+                operator-granted run_app being tricked into launching
+                an arbitrary executable path.
+
+    Returns:
+      { launched_at, app_name } on success.
+    """
+    if platform.system() != "Darwin":
+        return _macos_only("computer_run_app")
+
+    app_name = args.get("app_name")
+    if not isinstance(app_name, str) or not app_name.strip():
+        return {
+            "isError": True,
+            "error": {
+                "code": "bad_args",
+                "message": "computer_run_app requires non-empty 'app_name' string",
+            },
+        }
+    if "/" in app_name or "\x00" in app_name:
+        return {
+            "isError": True,
+            "error": {
+                "code": "bad_app_name",
+                "message": (
+                    "app_name must not contain '/' or null byte. Use the "
+                    "display name (e.g., 'Safari'), not a file path. "
+                    "computer_run_app is for opening apps; arbitrary "
+                    "binary execution is not its scope."
+                ),
+            },
+        }
+
+    try:
+        proc = subprocess.run(
+            ["open", "-a", app_name],
+            capture_output=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "isError": True,
+            "error": {
+                "code": "open_timeout",
+                "message": f"open -a {app_name!r} did not return within 10s",
+            },
+        }
+    if proc.returncode != 0:
+        return {
+            "isError": True,
+            "error": {
+                "code": "open_failed",
+                "message": (
+                    proc.stderr.decode("utf-8", errors="replace")[:200]
+                    or f"open exited {proc.returncode}"
+                ),
+            },
+        }
+    return {
+        "launched_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "app_name": app_name,
+    }
+
+
+def computer_launch_url(args: dict) -> dict:
+    """Open a URL in the default browser via `open <url>`.
+
+    Args:
+      url: string URL. Must use http://, https://, or mailto:// scheme.
+           file:// and javascript:// are refused — those are common
+           XSS / local-file-exfil attack vectors when a URL handler
+           is exposed to an automation surface.
+
+    Returns:
+      { launched_at, url } on success.
+    """
+    if platform.system() != "Darwin":
+        return _macos_only("computer_launch_url")
+
+    url = args.get("url")
+    if not isinstance(url, str) or not url.strip():
+        return {
+            "isError": True,
+            "error": {
+                "code": "bad_args",
+                "message": "computer_launch_url requires a non-empty 'url' string",
+            },
+        }
+
+    allowed_prefixes = ("http://", "https://", "mailto:")
+    if not any(url.startswith(p) for p in allowed_prefixes):
+        return {
+            "isError": True,
+            "error": {
+                "code": "scheme_disallowed",
+                "message": (
+                    f"URL scheme not in allowlist {allowed_prefixes}. "
+                    f"file:// and javascript:// are explicitly refused — "
+                    f"they're common attack vectors. Pass a normal "
+                    f"http(s):// or mailto: URL."
+                ),
+            },
+        }
+
+    try:
+        proc = subprocess.run(
+            ["open", url],
+            capture_output=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "isError": True,
+            "error": {
+                "code": "open_timeout",
+                "message": f"open {url!r} did not return within 10s",
+            },
+        }
+    if proc.returncode != 0:
+        return {
+            "isError": True,
+            "error": {
+                "code": "open_failed",
+                "message": (
+                    proc.stderr.decode("utf-8", errors="replace")[:200]
+                    or f"open exited {proc.returncode}"
+                ),
+            },
+        }
+    return {
+        "launched_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "url": url,
+    }
+
+
+# ---------------------------------------------------------------------------
 # JSON-RPC dispatch
 # ---------------------------------------------------------------------------
 
 TOOLS = {
     "computer_screenshot": computer_screenshot,
     "computer_read_clipboard": computer_read_clipboard,
+    # T3 (B164) — action tools.
+    "computer_click": computer_click,
+    "computer_type": computer_type,
+    "computer_run_app": computer_run_app,
+    "computer_launch_url": computer_launch_url,
 }
 
 
@@ -239,6 +548,22 @@ def handle(request: dict) -> dict:
                     {
                         "name": "computer_read_clipboard",
                         "description": "Read the current clipboard contents (text only) via macOS pbpaste.",
+                    },
+                    {
+                        "name": "computer_click",
+                        "description": "Left-click at integer (x, y) coordinates via osascript System Events.",
+                    },
+                    {
+                        "name": "computer_type",
+                        "description": "Type a string (max 4000 chars) into the focused app via osascript System Events.",
+                    },
+                    {
+                        "name": "computer_run_app",
+                        "description": "Launch an app by display name via `open -a`. No file paths.",
+                    },
+                    {
+                        "name": "computer_launch_url",
+                        "description": "Open a URL via `open`. http://, https://, mailto: only.",
                     },
                 ],
             },

@@ -57,40 +57,47 @@ type: mcp_server
 # (added in T2/T3) are what the dispatcher actually checks.
 side_effects: external
 
-# Capability list — T2 (B163) adds the read tools. T3 will append:
-#     - mcp.soulux-computer-control.computer_click
-#     - mcp.soulux-computer-control.computer_type
-#     - mcp.soulux-computer-control.computer_run_app
-#     - mcp.soulux-computer-control.computer_launch_url
+# Capability list — T2 (B163) added the read tools. T3 (B164) appends
+# the four action tools, completing the v1 six-tool surface from
+# ADR-0048 Decision 2.
 capabilities:
   - mcp.soulux-computer-control.computer_screenshot
   - mcp.soulux-computer-control.computer_read_clipboard
+  - mcp.soulux-computer-control.computer_click
+  - mcp.soulux-computer-control.computer_type
+  - mcp.soulux-computer-control.computer_run_app
+  - mcp.soulux-computer-control.computer_launch_url
 
 # Per-tool approval map. Per ADR-0048 Decision 2:
 #   computer_screenshot, computer_read_clipboard → false (read_only;
-#       operator can grant freely without per-call approval friction.
-#       Posture clamps still apply via PostureGateStep — but read_only
-#       bypasses posture per ADR-0048 Decision 4 + B160 coverage.)
+#       posture-bypass; operator can grant freely.)
 #   computer_click, computer_type, computer_run_app, computer_launch_url
-#       → true (external — added in T3; operator approves each call by
+#       → true (external/network — operator approves each call by
 #               default; per-(agent, plugin) grants can bypass per
-#               ADR-0043 #1)
+#               ADR-0043 #1; posture clamps still fire — yellow elevates
+#               to PENDING approval, red refuses outright.)
 requires_human_approval:
   computer_screenshot: false
   computer_read_clipboard: false
+  computer_click: true
+  computer_type: true
+  computer_run_app: true
+  computer_launch_url: true
 
 entry_point:
   type: stdio
-  # T2 (B163): real JSON-RPC stdio server handling computer_screenshot
-  # and computer_read_clipboard. Single-file Python; stdlib-only (no
-  # mcp SDK dependency) so the sha256 stays stable across upstream
-  # package moves. Operator MUST recompute sha256 after editing the
-  # server — the plugin loader rejects mismatched checksums by design
-  # (ADR-0043 supply-chain-swap defense). Recompute with:
+  # T3 (B164): JSON-RPC stdio server handling all six v1 tools — the
+  # two read tools from T2 (B163) plus the four action tools added
+  # here (click, type, run_app, launch_url). Single-file Python;
+  # stdlib-only (no mcp SDK dependency) so the sha256 stays stable
+  # across upstream package moves. Operator MUST recompute sha256
+  # after editing the server — the plugin loader rejects mismatched
+  # checksums by design (ADR-0043 supply-chain-swap defense).
+  # Recompute with:
   #   sha256=$(shasum -a 256 ./server | cut -d ' ' -f 1)
   #   sed -i '' "s/^  sha256:.*/  sha256: \"$sha256\"/" plugin.yaml
   command: ./server
-  sha256: "3248d910dddbd048f5a2b7753cff37b8be7e01561e879b6e668be561312803c3"
+  sha256: "470806b869c63d29b61f2388baac4d518a4ff138ac32b1012e38ee8b7936eb76"
 
 # No required secrets — macOS automation tools don't need auth.
 # The osascript / screencapture / pbpaste binaries are system-level

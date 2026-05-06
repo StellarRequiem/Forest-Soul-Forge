@@ -21,13 +21,29 @@ discipline:
 - **Audit chain** captures every dispatch + approval / refusal /
   posture-change so the operator can reconstruct what happened
 
-## Status: T2 read tools shipped (B163)
+## Status: T3 action tools shipped (B164) — full v1 six-tool surface live
 
-`computer_screenshot.v1` and `computer_read_clipboard.v1` are live.
-The server is a single-file stdlib-only Python script that handles
-JSON-RPC stdio per the MCP wire protocol Forest's `mcp_call.v1`
-expects. T3 will append the four action tools (click / type /
-run_app / launch_url) on top of the same server.
+The plugin's v1 surface is complete:
+
+| Tool | side_effects | requires_human_approval | Wraps |
+|---|---|---|---|
+| `computer_screenshot.v1` | read_only | false | `screencapture -x -t png` |
+| `computer_read_clipboard.v1` | read_only | false | `pbpaste` |
+| `computer_click.v1` | external | true | `osascript` System Events click |
+| `computer_type.v1` | external | true | `osascript` System Events keystroke |
+| `computer_run_app.v1` | external | true | `open -a` |
+| `computer_launch_url.v1` | network | true | `open <url>` |
+
+The server is a single-file stdlib-only Python script handling
+JSON-RPC stdio per Forest's `mcp_call.v1` wire protocol. macOS
+Accessibility permission required for click + type to function;
+the server surfaces a clear actionable error when permission is
+missing.
+
+T4 (Allowance UI in the Chat-tab settings panel) is the remaining
+ADR-0048 deliverable that completes ADR-0047 T4 — the operator
+gets the three-preset toggle (Restricted / Specific / Full) plus
+Advanced disclosure for per-tool overrides.
 
 ## Tranche roadmap
 
@@ -37,7 +53,7 @@ Per [ADR-0048 §Implementation tranches](../../../docs/decisions/ADR-0048-comput
 |---|---|---|---|
 | T1 | Scaffold | **DONE (B159)** | — |
 | T2 | Read tools | **DONE (B163)** | `computer_screenshot.v1`, `computer_read_clipboard.v1` |
-| T3 | Action tools | pending | `computer_click.v1`, `computer_type.v1`, `computer_run_app.v1`, `computer_launch_url.v1` |
+| T3 | Action tools | **DONE (B164)** | `computer_click.v1`, `computer_type.v1`, `computer_run_app.v1`, `computer_launch_url.v1` |
 | T4 | Allowance UI | pending | (frontend) Chat-tab three-preset settings panel + Advanced disclosure |
 | T5 | Posture clamp logic | **DONE (B160)** | docs + 12 ADR-0048 coverage tests in PostureGateStep |
 | T6 | Documentation + safety | pending | per-tool docs + `docs/runbooks/` operator safety guide |
