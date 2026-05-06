@@ -59,6 +59,7 @@ from forest_soul_forge.daemon.routers import (
     agent_posture as agent_posture_router,
 )
 from forest_soul_forge.daemon.routers import scheduler as scheduler_router
+from forest_soul_forge.daemon.routers import secrets as secrets_router
 from forest_soul_forge.daemon.routers import verifier as verifier_router
 from forest_soul_forge.daemon.routers import writes as writes_router
 from forest_soul_forge.registry import Registry
@@ -679,6 +680,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(plugins_router.router)
     app.include_router(plugin_grants_router.router)
     app.include_router(agent_posture_router.router)
+    app.include_router(secrets_router.router)
     return app
 
 

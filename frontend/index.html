@@ -565,6 +565,28 @@
                       <div id="chat-assistant-consents" class="muted">—</div>
                     </section>
 
+                    <!-- B173 / ADR-0052 T6: pluggable secrets card.
+                         Shows the active backend + the list of secret
+                         names Forest has access to. Names ONLY — values
+                         never traverse the HTTP surface. Mutating
+                         operations stay CLI-only (`fsf secret put|delete`)
+                         per the ADR-0052 design — the chat tab is not
+                         a destructive surface for credentials. -->
+                    <section class="chat-assistant-card">
+                      <h4 class="chat-assistant-card__title">Plugin secrets
+                        <span class="chat-assistant-card__hint muted">(ADR-0052 — values stored in the active backend; never logged)</span>
+                      </h4>
+                      <p class="muted" id="chat-assistant-secrets-backend" style="margin: 6px 0;">
+                        Loading backend…
+                      </p>
+                      <div id="chat-assistant-secrets-names" class="muted">—</div>
+                      <p class="muted" style="font-size: 0.85em; margin-top: 8px;">
+                        Add or remove via CLI: <code>fsf secret put &lt;name&gt;</code>
+                        / <code>fsf secret delete &lt;name&gt;</code>.
+                        Values never round-trip the browser by design.
+                      </p>
+                    </section>
+
                     <section class="chat-assistant-card">
                       <h4 class="chat-assistant-card__title">Computer-control allowances
                         <span class="chat-assistant-card__hint muted">(ADR-0048 — soulux-computer-control plugin)</span>

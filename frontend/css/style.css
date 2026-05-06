@@ -1869,6 +1869,24 @@ body { padding-bottom: 56px; }
 .chat-assistant-tool-table tr:last-child td {
   border-bottom: none;
 }
+
+/* ADR-0052 T6 (B173) — secrets card name list. Compact monospaced
+   bullets; visually distinct from the consents row so an operator
+   doesn't confuse "consent grants" (memory) with "stored secrets"
+   (plugin auth tokens). */
+.chat-assistant-secrets-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  column-gap: 12px;
+  row-gap: 2px;
+  font-size: 0.85em;
+}
+.chat-assistant-secrets-list li {
+  padding: 1px 0;
+}
 .chat-rooms__item-id {
   font-family: var(--mono, monospace);
   font-size: 0.85em;

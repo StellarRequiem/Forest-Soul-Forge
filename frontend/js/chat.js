@@ -538,12 +538,13 @@ async function loadAssistantSettings(instanceId) {
     }
   }
 
-  // Four independent fetches; render each on completion.
+  // Five independent fetches; render each on completion.
   await Promise.allSettled([
     renderAssistantIdentity(instanceId),
     renderAssistantPosture(instanceId),
     renderAssistantConsents(instanceId),
     renderAssistantAllowances(instanceId),    // ADR-0048 T4 (B165)
+    renderAssistantSecrets(),                 // ADR-0052 T6 (B173)
   ]);
 
   // Wire posture buttons + preset buttons (idempotent — only
@@ -748,6 +749,56 @@ function wireAssistantAllowanceButtons(instanceId) {
       }
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0052 T6 (B173) — Plugin-secrets card.
+// ---------------------------------------------------------------------------
+// Read-only view of the active backend + secret name list. Values
+// NEVER traverse the HTTP surface; the daemon's GET /secrets/names
+// returns names only. Mutation stays CLI-only per the ADR-0052
+// design (`fsf secret put|delete`). The chat tab shouldn't be a
+// destructive surface for credentials — operators removing a
+// secret should do it through a deliberate terminal action, not a
+// browser click.
+
+async function renderAssistantSecrets() {
+  const backendEl = document.getElementById("chat-assistant-secrets-backend");
+  const namesEl = document.getElementById("chat-assistant-secrets-names");
+  if (!backendEl || !namesEl) return;
+  // Two independent fetches — let one fail without taking the
+  // other down.
+  try {
+    const r = await api.get("/secrets/backend");
+    backendEl.innerHTML = (
+      `Active backend: <code>${escapeHTML(r.name)}</code> ` +
+      `<span class="muted" style="font-size: 0.85em;">` +
+      `(${escapeHTML(r.selection_source)} — ${escapeHTML(r.selection_via)})</span>`
+    );
+  } catch (e) {
+    backendEl.textContent = `backend fetch failed: ${String(e.message || e).slice(0, 100)}`;
+  }
+  try {
+    const r = await api.get("/secrets/names");
+    const names = r.names || [];
+    if (!names.length) {
+      namesEl.innerHTML = (
+        `<span class="muted">No secrets stored. Plugins requiring ` +
+        `auth tokens will fail launch with an actionable error ` +
+        `pointing at <code>fsf secret put &lt;name&gt;</code>.</span>`
+      );
+      return;
+    }
+    const html = [`<div class="muted" style="margin-bottom: 4px; font-size: 0.85em;">${names.length} stored:</div>`];
+    html.push(`<ul class="chat-assistant-secrets-list">`);
+    for (const n of names) {
+      html.push(`<li><code>${escapeHTML(n)}</code></li>`);
+    }
+    html.push(`</ul>`);
+    namesEl.innerHTML = html.join("");
+  } catch (e) {
+    namesEl.innerHTML = `<span class="muted">names fetch failed: ${escapeHTML(String(e.message || e))}</span>`;
+  }
 }
 
 async function applyAssistantAllowancePreset(instanceId, preset) {
