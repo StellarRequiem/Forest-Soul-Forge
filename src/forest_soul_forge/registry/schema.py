@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 15
+SCHEMA_VERSION: int = 16
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -297,6 +297,51 @@ DDL_STATEMENTS: tuple[str, ...] = (
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_memory_consents_recipient ON memory_consents(recipient_instance);",
+    # --- memory_procedural_shortcuts (v16 — ADR-0054 T1) -----------------
+    # Per-instance procedural-shortcut storage. The dispatcher's
+    # ProceduralShortcutStep (ADR-0054 T3) consults this table BEFORE
+    # firing llm_think — on a high-confidence situation→action match,
+    # the recorded action is returned directly + a tool_call_shortcut
+    # event lands in the audit chain (T4). Operator overrides via env
+    # vars (ADR-0054 D6); master switch defaults off in v0.1.
+    #
+    # Sibling table not column-extension on memory_entries because
+    # access pattern (cosine similarity over BLOB embeddings) differs
+    # from episodic/semantic (text search), and ADR-0040 trust-surface
+    # decomposition prefers separate tables for separately-grantable
+    # capabilities.
+    #
+    # Per ADR-0001 D2 identity invariance: this table is per-instance
+    # state, not identity. constitution_hash + DNA stay immutable;
+    # only what the agent KNOWS evolves, not what it IS.
+    """
+    CREATE TABLE IF NOT EXISTS memory_procedural_shortcuts (
+        shortcut_id          TEXT PRIMARY KEY,
+        instance_id          TEXT NOT NULL,
+        created_at           TEXT NOT NULL,
+        last_matched_at      TEXT,
+        last_matched_seq     INTEGER,
+
+        situation_text       TEXT NOT NULL,
+        situation_embedding  BLOB NOT NULL,
+
+        action_kind          TEXT NOT NULL
+                             CHECK (action_kind IN ('response', 'tool_call', 'no_op')),
+        action_payload       TEXT NOT NULL,
+
+        success_count        INTEGER NOT NULL DEFAULT 0,
+        failure_count        INTEGER NOT NULL DEFAULT 0,
+
+        learned_from_seq     INTEGER NOT NULL,
+        learned_from_kind    TEXT NOT NULL
+                             CHECK (learned_from_kind IN ('auto', 'operator_tagged')),
+
+        FOREIGN KEY (instance_id)
+            REFERENCES agents(instance_id) ON DELETE CASCADE
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_psh_instance "
+        "ON memory_procedural_shortcuts(instance_id);",
     # --- memory contradictions (v11 — ADR-0027-amendment §7.3) -----------
     # Many-to-many: one entry can be contradicted by N later entries, and
     # one new entry can contradict N older ones. Composite shape doesn't
@@ -986,5 +1031,44 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
             "CHECK (posture IN ('green', 'yellow', 'red'));",
         "CREATE INDEX IF NOT EXISTS idx_agents_posture "
             "ON agents(posture);",
+    ),
+    # v15 → v16 (ADR-0054 T1, Burst 178): memory_procedural_shortcuts.
+    # Pure addition — new table only, no existing rows touched. The
+    # immutable-constitution invariant is preserved: this table stores
+    # per-instance state (what the agent knows / has seen), not
+    # identity (DNA + constitution_hash). Per-tranche feature flag
+    # (FSF_PROCEDURAL_SHORTCUT_ENABLED) defaults off; the table can
+    # exist empty without affecting any existing behavior.
+    #
+    # Effective dispatch path:
+    #   constitution_hash + DNA stay stable
+    #   procedural shortcuts (this table) augment what the assistant
+    #     can resolve quickly without firing llm_think
+    #   audit chain captures every shortcut hit (tool_call_shortcut
+    #     event type, ADR-0054 T4)
+    16: (
+        """
+        CREATE TABLE IF NOT EXISTS memory_procedural_shortcuts (
+            shortcut_id          TEXT PRIMARY KEY,
+            instance_id          TEXT NOT NULL,
+            created_at           TEXT NOT NULL,
+            last_matched_at      TEXT,
+            last_matched_seq     INTEGER,
+            situation_text       TEXT NOT NULL,
+            situation_embedding  BLOB NOT NULL,
+            action_kind          TEXT NOT NULL
+                                 CHECK (action_kind IN ('response', 'tool_call', 'no_op')),
+            action_payload       TEXT NOT NULL,
+            success_count        INTEGER NOT NULL DEFAULT 0,
+            failure_count        INTEGER NOT NULL DEFAULT 0,
+            learned_from_seq     INTEGER NOT NULL,
+            learned_from_kind    TEXT NOT NULL
+                                 CHECK (learned_from_kind IN ('auto', 'operator_tagged')),
+            FOREIGN KEY (instance_id)
+                REFERENCES agents(instance_id) ON DELETE CASCADE
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_psh_instance "
+            "ON memory_procedural_shortcuts(instance_id);",
     ),
 }
