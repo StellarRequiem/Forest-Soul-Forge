@@ -17,15 +17,21 @@ T1 scope (B167):
   - SecretStoreError exception
   - FileStore reference implementation
   - resolve_secret_store() reading FSF_SECRET_STORE env var
+
+T2 scope (B168):
+  - KeychainStore — macOS Keychain via the `security` CLI
+  - Default backend flips to `keychain` on Darwin (file elsewhere)
 """
 from __future__ import annotations
 
 from .file_store import FileStore
+from .keychain_store import KeychainStore
 from .protocol import SecretStoreError, SecretStoreProtocol
 from .resolver import resolve_secret_store
 
 __all__ = [
     "FileStore",
+    "KeychainStore",
     "SecretStoreError",
     "SecretStoreProtocol",
     "resolve_secret_store",

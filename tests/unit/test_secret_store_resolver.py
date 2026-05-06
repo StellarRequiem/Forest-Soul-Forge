@@ -35,13 +35,23 @@ def _clear_resolver_cache():
 # Default + explicit backend selection
 # ---------------------------------------------------------------------------
 
-def test_default_resolves_to_file_store(monkeypatch, tmp_path):
-    """No FSF_SECRET_STORE env var → FileStore (T1 default)."""
+def test_default_resolves_to_platform_backend(monkeypatch, tmp_path):
+    """No FSF_SECRET_STORE env var → platform default. Darwin →
+    KeychainStore; everything else → FileStore (T2 default flip,
+    B168)."""
     monkeypatch.delenv("FSF_SECRET_STORE", raising=False)
     monkeypatch.setenv("FSF_FILE_SECRETS_PATH", str(tmp_path / "s.yaml"))
-    store = resolve_secret_store(force_reload=True)
-    assert isinstance(store, FileStore)
-    assert store.name == "file"
+    import platform as _platform
+    if _platform.system() == "Darwin":
+        # On a Mac the resolver picks Keychain — but constructing it
+        # is fine even in tests; we just don't exercise security CLI
+        # calls here.
+        store = resolve_secret_store(force_reload=True)
+        assert store.name == "keychain"
+    else:
+        store = resolve_secret_store(force_reload=True)
+        assert isinstance(store, FileStore)
+        assert store.name == "file"
 
 
 def test_explicit_file_resolves_to_file_store(monkeypatch, tmp_path):
@@ -64,11 +74,19 @@ def test_whitespace_in_env_var_is_stripped(monkeypatch, tmp_path):
 # Pending-tranche stubs (T2 / T3)
 # ---------------------------------------------------------------------------
 
-def test_keychain_raises_with_pointer_to_t2(monkeypatch):
+def test_keychain_on_darwin_resolves(monkeypatch):
+    """T2 (B168) shipped KeychainStore. On Darwin the resolver
+    constructs it; on non-Darwin the constructor raises with a
+    platform-only message."""
+    import platform as _platform
     monkeypatch.setenv("FSF_SECRET_STORE", "keychain")
-    with pytest.raises(SecretStoreError) as exc:
-        resolve_secret_store(force_reload=True)
-    assert "T2" in str(exc.value)
+    if _platform.system() == "Darwin":
+        store = resolve_secret_store(force_reload=True)
+        assert store.name == "keychain"
+    else:
+        with pytest.raises(SecretStoreError) as exc:
+            resolve_secret_store(force_reload=True)
+        assert "macOS-only" in str(exc.value)
 
 
 def test_vaultwarden_raises_with_pointer_to_t3(monkeypatch):

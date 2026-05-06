@@ -2,13 +2,20 @@
 
 Reads ``FSF_SECRET_STORE`` env var. Recognized values:
 
-  - ``file`` (default in T1) — plaintext YAML at
-    ``~/.forest/secrets/secrets.yaml``. INSECURE; for CI/sandbox.
-  - ``keychain`` (T2 — coming, raises NotImplementedError today)
+  - ``file`` — plaintext YAML at ``~/.forest/secrets/secrets.yaml``.
+    INSECURE; for CI/sandbox. (T1, default on non-Darwin.)
+  - ``keychain`` — macOS Keychain via ``security`` CLI. (T2, default
+    on Darwin.)
   - ``vaultwarden`` (T3 — coming)
   - ``module:my_pkg.my_store.MyStore`` — BYO. Resolver imports the
     dotted path, calls the no-arg constructor, asserts the result
     implements SecretStoreProtocol, returns it.
+
+If FSF_SECRET_STORE is unset, the resolver picks ``keychain`` on
+Darwin and ``file`` everywhere else — so the out-of-box experience
+on Alex's Mac stores secrets in the OS-native vault without
+configuration, while non-macOS hosts fall back to the FileStore
+(which is INSECURE-by-design and emits a banner saying so).
 
 The function caches resolved instances per-process so subsequent
 calls share the same backend handle. Callers don't have to thread
@@ -18,11 +25,25 @@ from __future__ import annotations
 
 import importlib
 import os
+import platform
 import threading
 from typing import Any
 
 from .file_store import FileStore
+from .keychain_store import KeychainStore
 from .protocol import SecretStoreError, SecretStoreProtocol
+
+
+def _platform_default() -> str:
+    """Pick the default backend for the current OS.
+
+    Operators override via FSF_SECRET_STORE. The platform default
+    matches the principle "operator gets the most secure useful
+    backend without having to configure anything" —
+        macOS → Keychain (production-grade; OS-integrated)
+        Linux/Windows → file (INSECURE; with a banner saying so)
+    """
+    return "keychain" if platform.system() == "Darwin" else "file"
 
 
 _CACHE: dict[str, Any] = {}
@@ -32,11 +53,12 @@ _CACHE_LOCK = threading.Lock()
 def resolve_secret_store(*, force_reload: bool = False) -> SecretStoreProtocol:
     """Return the active SecretStoreProtocol implementation.
 
-    Reads ``FSF_SECRET_STORE`` env var; defaults to ``file``.
-    Caches the resolved instance per-process; pass
-    ``force_reload=True`` to bypass the cache (test seam).
+    Reads ``FSF_SECRET_STORE`` env var; defaults to keychain on
+    Darwin and file on other platforms. Caches the resolved
+    instance per-process; pass ``force_reload=True`` to bypass
+    the cache (test seam).
     """
-    backend_id = (os.environ.get("FSF_SECRET_STORE") or "file").strip()
+    backend_id = (os.environ.get("FSF_SECRET_STORE") or _platform_default()).strip()
 
     with _CACHE_LOCK:
         if not force_reload and backend_id in _CACHE:
@@ -61,12 +83,7 @@ def _build(backend_id: str) -> SecretStoreProtocol:
     if backend_id == "file":
         return FileStore()
     if backend_id == "keychain":
-        # T2 will replace this stub with a real KeychainStore.
-        raise SecretStoreError(
-            "FSF_SECRET_STORE=keychain not implemented yet "
-            "(ADR-0052 T2). Use 'file' for now or switch to "
-            "'vaultwarden' once T3 lands."
-        )
+        return KeychainStore()
     if backend_id == "vaultwarden":
         # T3 will replace this stub.
         raise SecretStoreError(
