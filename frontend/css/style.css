@@ -1601,6 +1601,42 @@ body { padding-bottom: 56px; }
   background: var(--bg-hover, #1c2330);
 }
 .chat-rooms__item--archived { opacity: 0.55; }
+/* T19 (B145): per-row archive button (×) — hover-shown so the rail
+   stays clean. Stops click propagation so clicking × archives without
+   first selecting the room. */
+.chat-rooms__item { position: relative; }
+.chat-rooms__item-archive-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: transparent;
+  border: none;
+  color: var(--fg-faint, #6c7682);
+  cursor: pointer;
+  padding: 0 6px;
+  font-size: 1.2em;
+  line-height: 1;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.chat-rooms__item:hover .chat-rooms__item-archive-btn { opacity: 1; }
+.chat-rooms__item-archive-btn:hover {
+  color: var(--accent, #4a90e2);
+  background: var(--bg-soft, #161c25);
+}
+/* T19 (B145): the archived-toggle in the rail header. Compact + inline
+   so it doesn't push the action buttons around. */
+.chat-rooms__filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85em;
+  color: var(--fg-faint, #6c7682);
+  cursor: pointer;
+  user-select: none;
+}
+.chat-rooms__filter input[type="checkbox"] { margin: 0; }
 .chat-rooms__item-id {
   font-family: var(--mono, monospace);
   font-size: 0.85em;

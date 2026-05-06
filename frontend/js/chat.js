@@ -21,18 +21,24 @@ import * as state from "./state.js";
 import { toast } from "./toast.js";
 
 const ACTIVE_KEY = "fsf.chat.activeConv";
+// T19 (B145): persist the operator's "show archived" preference across
+// page reloads. Default false — the rail stays clean by default; toggle
+// to surface archived rooms (e.g., to restore one or audit history).
+const SHOW_ARCHIVED_KEY = "fsf.chat.showArchived";
 
 let activeConversationId = null;
 let activeConversation = null;   // ConversationOut row
 let activeParticipants = [];      // ParticipantOut[]
 let activeTurns = [];             // TurnOut[]
 let agentLookupCache = new Map(); // instance_id -> agent row (name, role, etc.)
+let showArchived = false;         // T19 (B145): rail filter state
 
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 export async function start() {
   wireRoomsRefresh();
+  wireShowArchivedToggle();   // T19 (B145)
   wireNewRoomDialog();
   wireComposer();
   wireRoomActions();
@@ -40,6 +46,11 @@ export async function start() {
   wireAmbientDialog();
   wireSweepDialog();
   wireAddParticipantDialog();
+  // Restore archived-toggle preference before first render so the
+  // rail's initial paint matches what the operator last saw.
+  showArchived = localStorage.getItem(SHOW_ARCHIVED_KEY) === "true";
+  const cb = document.getElementById("chat-rooms-show-archived");
+  if (cb) cb.checked = showArchived;
   await loadRooms();
   // Auto-resume an active conversation if one is stashed.
   const stashed = localStorage.getItem(ACTIVE_KEY);
@@ -70,13 +81,26 @@ async function loadRooms() {
 
 function renderRooms(conversations) {
   const list = document.getElementById("chat-rooms");
-  if (!conversations.length) {
-    list.innerHTML = `<p class="muted">No rooms yet. Click <strong>+ new</strong> to create one.</p>`;
+  // T19 (B145): filter archived rooms from the rail unless the
+  // operator opted in via the "archived" toggle. Honors the
+  // distinction between "really gone" (Forest doesn't do that —
+  // audit chain is append-only) and "out of sight" (rail filter).
+  const visible = showArchived
+    ? conversations
+    : conversations.filter((c) => c.status !== "archived");
+  const archivedHidden = conversations.length - visible.length;
+
+  if (!visible.length) {
+    if (archivedHidden > 0) {
+      list.innerHTML = `<p class="muted">No active rooms. <strong>${archivedHidden}</strong> archived hidden — toggle <em>archived</em> to see them, or click <strong>+ new</strong>.</p>`;
+    } else {
+      list.innerHTML = `<p class="muted">No rooms yet. Click <strong>+ new</strong> to create one.</p>`;
+    }
     return;
   }
   // Group by domain (alphabetical), sort within domain by last_turn_at desc.
   const byDomain = {};
-  for (const c of conversations) {
+  for (const c of visible) {
     if (!byDomain[c.domain]) byDomain[c.domain] = [];
     byDomain[c.domain].push(c);
   }
@@ -91,8 +115,17 @@ function renderRooms(conversations) {
       const isActive = r.conversation_id === activeConversationId;
       const ts = r.last_turn_at || r.created_at;
       const tsShort = ts ? ts.slice(11, 19) : "—";
+      // T19 (B145): per-row archive button (×) — only render for
+      // active rooms (no point archiving an already-archived one).
+      // Title says "archive" not "delete" because Forest's audit chain
+      // is append-only; nothing is truly removed, just hidden from
+      // default view.
+      const archiveBtn = (r.status !== "archived")
+        ? `<button class="chat-rooms__item-archive-btn" data-archive-cid="${r.conversation_id}" title="Archive (hides from rail; audit chain preserved)" type="button">×</button>`
+        : "";
       html.push(`<div class="chat-rooms__item ${isActive ? "chat-rooms__item--active" : ""} ${r.status === "archived" ? "chat-rooms__item--archived" : ""}"
                    data-cid="${r.conversation_id}">
+        ${archiveBtn}
         <div class="chat-rooms__item-id">${escapeHTML(r.conversation_id.slice(0, 8))}…</div>
         <div class="chat-rooms__item-meta">
           <span class="chat-rooms__item-status">${escapeHTML(r.status)}</span>
@@ -102,8 +135,15 @@ function renderRooms(conversations) {
     }
     html.push(`</div>`);
   }
+  // T19 (B145): summary footer — when archived rooms are hidden,
+  // show the operator how many were filtered + a one-click toggle.
+  if (!showArchived && archivedHidden > 0) {
+    html.push(`<div class="chat-rooms__archived-note muted" style="padding:8px 10px;font-size:0.8em;">
+      ${archivedHidden} archived hidden
+    </div>`);
+  }
   list.innerHTML = html.join("");
-  // Wire clicks.
+  // Wire room-select clicks (the whole item).
   list.querySelectorAll(".chat-rooms__item").forEach((el) => {
     el.addEventListener("click", () => {
       const cid = el.dataset.cid;
@@ -112,10 +152,53 @@ function renderRooms(conversations) {
       });
     });
   });
+  // T19 (B145): wire per-row archive (×) buttons. stopPropagation so
+  // clicking × archives without first selecting the room.
+  list.querySelectorAll(".chat-rooms__item-archive-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const cid = btn.dataset.archiveCid;
+      if (!cid) return;
+      if (!confirm(`Archive room ${cid.slice(0, 8)}…?\n\nThe room is hidden from the rail (toggle "archived" to restore). Turns + audit history are preserved.`)) {
+        return;
+      }
+      try {
+        await writeCall(`/conversations/${cid}/status`, {
+          status: "archived",
+          reason: "operator archived from rail",
+        });
+        toast({ title: "Archived", msg: cid.slice(0, 8) + "…", kind: "info", ttl: 3000 });
+        // If we just archived the active room, drop selection.
+        if (cid === activeConversationId) {
+          activeConversationId = null;
+          localStorage.removeItem(ACTIVE_KEY);
+        }
+        await loadRooms();
+      } catch (err) {
+        toast({ title: "Archive failed", msg: String(err.message || err), kind: "error", ttl: 6000 });
+      }
+    });
+  });
 }
 
 function wireRoomsRefresh() {
   document.getElementById("chat-rooms-refresh")?.addEventListener("click", () => loadRooms());
+}
+
+// T19 (B145): the "archived" toggle in the rail header. Defaults off
+// (rail stays clean); on persists across reloads. On change, re-renders
+// the rail using the cached conversation list — no re-fetch needed
+// because we only filter what to show, not what to fetch.
+function wireShowArchivedToggle() {
+  const cb = document.getElementById("chat-rooms-show-archived");
+  if (!cb) return;
+  cb.addEventListener("change", () => {
+    showArchived = cb.checked;
+    localStorage.setItem(SHOW_ARCHIVED_KEY, String(showArchived));
+    // Re-render via loadRooms — simplest path that picks up server-
+    // side changes too (e.g., another tab archived something).
+    loadRooms();
+  });
 }
 
 // ---------------------------------------------------------------------------
