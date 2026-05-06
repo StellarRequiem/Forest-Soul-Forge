@@ -89,22 +89,24 @@ echo "  Snapshot:"
 [[ -n "$ollama_pid" ]] && ps -o pid,nice,comm,user -p "$ollama_pid" 2>/dev/null | sed 's/^/    /'
 [[ -n "$forest_pid" ]] && ps -o pid,nice,comm,user -p "$forest_pid" 2>/dev/null | sed 's/^/    /'
 
-bar "4. reminder: KEEP_ALIVE needs Ollama restart"
+bar "4. reminder: KEEP_ALIVE needs separate setup"
 cat <<'EOF'
-  The .env now has OLLAMA_KEEP_ALIVE=-1 and OLLAMA_NUM_PARALLEL=1,
-  but Ollama only reads its env on `ollama serve` startup. To pin
-  the model in memory permanently:
+  Renice handles CPU priority. The OTHER half of 24/7 ops tuning is
+  pinning Ollama's loaded model in memory so dispatches don't pay
+  the 3-10s warmup penalty. That's a separate sequence because
+  Ollama.app reads its env from launchd's gui/$UID domain, not from
+  Forest's .env file.
 
-    1. Quit Ollama.app from the menu bar (whale → Quit Ollama)
-       OR: pkill -f "ollama serve"
-    2. Reopen Ollama.app
-       OR: cd /Users/llm01/Forest-Soul-Forge && ollama serve &
-    3. Touch any model — `curl -fsS http://127.0.0.1:11434/api/generate \
-       -d '{"model":"qwen2.5-coder:7b","prompt":"hi","stream":false}'`
+  To activate KEEP_ALIVE pinning, run:
 
-  After that, the model stays loaded forever (until manually unloaded).
-  Re-run this script after restart to re-renice priority (renice does
-  NOT survive process restart — Ollama spawns at default nice 0 again).
+    ./restart-ollama-pin.command
+
+  That script does: launchctl setenv → quit Ollama.app → reopen →
+  touch a model. After it runs, `ollama ps` should show
+  "UNTIL: Forever" for the touched model.
+
+  Note: renice does NOT survive process restart — Ollama spawns at
+  default nice 0 again. Re-run this script after restart-ollama-pin.
 EOF
 
 echo ""
