@@ -690,6 +690,7 @@ class ToolDispatcher:
             delegate=delegate_fn,
             priv_client=self.priv_client,
             agent_registry=self.agent_registry,
+            procedural_shortcuts=self.procedural_shortcuts_table,
         )
         try:
             result = await tool.execute(args, ctx)
@@ -1530,6 +1531,7 @@ class ToolDispatcher:
             memory=self.memory,
             delegate=delegate_fn,
             priv_client=self.priv_client,
+            procedural_shortcuts=self.procedural_shortcuts_table,
         )
         try:
             result = await tool.execute(args, ctx)

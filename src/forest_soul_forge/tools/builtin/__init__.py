@@ -34,6 +34,7 @@ from forest_soul_forge.tools.builtin.memory_challenge import MemoryChallengeTool
 from forest_soul_forge.tools.builtin.memory_disclose import MemoryDiscloseTool
 from forest_soul_forge.tools.builtin.memory_flag_contradiction import MemoryFlagContradictionTool
 from forest_soul_forge.tools.builtin.memory_recall import MemoryRecallTool
+from forest_soul_forge.tools.builtin.memory_tag_outcome import MemoryTagOutcomeTool
 from forest_soul_forge.tools.builtin.memory_write import MemoryWriteTool
 from forest_soul_forge.tools.builtin.mypy_typecheck import MypyTypecheckTool
 from forest_soul_forge.tools.builtin.patch_check import PatchCheckTool
@@ -89,6 +90,7 @@ __all__ = [
     "BanditSecurityScanTool",
     "PipInstallIsolatedTool",
     "MemoryFlagContradictionTool",
+    "MemoryTagOutcomeTool",
     "AnomalyScoreTool",
     "LogCorrelateTool",
     "LateralMovementDetectTool",
@@ -193,6 +195,16 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # kind. Operator-only at v0.3 by convention via constitutional
     # kit gating; verifier_loop role reaches autonomously.
     registry.register(MemoryFlagContradictionTool())
+    # ADR-0054 T5 — memory_tag_outcome.v1. Operator-driven
+    # reinforcement of procedural-shortcut hits. The chat-tab
+    # thumbs UI dispatches this with outcome ∈ {good, bad,
+    # neutral}; the tool calls strengthen / weaken / no-op on
+    # ProceduralShortcutsTable. side_effects=read_only because
+    # mutating per-instance counters is the agent's own state per
+    # ADR-0001 D2; required_initiative_level=L2 because operator-
+    # initiated by design (the agent never self-reinforces without
+    # operator routing).
+    registry.register(MemoryTagOutcomeTool())
     # ADR-003X Phase C3 — browser_action.v1. Drives a chromium browser
     # via Playwright. Heaviest open-web primitive; always gated
     # (side_effects=external triggers requires_human_approval). Lazy

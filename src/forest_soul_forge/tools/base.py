@@ -107,6 +107,14 @@ class ToolContext:
     # refuse cleanly. Read-only use; writes still go through the
     # daemon's write_lock + handler path.
     agent_registry: Any = None
+    # ADR-0054 T5 (Burst 182) — bound ProceduralShortcutsTable for the
+    # reinforcement tool (memory_tag_outcome.v1). The tool calls
+    # strengthen / weaken / record_match on this table to update an
+    # operator-tagged shortcut's reinforcement counters. None when the
+    # dispatcher's procedural-shortcut substrate is unwired (default
+    # for pre-T6 daemons); the tool refuses cleanly with
+    # "procedural shortcut substrate not wired" rather than crashing.
+    procedural_shortcuts: Any = None
 
 
 @dataclass(frozen=True)
