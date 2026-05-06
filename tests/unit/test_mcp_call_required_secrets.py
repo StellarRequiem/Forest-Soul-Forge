@@ -62,31 +62,34 @@ def _patch_resolver(store):
 # ---------------------------------------------------------------------------
 
 def test_empty_list_is_noop():
-    """No required_secrets → no resolver call, no env mutation.
-    Existing plugins (forest-echo, brave-search, soulux-computer-
-    control) all have empty lists; their behavior must stay
-    byte-identical."""
+    """No required_secrets → no resolver call, no env mutation,
+    empty descriptor list. Existing plugins (forest-echo,
+    brave-search, soulux-computer-control) all have empty lists;
+    their behavior must stay byte-identical."""
     auth_env: dict[str, str] = {}
     fake_store = _FakeStore({})
     with _patch_resolver(fake_store):
-        _resolve_required_secrets(
+        result = _resolve_required_secrets(
             server_name="some-plugin",
             required_secrets=[],
             auth_env=auth_env,
         )
     assert auth_env == {}
     assert fake_store.get_calls == []
+    # B171: empty list returns empty descriptor list.
+    assert result == []
 
 
 def test_none_list_is_noop():
     """None as required_secrets — defensive: behaves same as []."""
     auth_env: dict[str, str] = {}
-    _resolve_required_secrets(
+    result = _resolve_required_secrets(
         server_name="x",
         required_secrets=[],
         auth_env=auth_env,
     )
     assert auth_env == {}
+    assert result == []
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +103,7 @@ def test_resolved_values_populate_env_vars():
     })
     auth_env: dict[str, str] = {}
     with _patch_resolver(fake_store):
-        _resolve_required_secrets(
+        result = _resolve_required_secrets(
             server_name="github-mcp",
             required_secrets=[
                 {"name": "github_pat", "env_var": "GITHUB_TOKEN", "description": ""},
@@ -111,6 +114,17 @@ def test_resolved_values_populate_env_vars():
     assert auth_env["GITHUB_TOKEN"] == "ghp_secret_xyz"
     assert auth_env["GITHUB_WEBHOOK_SECRET"] == "whsec_blah"
     assert sorted(fake_store.get_calls) == ["github_pat", "github_webhook_secret"]
+    # B171: each resolved secret produces an audit-trail descriptor
+    # — name + env_var + backend, never the value.
+    by_name = {d["secret_name"]: d for d in result}
+    assert by_name["github_pat"]["env_var"] == "GITHUB_TOKEN"
+    assert by_name["github_pat"]["backend"] == "fake"
+    assert by_name["github_webhook_secret"]["env_var"] == "GITHUB_WEBHOOK_SECRET"
+    # No descriptor leaks the value (defense-in-depth grep).
+    for d in result:
+        assert "ghp_secret_xyz" not in str(d)
+        assert "whsec_blah" not in str(d)
+        assert "value" not in d
 
 
 def test_existing_auth_env_preserved():
@@ -125,6 +139,43 @@ def test_existing_auth_env_preserved():
             auth_env=auth_env,
         )
     assert auth_env == {"FSF_MCP_AUTH": "preexisting_token", "X": "y"}
+
+
+def test_descriptor_shape_stable():
+    """B171 descriptor schema is stable across the conformance
+    contract: exactly the keys {secret_name, env_var, backend}.
+    Adding new fields here changes the audit-chain hash for every
+    plugin call that uses required_secrets — bump deliberately."""
+    fake_store = _FakeStore({"k": "v"})
+    auth_env: dict[str, str] = {}
+    with _patch_resolver(fake_store):
+        result = _resolve_required_secrets(
+            server_name="p",
+            required_secrets=[{"name": "k", "env_var": "K", "description": ""}],
+            auth_env=auth_env,
+        )
+    assert len(result) == 1
+    assert sorted(result[0].keys()) == ["backend", "env_var", "secret_name"]
+
+
+def test_malformed_entries_dont_appear_in_descriptors():
+    """B171: only successfully-resolved secrets get descriptors.
+    Malformed entries that get skipped by the helper don't pollute
+    the audit trail."""
+    fake_store = _FakeStore({"good": "ok"})
+    auth_env: dict[str, str] = {}
+    with _patch_resolver(fake_store):
+        result = _resolve_required_secrets(
+            server_name="p",
+            required_secrets=[
+                {"name": "good", "env_var": "GOOD"},
+                {"name": None, "env_var": "BAD"},        # skipped
+                "not a dict",                            # skipped
+            ],
+            auth_env=auth_env,
+        )
+    assert len(result) == 1
+    assert result[0]["secret_name"] == "good"
 
 
 # ---------------------------------------------------------------------------

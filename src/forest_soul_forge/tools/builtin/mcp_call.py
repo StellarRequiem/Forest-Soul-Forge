@@ -208,8 +208,12 @@ class McpCallTool:
         # (FSF_SECRET_STORE → file / keychain / vaultwarden / BYO) and
         # set the env_var fields on the subprocess. See
         # _resolve_required_secrets() docstring for the full
-        # design rationale. Mutates auth_env in place.
-        _resolve_required_secrets(
+        # design rationale. Mutates auth_env in place; returns
+        # an audit-trail descriptor list (name + backend only,
+        # never values) that we pass to ToolResult.metadata so
+        # the existing tool_call_succeeded event hashes it into
+        # the audit chain (B171).
+        secrets_resolved = _resolve_required_secrets(
             server_name=server_name,
             required_secrets=server_cfg.get("required_secrets") or [],
             auth_env=auth_env,
@@ -302,6 +306,12 @@ class McpCallTool:
                     "tool": tool_name,
                     "auth_used": bool(secret_name),
                     "isError": True,
+                    # B171: include resolution descriptors even in the
+                    # error path so an auditor reading
+                    # tool_call_succeeded-but-MCP-server-said-error can
+                    # still see which secrets were consumed before the
+                    # server-side failure.
+                    "required_secrets_resolved": secrets_resolved,
                 },
                 side_effect_summary=(
                     f"mcp_call {server_name}/{tool_name} → error: "
@@ -322,6 +332,15 @@ class McpCallTool:
                 "tool": tool_name,
                 "auth_used": bool(secret_name),
                 "result_digest": _digest(result),
+                # B171 (ADR-0052 T4 follow-up): audit-trail for the
+                # operator-managed secrets resolved at server-launch
+                # time. Each entry is {secret_name, env_var, backend}
+                # — never the value. The dispatcher hashes this into
+                # the existing tool_call_succeeded chain entry, so an
+                # auditor querying the chain can see WHICH plugin ran
+                # against WHICH secrets via WHICH backend without ever
+                # seeing the credentials themselves.
+                "required_secrets_resolved": secrets_resolved,
             },
             side_effect_summary=(
                 f"mcp_call {server_name}/{tool_name} → ok"
@@ -334,11 +353,30 @@ def _resolve_required_secrets(
     server_name: str,
     required_secrets: list,
     auth_env: dict[str, str],
-) -> None:
+) -> list[dict]:
     """ADR-0052 T4 (B170) — resolve the plugin manifest's
     required_secrets via the operator-configured backend
     (FSF_SECRET_STORE → file / keychain / vaultwarden / BYO) and
     set each env_var on the subprocess. Mutates auth_env in place.
+
+    Returns a list of resolution descriptors — ONE per
+    successfully-resolved secret. Each descriptor is a dict:
+
+        {
+            "secret_name": <str>,    # the name asked for (matches
+                                     # plugin manifest entry.name)
+            "env_var":     <str>,    # the env var that received it
+            "backend":     <str>,    # store.name ("file", "keychain",
+                                     # "vaultwarden", BYO module name)
+        }
+
+    Critically, the descriptor NEVER includes the secret value —
+    only the name + backend identifier. McpCallTool.execute()
+    surfaces this list via ``ToolResult.metadata['required_secrets_
+    resolved']`` so the existing ``tool_call_succeeded`` audit
+    event hashes it into the chain (B171). Operators querying the
+    audit chain for "what secrets did this plugin call use?" find
+    the full lineage there without ever logging the values.
 
     Distinct from the per-call ``auth_secret_name`` path:
 
@@ -359,7 +397,11 @@ def _resolve_required_secrets(
 
     Failure modes:
       - Backend unreachable: raises McpCallError pointing at
-        FSF_SECRET_STORE configuration
+        FSF_SECRET_STORE configuration. The existing
+        ``tool_call_failed`` event captures the error_class +
+        message, so 'secret_store_unreachable' visibility from
+        ADR-0052 §Decision 6 is preserved without a dedicated
+        new event type.
       - Missing secret: raises McpCallError pointing at
         `fsf secret put <name>` for the operator to fix
       - Backend .get() raises: propagates as McpCallError tied
@@ -368,10 +410,11 @@ def _resolve_required_secrets(
         silently — the manifest schema validates these at load
         time; this is just defense in depth
 
-    Empty list → no-op (no resolver call, no env mutation).
+    Empty list → returns empty list, no resolver call, no env
+    mutation.
     """
     if not required_secrets:
-        return
+        return []
 
     # Lazy import — keeps mcp_call importable in environments where
     # the secrets module hasn't been touched yet (test harnesses,
@@ -391,6 +434,7 @@ def _resolve_required_secrets(
             f"active backend's configuration."
         ) from e
 
+    resolved: list[dict] = []
     for entry in required_secrets:
         if not isinstance(entry, dict):
             continue
@@ -415,6 +459,15 @@ def _resolve_required_secrets(
                 f"`fsf secret put {rs_name}` first, then retry."
             )
         auth_env[rs_env] = value
+        # B171 audit-trail descriptor. Name + backend only — never
+        # the value. McpCallTool.execute() surfaces this list via
+        # ToolResult.metadata for chain inclusion.
+        resolved.append({
+            "secret_name": rs_name,
+            "env_var": rs_env,
+            "backend": store.name,
+        })
+    return resolved
 
 
 def _load_registry() -> dict[str, dict]:
