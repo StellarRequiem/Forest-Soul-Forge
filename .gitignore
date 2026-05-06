@@ -86,6 +86,11 @@ registry.sqlite-wal
 # Local-dev launcher runtime state (run.command writes logs + pidfiles here)
 .run/
 
+# ADR-0041 set-and-forget orchestrator config — per-install operator
+# state (instance_ids are unique per Forest installation). Ship the
+# .example for shape; the activated file is local-only.
+config/scheduled_tasks.yaml
+
 # Docker
 docker-compose.override.yml
 
