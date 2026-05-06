@@ -142,10 +142,24 @@ The plugin ships with six tools chosen to cover the minimum-viable
 These ship in subsequent plugin tranches; v1.0 of the plugin is the
 six above.
 
-### Decision 3 — Hybrid allowance model (categories backed by per-tool grants)
+### Decision 3 — Three-preset allowance UI + Advanced disclosure (operator framing 2026-05-06)
 
-The Chat-tab settings panel (per ADR-0047 Decision 5) shows
-**categories** to the operator:
+The Chat-tab settings panel (per ADR-0047 Decision 5) presents the
+allowances as **three preset tiers** the operator picks from, plus
+an Advanced disclosure for fine-grained per-tool / trust-tier
+control. Each preset is a named configuration that maps to a
+specific set of per-(agent, plugin) grants under the hood.
+
+**Preset tiers:**
+
+| Preset | Grants issued | Operator intent |
+|---|---|---|
+| **Restricted** | `computer_screenshot.v1`, `computer_read_clipboard.v1` (read_only) | "Let the assistant SEE what's on my screen, but never act. Approval-gated everything else." |
+| **Specific** | Operator-picked per-category toggles (the previous Decision 3 hybrid lives here) | "I'll decide per-category which capabilities are on." |
+| **Full** | All 6 tools (screenshot + clipboard + click + type + run_app + launch_url) | "Let the assistant drive my Mac. Per-call approval still fires per tool's `requires_human_approval` map; posture (yellow/red) still clamps." |
+
+**Specific preset categories** (the per-category toggles inside
+the Specific tier — preserved from the original hybrid framing):
 
 - ☐ **Read screen** (screenshot + read clipboard) — read_only
 - ☐ **Click + type** (click + type tools) — external, approval per
@@ -154,27 +168,49 @@ The Chat-tab settings panel (per ADR-0047 Decision 5) shows
   network, approval per call by default
 - ☐ **(Future categories appear as plugin tools expand)**
 
-Each category toggle maps to **per-tool grants** under the hood
-(ADR-0043 substrate). Toggling a category ON issues grants for the
-tools in that category; toggling OFF revokes them. The substrate is
-precise (per-tool); the UI is friendly (per-category).
+**Advanced disclosure** (collapsed by default, expandable):
 
-**Why hybrid:**
+- Per-tool grant toggles independent of category presets — power
+  users who want "click but not type" check exactly the boxes
+  they want
+- Per-tool trust-tier override — `computer_run_app` with an
+  `allowed_apps` allowlist, `computer_launch_url` with a domain
+  allowlist, etc.
+- Each grant ties to a trust tier (default `standard`). Stricter-
+  than-standard tiers configure here.
+
+Each preset toggle / category toggle / per-tool toggle maps to
+**per-(agent, plugin) grants** under the hood (ADR-0043 substrate).
+Switching presets re-issues the appropriate grant set in one
+audited transaction (`agent_plugin_granted` per tool entering
+scope; `agent_plugin_revoked` per tool exiting scope).
+
+**Why three presets + Advanced (2026-05-06 operator framing):**
 
 - Pure per-tool grant UI = operator has to know that
   `soulux-computer-control:computer_click.v1` is a thing. Friction.
 - Pure category-only UI = operator can't grant "click but not type"
   if they want fine-grained control. Limits power users.
-- Hybrid = one UI shows categories; an "Advanced" disclosure shows
-  per-tool grants. Power users can drop down; default operators stay
-  at the category level.
+- Three-preset UI = the most common operator postures ("just see",
+  "case-by-case", "let it drive") become single-click choices.
+  Specific + Advanced cover everyone whose use case doesn't match
+  a preset. Recoverable: switching presets is one transaction with
+  a clear audit-chain trail.
+
+**Posture interaction (ADR-0048 Decision 4):**
+
+Presets define what the agent COULD do; posture (green/yellow/red)
+defines whether it CAN do it right now. Full preset + red posture =
+all action tools refused (read tools still fire). Operators flip
+posture to red as a "global brake" without losing their grant
+state — switching back to green resumes the preset's grants.
 
 **Trust tier integration (ADR-0043 #2 substrate):**
 
 Each grant is tied to a trust tier (default `standard`). Operators
 who want a stricter-than-standard tier for a specific tool (e.g.,
 `computer_run_app` with allowed_apps allowlist) configure it in the
-"Advanced" disclosure.
+Advanced disclosure.
 
 ### Decision 4 — Posture clamps (red dominates grants)
 
