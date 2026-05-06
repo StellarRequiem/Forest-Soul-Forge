@@ -82,10 +82,34 @@ def test_example_uses_known_side_effects(plugin_dir: Path):
     assert manifest.side_effects in SideEffects
 
 
+#: Plugins that ship as substrate scaffolds before any tools land.
+#: These are exempt from the non-empty-capabilities smoke test until
+#: the tranche that adds real tools lands. Each entry MUST link to
+#: the ADR that names the deferral and MUST be removed once tools
+#: arrive — staying on this list past the relevant tranche means
+#: the example has gone stale.
+SCAFFOLD_ONLY_PLUGINS = {
+    # ADR-0048 T1 (B159) — soulux-computer-control plugin scaffold.
+    # T2 lands the read tools (computer_screenshot.v1 +
+    # computer_read_clipboard.v1), at which point this entry MUST be
+    # removed and the smoke test should re-fire as non-empty.
+    "soulux-computer-control",
+}
+
+
 @pytest.mark.parametrize("plugin_dir", _example_dirs(), ids=lambda p: p.name)
 def test_example_capabilities_non_empty(plugin_dir: Path):
     """An example with no capabilities is meaningless — it
-    contributes nothing to the agent's tool catalog."""
+    contributes nothing to the agent's tool catalog. Exception:
+    plugins explicitly listed in SCAFFOLD_ONLY_PLUGINS are tracked
+    as substrate-only commits awaiting the tool tranche; their
+    entry MUST be removed once tools land."""
+    if plugin_dir.name in SCAFFOLD_ONLY_PLUGINS:
+        pytest.skip(
+            f"{plugin_dir.name} is on the scaffold-only allowlist; "
+            f"non-empty-capabilities check fires after the tool "
+            f"tranche lands."
+        )
     manifest = load_manifest(plugin_dir / "plugin.yaml")
     assert len(manifest.capabilities) >= 1
 

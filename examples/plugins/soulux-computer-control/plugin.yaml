@@ -1,0 +1,94 @@
+# SoulUX Computer Control — macOS automation plugin for the
+# Persistent Assistant (ADR-0047 + ADR-0048).
+#
+# Goal: give the assistant agent feature parity with ChatGPT-Operator /
+# Claude-Computer-Use surfaces (screenshot, click, type, app launch,
+# URL open, clipboard read), but bound by Forest's existing governance
+# discipline:
+#
+#   - Constitution constraints (allowed_mcp_servers / allowlisted_tools)
+#   - ADR-0045 posture clamps (red dominates grants)
+#   - ADR-0019 governance pipeline (counters, approval gates, audit)
+#   - ADR-0043 per-(agent, plugin) grants (revocable at runtime)
+#   - ADR-0027 memory-privacy contract (cross-agent reads gated)
+#
+# T1 (B159) ships the MANIFEST + DIRECTORY scaffold only. Zero
+# capabilities declared. T2/T3 add the actual tools per the ADR-0048
+# tranche table:
+#
+#   T1 (this commit) — scaffold (plugin.yaml, README, server stub)
+#   T2 — read tools: computer_screenshot.v1 + computer_read_clipboard.v1
+#                   (side_effects=read_only, no approval)
+#   T3 — action tools: computer_click.v1 + computer_type.v1 +
+#                      computer_run_app.v1 + computer_launch_url.v1
+#                      (side_effects=external/network, all
+#                      requires_human_approval=true)
+#   T4 — Allowance UI in Chat-tab settings panel (closes ADR-0047 T4
+#        full)
+#   T5 — Posture clamp logic in PostureGateStep
+#   T6 — Documentation + safety guide
+#
+# Per ADR-0048 Decision 1: ZERO kernel ABI changes. Uses existing
+# plugin protocol + dispatch + posture + grants substrate.
+#
+# Operator install path (after T2 ships actual tools):
+#
+#   sha256=$(shasum -a 256 ./server | cut -d ' ' -f 1)
+#   sed -i '' "s/^  sha256:.*/  sha256: \"$sha256\"/" plugin.yaml
+#   fsf plugin install ./examples/plugins/soulux-computer-control \\
+#       --plugin-root ~/.forest/plugins
+#
+# The capability list grows as tranches land — never gated on a "big
+# bang" install. Each tranche is independently testable.
+
+schema_version: 1
+name: soulux-computer-control
+display_name: "SoulUX Computer Control"
+version: "0.1.0"
+author: "Forest-Soul-Forge"
+license: "MIT"
+
+type: mcp_server
+
+# T1 declares the plugin's MAX side-effects ceiling. The actual mix
+# arrives with the tools — read tools (T2) are read_only; action tools
+# (T3) are external / network. The plugin-level side_effects field is
+# the upper bound for kit-tier governance; per-tool side_effects below
+# (added in T2/T3) are what the dispatcher actually checks.
+side_effects: external
+
+# Capability list — empty for T1 by design. Each tranche appends:
+#
+#   T2 adds:
+#     - mcp.soulux-computer-control.computer_screenshot
+#     - mcp.soulux-computer-control.computer_read_clipboard
+#
+#   T3 adds:
+#     - mcp.soulux-computer-control.computer_click
+#     - mcp.soulux-computer-control.computer_type
+#     - mcp.soulux-computer-control.computer_run_app
+#     - mcp.soulux-computer-control.computer_launch_url
+capabilities: []
+
+# Per-tool approval map. Empty for T1; populated as tools land.
+# Per ADR-0048 Decision 2:
+#   computer_screenshot, computer_read_clipboard → false (read_only)
+#   computer_click, computer_type, computer_run_app, computer_launch_url
+#       → true (external — operator approves each call by default;
+#               per-(agent, plugin) grants can bypass per ADR-0043 #1)
+requires_human_approval: {}
+
+entry_point:
+  type: stdio
+  # The server stub at ./server raises NotImplementedError until T2.
+  # Operators MUST replace this sha256 with the real one after T2
+  # lands an actual server binary; the loader rejects mismatched
+  # checksums by design (ADR-0043 supply-chain-swap defense).
+  command: ./server
+  sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+
+# No required secrets — macOS automation tools don't need auth.
+# The osascript / screencapture / pbpaste binaries are system-level
+# and reach the running user's session via standard macOS
+# credentials.
+required_secrets: []

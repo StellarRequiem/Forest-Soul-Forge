@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+# SoulUX Computer Control — server stub.
+#
+# T1 (B159) scaffold. The real MCP server arrives in T2 + T3:
+#
+#   T2 implements computer_screenshot.v1 + computer_read_clipboard.v1
+#       (wraps `screencapture -x` and `pbpaste`)
+#   T3 implements computer_click.v1 + computer_type.v1 +
+#       computer_run_app.v1 + computer_launch_url.v1
+#       (wraps `osascript` / `cliclick` / `open`)
+#
+# Until then, running this stub raises immediately with a pointer to
+# the tranche roadmap so any installation attempt fails loudly rather
+# than silently exposing an empty server.
+#
+# When T2 ships, this file becomes a real MCP server (stdio JSON-RPC
+# per ADR-0043). The operator MUST recompute the sha256 in plugin.yaml
+# after replacing this stub — the plugin loader rejects mismatched
+# checksums (ADR-0043 supply-chain-swap defense).
+
+import sys
+
+
+def main() -> int:
+    sys.stderr.write(
+        "soulux-computer-control: T1 scaffold — server not implemented.\n"
+        "T2 lands the read tools (computer_screenshot.v1 +\n"
+        "computer_read_clipboard.v1); T3 lands the action tools.\n"
+        "See examples/plugins/soulux-computer-control/README.md for\n"
+        "the tranche roadmap.\n"
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
