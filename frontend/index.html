@@ -457,9 +457,46 @@
 
     <!-- ========================================================== -->
     <!-- Chat tab — ADR-003Y Y6 multi-turn conversations             -->
+    <!-- ADR-0047 (B147 T1): mode toggle Assistant / Rooms.          -->
     <!-- ========================================================== -->
     <section class="tab-panel" data-panel="chat" role="tabpanel" hidden>
-      <div class="chat-grid">
+      <!-- Mode toggle: Assistant (single-agent persistent) vs Rooms
+           (multi-agent ADR-003Y, default until T2-T6 land). -->
+      <div class="chat-mode-toggle">
+        <button class="chat-mode-btn" data-mode="rooms" id="chat-mode-rooms" type="button">Rooms</button>
+        <button class="chat-mode-btn" data-mode="assistant" id="chat-mode-assistant" type="button">Assistant</button>
+      </div>
+
+      <!-- Mode pane: assistant (placeholder until T2-T6 implementation) -->
+      <div id="chat-pane-assistant" class="chat-pane-assistant" hidden>
+        <div class="panel">
+          <div class="panel__header">
+            <h2 class="panel__title">Persistent Assistant</h2>
+            <div class="panel__actions">
+              <span class="muted">ADR-0047 / B147 T1 — mode scaffold</span>
+            </div>
+          </div>
+          <div class="panel__body">
+            <p class="muted">
+              <strong>This mode is a scaffold.</strong> The Persistent Assistant
+              UX (single-agent, persistent context, computer-control allowances)
+              is locked in <a href="#" id="chat-pane-assistant-adr-link">ADR-0047</a>
+              and <a href="#" id="chat-pane-assistant-adr2-link">ADR-0048</a>.
+              Implementation tranches T2-T6 add: birth flow, conversation
+              auto-init, settings panel, memory integration, role definition.
+              For now, switch to <strong>Rooms</strong> for the multi-agent
+              chat substrate (ADR-003Y).
+            </p>
+            <p class="muted" style="margin-top: 12px; font-size: 0.85em;">
+              Next tranche: <code>ADR-0047 T2</code> — first-use birth flow
+              with trait sliders. ETA: 1 burst.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mode pane: rooms (existing multi-agent UI) -->
+      <div id="chat-pane-rooms" class="chat-grid">
         <!-- Left rail: conversation list grouped by domain -->
         <div class="chat-rail">
           <div class="panel">

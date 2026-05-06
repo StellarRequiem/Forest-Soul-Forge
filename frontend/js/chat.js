@@ -25,6 +25,10 @@ const ACTIVE_KEY = "fsf.chat.activeConv";
 // page reloads. Default false — the rail stays clean by default; toggle
 // to surface archived rooms (e.g., to restore one or audit history).
 const SHOW_ARCHIVED_KEY = "fsf.chat.showArchived";
+// ADR-0047 T1 (B147): persist Chat-tab mode (rooms vs assistant).
+// Default "rooms" until T2-T6 build out the assistant flow; T1 is
+// scaffold only. Operator can toggle now to confirm the mode wires.
+const CHAT_MODE_KEY = "fsf.chat.mode";
 
 let activeConversationId = null;
 let activeConversation = null;   // ConversationOut row
@@ -37,6 +41,7 @@ let showArchived = false;         // T19 (B145): rail filter state
 // Public entry point
 // ---------------------------------------------------------------------------
 export async function start() {
+  wireChatModeToggle();       // ADR-0047 T1 (B147)
   wireRoomsRefresh();
   wireShowArchivedToggle();   // T19 (B145)
   wireNewRoomDialog();
@@ -183,6 +188,41 @@ function renderRooms(conversations) {
 
 function wireRoomsRefresh() {
   document.getElementById("chat-rooms-refresh")?.addEventListener("click", () => loadRooms());
+}
+
+// ADR-0047 T1 (B147): wire the Chat-tab mode toggle (Assistant / Rooms).
+// T1 is the scaffold — the assistant pane shows a placeholder. T2-T6
+// add: birth flow, conversation auto-init, settings panel, memory
+// integration, role definition. Mode preference persists in localStorage.
+function wireChatModeToggle() {
+  const roomsBtn = document.getElementById("chat-mode-rooms");
+  const assistantBtn = document.getElementById("chat-mode-assistant");
+  if (!roomsBtn || !assistantBtn) return;
+
+  const stored = localStorage.getItem(CHAT_MODE_KEY);
+  const initialMode = (stored === "assistant") ? "assistant" : "rooms";
+  showChatMode(initialMode);
+
+  roomsBtn.addEventListener("click", () => {
+    showChatMode("rooms");
+    localStorage.setItem(CHAT_MODE_KEY, "rooms");
+  });
+  assistantBtn.addEventListener("click", () => {
+    showChatMode("assistant");
+    localStorage.setItem(CHAT_MODE_KEY, "assistant");
+  });
+}
+
+function showChatMode(mode) {
+  const roomsPane = document.getElementById("chat-pane-rooms");
+  const assistantPane = document.getElementById("chat-pane-assistant");
+  const roomsBtn = document.getElementById("chat-mode-rooms");
+  const assistantBtn = document.getElementById("chat-mode-assistant");
+  const isAssistant = mode === "assistant";
+  if (roomsPane) roomsPane.hidden = isAssistant;
+  if (assistantPane) assistantPane.hidden = !isAssistant;
+  if (roomsBtn) roomsBtn.classList.toggle("chat-mode-btn--active", !isAssistant);
+  if (assistantBtn) assistantBtn.classList.toggle("chat-mode-btn--active", isAssistant);
 }
 
 // T19 (B145): the "archived" toggle in the rail header. Defaults off

@@ -1637,6 +1637,44 @@ body { padding-bottom: 56px; }
   user-select: none;
 }
 .chat-rooms__filter input[type="checkbox"] { margin: 0; }
+
+/* ADR-0047 T1 (B147): Chat-tab mode toggle (Assistant / Rooms).
+   Pill-style segmented control at the top of the Chat tab. Persists
+   selection in localStorage. T1 = scaffold; T2-T6 build out the
+   actual assistant UX. */
+.chat-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border, #2a3340);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 0 0 12px 0;
+  background: var(--bg-soft, #161c25);
+}
+.chat-mode-btn {
+  background: transparent;
+  border: none;
+  padding: 6px 16px;
+  cursor: pointer;
+  color: var(--fg-faint, #6c7682);
+  font-size: 0.9em;
+  transition: background 0.12s, color 0.12s;
+}
+.chat-mode-btn:hover {
+  background: var(--bg-hover, #1c2330);
+  color: var(--fg, #c8d0db);
+}
+.chat-mode-btn--active {
+  background: var(--accent, #4a90e2);
+  color: var(--accent-fg, #fff);
+}
+.chat-mode-btn--active:hover {
+  background: var(--accent, #4a90e2);
+  color: var(--accent-fg, #fff);
+}
+.chat-pane-assistant {
+  /* Same panel-pane treatment as the rooms grid; placeholder for now. */
+  max-width: 720px;
+}
 .chat-rooms__item-id {
   font-family: var(--mono, monospace);
   font-size: 0.85em;
