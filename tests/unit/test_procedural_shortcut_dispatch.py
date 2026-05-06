@@ -53,6 +53,7 @@ from forest_soul_forge.tools.builtin.llm_think import LlmThinkTool
 from forest_soul_forge.tools.dispatcher import (
     EVENT_DISPATCHED,
     EVENT_FAILED,
+    EVENT_SHORTCUT,
     EVENT_SUCCEEDED,
     DispatchFailed,
     DispatchSucceeded,
@@ -481,9 +482,13 @@ class TestShortcutSubstitute:
         assert len(table.record_match_calls) == 1
         assert table.record_match_calls[0][0] == "sc-A"
 
-    def test_emits_dispatched_then_succeeded_with_shortcut_metadata(
+    def test_emits_single_shortcut_event_with_full_metadata(
         self, tmp_path,
     ):
+        """ADR-0054 T4 (Burst 181): a SHORTCUT verdict produces one
+        ``tool_call_shortcut`` event, not the dispatched+succeeded
+        pair that T3 temporarily emitted with shortcut_applied
+        metadata."""
         candidate = _FakeShortcut(
             shortcut_id="sc-B", action_kind="response",
             action_payload={"response": "ok"},
@@ -493,7 +498,7 @@ class TestShortcutSubstitute:
         cpath = tmp_path / "constitution.yaml"
         _write_llm_think_constitution(cpath)
 
-        _run(d.dispatch(
+        outcome = _run(d.dispatch(
             instance_id="i1", agent_dna="d" * 12, role="assistant",
             genre="companion", session_id="s1",
             constitution_path=cpath,
@@ -501,15 +506,24 @@ class TestShortcutSubstitute:
             args={"prompt": "hi", "task_kind": "conversation"},
             provider=_ProviderWithEmbed(),
         ))
+        assert isinstance(outcome, DispatchSucceeded)
         events = chain.read_all()
         types = [e.event_type for e in events]
-        # The last two events should be the dispatched + succeeded pair
-        assert types[-2:] == [EVENT_DISPATCHED, EVENT_SUCCEEDED]
-        for e in events[-2:]:
-            assert e.event_data.get("shortcut_applied") is True
-            assert e.event_data.get("shortcut_id") == "sc-B"
-            assert e.event_data.get("shortcut_action_kind") == "response"
-            assert "shortcut_similarity" in e.event_data
+        # ONE shortcut event, NO dispatched+succeeded for this dispatch
+        assert types[-1] == EVENT_SHORTCUT
+        assert EVENT_DISPATCHED not in types
+        assert EVENT_SUCCEEDED not in types
+        # Full metadata payload
+        e = events[-1]
+        assert e.event_data["tool_key"] == "llm_think.v1"
+        assert e.event_data["shortcut_id"] == "sc-B"
+        assert e.event_data["shortcut_action_kind"] == "response"
+        assert e.event_data["shortcut_similarity"] == pytest.approx(0.96)
+        assert e.event_data["tokens_used"] == 0
+        assert e.event_data["call_count"] == 1
+        assert e.event_data["side_effects"] == "read_only"
+        assert "args_digest" in e.event_data
+        assert e.event_data["result_digest"] == outcome.result.result_digest()
 
     def test_unsupported_action_kind_returns_failed(self, tmp_path):
         candidate = _FakeShortcut(
@@ -532,9 +546,14 @@ class TestShortcutSubstitute:
         assert isinstance(outcome, DispatchFailed)
         assert outcome.exception_type == "ShortcutUnsupportedKind"
         events = chain.read_all()
+        # ShortcutUnsupportedKind emits a regular tool_call_failed
+        # (not tool_call_shortcut) because the substitution itself
+        # failed. The shortcut metadata stays attached so the
+        # operator can find the malformed row.
         assert events[-1].event_type == EVENT_FAILED
-        assert events[-1].event_data["shortcut_applied"] is True
+        assert events[-1].event_data["shortcut_id"] == "sc-C"
         assert events[-1].event_data["shortcut_action_kind"] == "tool_call"
+        assert events[-1].event_data["exception_type"] == "ShortcutUnsupportedKind"
 
     def test_counter_still_increments_on_shortcut(self, tmp_path):
         """A shortcut hit costs a slot — otherwise an adversarial pattern
@@ -609,3 +628,104 @@ class TestShortcutSubstitute:
         # search was never called (master switch off short-circuits
         # before embed_situation)
         assert table.search_calls == []
+
+
+# ---------------------------------------------------------------------------
+# T4 — KNOWN_EVENT_TYPES registration + chain integrity
+# ---------------------------------------------------------------------------
+
+class TestShortcutEventRegistration:
+    def test_event_type_registered_in_audit_chain(self):
+        from forest_soul_forge.core.audit_chain import KNOWN_EVENT_TYPES
+        assert "tool_call_shortcut" in KNOWN_EVENT_TYPES
+
+    def test_dispatcher_constant_matches_chain_registration(self):
+        """EVENT_SHORTCUT in dispatcher.py must equal the string
+        registered in KNOWN_EVENT_TYPES — drift between the two
+        would cause verification warnings on every shortcut."""
+        from forest_soul_forge.core.audit_chain import KNOWN_EVENT_TYPES
+        assert EVENT_SHORTCUT in KNOWN_EVENT_TYPES
+        assert EVENT_SHORTCUT == "tool_call_shortcut"
+
+    def test_chain_integrity_after_shortcut_event(self, tmp_path):
+        """A tool_call_shortcut event must hash-link cleanly with
+        surrounding entries — the chain's verify() should pass."""
+        from forest_soul_forge.core.audit_chain import AuditChain
+        candidate = _FakeShortcut(
+            shortcut_id="sc-F", action_kind="response",
+            action_payload={"response": "verified"},
+        )
+        table = _FakeShortcutsTable(return_value=[(candidate, 0.97)])
+        d, chain, _ = _make_real_dispatcher(tmp_path, table=table)
+        cpath = tmp_path / "constitution.yaml"
+        _write_llm_think_constitution(cpath)
+
+        # Two shortcut hits + verify the chain.
+        for n in (1, 2):
+            _run(d.dispatch(
+                instance_id="i1", agent_dna="d" * 12, role="assistant",
+                genre="companion", session_id="s1",
+                constitution_path=cpath,
+                tool_name="llm_think", tool_version="1",
+                args={"prompt": f"q{n}", "task_kind": "conversation"},
+                provider=_ProviderWithEmbed(),
+            ))
+        # Re-open to force fresh read-from-disk verification.
+        fresh = AuditChain(chain.path)
+        report = fresh.verify()
+        assert report.ok is True, report
+        # And exactly two shortcut events landed (one per dispatch).
+        events = fresh.read_all()
+        shortcuts = [e for e in events if e.event_type == EVENT_SHORTCUT]
+        assert len(shortcuts) == 2
+
+    def test_record_call_status_is_shortcut(self, tmp_path):
+        """The registry tool_calls mirror records status='shortcut'
+        for shortcut hits so an operator's per-session roll-up can
+        filter on it explicitly without parsing audit data."""
+        from forest_soul_forge.core.audit_chain import AuditChain
+        candidate = _FakeShortcut(
+            shortcut_id="sc-G", action_kind="response",
+            action_payload={"response": "ok"},
+        )
+        table = _FakeShortcutsTable(return_value=[(candidate, 0.97)])
+
+        recorded_calls: list[dict] = []
+        def record(**kwargs):
+            recorded_calls.append(kwargs)
+
+        chain = AuditChain(tmp_path / "chain.jsonl")
+        counters: dict[tuple[str, str], int] = {}
+
+        def get_count(iid, sid): return counters.get((iid, sid), 0)
+        def inc_count(iid, sid, when):
+            counters[(iid, sid)] = counters.get((iid, sid), 0) + 1
+            return counters[(iid, sid)]
+
+        registry = ToolRegistry()
+        registry.register(LlmThinkTool())
+
+        d = ToolDispatcher(
+            registry=registry,
+            audit=chain,
+            counter_get=get_count,
+            counter_inc=inc_count,
+            record_call=record,
+            procedural_shortcuts_table=table,
+            procedural_shortcut_enabled_fn=lambda: True,
+            procedural_cosine_floor_fn=lambda: 0.5,
+            procedural_reinforcement_floor_fn=lambda: 0,
+        )
+        cpath = tmp_path / "constitution.yaml"
+        _write_llm_think_constitution(cpath)
+        _run(d.dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="assistant",
+            genre="companion", session_id="s1",
+            constitution_path=cpath,
+            tool_name="llm_think", tool_version="1",
+            args={"prompt": "hi", "task_kind": "conversation"},
+            provider=_ProviderWithEmbed(),
+        ))
+        assert len(recorded_calls) == 1
+        assert recorded_calls[0]["status"] == "shortcut"
+        assert recorded_calls[0]["tool_key"] == "llm_think.v1"

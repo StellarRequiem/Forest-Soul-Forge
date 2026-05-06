@@ -160,6 +160,21 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # Verifier's track record (§4.2) start from this event type.
     #   - verifier_scan_completed: a Verifier completed a scan pass
     "verifier_scan_completed",
+    # ADR-0054 T4 (Burst 181) — procedural-shortcut substitution.
+    # Emitted INSTEAD of the dispatched + succeeded pair when the
+    # dispatcher's ProceduralShortcutStep matches a stored
+    # situation→action shortcut. A shortcut isn't a tool execution —
+    # the underlying tool (typically llm_think.v1) never ran — so a
+    # distinct event type makes the substitution explicitly visible
+    # rather than burying it in metadata on a tool_call_succeeded.
+    # Operators querying "what did this agent do?" need to OR
+    # tool_call_succeeded with tool_call_shortcut for the complete
+    # picture; that's deliberate so the difference between an
+    # LLM-mediated answer and a recorded-pattern answer stays
+    # legible. event_data carries: tool_key, instance_id, session_id,
+    # shortcut_id, shortcut_similarity, shortcut_action_kind,
+    # args_digest, result_digest, tokens_used, call_count.
+    "tool_call_shortcut",
 })
 
 

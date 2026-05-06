@@ -89,6 +89,15 @@ EVENT_PENDING_APPROVAL = "tool_call_pending_approval"
 #   pending_approval → rejected   (no replay; tool never ran)
 EVENT_APPROVED = "tool_call_approved"
 EVENT_REJECTED = "tool_call_rejected"
+# ADR-0054 T4 (Burst 181) — single audit event emitted instead of the
+# dispatched + succeeded pair when ProceduralShortcutStep matches a
+# stored situation→action shortcut. A shortcut isn't a tool execution
+# so a distinct event type makes the substitution explicitly visible
+# rather than buried in metadata. event_data carries: tool_key,
+# instance_id, session_id, shortcut_id, shortcut_similarity,
+# shortcut_action_kind, args_digest, result_digest, tokens_used,
+# call_count, side_effects, applied_rules.
+EVENT_SHORTCUT = "tool_call_shortcut"
 
 
 # ---------------------------------------------------------------------------
@@ -1028,42 +1037,43 @@ class ToolDispatcher:
         candidate: Any,
         similarity: float,
     ) -> "DispatchSucceeded":
-        """ADR-0054 T3 (Burst 180) — substitute the recorded action.
+        """ADR-0054 T3 (Burst 180) + T4 (Burst 181) — substitute the
+        recorded action and emit a single ``tool_call_shortcut``
+        audit event.
 
-        Called when ``ProceduralShortcutStep`` returns SHORTCUT.
-        Mirrors the structure of the GO leg:
+        Called when ``ProceduralShortcutStep`` returns SHORTCUT:
 
-          1. Increment the counter (a shortcut still costs a slot —
-             otherwise an adversarial pattern would bypass
+          1. Counter increment (a shortcut still costs a slot —
+             otherwise an adversarial pattern could bypass
              max_calls_per_session by always matching).
-          2. Emit ``tool_call_dispatched`` with shortcut_applied
-             metadata so an operator can already grep the chain for
-             shortcut hits before T4's dedicated event lands.
-          3. Build a synthetic ToolResult from the recorded
+          2. Build a synthetic ToolResult from the recorded
              ``action_payload``. For action_kind="response" the
              payload is ``{"response": "...", ...}`` matching the
-             llm_think.v1 output shape, so callers don't notice a
+             llm_think.v1 output shape so callers don't notice a
              difference.
-          4. Emit ``tool_call_succeeded`` with the same shortcut
-             metadata.
-          5. Update the shortcut row's last_matched_at +
-             last_matched_seq via ``record_match()`` so reinforcement
+          3. **T4 graduation:** emit ONE
+             ``tool_call_shortcut`` event with the full picture —
+             tool_key, args_digest, result_digest, shortcut_id,
+             shortcut_similarity, shortcut_action_kind,
+             tokens_used, call_count, side_effects, applied_rules.
+             Replaces the dispatched + succeeded pair that T3
+             temporarily emitted with shortcut_applied=True
+             metadata. Why a dedicated type: a shortcut isn't a
+             tool execution — the underlying tool never ran — so
+             a distinct event keeps the substitution explicitly
+             visible rather than buried in metadata. Operators
+             querying "what did this agent do?" need to OR
+             tool_call_succeeded + tool_call_shortcut for the
+             complete picture; that asymmetry IS the legibility
+             we want.
+          4. ``record_match()`` updates last_matched_at +
+             last_matched_seq on the row so reinforcement
              telemetry (T5) can see this was used.
 
-        Action-kind handling: T3 only substitutes for ``"response"``.
-        ``"tool_call"`` (substituting one tool dispatch for another)
-        and ``"no_op"`` (suppress the call entirely) are deferred to
-        a later sub-tranche — they would change the audit shape
-        (a tool_call dispatch could turn into a different tool's
-        events; a no_op needs to NOT increment the counter). For
-        anything other than "response", silently fall through to
-        the normal execute leg by raising and letting the dispatcher
-        retry without the shortcut. (We don't actually retry — at
-        this point the pipeline already returned SHORTCUT; the
-        cleanest fallback is to emit a regular failed event with
-        a clear reason. Operators inspecting the chain will see
-        ``shortcut_unsupported_kind`` in the failed metadata and
-        know exactly which row needs operator attention.)
+        Action-kind handling: T3/T4 substitute for ``"response"``.
+        ``"tool_call"`` and ``"no_op"`` emit a ``tool_call_failed``
+        with ``ShortcutUnsupportedKind`` so the operator can find +
+        fix the row.
         """
         action_kind = getattr(candidate, "action_kind", None)
         action_payload = getattr(candidate, "action_payload", None) or {}
@@ -1074,20 +1084,13 @@ class ToolDispatcher:
             dctx.instance_id, dctx.session_id, when,
         ))
 
-        # Common metadata header for both audit events. T4 will
-        # graduate to a dedicated event type but the keys here stay
-        # stable so an operator's grep keeps working post-graduation.
-        shortcut_meta = {
-            "shortcut_applied": True,
-            "shortcut_id": shortcut_id,
-            "shortcut_similarity": round(float(similarity), 6),
-            "shortcut_action_kind": action_kind,
-        }
-
         if action_kind != "response":
-            # Out-of-scope action_kind for T3. Emit a failed event
-            # with a precise reason so the operator can find + fix
-            # the row.
+            # Out-of-scope action_kind. The failed event still
+            # carries the shortcut metadata so an operator
+            # filtering on shortcut_id can locate the row that
+            # tripped this (the failed event is NOT a
+            # tool_call_shortcut — it's a regular tool_call_failed
+            # because the substitution itself failed).
             failed_entry = self.audit.append(
                 EVENT_FAILED,
                 {
@@ -1098,9 +1101,11 @@ class ToolDispatcher:
                     "exception_message": (
                         f"shortcut_id={shortcut_id} has action_kind="
                         f"{action_kind!r} which is not yet supported "
-                        f"by the dispatcher (T3 covers 'response' only)"
+                        f"by the dispatcher (response only)"
                     ),
-                    **shortcut_meta,
+                    "shortcut_id": shortcut_id,
+                    "shortcut_similarity": round(float(similarity), 6),
+                    "shortcut_action_kind": action_kind,
                 },
                 agent_dna=dctx.agent_dna,
             )
@@ -1121,10 +1126,8 @@ class ToolDispatcher:
                 audit_seq=failed_entry.seq,
             )
 
-        # Build the synthetic dispatched event. resolved/applied_rules
-        # may not be populated here if the upstream gates ran on a
-        # tool that didn't surface them — but for llm_think.v1 they
-        # will be set (ConstraintResolutionStep ran).
+        # Build the synthetic ToolResult first — its result_digest
+        # lands in the audit event below.
         side_effects = (
             (dctx.resolved.side_effects if dctx.resolved else None)
             or (dctx.tool.side_effects if dctx.tool else "read_only")
@@ -1132,27 +1135,7 @@ class ToolDispatcher:
         applied_rules = (
             list(dctx.resolved.applied_rules) if dctx.resolved else []
         )
-        dispatched_entry = self.audit.append(
-            EVENT_DISPATCHED,
-            {
-                "tool_key": dctx.key,
-                "instance_id": dctx.instance_id,
-                "session_id": dctx.session_id,
-                "args_digest": _digest(dctx.args),
-                "call_count": post_count,
-                "side_effects": side_effects,
-                "applied_rules": applied_rules,
-                **shortcut_meta,
-            },
-            agent_dna=dctx.agent_dna,
-        )
 
-        # Build the synthetic ToolResult. The payload is the recorded
-        # action_payload — for action_kind="response" it should
-        # contain at minimum a "response" string. Defensive: if a
-        # malformed row is missing the field, surface an empty
-        # response rather than crashing — the failed-vs-empty
-        # distinction is operator-visible via the chain.
         response_text = ""
         if isinstance(action_payload, dict):
             response_text = str(action_payload.get("response") or "")
@@ -1163,9 +1146,9 @@ class ToolDispatcher:
             "elapsed_ms": 0,
         }
         # Preserve any extra fields the recorded payload carried
-        # (e.g., model identifier from the original dispatch) so the
-        # operator's downstream consumers see them, but never let
-        # them clobber the four canonical keys above.
+        # (e.g., model identifier from the original dispatch) so
+        # downstream consumers see them, but never let them clobber
+        # the four canonical keys above.
         if isinstance(action_payload, dict):
             for k, v in action_payload.items():
                 if k not in synthetic_output:
@@ -1187,41 +1170,55 @@ class ToolDispatcher:
             ),
         )
 
-        succeeded_entry = self.audit.append(
-            EVENT_SUCCEEDED,
+        # T4 — single dedicated event. Carries everything an
+        # operator needs to reconstruct the substitution: input
+        # digest, recorded output digest, the shortcut row that
+        # matched, and counter accounting. No
+        # tool_call_dispatched + tool_call_succeeded pair anymore.
+        shortcut_entry = self.audit.append(
+            EVENT_SHORTCUT,
             {
-                "tool_key": dctx.key,
-                "instance_id": dctx.instance_id,
-                "session_id": dctx.session_id,
-                "dispatched_seq": dispatched_entry.seq,
-                "result_digest": result.result_digest(),
-                "tokens_used": result.tokens_used,
-                "cost_usd": result.cost_usd,
-                "side_effect_summary": result.side_effect_summary,
-                **shortcut_meta,
+                "tool_key":             dctx.key,
+                "instance_id":          dctx.instance_id,
+                "session_id":           dctx.session_id,
+                "args_digest":          _digest(dctx.args),
+                "result_digest":        result.result_digest(),
+                "shortcut_id":          shortcut_id,
+                "shortcut_similarity":  round(float(similarity), 6),
+                "shortcut_action_kind": action_kind,
+                "tokens_used":          result.tokens_used,
+                "call_count":           post_count,
+                "side_effects":         side_effects,
+                "applied_rules":        applied_rules,
+                "side_effect_summary":  result.side_effect_summary,
             },
             agent_dna=dctx.agent_dna,
         )
+        # Mirror to the registry tool_calls table so per-session
+        # roll-ups still account for this dispatch (status="shortcut"
+        # so the operator can filter shortcut hits explicitly without
+        # parsing audit events).
         self._record_call_safe(
-            audit_seq=succeeded_entry.seq,
+            audit_seq=shortcut_entry.seq,
             instance_id=dctx.instance_id,
             session_id=dctx.session_id,
             tool_key=dctx.key,
-            status="succeeded",
+            status="shortcut",
             tokens_used=result.tokens_used,
             cost_usd=result.cost_usd,
             side_effect_summary=result.side_effect_summary,
-            finished_at=succeeded_entry.timestamp,
+            finished_at=shortcut_entry.timestamp,
         )
 
         # Update last_matched_at + last_matched_seq on the row so
         # reinforcement tools (T5) and the chat-tab thumbs surface
-        # see this match. Best-effort — a write failure here doesn't
-        # invalidate the dispatch the operator already saw succeed.
+        # see this match. Best-effort — a write failure here
+        # doesn't invalidate the dispatch the operator already saw
+        # succeed via the chain entry.
         try:
             if shortcut_id and self.procedural_shortcuts_table is not None:
                 self.procedural_shortcuts_table.record_match(
-                    shortcut_id, at_seq=succeeded_entry.seq,
+                    shortcut_id, at_seq=shortcut_entry.seq,
                 )
         except Exception:
             pass
@@ -1230,7 +1227,7 @@ class ToolDispatcher:
             tool_key=dctx.key,
             result=result,
             call_count_after=post_count,
-            audit_seq=succeeded_entry.seq,
+            audit_seq=shortcut_entry.seq,
         )
 
     def _load_plugin_grants_view(
