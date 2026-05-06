@@ -467,30 +467,67 @@
         <button class="chat-mode-btn" data-mode="assistant" id="chat-mode-assistant" type="button">Assistant</button>
       </div>
 
-      <!-- Mode pane: assistant (placeholder until T2-T6 implementation) -->
+      <!-- Mode pane: assistant (ADR-0047 T2 — birth flow + state machine) -->
       <div id="chat-pane-assistant" class="chat-pane-assistant" hidden>
         <div class="panel">
           <div class="panel__header">
             <h2 class="panel__title">Persistent Assistant</h2>
             <div class="panel__actions">
-              <span class="muted">ADR-0047 / B147 T1 — mode scaffold</span>
+              <span class="muted" id="chat-assistant-status">checking…</span>
             </div>
           </div>
           <div class="panel__body">
-            <p class="muted">
-              <strong>This mode is a scaffold.</strong> The Persistent Assistant
-              UX (single-agent, persistent context, computer-control allowances)
-              is locked in <a href="#" id="chat-pane-assistant-adr-link">ADR-0047</a>
-              and <a href="#" id="chat-pane-assistant-adr2-link">ADR-0048</a>.
-              Implementation tranches T2-T6 add: birth flow, conversation
-              auto-init, settings panel, memory integration, role definition.
-              For now, switch to <strong>Rooms</strong> for the multi-agent
-              chat substrate (ADR-003Y).
-            </p>
-            <p class="muted" style="margin-top: 12px; font-size: 0.85em;">
-              Next tranche: <code>ADR-0047 T2</code> — first-use birth flow
-              with trait sliders. ETA: 1 burst.
-            </p>
+            <!-- B154 / ADR-0047 T2: birth flow. Shown when no
+                 assistant instance is stored in localStorage. -->
+            <div id="chat-assistant-birth" hidden>
+              <p>No assistant born yet for this operator. Birth one to start
+                using the persistent-assistant chat.</p>
+              <div style="margin-top: 16px; max-width: 480px;">
+                <label class="lbl" for="chat-assistant-name">Assistant name</label>
+                <input type="text" id="chat-assistant-name" class="inp"
+                       placeholder="e.g., Ada / Forester / Companion / your call"
+                       maxlength="48" />
+                <div class="muted" style="margin-top: 6px; font-size: 0.85em;">
+                  Genre: <code>companion</code> (locked — read-only risk floor,
+                  private memory ceiling, ADR-0038 harm-model safeguards).
+                  Role: <code>operator_companion</code> (interim — dedicated
+                  <code>assistant</code> role coming in a follow-up burst).
+                </div>
+              </div>
+              <div style="margin-top: 16px;">
+                <button class="btn" id="chat-assistant-birth-btn" type="button">
+                  Birth my assistant
+                </button>
+                <span class="muted" id="chat-assistant-birth-feedback"
+                      style="margin-left: 12px;"></span>
+              </div>
+            </div>
+
+            <!-- Shown when an assistant instance IS stored. T3 will replace
+                 this with the actual chat surface. -->
+            <div id="chat-assistant-ready" hidden>
+              <p><strong>Assistant ready.</strong>
+                <code id="chat-assistant-instance-id" style="font-size: 0.85em;"></code>
+              </p>
+              <p class="muted" style="margin-top: 12px;">
+                Chat surface coming in <code>ADR-0047 T3</code> — auto-creates
+                a single persistent conversation room and wires the composer
+                to <code>POST /conversations/{id}/turns</code> against the
+                assistant. ETA: 1 burst.
+              </p>
+              <p class="muted" style="margin-top: 12px;">
+                In the meantime: this assistant is a regular agent. Switch
+                to <strong>Rooms</strong> mode + <strong>+ new</strong> to
+                create a room with the assistant as participant.
+              </p>
+              <div style="margin-top: 16px;">
+                <button class="btn btn--ghost btn--sm" id="chat-assistant-reset-btn"
+                        type="button"
+                        title="Forget this instance_id (does NOT archive the agent — operator does that from the Agents tab)">
+                  reset assistant binding
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

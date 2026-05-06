@@ -1672,8 +1672,12 @@ body { padding-bottom: 56px; }
   color: var(--accent-fg, #fff);
 }
 .chat-pane-assistant {
-  /* Same panel-pane treatment as the rooms grid; placeholder for now. */
+  /* Same panel-pane treatment as the rooms grid. */
   max-width: 720px;
+}
+.chat-pane-assistant .inp {
+  width: 100%;
+  max-width: 360px;
 }
 .chat-rooms__item-id {
   font-family: var(--mono, monospace);

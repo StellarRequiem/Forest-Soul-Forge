@@ -29,6 +29,13 @@ const SHOW_ARCHIVED_KEY = "fsf.chat.showArchived";
 // Default "rooms" until T2-T6 build out the assistant flow; T1 is
 // scaffold only. Operator can toggle now to confirm the mode wires.
 const CHAT_MODE_KEY = "fsf.chat.mode";
+// ADR-0047 T2 (B154): operator's bound assistant agent instance_id.
+// Stored after first-use birth so subsequent loads jump straight to
+// the assistant chat (T3) instead of re-prompting birth. Operator
+// can clear via the "reset assistant binding" button — that removes
+// the binding but does NOT archive the agent (archival is operator-
+// driven from the Agents tab, per Forest's audit-chain principle).
+const ASSISTANT_INSTANCE_KEY = "fsf.chat.assistantInstanceId";
 
 let activeConversationId = null;
 let activeConversation = null;   // ConversationOut row
@@ -42,6 +49,7 @@ let showArchived = false;         // T19 (B145): rail filter state
 // ---------------------------------------------------------------------------
 export async function start() {
   wireChatModeToggle();       // ADR-0047 T1 (B147)
+  wireAssistantBirthFlow();   // ADR-0047 T2 (B154)
   wireRoomsRefresh();
   wireShowArchivedToggle();   // T19 (B145)
   wireNewRoomDialog();
@@ -223,6 +231,115 @@ function showChatMode(mode) {
   if (assistantPane) assistantPane.hidden = !isAssistant;
   if (roomsBtn) roomsBtn.classList.toggle("chat-mode-btn--active", !isAssistant);
   if (assistantBtn) assistantBtn.classList.toggle("chat-mode-btn--active", isAssistant);
+  // T2 (B154): when entering assistant mode, refresh which pane (birth /
+  // ready) to show based on whether an assistant instance is bound.
+  if (isAssistant) refreshAssistantPane();
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0047 T2 (B154) — Assistant birth flow + bound-instance state
+// ---------------------------------------------------------------------------
+// Two-state machine inside the assistant pane:
+//
+//   [no assistant bound]  →  birth prompt (name input, genre locked, button)
+//                              ↓ on click → POST /birth → store instance_id
+//   [assistant bound]     →  "ready" panel with instance id + reset button
+//                              ↑ on reset → drop binding, return to birth prompt
+//
+// T3 will replace the "ready" panel with the actual chat surface (auto-create
+// conversation, render turns, wire composer). T2 ships the state machine +
+// birth path so the binding is durable.
+
+function refreshAssistantPane() {
+  const status = document.getElementById("chat-assistant-status");
+  const birthSection = document.getElementById("chat-assistant-birth");
+  const readySection = document.getElementById("chat-assistant-ready");
+  if (!birthSection || !readySection) return;
+
+  const instanceId = localStorage.getItem(ASSISTANT_INSTANCE_KEY) || "";
+  if (instanceId) {
+    birthSection.hidden = true;
+    readySection.hidden = false;
+    if (status) status.textContent = `bound: ${instanceId.slice(0, 8)}…`;
+    const idEl = document.getElementById("chat-assistant-instance-id");
+    if (idEl) idEl.textContent = instanceId;
+  } else {
+    birthSection.hidden = false;
+    readySection.hidden = true;
+    if (status) status.textContent = "no assistant bound";
+  }
+}
+
+function wireAssistantBirthFlow() {
+  // Birth button.
+  const birthBtn = document.getElementById("chat-assistant-birth-btn");
+  if (birthBtn) {
+    birthBtn.addEventListener("click", async () => {
+      const nameEl = document.getElementById("chat-assistant-name");
+      const feedback = document.getElementById("chat-assistant-birth-feedback");
+      const name = (nameEl?.value || "").trim();
+      if (!name) {
+        if (feedback) feedback.textContent = "Name required.";
+        return;
+      }
+      birthBtn.disabled = true;
+      if (feedback) feedback.textContent = "Birthing…";
+      try {
+        // Interim: use operator_companion role (existing in trait_tree
+        // + constitution_templates). A follow-up burst defines a
+        // dedicated `assistant` role per ADR-0047 Decision 2.
+        const conv = await writeCall("/birth", {
+          profile: {
+            role: "operator_companion",
+            trait_values: {},
+            domain_weight_overrides: {},
+          },
+          agent_name: name,
+          agent_version: "v1",
+          enrich_narrative: false,
+        });
+        if (!conv?.instance_id) {
+          throw new Error("birth response missing instance_id");
+        }
+        localStorage.setItem(ASSISTANT_INSTANCE_KEY, conv.instance_id);
+        toast({
+          title: "Assistant born",
+          msg: `${name} (${conv.instance_id.slice(0, 8)}…)`,
+          kind: "info", ttl: 4000,
+        });
+        // Clear the name field so the prompt is clean if operator resets.
+        if (nameEl) nameEl.value = "";
+        refreshAssistantPane();
+      } catch (e) {
+        if (feedback) feedback.textContent = `birth failed: ${String(e.message || e).slice(0, 200)}`;
+        toast({
+          title: "Birth failed",
+          msg: String(e.message || e),
+          kind: "error", ttl: 8000,
+        });
+      } finally {
+        birthBtn.disabled = false;
+      }
+    });
+  }
+
+  // Reset button.
+  const resetBtn = document.getElementById("chat-assistant-reset-btn");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      if (!confirm(
+        "Forget this assistant binding?\n\nThe agent itself stays in your registry " +
+        "(archive it from the Agents tab if you want it gone). This only clears the " +
+        "frontend's localStorage pointer, returning the assistant pane to the birth prompt."
+      )) return;
+      localStorage.removeItem(ASSISTANT_INSTANCE_KEY);
+      toast({
+        title: "Binding cleared", msg: "agent itself preserved",
+        kind: "info", ttl: 3000,
+      });
+      refreshAssistantPane();
+    });
+  }
 }
 
 // T19 (B145): the "archived" toggle in the rail header. Defaults off
