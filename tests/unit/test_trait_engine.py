@@ -42,14 +42,14 @@ class TestLoading:
         assert len(engine.list_traits()) == 29
 
     def test_expected_role_count(self, engine: TraitEngine) -> None:
-        # 42 roles total:
+        # 43 roles total:
         #   5 originals + 9 swarm (ADR-0033) + 3 SW-track (ADR-0034)
         #   + 1 verifier (ADR-0036) + 24 Burst 124 role-expansion roles
-        #   (ADR-0044 §"role inventory")
+        #   (ADR-0044 §"role inventory") + 1 ADR-0047 assistant (B156)
         # Asserting the absolute count rather than a >= floor catches
         # accidental role duplication / typos in trait_tree.yaml at the
         # same time.
-        assert len(engine.roles) == 42
+        assert len(engine.roles) == 43
         # Spot-check one representative role from each tranche so a single
         # tranche-removal would surface here too.
         assert "network_watcher" in engine.roles       # original 5
@@ -57,6 +57,7 @@ class TestLoading:
         assert "log_lurker" in engine.roles            # ADR-0033 low swarm
         assert "vault_warden" in engine.roles          # ADR-0033 high swarm
         assert "system_architect" in engine.roles      # ADR-0034 SW-track
+        assert "assistant" in engine.roles             # ADR-0047 (B156)
         assert "code_reviewer" in engine.roles         # ADR-0034 SW-track
         assert "verifier_loop" in engine.roles         # ADR-0036 verifier
         # Burst 124 — one per tranche (8 tranches × ~3 roles each)

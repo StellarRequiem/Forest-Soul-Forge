@@ -2328,6 +2328,20 @@ archetypes:
       - memory_write.v1
       - timestamp_window.v1
 
+  # ADR-0047 Decision 2 (B156) — Persistent Assistant role kit. Mirrors
+  # day_companion (think + memory r/w + timestamp) — the assistant's
+  # constitutional kit is read-heavy + memory-anchored. Per ADR-0047
+  # T6 description: "defaults to read-heavy + memory". Computer-control
+  # tools (ADR-0048) layer on top via per-(agent, plugin) grants — they
+  # are NOT in this constitutional baseline because grants are revocable
+  # at any time without rebirthing the agent.
+  assistant:
+    standard_tools:
+      - llm_think.v1
+      - memory_recall.v1
+      - memory_write.v1
+      - timestamp_window.v1
+
   learning_partner:
     standard_tools:
       - llm_think.v1

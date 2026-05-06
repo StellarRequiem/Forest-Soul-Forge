@@ -325,12 +325,15 @@ function wireAssistantBirthFlow() {
       birthBtn.disabled = true;
       if (feedback) feedback.textContent = "Birthing…";
       try {
-        // Interim: use operator_companion role (existing in trait_tree
-        // + constitution_templates). A follow-up burst defines a
-        // dedicated `assistant` role per ADR-0047 Decision 2.
+        // ADR-0047 Decision 2 (B156): dedicated `assistant` role.
+        // Defined in config/trait_tree.yaml + constitution_templates.yaml
+        // + tool_catalog.yaml + claimed by companion-genre in genres.yaml.
+        // Inherits Companion-genre risk floor (read_only + local providers
+        // + private memory ceiling); computer-control capabilities (ADR-0048)
+        // layer on top via per-(agent, plugin) grants.
         const conv = await writeCall("/birth", {
           profile: {
-            role: "operator_companion",
+            role: "assistant",
             trait_values: {},
             domain_weight_overrides: {},
           },

@@ -225,6 +225,13 @@ genres:
       # forge, not the agents being spawned). Inherits Companion's
       # local-only provider floor automatically.
       - operator_companion
+      # ADR-0047 Decision 2 (B156) — Persistent Assistant chat role.
+      # Distinct from operator_companion (general advisor) by being
+      # purpose-built for the operator's persistent 1:1 chat surface.
+      # Inherits the same Companion-genre risk floor (read_only + local
+      # providers + private memory ceiling) by claim. Computer-control
+      # capabilities ride on top via ADR-0048 per-(agent, plugin) grants.
+      - assistant
 
   # ─────────────────────────────────────────────────────────────────────
   # Security Swarm (ADR-0033) — three new genres for the defensive plane.
