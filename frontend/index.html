@@ -503,29 +503,41 @@
               </div>
             </div>
 
-            <!-- Shown when an assistant instance IS stored. T3 will replace
-                 this with the actual chat surface. -->
+            <!-- B155 / ADR-0047 T3: bound state shows the chat surface.
+                 Auto-creates a single persistent conversation (domain=
+                 assistant, retention_policy=full_indefinite) on first
+                 entry, then wires history + composer for back-and-forth
+                 with the bound assistant agent. -->
             <div id="chat-assistant-ready" hidden>
-              <p><strong>Assistant ready.</strong>
-                <code id="chat-assistant-instance-id" style="font-size: 0.85em;"></code>
-              </p>
-              <p class="muted" style="margin-top: 12px;">
-                Chat surface coming in <code>ADR-0047 T3</code> — auto-creates
-                a single persistent conversation room and wires the composer
-                to <code>POST /conversations/{id}/turns</code> against the
-                assistant. ETA: 1 burst.
-              </p>
-              <p class="muted" style="margin-top: 12px;">
-                In the meantime: this assistant is a regular agent. Switch
-                to <strong>Rooms</strong> mode + <strong>+ new</strong> to
-                create a room with the assistant as participant.
-              </p>
-              <div style="margin-top: 16px;">
-                <button class="btn btn--ghost btn--sm" id="chat-assistant-reset-btn"
-                        type="button"
-                        title="Forget this instance_id (does NOT archive the agent — operator does that from the Agents tab)">
-                  reset assistant binding
-                </button>
+              <div class="chat-assistant-surface">
+                <div class="chat-assistant-strip">
+                  <div class="chat-assistant-strip__id">
+                    <code id="chat-assistant-instance-id" title="bound assistant instance_id"></code>
+                    <span class="muted" id="chat-assistant-conv-id" style="margin-left: 10px;"></span>
+                  </div>
+                  <div class="chat-assistant-strip__actions">
+                    <button class="btn btn--ghost btn--sm" id="chat-assistant-reset-btn"
+                            type="button"
+                            title="Forget this instance_id (does NOT archive the agent — operator does that from the Agents tab)">
+                      reset binding
+                    </button>
+                  </div>
+                </div>
+
+                <div id="chat-assistant-turns" class="chat-assistant-turns">
+                  <p class="muted">Loading conversation…</p>
+                </div>
+
+                <div id="chat-assistant-composer" class="chat-assistant-composer">
+                  <textarea id="chat-assistant-input"
+                            class="inp chat-assistant-input"
+                            placeholder="Ask your assistant anything. Cmd/Ctrl+Enter to send."
+                            rows="3"></textarea>
+                  <div class="chat-assistant-composer__row">
+                    <span class="muted" id="chat-assistant-feedback"></span>
+                    <button class="btn" id="chat-assistant-send" type="button">send</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

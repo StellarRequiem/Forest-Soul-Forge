@@ -1679,6 +1679,71 @@ body { padding-bottom: 56px; }
   width: 100%;
   max-width: 360px;
 }
+
+/* ADR-0047 T3 (B155): assistant chat surface — single-conversation
+   1:1 layout. Header strip on top, scrolling turns in the middle,
+   composer at the bottom. Reuses .chat-turn / .chat-turn--agent /
+   .chat-turn--operator styles already defined for the multi-agent
+   rooms surface so the visual language matches. */
+.chat-assistant-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chat-assistant-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #2a3340);
+  border-radius: 6px;
+  background: var(--panel-bg, #1a2230);
+}
+.chat-assistant-strip__id {
+  font-family: var(--mono, monospace);
+  font-size: 0.85em;
+  color: var(--fg, #c8d0db);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.chat-assistant-strip__actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.chat-assistant-turns {
+  /* Scrollable history. Cap height so the composer stays in view —
+     the operator can scroll the turns list independently. */
+  min-height: 240px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--border, #2a3340);
+  border-radius: 6px;
+  background: var(--panel-bg, #1a2230);
+}
+.chat-assistant-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chat-assistant-input {
+  /* Override the generic .inp 360px cap inside the assistant pane —
+     the composer wants the full surface width for comfortable typing. */
+  width: 100%;
+  max-width: none !important;
+  min-height: 64px;
+  resize: vertical;
+  font-family: inherit;
+}
+.chat-assistant-composer__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .chat-rooms__item-id {
   font-family: var(--mono, monospace);
   font-size: 0.85em;

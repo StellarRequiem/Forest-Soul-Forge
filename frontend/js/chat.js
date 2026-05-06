@@ -36,6 +36,25 @@ const CHAT_MODE_KEY = "fsf.chat.mode";
 // the binding but does NOT archive the agent (archival is operator-
 // driven from the Agents tab, per Forest's audit-chain principle).
 const ASSISTANT_INSTANCE_KEY = "fsf.chat.assistantInstanceId";
+// ADR-0047 T3 (B155): the persistent conversation_id this operator's
+// assistant uses. Cached locally so we don't re-list /conversations on
+// every Assistant-mode entry. Authoritative source of truth is still
+// the daemon — when missing or stale, T3 re-discovers via /conversations
+// ?domain=assistant&operator_id=<op> and creates one if absent.
+const ASSISTANT_CONV_KEY = "fsf.chat.assistantConvId";
+// ADR-0047 T3: conventional operator_id for the assistant conversation.
+// Single-operator scale today; one row per operator by convention. The
+// frontend uses the same default everywhere ("alex", consistent with
+// chat-rooms operator default).
+const ASSISTANT_OPERATOR_ID = "alex";
+
+// T3 in-memory state: the current assistant conversation + its turns.
+// Kept separate from the multi-agent rooms state (activeConversation /
+// activeTurns) so switching modes doesn't trample either side.
+let assistantConvId    = null;
+let assistantTurns     = [];
+let assistantAgentName = null;  // populated from agentLookupCache after participant resolve
+let assistantLoading   = false; // guard against re-entrant load calls
 
 let activeConversationId = null;
 let activeConversation = null;   // ConversationOut row
@@ -238,17 +257,29 @@ function showChatMode(mode) {
 
 // ---------------------------------------------------------------------------
 // ADR-0047 T2 (B154) — Assistant birth flow + bound-instance state
+// ADR-0047 T3 (B155) — Auto-conversation init + chat surface
 // ---------------------------------------------------------------------------
 // Two-state machine inside the assistant pane:
 //
 //   [no assistant bound]  →  birth prompt (name input, genre locked, button)
 //                              ↓ on click → POST /birth → store instance_id
-//   [assistant bound]     →  "ready" panel with instance id + reset button
+//   [assistant bound]     →  chat surface (auto-resolved conversation +
+//                              turn history + composer, T3)
 //                              ↑ on reset → drop binding, return to birth prompt
 //
-// T3 will replace the "ready" panel with the actual chat surface (auto-create
-// conversation, render turns, wire composer). T2 ships the state machine +
-// birth path so the binding is durable.
+// T3 conversation resolution (cheap path on every entry):
+//   1. Check ASSISTANT_CONV_KEY in localStorage. If present → GET it; if
+//      404 (operator wiped it from the daemon side), fall through to step 2.
+//   2. List /conversations?domain=assistant&operator_id=<op>; pick the
+//      first non-archived row whose participants include the bound
+//      instance_id. Cache its id in localStorage.
+//   3. Otherwise create a new one: POST /conversations (domain=assistant,
+//      retention_policy=full_indefinite), then POST .../participants with
+//      the bound instance_id. Cache.
+//
+// All steps tolerate transient errors and surface the failure inline in
+// the surface header — they don't silently fall back to "no assistant"
+// (that would be confusing, since the binding is real).
 
 function refreshAssistantPane() {
   const status = document.getElementById("chat-assistant-status");
@@ -263,6 +294,15 @@ function refreshAssistantPane() {
     if (status) status.textContent = `bound: ${instanceId.slice(0, 8)}…`;
     const idEl = document.getElementById("chat-assistant-instance-id");
     if (idEl) idEl.textContent = instanceId;
+    // T3: kick off conversation resolution + render. The function is
+    // idempotent + guarded against re-entrancy, so toggling Assistant
+    // ↔ Rooms repeatedly is fine.
+    loadAssistantConversation(instanceId).catch((e) => {
+      const turns = document.getElementById("chat-assistant-turns");
+      if (turns) {
+        turns.innerHTML = `<p class="muted">Couldn't load assistant conversation: ${escapeHTML(String(e.message || e))}</p>`;
+      }
+    });
   } else {
     birthSection.hidden = false;
     readySection.hidden = true;
@@ -333,12 +373,216 @@ function wireAssistantBirthFlow() {
         "frontend's localStorage pointer, returning the assistant pane to the birth prompt."
       )) return;
       localStorage.removeItem(ASSISTANT_INSTANCE_KEY);
+      // T3: also clear the cached conversation pointer. The conversation
+      // row + turns persist in the daemon — the audit chain has every turn
+      // — but the frontend forgets WHICH conversation belongs to this
+      // (now-defunct) binding. Re-binding triggers fresh discovery.
+      localStorage.removeItem(ASSISTANT_CONV_KEY);
+      assistantConvId = null;
+      assistantTurns  = [];
       toast({
         title: "Binding cleared", msg: "agent itself preserved",
         kind: "info", ttl: 3000,
       });
       refreshAssistantPane();
     });
+  }
+
+  // T3 (B155): composer. Cmd/Ctrl+Enter sends; click sends; Enter alone
+  // inserts newline (keeps the multi-line affordance, matching the
+  // multi-agent rooms composer convention).
+  const sendBtn = document.getElementById("chat-assistant-send");
+  if (sendBtn) sendBtn.addEventListener("click", () => sendAssistantTurn());
+  const input = document.getElementById("chat-assistant-input");
+  if (input) {
+    input.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        sendAssistantTurn();
+      }
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0047 T3 (B155) — Auto-conversation init + chat surface
+// ---------------------------------------------------------------------------
+
+async function loadAssistantConversation(instanceId) {
+  if (assistantLoading) return;       // re-entrancy guard
+  assistantLoading = true;
+  try {
+    const turnsEl = document.getElementById("chat-assistant-turns");
+    const convIdEl = document.getElementById("chat-assistant-conv-id");
+    if (turnsEl && !assistantConvId) {
+      // Only paint the loading placeholder on first entry — subsequent
+      // refreshes preserve the existing render so the operator doesn't
+      // see flicker.
+      turnsEl.innerHTML = `<p class="muted">Resolving conversation…</p>`;
+    }
+
+    // ----- Step 1: try cached conv id -------------------------------------
+    let convId = localStorage.getItem(ASSISTANT_CONV_KEY) || "";
+    if (convId) {
+      try {
+        await api.get(`/conversations/${convId}`);
+      } catch (_) {
+        // Cached id is stale (404 / archived from another path). Drop
+        // the cache and fall through to discovery.
+        convId = "";
+        localStorage.removeItem(ASSISTANT_CONV_KEY);
+      }
+    }
+
+    // ----- Step 2: discover an existing assistant conversation ------------
+    if (!convId) {
+      const listResp = await api.get(
+        `/conversations?domain=assistant&operator_id=${encodeURIComponent(ASSISTANT_OPERATOR_ID)}&limit=50`
+      );
+      const candidates = (listResp.conversations || [])
+        .filter((c) => c.status !== "archived");
+      // Pick the first whose participants include the bound instance_id.
+      // Most operators will have at most one — convention, not enforcement,
+      // per ADR-0047 Decision 2.
+      for (const c of candidates) {
+        try {
+          const parts = await api.get(`/conversations/${c.conversation_id}/participants`);
+          const ids = (parts.participants || []).map((p) => p.instance_id);
+          if (ids.includes(instanceId)) {
+            convId = c.conversation_id;
+            break;
+          }
+        } catch (_) { /* skip; continue search */ }
+      }
+    }
+
+    // ----- Step 3: create one if nothing matched --------------------------
+    if (!convId) {
+      const created = await writeCall("/conversations", {
+        domain: "assistant",
+        operator_id: ASSISTANT_OPERATOR_ID,
+        retention_policy: "full_indefinite",
+      });
+      convId = created.conversation_id;
+      // Add the bound assistant as participant. Idempotent on
+      // (conv, instance_id) — the daemon enforces single-row.
+      await writeCall(`/conversations/${convId}/participants`, {
+        instance_id: instanceId,
+      });
+      toast({
+        title: "Assistant conversation created",
+        msg: `domain=assistant, retention=full_indefinite`,
+        kind: "info", ttl: 4000,
+      });
+    }
+
+    // Cache for next entry.
+    localStorage.setItem(ASSISTANT_CONV_KEY, convId);
+    assistantConvId = convId;
+    if (convIdEl) convIdEl.textContent = `conv: ${convId.slice(0, 8)}…`;
+
+    // Resolve participant agent name for nicer turn labels.
+    try {
+      const parts = await api.get(`/conversations/${convId}/participants`);
+      const ids = (parts.participants || []).map((p) => p.instance_id);
+      await refreshAgentLookup(ids);
+      const agent = agentLookupCache.get(instanceId);
+      assistantAgentName = agent?.agent_name || null;
+    } catch (_) { /* non-fatal — turns still render with instance_id */ }
+
+    // Load + render turns.
+    await loadAssistantTurns();
+  } finally {
+    assistantLoading = false;
+  }
+}
+
+async function loadAssistantTurns() {
+  if (!assistantConvId) return;
+  const resp = await api.get(`/conversations/${assistantConvId}/turns?limit=200`);
+  assistantTurns = resp.turns || [];
+  renderAssistantTurns();
+}
+
+function renderAssistantTurns() {
+  const list = document.getElementById("chat-assistant-turns");
+  if (!list) return;
+  if (!assistantTurns.length) {
+    list.innerHTML = `<p class="muted">No turns yet. Send the first message below to start the conversation.</p>`;
+    return;
+  }
+  const instanceId = localStorage.getItem(ASSISTANT_INSTANCE_KEY) || "";
+  const html = [];
+  for (const t of assistantTurns) {
+    const isAgent = t.speaker === instanceId;
+    const speakerLabel = isAgent
+      ? (assistantAgentName || `${instanceId.slice(0, 8)}…`)
+      : (t.speaker || "operator");
+    const ts = t.timestamp ? t.timestamp.slice(11, 19) : "—";
+    const bodyEsc = t.body
+      ? escapeHTML(t.body)
+      : (t.summary
+          ? escapeHTML(`[summarized] ${t.summary}`)
+          : `<em class="muted">[content purged]</em>`);
+    const meta = isAgent
+      ? `<span class="chat-turn__model">${escapeHTML(t.model_used || "?")}</span><span class="chat-turn__tokens">${t.token_count || 0} tok</span>`
+      : "";
+    html.push(`<div class="chat-turn ${isAgent ? "chat-turn--agent" : "chat-turn--operator"}">
+      <div class="chat-turn__head">
+        <span class="chat-turn__speaker">${escapeHTML(speakerLabel)}</span>
+        <span class="chat-turn__time">${ts}</span>
+        ${meta}
+      </div>
+      <div class="chat-turn__body">${bodyEsc}</div>
+    </div>`);
+  }
+  list.innerHTML = html.join("");
+  list.scrollTop = list.scrollHeight;
+}
+
+async function sendAssistantTurn() {
+  if (!assistantConvId) {
+    toast({ title: "No conversation yet", msg: "Wait for the assistant pane to finish loading.", kind: "warn", ttl: 4000 });
+    return;
+  }
+  const input = document.getElementById("chat-assistant-input");
+  const sendBtn = document.getElementById("chat-assistant-send");
+  const feedback = document.getElementById("chat-assistant-feedback");
+  if (!input || !sendBtn) return;
+  const body = input.value.trim();
+  if (!body) return;
+
+  sendBtn.disabled = true;
+  sendBtn.textContent = "thinking…";
+  if (feedback) feedback.textContent = "";
+  const startedAt = performance.now();
+  try {
+    const resp = await writeCall(`/conversations/${assistantConvId}/turns`, {
+      speaker: ASSISTANT_OPERATOR_ID,
+      body,
+      auto_respond: true,
+      history_limit: 30,
+      max_chain_depth: 1,        // 1:1 conversation — no chains
+      max_response_tokens: 600,
+    });
+    input.value = "";
+    if (resp.agent_dispatch_failed) {
+      toast({
+        title: "Assistant didn't respond",
+        msg: "Operator turn landed; check audit/tail or the daemon log for the failure reason.",
+        kind: "warn", ttl: 8000,
+      });
+    }
+    const elapsedSec = Math.round((performance.now() - startedAt) / 100) / 10;
+    if (feedback && elapsedSec > 0) {
+      feedback.textContent = `round-trip ${elapsedSec}s`;
+    }
+    await loadAssistantTurns();
+  } catch (e) {
+    toast({ title: "Send failed", msg: String(e.message || e), kind: "error", ttl: 8000 });
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = "send";
   }
 }
 
