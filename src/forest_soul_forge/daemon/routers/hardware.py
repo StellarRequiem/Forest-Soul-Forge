@@ -26,6 +26,7 @@ from forest_soul_forge.daemon.deps import (
     get_audit_chain,
     get_registry,
     get_write_lock,
+    require_api_token,
     require_writes_enabled,
 )
 from forest_soul_forge.daemon.schemas import (
@@ -41,7 +42,7 @@ router = APIRouter(prefix="/agents", tags=["hardware"])
 @router.post(
     "/{instance_id}/hardware/unbind",
     response_model=HardwareUnbindResponse,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 def hardware_unbind(
     instance_id: str,

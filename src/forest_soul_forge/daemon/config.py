@@ -146,8 +146,23 @@ class DaemonSettings(BaseSettings):
     api_token: str | None = Field(
         default=None,
         description=(
-            "Optional shared-secret token required on write endpoints "
-            "via the X-FSF-Token header. Unset = writes open (dev)."
+            "Shared-secret token required on write endpoints via the "
+            "X-FSF-Token header. As of B148 (T25 security hardening), "
+            "if this is unset the daemon AUTO-GENERATES a token on "
+            "first boot, writes it to .env, and uses it. Operators who "
+            "want to opt out of auth (e.g., dev-only loopback) must "
+            "explicitly set FSF_INSECURE_NO_TOKEN=true."
+        ),
+    )
+    insecure_no_token: bool = Field(
+        default=False,
+        description=(
+            "B148 (T25 security hardening): explicit opt-out of API "
+            "token auth. Default false → if api_token is also unset, "
+            "the daemon auto-generates one on first boot and writes "
+            "to .env. Set to true to keep writes open (e.g., for "
+            "frictionless dev loopback). Same shape as "
+            "FSF_ENABLE_PRIV_CLIENT (default off, explicit opt-in/out)."
         ),
     )
 

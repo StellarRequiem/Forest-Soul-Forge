@@ -42,6 +42,7 @@ from forest_soul_forge.daemon.deps import (
     get_audit_chain,
     get_registry,
     get_write_lock,
+    require_api_token,
     require_writes_enabled,
 )
 from forest_soul_forge.daemon.schemas import (
@@ -57,7 +58,7 @@ router = APIRouter(prefix="/triune", tags=["triune"])
 @router.post(
     "/bond",
     response_model=TriuneBondResponse,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 def triune_bond(
     body: TriuneBondRequest,

@@ -33,6 +33,7 @@ from forest_soul_forge.daemon.deps import (
     get_audit_chain,
     get_registry,
     get_write_lock,
+    require_api_token,
     require_writes_enabled,
 )
 from forest_soul_forge.daemon.schemas import (
@@ -133,7 +134,7 @@ async def audit_by_dna(
 @router.post(
     "/ceremony",
     response_model=CeremonyEmitResponse,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 async def audit_ceremony(
     body: CeremonyEmitRequest,

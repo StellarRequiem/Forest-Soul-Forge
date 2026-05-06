@@ -30,6 +30,7 @@ from forest_soul_forge.daemon.deps import (
     get_registry,
     get_tool_dispatcher,
     get_write_lock,
+    require_api_token,
     require_writes_enabled,
 )
 from forest_soul_forge.daemon.schemas import (
@@ -87,7 +88,7 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
     "",
     response_model=ConversationOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 def create_conversation(
     body:       ConversationCreateRequest,
@@ -161,7 +162,7 @@ def list_conversations(
 @router.post(
     "/{conversation_id}/status",
     response_model=ConversationOut,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 def update_status(
     conversation_id: str,
@@ -205,7 +206,7 @@ def update_status(
 @router.post(
     "/{conversation_id}/retention",
     response_model=ConversationOut,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 def update_retention(
     conversation_id: str,
@@ -245,7 +246,7 @@ def update_retention(
     "/{conversation_id}/participants",
     response_model=ParticipantOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 def add_participant(
     conversation_id: str,
@@ -309,7 +310,7 @@ def list_participants(
     "/{conversation_id}/bridge",
     response_model=ParticipantOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 def bridge_participant(
     conversation_id: str,
@@ -379,7 +380,7 @@ def bridge_participant(
 @router.delete(
     "/{conversation_id}/participants/{instance_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 def remove_participant(
     conversation_id: str,
@@ -414,7 +415,7 @@ def remove_participant(
     "/{conversation_id}/turns",
     response_model=TurnDispatchResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 async def append_turn(
     conversation_id: str,
@@ -637,7 +638,7 @@ async def append_turn(
     "/{conversation_id}/ambient/nudge",
     response_model=AmbientNudgeResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 async def ambient_nudge(
     conversation_id: str,

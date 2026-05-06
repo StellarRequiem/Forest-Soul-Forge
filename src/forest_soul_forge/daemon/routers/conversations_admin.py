@@ -37,6 +37,7 @@ from forest_soul_forge.daemon.deps import (
     get_registry,
     get_tool_dispatcher,
     get_write_lock,
+    require_api_token,
     require_writes_enabled,
 )
 from forest_soul_forge.daemon.schemas import (
@@ -83,7 +84,7 @@ def _build_summary_prompt(*, speaker_label: str, body: str) -> str:
 @router.post(
     "/sweep_retention",
     response_model=RetentionSweepResponse,
-    dependencies=[Depends(require_writes_enabled)],
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
 )
 async def sweep_retention(
     body:            RetentionSweepRequest,
