@@ -110,6 +110,68 @@ class LocalProvider:
             raise ProviderError(f"unexpected local response shape: {data!r}")
         return text
 
+    async def embed(
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+    ) -> list[float]:
+        """Return a dense vector embedding for ``text`` via Ollama's
+        ``/api/embeddings`` endpoint.
+
+        ADR-0054 T2 (B179): wired in for the procedural-shortcut
+        substrate. The dispatcher's ProceduralShortcutStep (T3) calls
+        this on operator turns to find matching shortcuts via cosine
+        similarity (ProceduralShortcutsTable.search_by_cosine).
+
+        Default model: ``nomic-embed-text:latest`` — Forest's standing
+        embedding model per the healthz baseline (see
+        config/daemon defaults). 768-dim vectors. Operator can
+        override via the ``model`` argument or via
+        ``FSF_LOCAL_EMBED_MODEL`` env var (consumed by the resolver
+        layer above; this method just trusts what it's handed).
+
+        Raises ProviderUnavailable on Ollama unreachable, ProviderError
+        on non-2xx response or unexpected shape. The caller (T3)
+        catches ProviderError and falls through to ``llm_think`` —
+        embedding failure means the shortcut path silently degrades
+        to the existing LLM round-trip path. No agent-visible
+        regression.
+        """
+        chosen = model or "nomic-embed-text:latest"
+        payload = {"model": chosen, "prompt": text}
+        url = f"{self._base_url}/api/embeddings"
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_s) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.RequestError as e:
+            raise ProviderUnavailable(
+                f"local embedder unreachable at {self._base_url}: {e}"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise ProviderError(
+                f"local embedder returned {e.response.status_code}: "
+                f"{e.response.text[:200]}"
+            ) from e
+
+        # Ollama returns {"embedding": [float, ...]}.
+        emb = data.get("embedding")
+        if not isinstance(emb, list) or not emb:
+            raise ProviderError(
+                f"unexpected embedding response shape: {data!r}"
+            )
+        # Validate float-ish list — defensive against an Ollama version
+        # that drops the contract. Returning malformed vectors would
+        # corrupt the cosine math at the table layer.
+        try:
+            return [float(x) for x in emb]
+        except (TypeError, ValueError) as e:
+            raise ProviderError(
+                f"embedding contains non-float entries: {e}"
+            ) from e
+
     async def healthcheck(self) -> ProviderHealth:
         url = f"{self._base_url}/api/tags"
         try:
