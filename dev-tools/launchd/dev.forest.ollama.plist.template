@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for Ollama in headless 24/7 mode.
+
+  Installed to ~/Library/LaunchAgents/dev.forest.ollama.plist by
+  install-launchagents.command (which substitutes @OLLAMA_BIN@ with
+  the detected path).
+
+  Tradeoff vs. Ollama.app: this version runs `ollama serve` directly,
+  so there's no menu bar UI. Pure background daemon. If you want the
+  .app's GUI back, run uninstall-launchagents.command and re-enable
+  Ollama.app in System Settings → General → Login Items.
+
+  EnvironmentVariables bake KEEP_ALIVE + NUM_PARALLEL into the
+  process at launch — survives reboots without launchctl setenv calls.
+
+  KeepAlive=true means launchd restarts ollama serve if it crashes.
+  RunAtLoad=true means it starts when this plist is loaded (also at
+  login).
+
+  ProcessType=Interactive gives this process priority similar to a
+  foreground app (no aggressive throttling).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.forest.ollama</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>@OLLAMA_BIN@</string>
+    <string>serve</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OLLAMA_KEEP_ALIVE</key>
+    <string>-1</string>
+    <key>OLLAMA_NUM_PARALLEL</key>
+    <string>1</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/ollama.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/ollama.err.log</string>
+</dict>
+</plist>

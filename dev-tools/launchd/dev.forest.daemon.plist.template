@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for the Forest daemon in headless 24/7 mode.
+
+  Installed to ~/Library/LaunchAgents/dev.forest.daemon.plist by
+  install-launchagents.command. The repo path and venv python are
+  already resolved at install time (no @PLACEHOLDERS@ for those —
+  Forest's repo path is well-known on this machine).
+
+  Note: this plist runs ONLY the daemon. It does NOT start the
+  frontend (port 5173). If you want the frontend up too, either:
+    (a) keep using run.command for development sessions, OR
+    (b) add a separate dev.forest.frontend.plist for nginx/python
+        http.server (not shipped — frontend is operator-facing dev
+        UI, not 24/7 critical)
+
+  EnvironmentVariables baked in:
+    FSF_LOCAL_MODEL=qwen2.5-coder:7b — daemon's default model
+    PATH                              — needed to find subprocesses
+
+  KeepAlive=true restarts the daemon if it crashes.
+  ProcessType=Interactive gives it foreground-app priority.
+
+  Logs at /tmp/forest-daemon.{out,err}.log.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.forest.daemon</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/llm01/Forest-Soul-Forge/.venv/bin/python</string>
+    <string>-m</string>
+    <string>forest_soul_forge.daemon</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/llm01/Forest-Soul-Forge</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>FSF_LOCAL_MODEL</key>
+    <string>qwen2.5-coder:7b</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>/Users/llm01</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/forest-daemon.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/forest-daemon.err.log</string>
+</dict>
+</plist>
