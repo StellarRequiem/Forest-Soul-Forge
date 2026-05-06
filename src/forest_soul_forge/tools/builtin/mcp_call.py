@@ -186,6 +186,9 @@ class McpCallTool:
 
         # Resolve auth secret if requested. Allowlist enforcement is in
         # the SecretsAccessor; we just propagate the result.
+        # This is the per-CALL dynamic auth path (operator pre-stored
+        # the secret in the agent's encrypted store + the constitution
+        # listed it as allowed). Distinct from required_secrets below.
         auth_env: dict[str, str] = {}
         if secret_name:
             if ctx.secrets is None:
@@ -199,6 +202,18 @@ class McpCallTool:
             except Exception as e:
                 raise McpCallError(f"secret {secret_name!r}: {e}") from e
             auth_env["FSF_MCP_AUTH"] = token
+
+        # ADR-0052 T4 (B170): resolve the plugin manifest's
+        # required_secrets via the operator-configured backend
+        # (FSF_SECRET_STORE → file / keychain / vaultwarden / BYO) and
+        # set the env_var fields on the subprocess. See
+        # _resolve_required_secrets() docstring for the full
+        # design rationale. Mutates auth_env in place.
+        _resolve_required_secrets(
+            server_name=server_name,
+            required_secrets=server_cfg.get("required_secrets") or [],
+            auth_env=auth_env,
+        )
 
         # Dispatch the call. v1 supports stdio: prefix only — JSON-RPC over
         # the server's stdin/stdout. ws:// / http:// transports are future
@@ -312,6 +327,94 @@ class McpCallTool:
                 f"mcp_call {server_name}/{tool_name} → ok"
             ),
         )
+
+
+def _resolve_required_secrets(
+    *,
+    server_name: str,
+    required_secrets: list,
+    auth_env: dict[str, str],
+) -> None:
+    """ADR-0052 T4 (B170) — resolve the plugin manifest's
+    required_secrets via the operator-configured backend
+    (FSF_SECRET_STORE → file / keychain / vaultwarden / BYO) and
+    set each env_var on the subprocess. Mutates auth_env in place.
+
+    Distinct from the per-call ``auth_secret_name`` path:
+
+      auth_secret_name  — per-CALL agent-allowlisted secret pulled
+                          from the registry's encrypted store; sets
+                          FSF_MCP_AUTH. Used when the agent has
+                          dynamic per-session credentials (rare).
+      required_secrets  — OPERATOR-LEVEL plugin auth (e.g., a
+                          GitHub PAT); pre-stored via `fsf secret
+                          put` + served by the active
+                          SecretStoreProtocol backend; sets each
+                          manifest-declared env_var. The common
+                          case for plugins that need stable
+                          credentials.
+
+    Both paths coexist: per-call FSF_MCP_AUTH and per-plugin
+    FSF_SECRET_* vars are separate keys in the env dict.
+
+    Failure modes:
+      - Backend unreachable: raises McpCallError pointing at
+        FSF_SECRET_STORE configuration
+      - Missing secret: raises McpCallError pointing at
+        `fsf secret put <name>` for the operator to fix
+      - Backend .get() raises: propagates as McpCallError tied
+        to the specific name + backend identifier
+      - Malformed entry shapes (missing name/env_var): skipped
+        silently — the manifest schema validates these at load
+        time; this is just defense in depth
+
+    Empty list → no-op (no resolver call, no env mutation).
+    """
+    if not required_secrets:
+        return
+
+    # Lazy import — keeps mcp_call importable in environments where
+    # the secrets module hasn't been touched yet (test harnesses,
+    # tools-suite-only configurations).
+    from forest_soul_forge.security.secrets import (
+        SecretStoreError as _SecretStoreError,
+        resolve_secret_store as _resolve_secret_store,
+    )
+
+    try:
+        store = _resolve_secret_store()
+    except _SecretStoreError as e:
+        raise McpCallError(
+            f"plugin {server_name!r} requires {len(required_secrets)} "
+            f"operator-managed secret(s) but the secret-store backend "
+            f"is unavailable: {e}. Check FSF_SECRET_STORE and the "
+            f"active backend's configuration."
+        ) from e
+
+    for entry in required_secrets:
+        if not isinstance(entry, dict):
+            continue
+        rs_name = entry.get("name")
+        rs_env = entry.get("env_var")
+        if not rs_name or not rs_env:
+            # Manifest schema validates these at load time; defensive
+            # skip rather than dereference None.
+            continue
+        try:
+            value = store.get(rs_name)
+        except _SecretStoreError as e:
+            raise McpCallError(
+                f"plugin {server_name!r}: backend {store.name!r} "
+                f"failed reading required secret {rs_name!r}: {e}"
+            ) from e
+        if value is None:
+            raise McpCallError(
+                f"plugin {server_name!r} requires secret "
+                f"{rs_name!r} but the {store.name!r} backend "
+                f"doesn't have it. Operator must store it via "
+                f"`fsf secret put {rs_name}` first, then retry."
+            )
+        auth_env[rs_env] = value
 
 
 def _load_registry() -> dict[str, dict]:

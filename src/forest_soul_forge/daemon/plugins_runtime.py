@@ -244,6 +244,19 @@ class PluginRuntime:
             # makes a shallow copy — defensive, since the manifest
             # object is shared across calls.
             per_tool = dict(m.requires_human_approval)
+            # ADR-0052 T4 (B170): expose the manifest's required_secrets
+            # list so mcp_call.v1 can resolve each name against the
+            # active SecretStoreProtocol backend at server-launch time
+            # and set the corresponding env_var on the subprocess.
+            #
+            # Shape per RequiredSecret model: {name, env_var, description}.
+            # Description is optional + ignored by the dispatch path
+            # (it shows up in the install-prompt UI when ADR-0052 T6
+            # ships).
+            required_secrets = [
+                {"name": s.name, "env_var": s.env_var, "description": s.description}
+                for s in m.required_secrets
+            ]
             view[m.name] = {
                 "url": url,
                 "sha256": entry.sha256,
@@ -254,6 +267,9 @@ class PluginRuntime:
                 "description": (
                     f"{m.display_label()} v{m.version} (plugin)"
                 ),
+                # ADR-0052 T4: required_secrets list (empty for plugins
+                # that don't need operator-managed auth tokens).
+                "required_secrets": required_secrets,
             }
         return view
 

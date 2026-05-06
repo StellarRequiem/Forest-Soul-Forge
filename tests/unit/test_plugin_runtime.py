@@ -28,6 +28,7 @@ def _write_plugin_dir(
     capabilities: list[str] | None = None,
     binary_bytes: bytes = b"#!/bin/sh\necho hi\n",
     requires_human_approval: dict | None = None,
+    required_secrets: list[dict] | None = None,
 ) -> Path:
     src = base / f"src-{name}"
     src.mkdir(parents=True)
@@ -51,6 +52,8 @@ def _write_plugin_dir(
     }
     if requires_human_approval is not None:
         body["requires_human_approval"] = requires_human_approval
+    if required_secrets is not None:
+        body["required_secrets"] = required_secrets
     (src / "plugin.yaml").write_text(yaml.safe_dump(body))
     return src
 
@@ -428,3 +431,68 @@ def test_runtime_without_chain_is_silent_no_op(tmp_path: Path):
     rt.repository.install_from_dir(_write_plugin_dir(tmp_path, name="alpha"))
     rt.reload()
     assert {p.name for p in rt.active()} == {"alpha"}
+
+
+# ===========================================================================
+# ADR-0052 T4 (B170) — required_secrets passes through mcp_servers_view
+# ===========================================================================
+
+def test_mcp_servers_view_omits_required_secrets_when_empty(tmp_path: Path):
+    """A plugin with no required_secrets gets the field as an empty
+    list (not missing) — mcp_call.v1's `or []` fallback handles
+    either, but explicit empty is the documented contract."""
+    rt = _runtime(tmp_path)
+    rt.repository.install_from_dir(_write_plugin_dir(tmp_path))
+    rt.reload()
+    entry = rt.mcp_servers_view()["github-mcp"]
+    assert entry["required_secrets"] == []
+
+
+def test_mcp_servers_view_passes_through_required_secrets(tmp_path: Path):
+    """A plugin manifest declaring required_secrets surfaces them in
+    the dispatch dict so mcp_call.v1 can resolve them via
+    resolve_secret_store() at server-launch time (ADR-0052 T4)."""
+    rt = _runtime(tmp_path)
+    rt.repository.install_from_dir(_write_plugin_dir(
+        tmp_path,
+        name="github-mcp",
+        required_secrets=[
+            {
+                "name": "github_pat",
+                "env_var": "GITHUB_TOKEN",
+                "description": "Personal access token with repo scope.",
+            },
+            {
+                "name": "github_webhook_secret",
+                "env_var": "GITHUB_WEBHOOK_SECRET",
+            },
+        ],
+    ))
+    rt.reload()
+    entry = rt.mcp_servers_view()["github-mcp"]
+    assert len(entry["required_secrets"]) == 2
+
+    # Each entry has name + env_var; description is preserved when
+    # provided (ignored by mcp_call.v1 but used by the install-prompt
+    # UI when ADR-0052 T6 ships).
+    by_name = {s["name"]: s for s in entry["required_secrets"]}
+    assert by_name["github_pat"]["env_var"] == "GITHUB_TOKEN"
+    assert "Personal access token" in by_name["github_pat"]["description"]
+    assert by_name["github_webhook_secret"]["env_var"] == "GITHUB_WEBHOOK_SECRET"
+    # Description defaults to empty string when omitted in the manifest.
+    assert by_name["github_webhook_secret"]["description"] == ""
+
+
+def test_mcp_servers_view_required_secrets_dict_shape_is_stable(tmp_path: Path):
+    """Each entry is a dict with exactly the three keys mcp_call.v1
+    expects: name, env_var, description. Catches accidental field
+    additions/removals that would break the dispatch contract."""
+    rt = _runtime(tmp_path)
+    rt.repository.install_from_dir(_write_plugin_dir(
+        tmp_path,
+        required_secrets=[{"name": "foo", "env_var": "FOO_TOKEN"}],
+    ))
+    rt.reload()
+    entry = rt.mcp_servers_view()["github-mcp"]
+    secret = entry["required_secrets"][0]
+    assert sorted(secret.keys()) == ["description", "env_var", "name"]
