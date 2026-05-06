@@ -538,15 +538,18 @@ async function loadAssistantSettings(instanceId) {
     }
   }
 
-  // Three independent fetches; render each on completion.
+  // Four independent fetches; render each on completion.
   await Promise.allSettled([
     renderAssistantIdentity(instanceId),
     renderAssistantPosture(instanceId),
     renderAssistantConsents(instanceId),
+    renderAssistantAllowances(instanceId),    // ADR-0048 T4 (B165)
   ]);
 
-  // Wire posture buttons (idempotent; only attaches once per pane).
+  // Wire posture buttons + preset buttons (idempotent — only
+  // attaches once per pane via dataset.wired).
   wireAssistantPostureButtons(instanceId);
+  wireAssistantAllowanceButtons(instanceId);
 }
 
 async function renderAssistantIdentity(instanceId) {
@@ -644,6 +647,130 @@ async function renderAssistantConsents(instanceId) {
   } catch (e) {
     list.innerHTML = `<span class="muted">consents fetch failed: ${escapeHTML(String(e.message || e))}</span>`;
   }
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0048 T4 (B165) — Allowance UI for soulux-computer-control plugin.
+// ---------------------------------------------------------------------------
+// Three presets map to plugin-grant operations against the existing
+// /agents/{id}/plugin-grants endpoint:
+//
+//   Restricted → DELETE the grant. No tools available.
+//   Specific   → POST grant with trust_tier='standard'.
+//   Full       → POST grant with trust_tier='elevated'. (Same effect
+//                today as Specific; ADR-0045 T3 substrate will
+//                differentiate per-tier behavior.)
+//
+// Per-tool granularity inside the Advanced disclosure awaits a
+// substrate extension — Forest's plugin-grants API operates at
+// plugin scope today. The reference table renders for transparency.
+
+const ALLOW_PLUGIN_NAME = "soulux-computer-control";
+
+function _allowStatusEl() {
+  return document.getElementById("chat-assistant-allow-status");
+}
+function _allowFeedbackEl() {
+  return document.getElementById("chat-assistant-allow-feedback");
+}
+
+async function renderAssistantAllowances(instanceId) {
+  const status = _allowStatusEl();
+  if (!status) return;
+  try {
+    const r = await api.get(`/agents/${instanceId}/plugin-grants`);
+    const grants = r.grants || [];
+    const sccGrant = grants.find((g) => g.plugin_name === ALLOW_PLUGIN_NAME);
+
+    let preset = "restricted";
+    if (sccGrant) {
+      preset = (sccGrant.trust_tier === "elevated") ? "full" : "specific";
+    }
+
+    if (sccGrant) {
+      status.innerHTML = (
+        `Plugin <code>${escapeHTML(ALLOW_PLUGIN_NAME)}</code> ` +
+        `granted (tier: <code>${escapeHTML(sccGrant.trust_tier || "standard")}</code>). ` +
+        `Read tools fire freely; action tools require per-call approval. ` +
+        `Posture clamps still apply.`
+      );
+    } else {
+      status.innerHTML = (
+        `Plugin <code>${escapeHTML(ALLOW_PLUGIN_NAME)}</code> ` +
+        `<strong>not granted</strong>. The assistant cannot fire any ` +
+        `computer-control tool — the kit stays at its constitutional baseline.`
+      );
+    }
+
+    // Highlight the active preset button.
+    document.querySelectorAll("[data-preset]").forEach((b) => {
+      b.classList.toggle(
+        "chat-assistant-posture-btn--active",      // reuse existing highlight class
+        b.dataset.preset === preset,
+      );
+    });
+  } catch (e) {
+    status.textContent = `grant state fetch failed: ${String(e.message || e).slice(0, 100)}`;
+  }
+}
+
+function wireAssistantAllowanceButtons(instanceId) {
+  const row = document.querySelector(".chat-assistant-preset-row");
+  if (!row || row.dataset.wired === instanceId) return;
+  row.dataset.wired = instanceId;
+  row.querySelectorAll("[data-preset]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const preset = btn.dataset.preset;
+      if (!preset) return;
+      const fb = _allowFeedbackEl();
+      if (fb) fb.textContent = "applying…";
+      btn.disabled = true;
+      try {
+        await applyAssistantAllowancePreset(instanceId, preset);
+        if (fb) fb.textContent = `preset applied: ${preset}`;
+        toast({
+          title: `Allowance: ${preset}`,
+          msg: (preset === "restricted")
+            ? "Plugin grant revoked. Assistant cannot use computer-control tools."
+            : "Plugin granted. Read tools fire freely; action tools require per-call approval.",
+          kind: "info", ttl: 4000,
+        });
+        await renderAssistantAllowances(instanceId);
+      } catch (e) {
+        if (fb) fb.textContent = `apply failed: ${String(e.message || e).slice(0, 100)}`;
+        toast({
+          title: "Allowance change failed",
+          msg: String(e.message || e),
+          kind: "error", ttl: 8000,
+        });
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+async function applyAssistantAllowancePreset(instanceId, preset) {
+  if (preset === "restricted") {
+    // Revoke the grant. api.del routes the X-FSF-Token header for
+    // auth; writeCall's 401-retry-prompt isn't needed here because
+    // the prior GET (renderAssistantAllowances) would have already
+    // surfaced an auth issue. 404 is treated as success — the
+    // desired end-state is "no grant" and that's what we have.
+    try {
+      await api.del(`/agents/${instanceId}/plugin-grants/${ALLOW_PLUGIN_NAME}`);
+    } catch (e) {
+      if (e?.status !== 404) throw e;
+    }
+    return;
+  }
+  // Specific or Full → issue/upsert a grant. trust_tier differs.
+  const trust_tier = (preset === "full") ? "elevated" : "standard";
+  await writeCall(`/agents/${instanceId}/plugin-grants`, {
+    plugin_name: ALLOW_PLUGIN_NAME,
+    trust_tier,
+    reason: `operator selected ${preset} preset`,
+  });
 }
 
 async function loadAssistantTurns() {

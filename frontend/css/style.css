@@ -1824,6 +1824,51 @@ body { padding-bottom: 56px; }
   font-size: 0.85em;
   padding: 2px 0;
 }
+
+/* ADR-0048 T4 (B165) — allowance preset row + Advanced disclosure
+   table. Reuses .chat-assistant-posture-btn--active for the active-
+   button highlight (intentionally — visual language for "current
+   setting in this card" stays consistent). */
+.chat-assistant-preset-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.chat-assistant-allow-advanced > summary {
+  cursor: pointer;
+  font-size: 0.9em;
+  color: var(--muted, #7d8a99);
+  user-select: none;
+  list-style: none;
+}
+.chat-assistant-allow-advanced > summary::-webkit-details-marker { display: none; }
+.chat-assistant-allow-advanced > summary::before {
+  content: "▸ ";
+}
+.chat-assistant-allow-advanced[open] > summary::before {
+  content: "▾ ";
+}
+.chat-assistant-tool-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+  margin-top: 6px;
+}
+.chat-assistant-tool-table th,
+.chat-assistant-tool-table td {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border, #2a3340);
+}
+.chat-assistant-tool-table th {
+  color: var(--muted, #7d8a99);
+  font-weight: normal;
+  border-bottom: 1px solid var(--accent, #4a90e2);
+}
+.chat-assistant-tool-table tr:last-child td {
+  border-bottom: none;
+}
 .chat-rooms__item-id {
   font-family: var(--mono, monospace);
   font-size: 0.85em;

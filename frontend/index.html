@@ -566,16 +566,56 @@
                     </section>
 
                     <section class="chat-assistant-card">
-                      <h4 class="chat-assistant-card__title">Computer-control allowances</h4>
-                      <p class="muted">
-                        Per-(agent, plugin) grant toggles — implementation pending
-                        per <code>ADR-0048</code>. Until that lands, the assistant
-                        operates with its constitutional kit only
-                        (<code>llm_think</code> + <code>memory_recall</code> +
-                        <code>memory_write</code> + <code>timestamp_window</code>).
-                        Computer-control plugins layer on top via per-(agent,
-                        plugin) grants when ADR-0048 implementation tranches ship.
+                      <h4 class="chat-assistant-card__title">Computer-control allowances
+                        <span class="chat-assistant-card__hint muted">(ADR-0048 — soulux-computer-control plugin)</span>
+                      </h4>
+
+                      <p class="muted" id="chat-assistant-allow-status" style="margin: 6px 0;">
+                        Loading grant state…
                       </p>
+
+                      <div class="chat-assistant-preset-row">
+                        <button class="btn btn--sm" data-preset="restricted" type="button"
+                                title="Revoke the plugin entirely. Assistant cannot use any computer-control tool.">
+                          Restricted
+                        </button>
+                        <button class="btn btn--sm" data-preset="specific" type="button"
+                                title="Grant at standard tier. Read tools fire freely; action tools require per-call approval.">
+                          Specific
+                        </button>
+                        <button class="btn btn--sm" data-preset="full" type="button"
+                                title="Grant at elevated tier. Same effect today as Specific; ADR-0045 T3 per-grant tier substrate will differentiate.">
+                          Full
+                        </button>
+                      </div>
+
+                      <details class="chat-assistant-allow-advanced" style="margin-top: 10px;">
+                        <summary>Advanced — per-tool reference</summary>
+                        <div class="muted" style="font-size: 0.85em; margin: 8px 0 4px;">
+                          The plugin's six tools and their classification.
+                          Per-tool granularity in the UI awaits a substrate
+                          extension; today the grant is all-or-nothing at the
+                          plugin level. Posture (above) provides the
+                          orthogonal "global brake" — flip to red to refuse
+                          all action tools without revoking the plugin.
+                        </div>
+                        <table class="chat-assistant-tool-table">
+                          <thead>
+                            <tr><th>Tool</th><th>Side effect</th><th>Approval</th></tr>
+                          </thead>
+                          <tbody>
+                            <tr><td><code>computer_screenshot.v1</code></td><td>read_only</td><td>none</td></tr>
+                            <tr><td><code>computer_read_clipboard.v1</code></td><td>read_only</td><td>none</td></tr>
+                            <tr><td><code>computer_click.v1</code></td><td>external</td><td>per-call</td></tr>
+                            <tr><td><code>computer_type.v1</code></td><td>external</td><td>per-call</td></tr>
+                            <tr><td><code>computer_run_app.v1</code></td><td>external</td><td>per-call</td></tr>
+                            <tr><td><code>computer_launch_url.v1</code></td><td>network</td><td>per-call</td></tr>
+                          </tbody>
+                        </table>
+                      </details>
+
+                      <p class="muted" id="chat-assistant-allow-feedback"
+                         style="font-size: 0.85em; margin-top: 6px;"></p>
                     </section>
                   </div>
                 </details>
