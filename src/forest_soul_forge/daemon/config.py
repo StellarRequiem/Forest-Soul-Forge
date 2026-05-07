@@ -272,6 +272,69 @@ class DaemonSettings(BaseSettings):
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173", "null"],
     )
 
+    # ----- marketplace (ADR-0055) ------------------------------------------
+    # The kernel exposes GET /marketplace/index that aggregates configured
+    # registries, returns a merged plugin index, caches per TTL.
+    #
+    # Default is empty — operators opt in by pinning at least one
+    # registry URL. The first official registry will be the
+    # forest-marketplace sibling repo's raw GitHub URL once the
+    # operator publishes it. Until then, operators can pin a local
+    # file:// URL pointing at their local clone of forest-marketplace's
+    # registry/marketplace.yaml.
+    #
+    # Each entry in the list is a registry index URL. Supported schemes:
+    #   file:///absolute/path/to/marketplace.yaml
+    #   https://example.com/marketplace.yaml
+    #
+    # Override via FSF_MARKETPLACE_REGISTRIES (comma- or
+    # newline-separated; pydantic-settings parses list[str] from the
+    # env var).
+    marketplace_registries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Pinned marketplace registry URLs (file:// or https://). "
+            "Empty = marketplace browse pane shows 'no registries "
+            "configured'; operator opts in by pointing at their "
+            "forest-marketplace clone or the official registry URL."
+        ),
+    )
+
+    # M6 forward-compat (signing). Per-registry trusted ed25519 keys
+    # for verifying manifest_signature on each entry. Empty list at
+    # M1-M5 means signing isn't enforced — entries surface with the
+    # 'untrusted' badge but install is still permitted with operator
+    # confirmation. M6 will refuse install on bad-signature when at
+    # least one trusted key is configured.
+    marketplace_trusted_keys: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Base64-encoded ed25519 public keys trusted to sign "
+            "marketplace registry entries. Empty = signing not "
+            "enforced (M6 lifts this)."
+        ),
+    )
+
+    # Cache TTL for the merged registry index. Default 1 hour balances
+    # freshness for active marketplace browsing against unnecessary
+    # network chatter for an idle daemon. The /marketplace/index
+    # endpoint serves the cached value within the TTL window; on
+    # expiry the next call re-fetches synchronously (the response
+    # surfaces an updated fetched_at timestamp). Operators pinning
+    # local file:// registries can crank this up arbitrarily — the
+    # filesystem read is cheap, but caching avoids redundant YAML
+    # parses on rapid refreshes.
+    marketplace_cache_ttl_s: int = Field(
+        default=3600,
+        ge=0,
+        description=(
+            "TTL for the cached merged registry index in seconds. "
+            "0 = no caching (always fetch). Operators with local "
+            "file:// registries can set this high; remote https:// "
+            "registries should respect maintainer rate limits."
+        ),
+    )
+
     # ----- derived maps ----------------------------------------------------
     def local_model_map(self) -> dict[TaskKind, str]:
         """Return the task_kind → model tag map for the local provider."""

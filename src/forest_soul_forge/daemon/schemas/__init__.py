@@ -104,6 +104,14 @@ from forest_soul_forge.daemon.schemas.memory import (
     MemoryConsentOut,
     MemoryConsentListResponse,
 )
+from forest_soul_forge.daemon.schemas.marketplace import (
+    MarketplaceContributes,
+    MarketplaceContributesTool,
+    MarketplaceEntryOut,
+    MarketplaceIndexOut,
+    MarketplaceReview,
+    SideEffectTier,
+)
 from forest_soul_forge.daemon.schemas.conversations import (
     AmbientNudgeRequest,
     AmbientNudgeResponse,
@@ -222,4 +230,11 @@ __all__ = [
     "TurnOut",
     "TurnListOut",
     "LastShortcutOut",
+    # ADR-0055 M1 — marketplace index read model
+    "MarketplaceContributesTool",
+    "MarketplaceContributes",
+    "MarketplaceReview",
+    "MarketplaceEntryOut",
+    "MarketplaceIndexOut",
+    "SideEffectTier",
 ]
