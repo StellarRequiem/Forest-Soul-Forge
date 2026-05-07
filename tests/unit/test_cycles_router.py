@@ -32,7 +32,7 @@ from forest_soul_forge.daemon.app import build_app
 from forest_soul_forge.daemon.config import DaemonSettings
 from forest_soul_forge.registry import Registry
 
-from tests.unit.conftest import seed_stub_agent
+from conftest import seed_stub_agent  # type: ignore[import-not-found]
 
 
 API_TOKEN = "test-token-cycles"
