@@ -240,6 +240,51 @@ def build_or_get_tool_dispatcher(app):
             if fsf_registry is not None else None
         ),
     )
+    # ADR-0054 T6 (B194) — procedural-shortcut substrate wiring.
+    # Master switch is ``settings.procedural_shortcut_enabled`` (default
+    # False). When True, the dispatcher's ProceduralShortcutStep matches
+    # llm_think dispatches against stored situation→action rows.
+    # Closures (not constants) so an operator who flips the env var at
+    # runtime + restarts sees the change without touching code; tests
+    # can also override via direct assignment to settings.
+    #
+    # Per ADR-0054 D1 + ADR-0001 D2: shortcuts are per-instance state.
+    # constitution_hash + DNA stay constant across the table's growth.
+    settings_for_shortcuts = getattr(app.state, "settings", None)
+    if settings_for_shortcuts is not None and fsf_registry is not None:
+        try:
+            from forest_soul_forge.registry.tables.procedural_shortcuts import (
+                ProceduralShortcutsTable,
+            )
+            shortcuts_table = ProceduralShortcutsTable(fsf_registry._conn)
+            dispatcher.procedural_shortcuts_table = shortcuts_table
+            dispatcher.procedural_shortcut_enabled_fn = (
+                lambda s=settings_for_shortcuts: bool(
+                    getattr(s, "procedural_shortcut_enabled", False)
+                )
+            )
+            dispatcher.procedural_cosine_floor_fn = (
+                lambda s=settings_for_shortcuts: float(
+                    getattr(s, "procedural_cosine_floor", 0.92)
+                )
+            )
+            dispatcher.procedural_reinforcement_floor_fn = (
+                lambda s=settings_for_shortcuts: int(
+                    getattr(s, "procedural_reinforcement_floor", 2)
+                )
+            )
+            dispatcher.procedural_embed_model_fn = (
+                lambda s=settings_for_shortcuts: str(
+                    getattr(s, "procedural_embed_model", "nomic-embed-text:latest")
+                )
+            )
+        except Exception:
+            # Defensive — any failure constructing the table or
+            # wiring the closures must NOT crash the daemon's
+            # startup. Dispatcher's _resolve_shortcut_match handles
+            # a None table by short-circuiting to no-match.
+            pass
+
     # ADR-0033 A3: build the cross-agent delegator factory now that
     # the dispatcher exists, then mutate the dispatcher to hold a
     # reference. Late binding because the factory captures the

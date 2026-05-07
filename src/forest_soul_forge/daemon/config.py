@@ -74,6 +74,61 @@ class DaemonSettings(BaseSettings):
     # Off by default to protect registries in production-ish use.
     allow_rebuild_endpoint: bool = Field(default=False)
 
+    # ----- ADR-0054 T6 — procedural-shortcut substrate (opt-in) ---------
+    # When enabled, the dispatcher's ProceduralShortcutStep matches
+    # llm_think dispatches against stored situation→action shortcuts
+    # in the memory_procedural_shortcuts table. On a high-confidence
+    # match, the dispatcher substitutes the recorded response without
+    # firing the LLM — sub-100ms response instead of multi-second
+    # round-trip. Default OFF; operators opt in via
+    # FSF_PROCEDURAL_SHORTCUT_ENABLED=1 + restart.
+    #
+    # Per ADR-0054 D1 + ADR-0001 D2: shortcuts are per-instance state
+    # (not identity). constitution_hash + DNA stay constant across
+    # shortcut growth. Operators can rebuild the table freely without
+    # touching agent identity.
+    procedural_shortcut_enabled: bool = Field(
+        default=False,
+        description=(
+            "Master switch for ADR-0054 procedural-shortcut "
+            "substrate. Default OFF. Operator opts in via "
+            "FSF_PROCEDURAL_SHORTCUT_ENABLED=1 + daemon restart."
+        ),
+    )
+    procedural_cosine_floor: float = Field(
+        default=0.92,
+        ge=0.0, le=1.0,
+        description=(
+            "Cosine-similarity threshold for shortcut match. "
+            "Lower = more matches, lower confidence. Default 0.92 "
+            "per ADR-0054 D2. Tune down to ~0.85 for noisier "
+            "operator phrasing; tune up to 0.95+ for high-stakes "
+            "assistants where false-shortcut hits would cause "
+            "harm."
+        ),
+    )
+    procedural_reinforcement_floor: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "Minimum (success_count - failure_count) before a "
+            "shortcut row participates in the search. Default 2: "
+            "operator must thumbs-up at least twice (or once "
+            "without thumbs-down) before the shortcut auto-fires. "
+            "Set to 0 to allow brand-new shortcuts to fire "
+            "immediately (operator-tagged via memory_tag_outcome.v1)."
+        ),
+    )
+    procedural_embed_model: str = Field(
+        default="nomic-embed-text:latest",
+        description=(
+            "Embedding model name for situation vectorization. "
+            "Default nomic-embed-text:latest matches the standing "
+            "Forest baseline. 768-dim float32. Override per-deploy "
+            "if Ollama hosts a different embedding model."
+        ),
+    )
+
     # ----- ADR-0056 experimenter workspace -------------------------------
     # Smith's branch-isolated work tree. birth-smith.command provisions
     # this clone at ~/.fsf/experimenter-workspace/Forest-Soul-Forge/ and
