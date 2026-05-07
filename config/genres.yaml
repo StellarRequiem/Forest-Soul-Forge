@@ -127,6 +127,7 @@ genres:
       - deploy_runner
       - alert_dispatcher
       - software_engineer        # SW track — coding swarm Engineer
+      - experimenter             # ADR-0056 — Smith / sandbox self-improvement
 
   guardian:
     description: |

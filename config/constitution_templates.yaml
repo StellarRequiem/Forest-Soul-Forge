@@ -569,6 +569,58 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  # ADR-0056 — Experimenter (Smith). Mirrors software_engineer's
+  # actuator-tier policy posture but tightens further around the
+  # sandboxed-self-improvement framing: branch isolation explicit,
+  # main-branch push forbidden, identity surfaces (audit chain,
+  # registry, secrets dirs) untouchable. Posture YELLOW means the
+  # operator approves every non-read-only dispatch via the
+  # existing pending-call queue (ADR-0019 T3).
+  experimenter:
+    policies:
+      - id: forbid_main_push
+        rule: forbid
+        triggers: [push_to_main, push_to_master, force_push_main]
+        rationale: "Smith pushes only to experimenter/cycle-* branches. Main is operator-merge-only after display-mode review (ADR-0056 D3)."
+      - id: forbid_identity_writes
+        rule: forbid
+        triggers: [write_audit_chain, mutate_registry_db, write_secrets_dir]
+        rationale: "Identity surfaces are append-only by the kernel itself or reconstructed from artifacts. No agent writes them. ADR-0001 D2 invariance."
+      - id: approval_for_destructive_changes
+        rule: require_human_approval
+        triggers: [delete_file, force_push, drop_table, rm_rf, install_unvetted_package]
+        rationale: "Destructive operations queue under YELLOW posture (default). GREEN auto-approves; operator only flips after several clean cycles."
+      - id: approval_for_external_calls
+        rule: require_human_approval
+        triggers: [send_external_request, post_to_remote_api, frontier_dispatch]
+        rationale: "Smith routes llm_think to Anthropic by default; every outbound API call is operator-visible via the queue."
+      - id: approval_for_tool_creation
+        rule: require_human_approval
+        triggers: [request_new_tool, request_new_skill, request_new_plugin]
+        rationale: "Self-augmentation flow: Smith drafts tools but never grants itself access. Operator approves via display-mode pane. ADR-0056 D6."
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.55  # slightly more permissive than
+                                   # software_engineer (0.60) because
+                                   # explore-mode hypothesis-floating
+                                   # benefits from lower confidence
+                                   # gates; operator review is the
+                                   # backstop, not pre-action
+                                   # confidence.
+    out_of_scope:
+      - bypass_review_gate
+      - direct_main_push
+      - identity_surface_write
+    operator_duties:
+      - "Review every cycle in display-mode before approving merge or tools_add."
+      - "Flip posture RED before stepping away if cycles queue overnight; explore mode keeps gathering ideas without acting."
+      - "Audit Smith's branch history weekly; rotate workspace clone if pattern drift surfaces."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   code_reviewer:
     policies:
       - id: forbid_implementation

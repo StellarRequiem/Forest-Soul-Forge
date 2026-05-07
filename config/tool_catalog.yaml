@@ -2154,6 +2154,62 @@ archetypes:
       - code_edit.v1            # SW.A.5 — write changes (gated by genre)
       - shell_exec.v1           # SW.A.5 — run tests / git (gated by genre)
 
+  # ADR-0056 — Experimenter (Smith). Maximally permissive legal
+  # kit: every tool that doesn't touch identity-immutable
+  # surfaces (audit chain, registry DB, secrets dir). Branch
+  # isolation + path constraints are enforced at the
+  # constitutional-policy layer (constitution_templates.yaml
+  # 'experimenter' block) rather than by removing tools — Smith
+  # has shell_exec.v1 but its allowed_commands forbid
+  # `git push origin main`. Per ADR-0056 D1 the design is
+  # 'broad kit + tight per-tool constraints' rather than 'narrow
+  # kit'. Constraints land at birth via the post-birth
+  # constitutional patch (E1.5) since tool_catalog only
+  # configures membership.
+  experimenter:
+    standard_tools:
+      # --- core cognition + memory ---
+      - llm_think.v1            # routes to frontier per ADR-0056 D4
+      - memory_write.v1
+      - memory_recall.v1
+      - memory_tag_outcome.v1   # ADR-0054 T5 reinforcement on cycle
+      - memory_flag_contradiction.v1
+      - memory_disclose.v1
+      - memory_challenge.v1
+      - memory_verify.v1
+      # --- code + repo + analysis ---
+      - code_read.v1
+      - code_edit.v1
+      - shell_exec.v1
+      - pytest_run.v1
+      - ruff_lint.v1
+      - mypy_typecheck.v1
+      - semgrep_scan.v1
+      - bandit_security_scan.v1
+      - tree_sitter_query.v1
+      - git_log_read.v1
+      - git_diff_read.v1
+      - git_blame_read.v1
+      - pip_install_isolated.v1
+      - patch_check.v1
+      # --- system inspection (read-only, defensible) ---
+      - audit_chain_verify.v1
+      - file_integrity.v1
+      - log_scan.v1
+      - log_aggregate.v1
+      - software_inventory.v1
+      - posture_check.v1
+      - continuous_verify.v1
+      - timestamp_window.v1
+      # --- network + external (gated by genre + posture) ---
+      - dns_lookup.v1
+      - web_fetch.v1
+      - browser_action.v1
+      - mcp_call.v1
+      # --- delegation + agent introspection ---
+      - delegate.v1
+      - suggest_agent.v1
+
   code_reviewer:
     standard_tools:
       - llm_think.v1

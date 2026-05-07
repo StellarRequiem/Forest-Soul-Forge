@@ -545,6 +545,33 @@ roles:
       emotional: 0.5
       embodiment: 1.8
 
+  # ADR-0056 — Experimenter (Smith) role. Three-mode agent
+  # (explore / work / display) with the broadest legal kit
+  # modulo identity-touching surfaces. Genre: actuator (highest
+  # tier, max_side_effects=external). Operates branch-isolated
+  # at ~/.fsf/experimenter-workspace/. Frontier-provider
+  # preference for the strongest model the system can run.
+  # Posture YELLOW default — every non-read-only action queues
+  # for operator approval until trust is established.
+  #
+  # Domain weights skew higher than software_engineer on
+  # cognitive (recursive-improvement requires deeper planning
+  # than typical implementation), audit (Smith's actions are
+  # under heavy operator scrutiny + cycle review), and security
+  # (Smith touches more of the system; needs to reason about
+  # blast radius). Embodiment matches software_engineer (heavy
+  # tool-using). Communication slightly higher because cycle
+  # reports and tool requests are operator-facing prose.
+  experimenter:
+    description: "Sandbox experimenter for self-recursive system improvement. Three modes: explore (read-only timer-driven), work (full-kit branch-isolated implementation cycles), display (review of past cycles). Drafts new tools/skills then requests operator approval to add them. Frontier-provider preference. Genre: actuator. Posture YELLOW default. ADR-0056."
+    domain_weights:
+      security: 1.6
+      audit: 1.8
+      cognitive: 2.5
+      communication: 1.3
+      emotional: 0.5
+      embodiment: 1.8
+
   code_reviewer:
     description: "Reviews diffs. Adversarial mindset, finds bugs, gates merges. Refusal arbiter. Genre: guardian."
     domain_weights:
