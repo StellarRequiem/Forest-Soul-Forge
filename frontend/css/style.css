@@ -2391,3 +2391,30 @@ body { padding-bottom: 56px; }
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ADR-0054 T5b (B195) — chat-tab shortcut reinforcement widget. */
+.chat-shortcut-widget {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(72, 187, 120, 0.35);
+  border-radius: 6px;
+  background: rgba(72, 187, 120, 0.05);
+  font-size: 0.9em;
+}
+.chat-shortcut-widget[hidden] { display: none !important; }
+.chat-shortcut-widget__head {
+  margin-bottom: 8px;
+}
+.chat-shortcut-widget__buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chat-shortcut-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.chat-shortcut-widget__status {
+  margin-top: 6px;
+  font-size: 0.85em;
+}

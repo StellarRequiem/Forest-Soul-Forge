@@ -862,6 +862,141 @@ async function loadAssistantTurns() {
   const resp = await api.get(`/conversations/${assistantConvId}/turns?limit=200`);
   assistantTurns = resp.turns || [];
   renderAssistantTurns();
+  // ADR-0054 T5b (B195) — after turns render, check whether the
+  // most recent agent turn was a shortcut substitution. If so,
+  // surface the reinforcement widget.
+  refreshAssistantShortcutWidget();
+}
+
+// ADR-0054 T5b (B195) — last-shortcut reinforcement widget on
+// the Assistant pane.
+//
+// Detection: Sage's most recent turn has `model_used === 'shortcut'`
+// when the dispatcher substituted via ProceduralShortcutStep
+// (the synthetic ToolResult sets model: 'shortcut' per
+// dispatcher._shortcut_substitute). We additionally fetch
+// /conversations/{id}/last-shortcut to get the shortcut_id +
+// similarity for the reinforcement dispatch.
+//
+// Click thumbs → dispatch memory_tag_outcome.v1 against the
+// agent that owned the shortcut (instance_id from the audit
+// event). good = strengthen (success+1), bad = weaken
+// (failure+1), neutral = no counter change but audit-visible.
+async function refreshAssistantShortcutWidget() {
+  const widget = document.getElementById("chat-assistant-shortcut");
+  if (!widget) return;
+
+  // Hide by default; show only on a fresh shortcut hit.
+  widget.hidden = true;
+  widget.innerHTML = "";
+
+  if (!assistantConvId || !assistantTurns.length) return;
+
+  // Find the most recent agent turn (model_used could be
+  // 'shortcut' or anything else; we only care if it's
+  // 'shortcut').
+  const instanceId = localStorage.getItem(ASSISTANT_INSTANCE_KEY) || "";
+  let lastAgentTurn = null;
+  for (let i = assistantTurns.length - 1; i >= 0; i--) {
+    if (assistantTurns[i].speaker === instanceId) {
+      lastAgentTurn = assistantTurns[i];
+      break;
+    }
+  }
+  if (!lastAgentTurn || lastAgentTurn.model_used !== "shortcut") return;
+
+  // Fetch the shortcut metadata.
+  let shortcut;
+  try {
+    shortcut = await api.get(`/conversations/${assistantConvId}/last-shortcut`);
+  } catch (e) {
+    // 404 is normal pre-T6 daemons or before any shortcut has
+    // ever fired; just don't render the widget.
+    return;
+  }
+
+  const sid = shortcut.shortcut_id || "?";
+  const sim = shortcut.shortcut_similarity != null
+    ? Number(shortcut.shortcut_similarity).toFixed(3)
+    : "?";
+  const ownerInstance = shortcut.instance_id || instanceId;
+
+  widget.innerHTML = `
+    <div class="chat-shortcut-widget__head muted">
+      Last response was a recorded pattern
+      <code>${escapeHTML(sid)}</code> (cosine ${escapeHTML(sim)}).
+      Reinforce so future matches grow stronger / weaker.
+    </div>
+    <div class="chat-shortcut-widget__buttons">
+      <button class="btn btn--sm chat-shortcut-btn"
+              data-outcome="good"
+              data-shortcut-id="${escapeHTML(sid)}"
+              data-instance-id="${escapeHTML(ownerInstance)}"
+              type="button">good (success +1)</button>
+      <button class="btn btn--sm btn--ghost chat-shortcut-btn"
+              data-outcome="neutral"
+              data-shortcut-id="${escapeHTML(sid)}"
+              data-instance-id="${escapeHTML(ownerInstance)}"
+              type="button">neutral (audit only)</button>
+      <button class="btn btn--sm btn--ghost chat-shortcut-btn"
+              data-outcome="bad"
+              data-shortcut-id="${escapeHTML(sid)}"
+              data-instance-id="${escapeHTML(ownerInstance)}"
+              type="button">bad (failure +1)</button>
+    </div>
+    <div class="chat-shortcut-widget__status muted" id="chat-shortcut-status"></div>
+  `;
+  widget.hidden = false;
+
+  widget.querySelectorAll(".chat-shortcut-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => _onShortcutTag(e.currentTarget));
+  });
+}
+
+async function _onShortcutTag(btn) {
+  const outcome = btn.dataset.outcome;
+  const shortcutId = btn.dataset.shortcutId;
+  const instanceId = btn.dataset.instanceId;
+  const status = document.getElementById("chat-shortcut-status");
+  if (!outcome || !shortcutId || !instanceId) return;
+
+  // Disable buttons while the dispatch is in flight.
+  document.querySelectorAll(".chat-shortcut-btn").forEach((b) => b.disabled = true);
+  if (status) status.textContent = `tagging ${outcome}…`;
+
+  try {
+    const resp = await writeCall(
+      `/agents/${encodeURIComponent(instanceId)}/tools/call`,
+      {
+        tool_name: "memory_tag_outcome",
+        tool_version: "1",
+        session_id: `chat-tab-thumbs-${Date.now()}`,
+        args: { shortcut_id: shortcutId, outcome },
+      },
+    );
+    if (resp.status === "succeeded") {
+      const out = (resp.result && resp.result.output) || {};
+      if (status) {
+        status.innerHTML = (
+          `<strong style="color: rgba(72,187,120,1);">tagged ${escapeHTML(outcome)}</strong> — ` +
+          `success=${out.new_success_count ?? "?"} failure=${out.new_failure_count ?? "?"} ` +
+          `score=${out.new_reinforcement_score ?? "?"}` +
+          (out.soft_deleted ? ` <strong>· soft-deleted</strong>` : "")
+        );
+      }
+    } else if (resp.status === "pending_approval") {
+      if (status) {
+        status.innerHTML = `queued for approval (ticket ${escapeHTML(resp.ticket_id || "?")})`;
+      }
+    } else {
+      if (status) status.textContent = `dispatch ${resp.status}`;
+    }
+  } catch (e) {
+    if (status) {
+      status.innerHTML = `<strong style="color: rgba(220,80,80,1);">error</strong> — ${escapeHTML(String(e.message || e))}`;
+    }
+    document.querySelectorAll(".chat-shortcut-btn").forEach((b) => b.disabled = false);
+  }
 }
 
 function renderAssistantTurns() {

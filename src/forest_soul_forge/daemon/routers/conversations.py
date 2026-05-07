@@ -901,3 +901,79 @@ def list_turns(
         turns=[_turn_out(r) for r in rows],
         limit=limit, offset=offset,
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR-0054 T5b (B195) — last-shortcut endpoint for chat-tab thumbs.
+# ---------------------------------------------------------------------------
+@router.get(
+    "/{conversation_id}/last-shortcut",
+)
+def get_last_shortcut(
+    conversation_id: str,
+    request: Request,
+    registry: Registry = Depends(get_registry),
+):
+    """Return the most recent ``tool_call_shortcut`` audit event for
+    this conversation's session, or 404 when none exists.
+
+    The chat-tab thumbs UI uses this to surface a reinforcement
+    widget after a shortcut substitution: 'last response was from
+    recorded pattern sc-xxx (cosine 0.96). Tag: thumbs-up /
+    thumbs-down / neutral.' Click dispatches memory_tag_outcome.v1
+    against the agent that owned the shortcut.
+
+    Conversation-to-session mapping per conversation_helpers'
+    convention: dispatches against an agent in this conversation
+    use ``session_id = f'conv-{conversation_id}'``. The endpoint
+    scans the recent audit chain for events matching that
+    session_id + event_type=tool_call_shortcut and returns the
+    most recent.
+
+    Walks ``audit.tail(N)`` rather than ``read_all`` so the lookup
+    is O(N) on chain depth rather than full-scan. N=200 is
+    comfortably sized to capture the most recent shortcut even on
+    chatty operators.
+    """
+    # Confirm the conversation exists.
+    try:
+        registry.conversations.get_conversation(conversation_id)
+    except ConversationNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"conversation {conversation_id!r} not found",
+        )
+
+    audit = getattr(request.app.state, "audit_chain", None)
+    if audit is None:
+        raise HTTPException(
+            status_code=503, detail="audit chain not loaded",
+        )
+
+    target_session = f"conv-{conversation_id}"
+    # Scan most-recent first (audit.tail returns oldest-to-newest
+    # within the window; reverse for newest-first).
+    try:
+        entries = audit.tail(200)
+    except Exception:
+        entries = []
+
+    for entry in reversed(entries):
+        if entry.event_type != "tool_call_shortcut":
+            continue
+        data = entry.event_data or {}
+        if data.get("session_id") != target_session:
+            continue
+        return {
+            "shortcut_id":          data.get("shortcut_id"),
+            "shortcut_similarity":  data.get("shortcut_similarity"),
+            "shortcut_action_kind": data.get("shortcut_action_kind"),
+            "audit_seq":            entry.seq,
+            "timestamp":            entry.timestamp,
+            "instance_id":          data.get("instance_id"),
+        }
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"no shortcut events for conversation {conversation_id!r}",
+    )

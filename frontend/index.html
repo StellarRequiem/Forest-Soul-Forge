@@ -651,6 +651,13 @@
                   <p class="muted">Loading conversation…</p>
                 </div>
 
+                <!-- ADR-0054 T5b (B195) — shortcut-reinforcement widget.
+                     Hidden by default; chat.js's
+                     refreshAssistantShortcutWidget surfaces it
+                     when the assistant's most recent turn was
+                     a procedural-shortcut substitution. -->
+                <div id="chat-assistant-shortcut" class="chat-shortcut-widget" hidden></div>
+
                 <div id="chat-assistant-composer" class="chat-assistant-composer">
                   <textarea id="chat-assistant-input"
                             class="inp chat-assistant-input"
