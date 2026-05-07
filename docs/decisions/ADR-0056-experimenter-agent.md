@@ -404,3 +404,131 @@ agents stay on local provider. The operator's
 — Sage (operator-facing assistant) still routes to local
 qwen2.5-coder:7b; Smith routing to Claude is the Smith-specific
 opt-in.
+
+## Followups — first-cycle trial findings (2026-05-07)
+
+The first work-mode cycle dispatch went through four iterations
+(v1 → v4) with operator-side path validation between each. The
+runtime did exactly what E2's ModeKitClampStep + frontier routing
+were supposed to do: every dispatch landed cleanly, mode-clamped
+to work, routed to claude-sonnet-4-6, audit-chained. The
+substrate is sound. What surfaced is a gap in the *iteration
+model*, not the runtime.
+
+**Finding 1 — cycle dispatches are stateless across versions.**
+Each cycle revision is a fresh `llm_think` call. Smith's prior
+plan output is not threaded into the next cycle's prompt
+automatically — there's no machinery that says "here is what you
+proposed last time, here is the operator's review, revise." When
+the operator asks for a "minimal fix to v3," Smith fabricates
+what v3 might have looked like rather than revising the actual
+v3.
+
+Concrete evidence from the v4 dispatch
+(`dev-tools/smith-cycle-1-plan-response-v4.json`): Section 2 of
+the response presents a diff whose "before" side does not match
+v3's actual `_seed_conversation` helper, and Section 3
+("revised file") is an entirely different file targeting an
+imagined `client.respond()` method on a non-existent
+`ForestSoulForgeClient` class. The kwargs-fix instruction was
+applied correctly in isolation; the surrounding structure
+collapsed because Smith had no v3 in context.
+
+By contrast, the v2 → v3 jump worked cleanly because the operator
+embedded the full ground-truth code blocks (endpoint source,
+fixture pattern source, real schema) directly in the v3 prompt.
+Smith iterated against in-prompt material correctly. Iteration
+failed once that scaffolding was removed.
+
+**Finding 2 — frontier routing is markedly higher-quality than
+local.** Cycle 1.1 on local qwen2.5-coder:7b produced
+specifics-light output (vapor target: HSM adapter for a
+non-existent tool). Cycle 1.2 on claude-sonnet-4-6 (post-B193
+provider override) produced structured, locatable, partially-
+runnable output. The 2.3x richer output translates directly to
+a target the operator can actually evaluate.
+
+**Finding 3 — Smith's `min_confidence_to_act=0.55` correctly
+flags but does not stop.** Across all four cycles, Smith's
+"Risks / blast radius" sections accurately identified at least
+one of the gaps in the corresponding plan (vapor target in 1.1,
+patch-target uncertainty in 1.2, interface-kwargs uncertainty in
+1.3, none in 1.4 because Smith had lost the thread entirely).
+This is the right behavior for a YELLOW-posture experimenter:
+flag the risk, let the operator gate. The constitution's
+approval-for-destructive-changes clause is doing its job.
+
+**Decision: file follow-up tranche E7 — prior-cycle artifact
+threading.**
+
+When the operator fires a revision dispatch (cycle N → cycle N+1
+on the same target), the daemon should:
+
+1. Look up the prior cycle's plan output by `(instance_id,
+   cycle_id)` from the audit chain.
+2. Inject the prior plan's full text into the next dispatch's
+   system message under a clearly-labeled `<prior_cycle>` block.
+3. Inject the operator's review notes (the `decision` payload
+   from `POST /agents/{id}/cycles/{cycle_id}/decision`) under
+   `<operator_feedback>`.
+4. Cap the threaded context at ~8k tokens — older cycles get
+   summarized rather than dropped, preserving the iteration
+   trail.
+
+E7 is gated on Smith doing a few more cycles in the current
+flat-prompt mode so we collect more data on where the iteration
+model breaks down. Operator preference: ship E7 once we have
+evidence from at least 3-4 distinct targets, not just one.
+
+**Finding 4 — verbatim wrappers restore literal-copy compliance.**
+Cycle 1.5 confirmed the prior-cycle-threading fix (Finding 1) but
+exposed a separate failure mode: even with the v3 file body
+embedded in-prompt, when the operator wrote out the corrected
+helper kwargs in plain prose, Smith paraphrased them. He
+substituted `id=conversation_id, session_tag="agent-test-001"`
+for the explicit `domain="general", operator_id="test-operator",
+conversation_id=conversation_id` from the prompt. Neither `id`
+nor `session_tag` is a parameter of `create_conversation` — pure
+hallucination, but with the structural shell of v3 still intact.
+
+Cycle 1.6 tested whether a `<copy_verbatim id="helper">` block
+with explicit "copy character-for-character; deviation fails the
+cycle" framing would stop the paraphrasing. It did. Smith quoted
+the block back verbatim in section 2 of his response, used the
+exact kwargs in section 3, and self-audited the match in
+section 5. Verbatim wrappers belong alongside `<prior_cycle>`
+threading in the E7 prompt-construction toolkit.
+
+**Finding 5 — Smith's tests caught a real bug.** The test file
+v6 produced (helper from cycle 1.6, structure from cycle 1.3,
+audit.append assumptions verified by operator) ran 3/4 green
+on first apply. The remaining failure was
+`test_most_recent_wins_with_multiple_matching_events`: the
+endpoint was returning the OLDEST matching shortcut, not the
+newest. Root cause: B195's route handler did
+`for entry in reversed(entries)` against
+`audit.tail(200)`, but `tail` already returns newest-first
+(line 367 of audit_chain.py: `return list(reversed(keepers))`).
+The route was double-reversing into oldest-first iteration and
+returning the FIRST oldest match. Fix: drop the `reversed()`
+call, iterate `entries` directly. Without Smith's test, this
+would have shipped to operators and reinforced stale shortcuts
+on chatty conversations.
+
+**Decision: cycle 1 closes 4/4 green.** Final state:
+- `tests/unit/test_last_shortcut_route.py` — Smith's structure +
+  operator-supplied helper + `allow_write_endpoints=True` fixture
+  fix (audit chain initialization is gated on that flag in
+  `daemon/app.py` L229; flipping it is required for any test that
+  exercises the chain).
+- `routers/conversations.py` L961 — dropped `reversed(entries)`,
+  iterate directly. Bug introduced in B195, surfaced by Smith's
+  test, fixed in cycle 1 close.
+
+Cycle 1 produced more value than the test file alone: the
+iteration trail discovered two prompt-engineering primitives
+(Findings 1 + 4) that should be wired into the E7 cycle dispatcher,
+and the test itself caught a B195 regression. Pattern to repeat:
+Smith picks small undertested surfaces, operator iterates the plan
+with prior-cycle threading + verbatim wrappers, the green test on
+disk closes the loop and may surface real bugs along the way.

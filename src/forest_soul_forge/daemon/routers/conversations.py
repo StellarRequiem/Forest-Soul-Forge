@@ -951,14 +951,19 @@ def get_last_shortcut(
         )
 
     target_session = f"conv-{conversation_id}"
-    # Scan most-recent first (audit.tail returns oldest-to-newest
-    # within the window; reverse for newest-first).
+    # Scan most-recent first. AuditChain.tail returns newest-first
+    # already (collects via deque in file order, then list-reverses
+    # at return — see audit_chain.py L367). Iterate in that order;
+    # the first match is the most recent. Earlier B195 had
+    # `reversed(entries)` here which flipped to oldest-first and
+    # surfaced the OLDEST shortcut — caught by Smith's cycle-1
+    # test_most_recent_wins, fixed post-cycle-1.6.
     try:
         entries = audit.tail(200)
     except Exception:
         entries = []
 
-    for entry in reversed(entries):
+    for entry in entries:
         if entry.event_type != "tool_call_shortcut":
             continue
         data = entry.event_data or {}
