@@ -49,17 +49,73 @@ from forest_soul_forge.tools.dispatcher import (
 router = APIRouter(tags=["tools"])
 
 
-def _resolve_active_provider(request: Request):
-    """Best-effort fetch of the active model provider.
+def _load_agent_default_provider(constitution_path: Path) -> str | None:
+    """ADR-0056 D4 / B193 — read the per-agent provider override
+    from the constitution YAML. Returns the provider name (e.g.
+    'frontier' or 'local') or None when unset / file missing /
+    parse-error.
 
-    Returns ``None`` when the provider registry isn't on app.state OR
-    no default is set. Tools that need a provider raise a ToolError
-    (handled by the dispatcher) when one isn't available; pure-function
-    tools ignore the parameter entirely.
+    The field is a single top-level string in the constitution:
+
+        default_provider: frontier
+
+    Operators add it after birth to route an agent's llm_think
+    dispatches to a different provider than the daemon's
+    registry default. Smith (the experimenter) defaults to
+    frontier per ADR-0056 D4 — every other agent stays on the
+    daemon-wide default unless explicitly opted in.
+    """
+    if not constitution_path.exists():
+        return None
+    try:
+        import yaml
+        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    val = data.get("default_provider")
+    if isinstance(val, str) and val.strip():
+        return val.strip()
+    return None
+
+
+def _resolve_active_provider(request: Request, *, constitution_path: Path | None = None):
+    """Resolve which model provider to hand the dispatcher.
+
+    Resolution order (B193):
+      1. If ``constitution_path`` is given AND the constitution
+         specifies ``default_provider: <name>``, use that named
+         provider from the registry.
+      2. Otherwise, the daemon-wide active provider via
+         ``ProviderRegistry.active()``.
+      3. ``None`` when no provider registry is on app.state.
+
+    Returns ``None`` when:
+      - No registry wired (test contexts).
+      - Per-agent override names a provider that isn't in the
+        registry (defensive — log and fall through to active()).
+      - active() raises for any reason.
     """
     pr = getattr(request.app.state, "providers", None)
     if pr is None:
         return None
+    # Per-agent override.
+    if constitution_path is not None:
+        override_name = _load_agent_default_provider(constitution_path)
+        if override_name is not None:
+            try:
+                return pr.get(override_name)
+            except Exception:
+                # Unknown provider name in the constitution —
+                # fall through to active(). Operator may have
+                # mistyped; the dispatch still works against the
+                # daemon default. The audit chain captures the
+                # provider via the dispatched event's metadata
+                # so the operator sees the actual route on
+                # review.
+                pass
+    # Daemon-wide active provider.
     try:
         return pr.active()
     except Exception:
@@ -143,7 +199,17 @@ async def call_tool(
             # wrap LLM calls reach for this; pure-function tools ignore
             # it. Done lazily so a missing provider registry doesn't
             # crash dispatches that don't need one.
-            provider=_resolve_active_provider(request),
+            #
+            # B193: now accepts a constitution_path to honor per-agent
+            # default_provider overrides. Smith's constitution sets
+            # default_provider: frontier so its llm_think dispatches
+            # route to Anthropic (claude-sonnet-4-6); every other
+            # agent stays on the daemon-wide default unless their
+            # constitution opts in.
+            provider=_resolve_active_provider(
+                request,
+                constitution_path=Path(agent.constitution_path),
+            ),
             # T2.2b — operator-supplied per-task caps. None when the
             # operator didn't set any; dispatcher treats absence as
             # "no per-task limit" (constitution + genre floor still apply).
