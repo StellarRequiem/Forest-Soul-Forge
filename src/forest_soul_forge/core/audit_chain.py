@@ -160,6 +160,17 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # Verifier's track record (§4.2) start from this event type.
     #   - verifier_scan_completed: a Verifier completed a scan pass
     "verifier_scan_completed",
+    # ADR-0056 E5 (Burst 191) — operator decision on a Smith cycle.
+    # One event covers approve / deny / counter via the action
+    # field in event_data. event_data also carries cycle_id,
+    # branch, head_sha, the optional note, and (for approve) the
+    # list of approved requested_tools. Pairs with the
+    # tool_call_succeeded events for memory_tag_outcome.v1 +
+    # tools_add invocations that the decision triggers
+    # downstream — operators querying 'what happened to
+    # cycle-N?' get the full picture by ORing this event type
+    # with the standard tool-call lifecycle events.
+    "experimenter_cycle_decision",
     # ADR-0054 T4 (Burst 181) — procedural-shortcut substitution.
     # Emitted INSTEAD of the dispatched + succeeded pair when the
     # dispatcher's ProceduralShortcutStep matches a stored

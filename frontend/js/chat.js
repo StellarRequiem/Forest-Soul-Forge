@@ -1683,14 +1683,87 @@ async function _expandCycle(instanceId, cycleId, rowEl) {
       <pre class="chat-cycles-pre chat-cycles-pre--diff">${escapeHTML(d.diff || "(no diff)")}</pre>
     </details>
 
-    <div class="chat-cycles-detail__actions muted" style="margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08);">
-      Approve / Deny / Counter-propose surfaces are E5 (B191).
-      For now, review the diff above and merge manually with
-      <code>git merge --no-ff ${escapeHTML(d.branch)}</code> if approved,
-      or delete the branch with <code>git branch -D ${escapeHTML(d.branch)}</code>
-      if denied.
+    <div class="chat-cycles-detail__actions" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08);">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+        <button class="btn btn--sm chat-cycles-action chat-cycles-action--approve"
+                type="button"
+                data-cycle-id="${escapeHTML(d.cycle_id)}"
+                data-instance-id="${escapeHTML(instanceId)}"
+                data-action="approve">approve + merge</button>
+        <button class="btn btn--sm btn--ghost chat-cycles-action chat-cycles-action--deny"
+                type="button"
+                data-cycle-id="${escapeHTML(d.cycle_id)}"
+                data-instance-id="${escapeHTML(instanceId)}"
+                data-action="deny">deny</button>
+        <button class="btn btn--sm btn--ghost chat-cycles-action chat-cycles-action--counter"
+                type="button"
+                data-cycle-id="${escapeHTML(d.cycle_id)}"
+                data-instance-id="${escapeHTML(instanceId)}"
+                data-action="counter">counter-propose</button>
+        <label class="muted" style="margin-left: 12px; font-size: 0.85em;">
+          <input type="checkbox" id="chat-cycles-deny-delete-branch" />
+          delete branch on deny
+        </label>
+      </div>
+      <div class="chat-cycles-action-note" style="margin-top: 8px;">
+        <textarea id="chat-cycles-decision-note"
+                  class="inp"
+                  rows="2"
+                  maxlength="2000"
+                  placeholder="optional note (required for counter-propose) — lands in audit + Smith's next explore tick"></textarea>
+      </div>
+      <div id="chat-cycles-action-status" class="muted" style="margin-top: 6px; font-size: 0.85em;"></div>
     </div>
   `;
+
+  // Wire the action buttons.
+  document.querySelectorAll(".chat-cycles-action").forEach((btn) => {
+    btn.addEventListener("click", (e) => _onCycleDecision(e.currentTarget));
+  });
+}
+
+async function _onCycleDecision(btn) {
+  const action = btn.dataset.action;
+  const cycleId = btn.dataset.cycleId;
+  const instanceId = btn.dataset.instanceId;
+  const noteEl = document.getElementById("chat-cycles-decision-note");
+  const statusEl = document.getElementById("chat-cycles-action-status");
+  const deleteBranchEl = document.getElementById("chat-cycles-deny-delete-branch");
+  const note = (noteEl?.value || "").trim();
+  const deleteBranch = !!(deleteBranchEl?.checked);
+
+  if (action === "counter" && !note) {
+    statusEl.textContent = "counter-propose requires a note.";
+    return;
+  }
+  // Confirm destructive actions inline.
+  if (action === "approve" && !confirm(
+    `Approve + merge ${cycleId} into the workspace's main? ` +
+    `This runs git merge --no-ff in ~/.fsf/experimenter-workspace/. ` +
+    `You'll still need to push to origin manually after.`
+  )) return;
+  if (action === "deny" && deleteBranch && !confirm(
+    `Deny ${cycleId} AND delete its branch? ` +
+    `Branch deletion is permanent.`
+  )) return;
+
+  // Disable all action buttons during the request.
+  document.querySelectorAll(".chat-cycles-action").forEach((b) => b.disabled = true);
+  statusEl.textContent = `${action}…`;
+
+  const body = { action, note: note || null, delete_branch: deleteBranch };
+  try {
+    const resp = await api.post(
+      `/agents/${encodeURIComponent(instanceId)}/cycles/${encodeURIComponent(cycleId)}/decision`,
+      body,
+    );
+    statusEl.innerHTML = `<strong style="color: rgba(72,187,120,1);">ok</strong> — ${escapeHTML(resp.detail || action)}`;
+    // After 2s, refresh the list so the row's status updates.
+    setTimeout(() => refreshCyclesPane(), 2000);
+  } catch (e) {
+    statusEl.innerHTML = `<strong style="color: rgba(220,80,80,1);">error</strong> — ${escapeHTML(String(e.message || e))}`;
+    document.querySelectorAll(".chat-cycles-action").forEach((b) => b.disabled = false);
+  }
 }
 
 function wireCyclesRefresh() {

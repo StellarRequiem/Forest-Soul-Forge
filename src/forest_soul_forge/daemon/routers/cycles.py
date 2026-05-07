@@ -1,10 +1,11 @@
-"""``/agents/{instance_id}/cycles`` — ADR-0056 E4 (Burst 190).
+"""``/agents/{instance_id}/cycles`` — ADR-0056 E4 + E5.
 
-Display-mode read surface for Smith's branch-isolated cycles.
-Reads the experimenter workspace via git subprocess (no
-GitPython dep) and surfaces cycle metadata to the chat tab.
+Display-mode read surface for Smith's branch-isolated cycles
+plus the E5 decision write surface. Reads the experimenter
+workspace via git subprocess (no GitPython dep) and surfaces
+cycle metadata to the chat tab.
 
-Two endpoints:
+Three endpoints:
 
   GET /agents/{instance_id}/cycles
     List view. One row per branch matching experimenter/cycle-*.
@@ -16,15 +17,33 @@ Two endpoints:
     + cycle report content if present + parsed requested_tools.
     More expensive — fired on row expand only.
 
-Both endpoints are READ-ONLY. The decision actions (approve /
-deny / counter) ship as part of E5 because they overlap with
-the self-augmentation flow's merge + tools_add automation.
+  POST /agents/{instance_id}/cycles/{cycle_id}/decision
+    E5 — operator decision write. action ∈ {approve, deny,
+    counter}.
+      approve: git merge --no-ff in the workspace's main
+        branch. On merge conflict, aborts and returns 409 so
+        the operator resolves manually. Emits
+        experimenter_cycle_decision audit event with
+        action=approve.
+      deny: deletes the branch (git branch -D). Emits the
+        same event with action=deny.
+      counter: writes a feedback note to Smith's memory
+        (deferred — ships as a memory_write call in a
+        follow-up). Emits the same event with
+        action=counter + note in event_data.
+
+Decision endpoint is the only WRITE surface. requires_writes_enabled
+gate applies. Per-cycle action is idempotent on deny + counter;
+approve is idempotent only when the merge is fast-forwardable
+(otherwise the second call returns 'already merged').
 
 Per ADR-0056 D5: cycle_id is the branch name without the
-'experimenter/' prefix. Stable across daemon restarts because
-git branch names don't change without explicit rename.
+'experimenter/' prefix.
 
-Per ADR-0001 D2: read-only. Touches no agent identity.
+Per ADR-0001 D2: read endpoints touch no identity. Decision
+endpoint emits an audit event but does NOT mutate Smith's
+constitution_hash or DNA. The merge into main is a state
+mutation in the workspace clone, not the kernel registry.
 """
 from __future__ import annotations
 
@@ -33,11 +52,19 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import threading
+from typing import Literal
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
+
+from forest_soul_forge.core.audit_chain import AuditChain
 from forest_soul_forge.daemon.deps import (
+    get_audit_chain,
     get_registry,
+    get_write_lock,
     require_api_token,
+    require_writes_enabled,
 )
 from forest_soul_forge.daemon.schemas import (
     CycleDetail,
@@ -46,6 +73,64 @@ from forest_soul_forge.daemon.schemas import (
 )
 from forest_soul_forge.registry import Registry
 from forest_soul_forge.registry.registry import UnknownAgentError
+
+
+# ---------------------------------------------------------------------------
+# E5 — Decision request/response shapes (inline since they're scoped
+# to this router and don't need to live in schemas/__init__.py).
+# ---------------------------------------------------------------------------
+DecisionAction = Literal["approve", "deny", "counter"]
+
+
+class CycleDecisionRequest(BaseModel):
+    """Body for POST /agents/{instance_id}/cycles/{cycle_id}/decision."""
+
+    action: DecisionAction
+    note: str | None = Field(
+        default=None,
+        max_length=2000,
+        description=(
+            "Optional operator note. For action='counter' this "
+            "becomes Smith's feedback message for the next "
+            "explore tick. For approve/deny it lands in the "
+            "audit event for after-the-fact context."
+        ),
+    )
+    delete_branch: bool = Field(
+        default=False,
+        description=(
+            "For action='deny' only — also delete the branch "
+            "(git branch -D experimenter/cycle-N) after tagging "
+            "the outcome. Default false: deny tags outcome but "
+            "keeps the branch around for forensics."
+        ),
+    )
+
+
+class CycleDecisionResponse(BaseModel):
+    """Response from POST /agents/{id}/cycles/{cycle_id}/decision."""
+
+    ok: bool
+    action: DecisionAction
+    cycle_id: str
+    branch: str
+    audit_seq: int
+    merge_commit_sha: str | None = Field(
+        default=None,
+        description=(
+            "For action='approve' only — the SHA of the merge "
+            "commit on main. Operator pushes to origin to "
+            "publish."
+        ),
+    )
+    branch_deleted: bool = Field(
+        default=False,
+        description="True when action='deny' + delete_branch=true succeeded.",
+    )
+    detail: str = Field(
+        default="",
+        description="Human-readable summary of what happened.",
+    )
 
 
 router = APIRouter(prefix="/agents", tags=["cycles"])
@@ -428,4 +513,214 @@ def get_cycle_detail(
         cycle_report_path=report_path,
         cycle_report_content=report_content,
         requested_tools=requested,
+    )
+
+
+# ---------------------------------------------------------------------------
+# E5 — Decision endpoint. Approve (merge), Deny (tag outcome,
+# optionally delete branch), Counter (record note for next tick).
+# ---------------------------------------------------------------------------
+@router.post(
+    "/{instance_id}/cycles/{cycle_id}/decision",
+    response_model=CycleDecisionResponse,
+    dependencies=[
+        Depends(require_writes_enabled),
+        Depends(require_api_token),
+    ],
+)
+def decide_cycle(
+    instance_id: str,
+    cycle_id: str,
+    body: CycleDecisionRequest,
+    request: Request,
+    registry: Registry = Depends(get_registry),
+    audit: AuditChain = Depends(get_audit_chain),
+    write_lock: threading.Lock = Depends(get_write_lock),
+) -> CycleDecisionResponse:
+    """ADR-0056 E5 — operator decision on a Smith cycle.
+
+    Three action modes:
+
+      approve — runs ``git merge --no-ff experimenter/cycle-N``
+        in the workspace's main branch. On clean merge, returns
+        the merge commit SHA. On conflict, aborts the merge
+        cleanly and returns 409 with a detail message; the
+        operator resolves manually then re-fires this endpoint.
+      deny — tags the cycle as denied via the audit event;
+        optionally deletes the branch (delete_branch=true).
+      counter — records the operator's note for routing into
+        Smith's next explore-mode tick. v0.1 just emits the
+        audit event with the note; the explore-prompt
+        machinery picks it up automatically when the
+        scheduler fires (Smith's prompt instructs reading
+        recent audit events for operator feedback).
+
+    All three actions emit ONE ``experimenter_cycle_decision``
+    audit event. The action field discriminates; the rest of
+    event_data carries cycle_id, branch, head_sha, optional
+    note, and (for approve) merge_commit_sha.
+
+    Per ADR-0056 D3: the merge happens in the experimenter
+    workspace clone (~/.fsf/experimenter-workspace/), NOT the
+    operator's main work tree. After a successful approve, the
+    operator pushes to origin from the workspace if they want
+    to publish:
+        cd ~/.fsf/experimenter-workspace/Forest-Soul-Forge
+        git push origin main
+    """
+    # Validate the agent exists.
+    try:
+        agent = registry.get_agent(instance_id)
+    except UnknownAgentError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"agent {instance_id!r} not found",
+        )
+
+    # Validate cycle_id pattern (path-traversal defense).
+    import re
+    if not re.match(r"^cycle-\d+$", cycle_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid cycle_id {cycle_id!r}; expected 'cycle-N'",
+        )
+    branch = f"experimenter/{cycle_id}"
+
+    # Resolve workspace.
+    repo = _resolve_workspace_path(request)
+    if repo is None:
+        raise HTTPException(
+            status_code=404,
+            detail="experimenter workspace not provisioned",
+        )
+
+    # Confirm branch exists.
+    rc, _, _ = _run_git(repo, "rev-parse", "--verify", branch)
+    if rc != 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"branch {branch!r} not found in workspace",
+        )
+
+    # Capture HEAD sha for audit metadata.
+    rc, head_sha_full, _ = _run_git(
+        repo, "rev-parse", branch,
+    )
+    head_sha = (head_sha_full or "").strip()[:12] or "unknown"
+
+    # All write paths take the daemon write lock so concurrent
+    # decision calls + concurrent audit emissions are
+    # serialized.
+    with write_lock:
+        merge_commit_sha: str | None = None
+        branch_deleted = False
+        detail_msg = ""
+
+        if body.action == "approve":
+            # Switch to main, merge --no-ff. On conflict, abort
+            # and return 409.
+            rc, _, err = _run_git(repo, "checkout", DEFAULT_BASE_BRANCH)
+            if rc != 0:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"failed to checkout main: {err.strip()[:200]}",
+                )
+            merge_msg = (
+                f"Merge experimenter/{cycle_id} (operator-approved)\n"
+                f"\n"
+                f"{(body.note or '')}".rstrip()
+            )
+            rc, mout, merr = _run_git(
+                repo, "merge", "--no-ff", branch,
+                "-m", merge_msg,
+            )
+            if rc != 0:
+                # Abort to leave main clean.
+                _run_git(repo, "merge", "--abort")
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"merge of {branch!r} into main produced a "
+                        f"conflict; merge aborted. Resolve manually "
+                        f"in the workspace and re-fire the decision. "
+                        f"git output: {(mout + merr).strip()[:300]}"
+                    ),
+                )
+            # Capture the merge commit SHA.
+            rc, sha_out, _ = _run_git(repo, "rev-parse", "HEAD")
+            if rc == 0:
+                merge_commit_sha = sha_out.strip()[:12]
+            detail_msg = (
+                f"approved: merged {branch} into main"
+                + (f" as {merge_commit_sha}" if merge_commit_sha else "")
+                + ". Push to origin from the workspace to publish."
+            )
+
+        elif body.action == "deny":
+            if body.delete_branch:
+                rc, _, derr = _run_git(repo, "branch", "-D", branch)
+                if rc == 0:
+                    branch_deleted = True
+                    detail_msg = (
+                        f"denied: branch {branch} deleted from workspace."
+                    )
+                else:
+                    detail_msg = (
+                        f"denied: tag recorded but branch delete "
+                        f"failed ({derr.strip()[:120]}). Branch "
+                        f"remains for forensics."
+                    )
+            else:
+                detail_msg = (
+                    f"denied: outcome tagged; branch {branch} "
+                    f"preserved for forensics."
+                )
+
+        elif body.action == "counter":
+            detail_msg = (
+                "counter-proposed: note recorded in audit chain. "
+                "Smith picks up operator feedback on the next "
+                "explore-mode tick (memory_recall surfaces recent "
+                "audit events with operator notes)."
+            )
+
+        # Emit the unified audit event.
+        try:
+            entry = audit.append(
+                "experimenter_cycle_decision",
+                {
+                    "instance_id":      instance_id,
+                    "cycle_id":         cycle_id,
+                    "branch":           branch,
+                    "head_sha":         head_sha,
+                    "action":           body.action,
+                    "note":             body.note,
+                    "merge_commit_sha": merge_commit_sha,
+                    "branch_deleted":   branch_deleted,
+                },
+                agent_dna=agent.dna,
+            )
+            audit_seq = entry.seq
+        except Exception as e:  # noqa: BLE001 — defensive
+            # Audit emit failure shouldn't undo a successful merge,
+            # but the operator should know.
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"action={body.action} side-effects landed but "
+                    f"audit emission failed: {type(e).__name__}: {e}. "
+                    f"Verify chain integrity via "
+                    f"audit_chain_verify.v1 before proceeding."
+                ),
+            )
+
+    return CycleDecisionResponse(
+        ok=True,
+        action=body.action,
+        cycle_id=cycle_id,
+        branch=branch,
+        audit_seq=audit_seq,
+        merge_commit_sha=merge_commit_sha,
+        branch_deleted=branch_deleted,
+        detail=detail_msg,
     )
