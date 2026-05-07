@@ -2222,3 +2222,125 @@ body { padding-bottom: 56px; }
   .tab { padding: var(--sp-2) var(--sp-2); font-size: 12px; }
   .tab__icon { width: 13px; height: 13px; }
 }
+
+/* ============================================================
+   ADR-0056 E4 (B190) — Cycles pane (Smith's branch-isolated review).
+   ============================================================ */
+
+.chat-cycles-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.chat-cycles-pane[hidden] { display: none !important; }
+
+.chat-cycles-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-cycles-row {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+  background: rgba(255,255,255,0.02);
+}
+.chat-cycles-row:hover {
+  border-color: rgba(72, 187, 120, 0.4);
+  background: rgba(72, 187, 120, 0.04);
+}
+.chat-cycles-row--active {
+  border-color: rgba(72, 187, 120, 0.7);
+  background: rgba(72, 187, 120, 0.08);
+}
+.chat-cycles-row__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.chat-cycles-row__id {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.chat-cycles-row__status {
+  font-size: 0.75em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+.chat-cycles-row__status--pending  { background: rgba(150,150,150,0.2); }
+.chat-cycles-row__status--ready    { background: rgba(72, 187, 120, 0.25); }
+.chat-cycles-row__status--passed   { background: rgba(72, 187, 120, 0.45); }
+.chat-cycles-row__status--failed   { background: rgba(220, 80, 80, 0.45); }
+.chat-cycles-row__status--merged   { background: rgba(80, 130, 220, 0.35); }
+.chat-cycles-row__sha,
+.chat-cycles-row__time {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+.chat-cycles-row__msg {
+  margin: 4px 0;
+}
+.chat-cycles-row__stats {
+  font-size: 0.85em;
+}
+
+.chat-cycles-detail {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(72, 187, 120, 0.3);
+  border-radius: 6px;
+  background: rgba(72, 187, 120, 0.02);
+}
+.chat-cycles-detail[hidden] { display: none !important; }
+.chat-cycles-detail__head {
+  margin-bottom: 12px;
+}
+.chat-cycles-detail__head h3 {
+  margin: 0 0 4px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.chat-cycles-detail details {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+}
+.chat-cycles-detail summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+.chat-cycles-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  margin: 8px 0;
+  padding: 8px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 3px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+.chat-cycles-pre--diff {
+  max-height: 600px;
+  font-size: 0.8em;
+}
+.chat-cycles-reqtools {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+.chat-cycles-reqtools li {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.chat-cycles-reqtools li:last-child { border-bottom: none; }

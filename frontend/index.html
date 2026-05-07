@@ -465,6 +465,11 @@
       <div class="chat-mode-toggle">
         <button class="chat-mode-btn" data-mode="rooms" id="chat-mode-rooms" type="button">Rooms</button>
         <button class="chat-mode-btn" data-mode="assistant" id="chat-mode-assistant" type="button">Assistant</button>
+        <!-- ADR-0056 E4 (B190) — Smith's display-mode review pane.
+             Surfaces cycle list + diff for branch-isolated work
+             cycles. Hidden when no experimenter workspace is
+             provisioned (the JS detects via the API response). -->
+        <button class="chat-mode-btn" data-mode="cycles" id="chat-mode-cycles" type="button">Cycles</button>
       </div>
 
       <!-- Mode pane: assistant (ADR-0047 T2 — birth flow + state machine) -->
@@ -866,6 +871,35 @@
           <div class="chat-dialog__actions">
             <button class="btn btn--ghost btn--sm" id="chat-new-cancel" type="button">cancel</button>
             <button class="btn btn--sm" id="chat-new-create" type="button">create</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ADR-0056 E4 (B190) — display-mode cycles pane. Surfaces
+           Smith's branch-isolated work cycles for review. List
+           on top, expand-on-click for diff + cycle report. -->
+      <div id="chat-pane-cycles" class="chat-cycles-pane" hidden>
+        <div class="panel">
+          <div class="panel__header">
+            <h2 class="panel__title">Smith — Cycles</h2>
+            <div class="panel__actions">
+              <span class="muted" id="chat-cycles-status">checking workspace…</span>
+              <button class="btn btn--ghost btn--sm" id="chat-cycles-refresh" type="button">refresh</button>
+            </div>
+          </div>
+          <div class="panel__body">
+            <div class="chat-cycles-empty muted" id="chat-cycles-empty" hidden>
+              No cycles yet. Smith works on branches under
+              <code>experimenter/cycle-N</code> in the workspace at
+              <code id="chat-cycles-workspace-path">~/.fsf/experimenter-workspace/Forest-Soul-Forge</code>.
+              Fire a work-mode dispatch to start cycle 1.
+            </div>
+            <div class="chat-cycles-no-workspace muted" id="chat-cycles-no-workspace" hidden>
+              Experimenter workspace not provisioned on this daemon.
+              Run <code>dev-tools/birth-smith.command</code> to set it up.
+            </div>
+            <ul class="chat-cycles-list" id="chat-cycles-list"></ul>
+            <div class="chat-cycles-detail" id="chat-cycles-detail" hidden></div>
           </div>
         </div>
       </div>

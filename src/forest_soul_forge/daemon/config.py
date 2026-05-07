@@ -74,6 +74,26 @@ class DaemonSettings(BaseSettings):
     # Off by default to protect registries in production-ish use.
     allow_rebuild_endpoint: bool = Field(default=False)
 
+    # ----- ADR-0056 experimenter workspace -------------------------------
+    # Smith's branch-isolated work tree. birth-smith.command provisions
+    # this clone at ~/.fsf/experimenter-workspace/Forest-Soul-Forge/ and
+    # creates the experimenter/cycle-1 branch. The cycles router (E4)
+    # reads from here to surface cycle reports + diffs in the
+    # display-mode chat pane.
+    #
+    # Set to None when the experimenter substrate isn't wired (test
+    # contexts, headless deployments without Smith). The cycles
+    # router treats None as "no cycles available" and returns an
+    # empty list rather than crashing.
+    experimenter_workspace_path: Path | None = Field(
+        default=Path.home() / ".fsf/experimenter-workspace/Forest-Soul-Forge",
+        description=(
+            "Path to Smith's branch-isolated workspace clone. "
+            "birth-smith.command provisions this. "
+            "Override via FSF_EXPERIMENTER_WORKSPACE_PATH."
+        ),
+    )
+
     # ----- write path (birth / spawn / archive) ---------------------------
     # Trait tree and constitution template roots. When /birth or /spawn is
     # called, the daemon loads these lazily on lifespan startup and holds

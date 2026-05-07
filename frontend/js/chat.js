@@ -227,7 +227,9 @@ function wireChatModeToggle() {
   if (!roomsBtn || !assistantBtn) return;
 
   const stored = localStorage.getItem(CHAT_MODE_KEY);
-  const initialMode = (stored === "assistant") ? "assistant" : "rooms";
+  // ADR-0056 E4 (B190) — three modes now: rooms, assistant, cycles.
+  const VALID_MODES = ["rooms", "assistant", "cycles"];
+  const initialMode = VALID_MODES.includes(stored) ? stored : "rooms";
   showChatMode(initialMode);
 
   roomsBtn.addEventListener("click", () => {
@@ -238,21 +240,36 @@ function wireChatModeToggle() {
     showChatMode("assistant");
     localStorage.setItem(CHAT_MODE_KEY, "assistant");
   });
+  const cyclesBtn = document.getElementById("chat-mode-cycles");
+  if (cyclesBtn) {
+    cyclesBtn.addEventListener("click", () => {
+      showChatMode("cycles");
+      localStorage.setItem(CHAT_MODE_KEY, "cycles");
+    });
+  }
 }
 
 function showChatMode(mode) {
   const roomsPane = document.getElementById("chat-pane-rooms");
   const assistantPane = document.getElementById("chat-pane-assistant");
+  const cyclesPane = document.getElementById("chat-pane-cycles");
   const roomsBtn = document.getElementById("chat-mode-rooms");
   const assistantBtn = document.getElementById("chat-mode-assistant");
+  const cyclesBtn = document.getElementById("chat-mode-cycles");
   const isAssistant = mode === "assistant";
-  if (roomsPane) roomsPane.hidden = isAssistant;
+  const isCycles = mode === "cycles";
+  const isRooms = !isAssistant && !isCycles;  // default
+  if (roomsPane) roomsPane.hidden = !isRooms;
   if (assistantPane) assistantPane.hidden = !isAssistant;
-  if (roomsBtn) roomsBtn.classList.toggle("chat-mode-btn--active", !isAssistant);
+  if (cyclesPane) cyclesPane.hidden = !isCycles;
+  if (roomsBtn) roomsBtn.classList.toggle("chat-mode-btn--active", isRooms);
   if (assistantBtn) assistantBtn.classList.toggle("chat-mode-btn--active", isAssistant);
+  if (cyclesBtn) cyclesBtn.classList.toggle("chat-mode-btn--active", isCycles);
   // T2 (B154): when entering assistant mode, refresh which pane (birth /
   // ready) to show based on whether an assistant instance is bound.
   if (isAssistant) refreshAssistantPane();
+  // ADR-0056 E4: when entering cycles mode, fetch fresh cycle list.
+  if (isCycles) refreshCyclesPane();
 }
 
 // ---------------------------------------------------------------------------
@@ -1505,4 +1522,185 @@ function escapeHTML(s) {
     '"': "&quot;",
     "'": "&#39;",
   }[c]));
+}
+
+
+// ===========================================================================
+// ADR-0056 E4 (B190) — Cycles pane: Smith's branch-isolated work review.
+// ===========================================================================
+// Reads cycles via GET /agents/{instance_id}/cycles. The instance_id of
+// Smith is auto-resolved by querying /agents and finding the
+// experimenter-role row. We could persist this in localStorage like the
+// assistant pattern, but cycles is a less-frequent surface — re-resolving
+// on each pane entry is cheap and avoids stale-key bugs when the
+// experimenter is re-birthed.
+
+const SMITH_ROLE = "experimenter";
+
+async function _resolveSmithInstanceId() {
+  try {
+    const resp = await api.get("/agents?limit=200");
+    const agents = resp.agents || [];
+    const smith = agents.find((a) => a.role === SMITH_ROLE);
+    return smith ? smith.instance_id : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function refreshCyclesPane() {
+  const status = document.getElementById("chat-cycles-status");
+  const empty = document.getElementById("chat-cycles-empty");
+  const noWs = document.getElementById("chat-cycles-no-workspace");
+  const list = document.getElementById("chat-cycles-list");
+  const detail = document.getElementById("chat-cycles-detail");
+  const wsPath = document.getElementById("chat-cycles-workspace-path");
+
+  if (!status || !list) return;
+  status.textContent = "loading…";
+  empty.hidden = true;
+  noWs.hidden = true;
+  list.innerHTML = "";
+  detail.hidden = true;
+  detail.innerHTML = "";
+
+  const instanceId = await _resolveSmithInstanceId();
+  if (!instanceId) {
+    status.textContent = "no experimenter agent found";
+    noWs.hidden = false;
+    return;
+  }
+
+  let resp;
+  try {
+    resp = await api.get(`/agents/${encodeURIComponent(instanceId)}/cycles`);
+  } catch (e) {
+    status.textContent = `error: ${e.message || e}`;
+    return;
+  }
+
+  if (!resp.workspace_available) {
+    status.textContent = "workspace not provisioned";
+    noWs.hidden = false;
+    return;
+  }
+  if (wsPath && resp.workspace_path) wsPath.textContent = resp.workspace_path;
+
+  const cycles = resp.cycles || [];
+  status.textContent = `${cycles.length} cycle${cycles.length === 1 ? "" : "s"} in workspace`;
+
+  if (cycles.length === 0) {
+    empty.hidden = false;
+    return;
+  }
+
+  // Render the list — newest first (descending cycle number) for review
+  // recency. The backend returns ascending; we reverse here.
+  for (const c of [...cycles].reverse()) {
+    const li = document.createElement("li");
+    li.className = "chat-cycles-row";
+    li.dataset.cycleId = c.cycle_id;
+    li.innerHTML = `
+      <div class="chat-cycles-row__head">
+        <span class="chat-cycles-row__id">${escapeHTML(c.cycle_id)}</span>
+        <span class="chat-cycles-row__status chat-cycles-row__status--${escapeHTML(c.status)}">${escapeHTML(c.status)}</span>
+        <span class="chat-cycles-row__sha muted">${escapeHTML(c.head_sha)}</span>
+        <span class="chat-cycles-row__time muted">${escapeHTML((c.head_timestamp || "").slice(0, 19))}</span>
+      </div>
+      <div class="chat-cycles-row__msg">${escapeHTML(c.head_message)}</div>
+      <div class="chat-cycles-row__stats muted">
+        ${c.files_changed} files · +${c.insertions} / -${c.deletions}
+        ${c.has_cycle_report ? " · <strong>report</strong>" : ""}
+      </div>
+    `;
+    li.addEventListener("click", () => _expandCycle(instanceId, c.cycle_id, li));
+    list.appendChild(li);
+  }
+}
+
+async function _expandCycle(instanceId, cycleId, rowEl) {
+  const detail = document.getElementById("chat-cycles-detail");
+  if (!detail) return;
+  detail.hidden = false;
+  detail.innerHTML = `<div class="muted">Loading cycle ${escapeHTML(cycleId)}…</div>`;
+
+  // Highlight the active row.
+  document.querySelectorAll(".chat-cycles-row--active")
+    .forEach((el) => el.classList.remove("chat-cycles-row--active"));
+  if (rowEl) rowEl.classList.add("chat-cycles-row--active");
+
+  let d;
+  try {
+    d = await api.get(`/agents/${encodeURIComponent(instanceId)}/cycles/${encodeURIComponent(cycleId)}`);
+  } catch (e) {
+    detail.innerHTML = `<div class="muted">Error loading detail: ${escapeHTML(String(e.message || e))}</div>`;
+    return;
+  }
+
+  const reqTools = (d.requested_tools || []).map((t) =>
+    `<li><code>${escapeHTML(t.name || "?")}.v${escapeHTML(t.version || "?")}</code>
+      — side_effects=${escapeHTML(t.side_effects || "?")}
+      ${t.reason ? `<div class="muted">${escapeHTML(t.reason)}</div>` : ""}
+    </li>`).join("");
+
+  const truncatedNote = d.diff_truncated
+    ? `<div class="muted" style="margin: 4px 0;">⚠ Diff truncated for size — see workspace at branch <code>${escapeHTML(d.branch)}</code> for the full version.</div>`
+    : "";
+
+  detail.innerHTML = `
+    <div class="chat-cycles-detail__head">
+      <h3>${escapeHTML(d.cycle_id)} — ${escapeHTML(d.status)}</h3>
+      <div class="muted">
+        <code>${escapeHTML(d.branch)}</code> @ <code>${escapeHTML(d.head_sha)}</code>
+        · ${d.files_changed} files · +${d.insertions}/-${d.deletions}
+      </div>
+    </div>
+
+    <details class="chat-cycles-detail__commit" open>
+      <summary>Commit message</summary>
+      <pre class="chat-cycles-pre">${escapeHTML(d.full_commit_message || d.head_message)}</pre>
+    </details>
+
+    ${d.cycle_report_content ? `
+      <details class="chat-cycles-detail__report" open>
+        <summary>Cycle report — <code>${escapeHTML(d.cycle_report_path || "")}</code></summary>
+        <pre class="chat-cycles-pre">${escapeHTML(d.cycle_report_content)}</pre>
+      </details>
+    ` : `
+      <div class="muted" style="margin: 8px 0;">No CYCLE_REPORT.md on this branch yet.</div>
+    `}
+
+    ${reqTools ? `
+      <details class="chat-cycles-detail__tools" open>
+        <summary>Requested tools (operator-approval gates land in E5)</summary>
+        <ul class="chat-cycles-reqtools">${reqTools}</ul>
+      </details>
+    ` : ""}
+
+    <details class="chat-cycles-detail__diff">
+      <summary>Diff vs <code>main</code></summary>
+      ${truncatedNote}
+      <pre class="chat-cycles-pre chat-cycles-pre--diff">${escapeHTML(d.diff || "(no diff)")}</pre>
+    </details>
+
+    <div class="chat-cycles-detail__actions muted" style="margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08);">
+      Approve / Deny / Counter-propose surfaces are E5 (B191).
+      For now, review the diff above and merge manually with
+      <code>git merge --no-ff ${escapeHTML(d.branch)}</code> if approved,
+      or delete the branch with <code>git branch -D ${escapeHTML(d.branch)}</code>
+      if denied.
+    </div>
+  `;
+}
+
+function wireCyclesRefresh() {
+  const btn = document.getElementById("chat-cycles-refresh");
+  if (btn) btn.addEventListener("click", () => refreshCyclesPane());
+}
+// Wire the refresh button at module load time. The pane itself
+// auto-refreshes on every showChatMode("cycles") call.
+if (typeof document !== "undefined" && document.readyState !== "loading") {
+  wireCyclesRefresh();
+} else if (typeof document !== "undefined") {
+  document.addEventListener("DOMContentLoaded", wireCyclesRefresh);
 }

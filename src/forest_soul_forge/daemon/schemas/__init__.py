@@ -112,6 +112,12 @@ from forest_soul_forge.daemon.schemas.marketplace import (
     MarketplaceReview,
     SideEffectTier,
 )
+from forest_soul_forge.daemon.schemas.cycles import (
+    CycleDetail,
+    CycleListOut,
+    CycleStatus,
+    CycleSummary,
+)
 from forest_soul_forge.daemon.schemas.conversations import (
     AmbientNudgeRequest,
     AmbientNudgeResponse,
@@ -237,4 +243,9 @@ __all__ = [
     "MarketplaceEntryOut",
     "MarketplaceIndexOut",
     "SideEffectTier",
+    # ADR-0056 E4 — display-mode cycle read models
+    "CycleStatus",
+    "CycleSummary",
+    "CycleDetail",
+    "CycleListOut",
 ]
