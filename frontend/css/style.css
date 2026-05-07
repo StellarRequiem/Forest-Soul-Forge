@@ -2344,3 +2344,50 @@ body { padding-bottom: 56px; }
   border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 .chat-cycles-reqtools li:last-child { border-bottom: none; }
+
+/* ADR-0056 E6 (B192) — posture toggle bar in Cycles pane. */
+.chat-cycles-posture {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.02);
+}
+.chat-cycles-posture-btn {
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.03);
+  color: #ddd;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  font-family: inherit;
+}
+.chat-cycles-posture-btn:hover {
+  background: rgba(255,255,255,0.08);
+}
+.chat-cycles-posture-btn--green.chat-cycles-posture-btn--active {
+  background: rgba(72, 187, 120, 0.5);
+  border-color: rgba(72, 187, 120, 0.9);
+  color: #fff;
+}
+.chat-cycles-posture-btn--yellow.chat-cycles-posture-btn--active {
+  background: rgba(220, 180, 50, 0.5);
+  border-color: rgba(220, 180, 50, 0.9);
+  color: #fff;
+}
+.chat-cycles-posture-btn--red.chat-cycles-posture-btn--active {
+  background: rgba(220, 80, 80, 0.5);
+  border-color: rgba(220, 80, 80, 0.9);
+  color: #fff;
+}
+.chat-cycles-posture-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

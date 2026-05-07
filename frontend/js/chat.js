@@ -1769,7 +1769,82 @@ async function _onCycleDecision(btn) {
 function wireCyclesRefresh() {
   const btn = document.getElementById("chat-cycles-refresh");
   if (btn) btn.addEventListener("click", () => refreshCyclesPane());
+  // ADR-0056 E6 (B192) — posture toggle wiring.
+  document.querySelectorAll(".chat-cycles-posture-btn").forEach((b) => {
+    b.addEventListener("click", () => _onPostureChange(b.dataset.posture));
+  });
+  // First-load posture display kick.
+  refreshSmithPosture();
 }
+
+// ADR-0056 E6 — Smith posture toggle.
+//
+// Reads/writes via existing /agents/{id}/posture endpoints
+// (ADR-0045). Highlights the active posture button + surfaces
+// a one-line current-state label next to the buttons.
+async function refreshSmithPosture() {
+  const label = document.getElementById("chat-cycles-posture-current");
+  if (!label) return;
+  const id = await _resolveSmithInstanceId();
+  if (!id) {
+    label.textContent = "(no Smith)";
+    return;
+  }
+  try {
+    const resp = await api.get(`/agents/${encodeURIComponent(id)}/posture`);
+    const posture = resp.posture || "?";
+    label.textContent = `current: ${posture}`;
+    // Highlight the active button.
+    document.querySelectorAll(".chat-cycles-posture-btn").forEach((b) => {
+      b.classList.toggle(
+        "chat-cycles-posture-btn--active",
+        b.dataset.posture === posture,
+      );
+    });
+  } catch (e) {
+    label.textContent = `(error reading posture: ${e.message || e})`;
+  }
+}
+
+async function _onPostureChange(newPosture) {
+  if (!["green", "yellow", "red"].includes(newPosture)) return;
+  const label = document.getElementById("chat-cycles-posture-current");
+  const id = await _resolveSmithInstanceId();
+  if (!id) {
+    if (label) label.textContent = "(no Smith — can't set posture)";
+    return;
+  }
+  // Confirm the destructive flip.
+  if (newPosture === "red" && !confirm(
+    "Flip Smith to RED?\n\nRED refuses every non-read-only " +
+    "dispatch. Useful before stepping away or after a bad " +
+    "cycle. Reversible at any time."
+  )) return;
+  if (newPosture === "green" && !confirm(
+    "Flip Smith to GREEN?\n\nGREEN auto-fires every dispatch " +
+    "within Smith's genre cap (no per-call operator approval). " +
+    "Recommended only after several clean cycles establish trust. " +
+    "Reversible at any time."
+  )) return;
+
+  if (label) label.textContent = `setting ${newPosture}…`;
+  try {
+    await api.post(
+      `/agents/${encodeURIComponent(id)}/posture`,
+      {
+        posture: newPosture,
+        reason: "operator-driven via Cycles pane (ADR-0056 E6)",
+      },
+    );
+  } catch (e) {
+    if (label) label.textContent = `error: ${e.message || e}`;
+    return;
+  }
+  // Refresh the display + the cycles list (some cycles may
+  // surface new info after a posture flip).
+  refreshSmithPosture();
+}
+
 // Wire the refresh button at module load time. The pane itself
 // auto-refreshes on every showChatMode("cycles") call.
 if (typeof document !== "undefined" && document.readyState !== "loading") {

@@ -888,6 +888,24 @@
             </div>
           </div>
           <div class="panel__body">
+            <!-- ADR-0056 E6 (B192) — posture toggle. Three buttons
+                 stacked horizontally at the top of the body so
+                 the operator can swap red/yellow/green without
+                 leaving the cycles surface. -->
+            <div class="chat-cycles-posture" id="chat-cycles-posture-bar">
+              <span class="muted" style="margin-right: 8px;">posture:</span>
+              <button class="chat-cycles-posture-btn chat-cycles-posture-btn--green"
+                      type="button" data-posture="green">green</button>
+              <button class="chat-cycles-posture-btn chat-cycles-posture-btn--yellow"
+                      type="button" data-posture="yellow">yellow</button>
+              <button class="chat-cycles-posture-btn chat-cycles-posture-btn--red"
+                      type="button" data-posture="red">red</button>
+              <span class="muted" id="chat-cycles-posture-current" style="margin-left: 12px; font-size: 0.85em;">…</span>
+              <a class="muted" id="chat-cycles-runbook-link"
+                 href="../docs/runbooks/experimenter-cycle-runbook.md"
+                 target="_blank"
+                 style="margin-left: auto; font-size: 0.85em; text-decoration: none;">runbook ↗</a>
+            </div>
             <div class="chat-cycles-empty muted" id="chat-cycles-empty" hidden>
               No cycles yet. Smith works on branches under
               <code>experimenter/cycle-N</code> in the workspace at
