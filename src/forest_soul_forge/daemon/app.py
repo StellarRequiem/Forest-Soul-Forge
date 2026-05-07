@@ -72,10 +72,31 @@ def _build_provider_registry(settings: DaemonSettings) -> ProviderRegistry:
         models=settings.local_model_map(),
         timeout_s=settings.local_timeout_s,
     )
+    # B185 — secrets-store fallback for the frontier API key. The
+    # operator's preferred storage is the macOS Keychain (or whatever
+    # FSF_SECRET_STORE resolves to); env-var FSF_FRONTIER_API_KEY is
+    # the override for ops cases that need explicit injection (CI,
+    # headless containers, etc.). When the env is unset AND the
+    # frontier provider is enabled, we look up
+    # ``settings.frontier_api_key_secret_name`` in the resolved
+    # secret store. Failure to read the store NEVER takes the daemon
+    # down — the FrontierProvider just reports ``no API key
+    # configured`` on dispatch and the local provider continues to
+    # serve requests routed to it. ADR-0052 D2 invariance:
+    # daemon-startup is local-first; remote credential reads are
+    # opt-in.
+    api_key = settings.frontier_api_key
+    if settings.frontier_enabled and not api_key:
+        try:
+            from forest_soul_forge.security.secrets import resolve_secret_store
+            store = resolve_secret_store()
+            api_key = store.get(settings.frontier_api_key_secret_name)
+        except Exception:
+            api_key = None
     frontier = FrontierProvider(
         enabled=settings.frontier_enabled,
         base_url=settings.frontier_base_url,
-        api_key=settings.frontier_api_key,
+        api_key=api_key,
         models=settings.frontier_model_map(),
         timeout_s=settings.frontier_timeout_s,
     )

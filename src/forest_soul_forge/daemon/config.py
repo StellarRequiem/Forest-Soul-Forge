@@ -213,9 +213,28 @@ class DaemonSettings(BaseSettings):
     frontier_enabled: bool = Field(default=False)
     frontier_base_url: str = Field(
         default="https://api.openai.com",
-        description="OpenAI-compatible base URL. Works with gateways (LiteLLM, etc.).",
+        description=(
+            "OpenAI-compatible base URL. Works with OpenAI itself, "
+            "Anthropic via their /v1/chat/completions compatibility "
+            "endpoint, xAI, gateways (LiteLLM), etc. For Anthropic "
+            "set this to 'https://api.anthropic.com/v1'."
+        ),
     )
     frontier_api_key: str | None = None
+    # B185 (ADR-0052 follow-up): when frontier_api_key is unset,
+    # _build_provider_registry falls back to reading this secret name
+    # from the resolved SecretStoreProtocol (keychain by default on
+    # macOS). Lets operators paste the key once via `fsf secret put`
+    # rather than smuggling it through the launchd plist as plaintext.
+    # Override per-deployment if you call your key something different
+    # in the store (e.g. 'openai_api_key' for OpenAI deployments).
+    frontier_api_key_secret_name: str = Field(
+        default="anthropic_api_key",
+        description=(
+            "Name to look up in the secrets store when "
+            "FSF_FRONTIER_API_KEY is unset. Default 'anthropic_api_key'."
+        ),
+    )
     frontier_model: str = Field(default="gpt-4o-mini")
     frontier_model_classify: str | None = None
     frontier_model_generate: str | None = None
