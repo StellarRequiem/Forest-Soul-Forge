@@ -153,6 +153,14 @@ class DispatchContext:
     # llm_think. See ``ToolDispatcher._resolve_shortcut_match``.
     shortcut_match: Any = None  # tuple[ProceduralShortcut, float] | None
 
+    # ADR-0056 E2 (Burst 188): experimenter mode tag. Threaded from
+    # task_caps.mode through the dispatcher into here. ModeKitClampStep
+    # reads it to clamp the experimenter agent's eligible tools per
+    # mode (explore = read_only-only; work = full kit; display = tight
+    # review-only allowlist). 'none' (default) is a no-op for every
+    # agent; non-experimenter agents ignore the field entirely.
+    mode: str = "none"
+
     # -- accumulated state (steps populate as the pipeline runs) ------------
     tool: Any = None
     resolved: Any = None  # _ResolvedToolConstraints from dispatcher.py
@@ -952,3 +960,145 @@ class ProceduralShortcutStep:
             # fall through to the normal path.
             return StepResult.go()
         return StepResult.shortcut(candidate, float(similarity))
+
+
+# ---------------------------------------------------------------------------
+# ModeKitClampStep — ADR-0056 E2 (Burst 188).
+# ---------------------------------------------------------------------------
+# Per-mode kit clamp for the experimenter agent. Reads
+# task_caps.mode and refuses dispatches that don't fit the active
+# mode's allowed-tool subset. No-op for any agent whose role isn't
+# the configured experimenter_role (default 'experimenter').
+#
+# The step receives the mode + the calling agent's role through
+# DispatchContext (E2 wires both into the dispatcher's per-call
+# ctx assembly). The step's eligibility check is fast-path:
+#
+#   1. If ``dctx.role != self.experimenter_role`` → GO. Other
+#      agents are unaffected by mode tagging.
+#   2. If ``dctx.mode in (None, "", "none")`` → GO. Default
+#      behavior: full kit. Operators dispatching against the
+#      experimenter without a mode tag get the same surface as
+#      any other actuator agent.
+#   3. If ``dctx.mode == "explore"`` and tool side_effects is
+#      not "read_only" → REFUSE with reason="mode_kit_clamp"
+#      and detail naming the mode + the rejected tool.
+#   4. If ``dctx.mode == "work"`` → GO. Work mode uses the full
+#      kit; mode tag is informational + propagates into audit
+#      events for the cycle-report system to pick up later
+#      (E5 self-augmentation needs the mode lineage).
+#   5. If ``dctx.mode == "display"`` → GO only when tool name
+#      is in the tiny review-only allowlist (memory_recall,
+#      memory_tag_outcome, git_diff_read, git_log_read,
+#      audit_chain_verify). Refuse otherwise.
+#   6. Unknown mode value → REFUSE with reason="mode_kit_clamp"
+#      and detail="unknown mode: {mode!r}". Prevents typo'd
+#      modes from silently degrading to default behavior.
+#
+# Pipeline placement: AFTER ConstraintResolutionStep (so we can
+# read the resolved tool's side_effects) and BEFORE PostureGateStep
+# (so the kit clamp applies before posture adjudicates the result).
+# Both ProceduralShortcutStep + ModeKitClampStep live AFTER the
+# core gates; ProceduralShortcutStep is LAST. ModeKitClampStep
+# sits just before it.
+@dataclass
+class ModeKitClampStep:
+    """ADR-0056 E2 (Burst 188) — per-mode kit clamp for the
+    experimenter agent.
+
+    Smith's three modes (explore / work / display) each restrict
+    which tools fire. The clamp is an inline refuse rather than
+    a per-mode constitution because:
+
+    - Constitutions are immutable per agent (ADR-0001 D2). Smith
+      can't have THREE constitutions; it has one with broad kit,
+      and the clamp narrows the dispatch surface dynamically.
+    - Operators set the mode at dispatch time
+      (`task_caps.mode=explore` etc.). A constitution rewrite
+      would require re-birth.
+    - The pipeline already supports per-call refusal via
+      :class:`StepResult.refuse`, and the audit chain captures
+      the refusal with the mode_kit_clamp reason for after-the-
+      fact analysis.
+
+    No-op for any agent whose role isn't ``experimenter_role``
+    (default 'experimenter'). Other agents on the dispatcher
+    inherit zero behavior change.
+    """
+
+    experimenter_role: str = "experimenter"
+
+    # Display mode allowlist — review-only tools the operator
+    # uses to inspect Smith's past cycles without granting any
+    # action surface. Keep this list TIGHT; widening it weakens
+    # the display-mode contract.
+    DISPLAY_ALLOWED_TOOLS: tuple[str, ...] = (
+        "memory_recall",
+        "memory_tag_outcome",
+        "git_diff_read",
+        "git_log_read",
+        "audit_chain_verify",
+    )
+
+    def evaluate(self, dctx: DispatchContext) -> StepResult:
+        # 1. Off-experimenter pass-through.
+        if dctx.role != self.experimenter_role:
+            return StepResult.go()
+
+        # 2. None / unset mode = full kit.
+        mode = (dctx.mode or "none").strip().lower()
+        if mode == "none":
+            return StepResult.go()
+
+        # Side_effects from resolved if available, else from the
+        # tool's own declaration. Same precedence used in
+        # GenreFloorStep + PostureGateStep — keeps the clamp
+        # consistent with the rest of the pipeline.
+        side_effects = (
+            (dctx.resolved.side_effects if dctx.resolved else None)
+            or (dctx.tool.side_effects if dctx.tool else "read_only")
+        )
+        tool_name = dctx.tool_name
+
+        # 3. Explore — read-only only.
+        if mode == "explore":
+            if side_effects == "read_only":
+                return StepResult.go()
+            return StepResult.refuse(
+                "mode_kit_clamp",
+                (
+                    f"experimenter is in mode='explore'; tool "
+                    f"{tool_name!r} has side_effects={side_effects!r} "
+                    f"(read_only required). Switch to mode='work' "
+                    f"to dispatch mutating tools."
+                ),
+            )
+
+        # 4. Work — full kit passthrough.
+        if mode == "work":
+            return StepResult.go()
+
+        # 5. Display — tight review-only allowlist.
+        if mode == "display":
+            if tool_name in self.DISPLAY_ALLOWED_TOOLS:
+                return StepResult.go()
+            return StepResult.refuse(
+                "mode_kit_clamp",
+                (
+                    f"experimenter is in mode='display' (review only); "
+                    f"tool {tool_name!r} not in the display "
+                    f"allowlist {self.DISPLAY_ALLOWED_TOOLS}. Switch "
+                    f"to mode='work' to act, or mode='explore' to "
+                    f"discover."
+                ),
+            )
+
+        # 6. Unknown mode — refuse loudly so a typo doesn't
+        #    silently degrade to default behavior.
+        return StepResult.refuse(
+            "mode_kit_clamp",
+            (
+                f"unknown experimenter mode {mode!r}; valid: "
+                f"none, explore, work, display."
+            ),
+        )

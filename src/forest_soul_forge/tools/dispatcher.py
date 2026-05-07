@@ -61,6 +61,7 @@ from forest_soul_forge.tools.governance_pipeline import (
     GovernancePipeline,
     HardwareQuarantineStep,
     McpPerToolApprovalStep,
+    ModeKitClampStep,
     PostureGateStep,
     PostureOverrideStep,
     ProceduralShortcutStep,
@@ -388,6 +389,13 @@ class ToolDispatcher:
     procedural_reinforcement_floor_fn: Any = None  # callable() -> int
     procedural_embed_model_fn: Any = None       # callable() -> str | None
 
+    # ADR-0056 E2 (Burst 188): which role the ModeKitClampStep
+    # treats as 'the experimenter'. Default 'experimenter'; tests
+    # override to a stub role to validate the no-op-for-other-
+    # agents semantic. The step is otherwise a pure-function
+    # mode→eligible-tools clamp.
+    experimenter_role: str = "experimenter"
+
     # R3 (2026-04-30): the pipeline of pre-execute checks. Built
     # once per dispatcher in __post_init__ from the dispatcher's
     # injected dependencies. Walked once per dispatch(). Adding a
@@ -463,17 +471,26 @@ class ToolDispatcher:
             # grant on a yellow agent ungates that specific mcp_call,
             # and a red grant on any agent refuses that mcp_call.
             PostureGateStep(enforce_per_grant=True),
+            # ADR-0056 E2 (Burst 188): experimenter mode kit clamp.
+            # Sits AFTER PostureGateStep so posture refusals fire
+            # first when both would refuse — the operator sees the
+            # primary safety mechanism (posture) rather than the
+            # secondary kit clamp. No-op for every agent except the
+            # experimenter; for that agent reads task_caps.mode and
+            # restricts tools per ADR-0056 D2.
+            ModeKitClampStep(experimenter_role=self.experimenter_role),
             # ADR-0054 T3 (Burst 180): procedural-shortcut bypass.
             # LAST in the pipeline so all upstream gates (hardware,
-            # args, constitution, posture, genre, counter, approval)
-            # have cleared before a shortcut can fire. Returns
-            # SHORTCUT terminal verdict only when ``dctx.shortcut_match``
-            # was populated by ``_resolve_shortcut_match`` before the
-            # pipeline started; otherwise GO and the dispatch falls
-            # through to the underlying tool's execute leg. The step
-            # itself is trivial — the heavy lifting (embed + search)
-            # is async and lives in the dispatcher to keep the
-            # pipeline sync.
+            # args, constitution, posture, genre, counter, approval,
+            # mode-kit-clamp) have cleared before a shortcut can
+            # fire. Returns SHORTCUT terminal verdict only when
+            # ``dctx.shortcut_match`` was populated by
+            # ``_resolve_shortcut_match`` before the pipeline
+            # started; otherwise GO and the dispatch falls through
+            # to the underlying tool's execute leg. The step itself
+            # is trivial — the heavy lifting (embed + search) is
+            # async and lives in the dispatcher to keep the pipeline
+            # sync.
             ProceduralShortcutStep(),
         ])
 
@@ -547,6 +564,16 @@ class ToolDispatcher:
             provider=provider,
             agent_posture=agent_posture,
         )
+        # ADR-0056 E2: pull the experimenter mode tag off the
+        # operator-supplied task_caps. Defaults to 'none' (no clamp)
+        # so non-experimenter dispatches AND experimenter dispatches
+        # without a mode tag both behave like every pre-E2 dispatch.
+        # ModeKitClampStep is the only consumer.
+        mode = "none"
+        if task_caps and isinstance(task_caps, dict):
+            raw_mode = task_caps.get("mode")
+            if isinstance(raw_mode, str) and raw_mode.strip():
+                mode = raw_mode.strip().lower()
         dctx = DispatchContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
@@ -563,6 +590,7 @@ class ToolDispatcher:
             agent_posture=agent_posture,
             plugin_grants_view=plugin_grants_view,
             shortcut_match=shortcut_match,
+            mode=mode,
         )
         verdict = self._pipeline.run(dctx)
         if verdict.is_refuse:

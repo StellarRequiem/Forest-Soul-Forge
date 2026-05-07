@@ -7,11 +7,21 @@ keep working — this is purely an organizational refactor.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from forest_soul_forge.daemon.providers import ProviderStatus, TaskKind
+
+
+# ADR-0056 E2 — Experimenter mode tagging. Selects which subset of
+# the agent's constitutional kit is dispatchable for a given call.
+# 'none' = no clamp (every other agent's default; non-experimenter
+# agents ignore the field entirely). The experimenter agent uses
+# 'explore' / 'work' / 'display' to swap kits for read-only
+# discovery, full-kit implementation cycles, and review-only
+# approval surfaces respectively. ModeKitClampStep enforces.
+ExperimenterMode = Literal["none", "explore", "work", "display"]
 
 
 # T2.2b — per-task caps the operator decides at execution time. These
@@ -43,6 +53,23 @@ class TaskCaps(BaseModel):
     usage_cap_tokens: int | None = Field(
         default=None, ge=1, le=10_000_000,
         description="Hard cap on cumulative tokens for this task; dispatcher-enforced.",
+    )
+    # ADR-0056 E2 — Experimenter mode selector. 'none' (the
+    # default) is a no-op for all agents; the experimenter agent's
+    # ModeKitClampStep also passes through. Other values clamp the
+    # eligible tools per ADR-0056 D2:
+    #   explore — read-only kit (discovery, no mutations)
+    #   work    — full kit (implementation cycles)
+    #   display — review-only allowlist (cycle inspection)
+    # Non-experimenter agents inherit no behavior change — the
+    # clamp step is no-op for any agent whose role isn't the
+    # configured experimenter_role (default 'experimenter').
+    mode: ExperimenterMode = Field(
+        default="none",
+        description=(
+            "ADR-0056 E2 mode selector. Affects only the experimenter "
+            "agent's dispatches; other agents see this as a no-op."
+        ),
     )
 
 class ToolCallRequest(BaseModel):
