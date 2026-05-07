@@ -70,28 +70,16 @@ if [ -n "$EXISTING" ]; then
   echo "      Smith already exists: ${INSTANCE_ID} — skipping birth"
 else
   echo "      No existing Smith — issuing /birth POST"
+  # Empty trait_values lets the kernel compute defaults from
+  # the experimenter role's domain_weights (trait_tree.yaml).
+  # The first birth attempt invented trait names that don't
+  # exist in the trait registry — empty + role-driven defaults
+  # is the right shape.
   BIRTH_PAYLOAD=$(cat <<'JSON'
 {
   "profile": {
     "role": "experimenter",
-    "trait_values": {
-      "caution": 70,
-      "evidence_demand": 80,
-      "self_review_rigor": 90,
-      "transparency": 95,
-      "double_checking": 85,
-      "verification": 90,
-      "risk_aversion": 60,
-      "humility": 75,
-      "creativity": 80,
-      "lateral_thinking": 85,
-      "inferential_depth": 90,
-      "abstraction": 80,
-      "directness": 85,
-      "formality": 60,
-      "curiosity": 90,
-      "stewardship": 80
-    },
+    "trait_values": {},
     "domain_weight_overrides": {}
   },
   "agent_name": "Smith",
@@ -147,7 +135,12 @@ else
   # the existing tools[].constraints blocks. We use a Python
   # one-liner to do this safely (YAML is too sensitive to
   # sed-string-edits).
-  python3 - "$CONST_PATH" <<'PY'
+  #
+  # Use the venv's Python which has PyYAML installed; system
+  # python3 doesn't (first attempt 2026-05-07 hit
+  # ModuleNotFoundError: No module named 'yaml').
+  VENV_PY="$(pwd)/.venv/bin/python3"
+  "$VENV_PY" - "$CONST_PATH" <<'PY'
 import sys, yaml
 path = sys.argv[1]
 with open(path) as f:
