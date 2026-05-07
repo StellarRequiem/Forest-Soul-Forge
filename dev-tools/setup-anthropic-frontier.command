@@ -35,7 +35,7 @@ if [ ! -x "$VENV_PY" ]; then
   exit 1
 fi
 if [ ! -x "$FSF_BIN" ]; then
-  echo "WARN: no .venv/bin/fsf — falling back to python -m fsf-secret-put."
+  echo "INFO: no .venv/bin/fsf console script — using python -m forest_soul_forge.cli.main"
   FSF_BIN=""
 fi
 
@@ -67,7 +67,12 @@ add_if_missing() {
 }
 
 add_if_missing "FSF_FRONTIER_ENABLED"           "true"
-add_if_missing "FSF_FRONTIER_BASE_URL"          "https://api.anthropic.com/v1"
+# IMPORTANT: do NOT include /v1 here — the FrontierProvider already
+# appends /v1/chat/completions internally. Including /v1 in the
+# base URL produces a double-prefix .../v1/v1/chat/completions and
+# Anthropic returns 404. Validated 2026-05-07 via
+# smoke-test-frontier.command.
+add_if_missing "FSF_FRONTIER_BASE_URL"          "https://api.anthropic.com"
 add_if_missing "FSF_FRONTIER_MODEL"             "claude-sonnet-4-6"
 add_if_missing "FSF_FRONTIER_MODEL_GENERATE"    "claude-sonnet-4-6"
 add_if_missing "FSF_FRONTIER_MODEL_CONVERSATION" "claude-sonnet-4-6"
@@ -120,9 +125,16 @@ echo "[4/6] Storing key in secrets backend (Keychain)"
 # Export the in-shell vars so the CLI sees them.
 export FSF_SECRET_STORE=keychain
 if [ -n "$FSF_BIN" ]; then
-  printf '%s' "$ANTHROPIC_KEY" | "$FSF_BIN" secret put anthropic_api_key --from-stdin
+  # printf '%s\n' adds the trailing newline that --from-stdin
+  # strips. Without it the secret_cmd parser raises EmptyError
+  # because read() returns the un-newlined value as a malformed
+  # input on some platforms. printf '%s\n' is the documented
+  # safe shape (per `fsf secret put --help`).
+  printf '%s\n' "$ANTHROPIC_KEY" | "$FSF_BIN" secret put anthropic_api_key --from-stdin
 else
-  printf '%s' "$ANTHROPIC_KEY" | PYTHONPATH=src:. "$VENV_PY" -m forest_soul_forge.cli secret put anthropic_api_key --from-stdin
+  # Module path is forest_soul_forge.cli.main (top-level main()).
+  # PYTHONPATH=src:. picks up the installed-or-editable package.
+  printf '%s\n' "$ANTHROPIC_KEY" | PYTHONPATH=src:. "$VENV_PY" -m forest_soul_forge.cli.main secret put anthropic_api_key --from-stdin
 fi
 unset ANTHROPIC_KEY   # belt-and-suspenders — the env var goes away
                      # when this shell exits anyway
