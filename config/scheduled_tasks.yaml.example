@@ -103,6 +103,107 @@ tasks:
         prompt: "Weekly check for vendor/product changes. (Wire to real sources.)"
         max_tokens: 600
 
+  # ----------------------------------------------------------------------
+  # ADR-0056 E3 — Smith (Experimenter) explore-mode scheduled tasks.
+  #
+  # Both DISABLED by default. Operator enables one (or both) by flipping
+  # `enabled: true` after a few work-mode cycles validate Smith's
+  # behavior. Frontier costs apply (Anthropic API spend per fire) so
+  # operator opts in deliberately, not by default.
+  #
+  # task_caps.mode=explore engages ADR-0056 D2's read_only-only kit
+  # clamp via ModeKitClampStep (B188). Smith CANNOT mutate code or
+  # state in this mode regardless of posture. Findings get written to
+  # Smith's procedural + semantic memory; downstream display-mode
+  # review (E4) surfaces them for operator approval.
+  #
+  # Cadence rationale:
+  #   - codebase scan every 4h: surfaces improvement candidates Smith
+  #     can take to work-mode in the next operator-fired cycle.
+  #     ≤6 fires per day at most.
+  #   - audit-chain scan every 6h: looks at recent agent activity
+  #     for coordination / drift patterns. ≤4 fires per day at most.
+  # Combined: ≤10 frontier dispatches/day in explore mode at full
+  # enablement. At Sonnet 4.6 token sizes ≈ $1 / day.
+  #
+  # Replace the agent_id below with the instance_id from your
+  # birth-smith.command run output (e.g.
+  # experimenter_1de20e0840a2). Restart daemon (or POST
+  # /scheduler/reload) after editing.
+  - id: smith_explore_codebase_4h
+    description: "Smith explore: scan codebase for improvement candidates"
+    schedule: "every 4h"
+    enabled: false
+    type: tool_call
+    config:
+      agent_id: REPLACE_WITH_SMITH_INSTANCE_ID
+      tool_name: llm_think
+      tool_version: "1"
+      args:
+        prompt: |
+          You are Smith in EXPLORE mode (ADR-0056). Your job: scan the
+          Forest-Soul-Forge codebase for one improvement candidate
+          worth taking to a work-mode cycle. Use only memory_recall
+          (find prior findings to avoid repetition) and your own
+          context — do NOT call any mutating tools (the kit clamp
+          would refuse anyway).
+
+          Output a single JSON object with these fields:
+            - candidate_title: ≤60 chars, naming the improvement
+            - rationale: 2-3 sentences on what the issue is and why
+              it matters
+            - estimated_complexity: one of {trivial, small, medium, large}
+            - target_files: list of paths the change would touch
+            - related_adrs: list of ADR IDs (e.g. "ADR-0056") if any
+            - blast_radius_concerns: anything that makes this risky
+
+          If you've already proposed this in a prior explore-mode
+          run (memory_recall confirms), return:
+            {"candidate_title": null, "skip_reason": "..."}.
+
+          Keep it focused — one candidate, well-scoped, ready for
+          operator review.
+        max_tokens: 800
+        task_kind: conversation
+      task_caps:
+        mode: explore
+
+  - id: smith_explore_audit_chain_6h
+    description: "Smith explore: scan recent audit activity for coordination patterns"
+    schedule: "every 6h"
+    enabled: false
+    type: tool_call
+    config:
+      agent_id: REPLACE_WITH_SMITH_INSTANCE_ID
+      tool_name: llm_think
+      tool_version: "1"
+      args:
+        prompt: |
+          You are Smith in EXPLORE mode (ADR-0056). Your job: review
+          the past 6 hours of audit-chain activity for patterns
+          worth investigating in a work-mode cycle.
+
+          Use audit_chain_verify if you need integrity confirmation.
+          Use memory_recall to avoid repeating prior findings.
+          Do NOT call mutating tools (the kit clamp refuses anyway).
+
+          Output a single JSON object with these fields:
+            - patterns_observed: list of {description, severity:
+              low|medium|high, sample_event_seqs: [int, ...]}
+            - coordination_gaps: list of {description, agents_involved}
+            - recommendation: one of:
+                "no_action" — nothing notable
+                "investigate" — pattern worth a work-mode follow-up
+                "operator_attention" — needs human review now
+            - notes: free text, ≤200 words
+
+          Brief is good. The display-mode pane (E4) will surface
+          high-severity items first.
+        max_tokens: 600
+        task_kind: conversation
+      task_caps:
+        mode: explore
+
   # ---- status_reporter: daily 7am audit-chain summary --------------------
   # Most-useful starter task. Generates a brief of what happened in the
   # audit chain since yesterday. Memory.write to lineage scope so other
