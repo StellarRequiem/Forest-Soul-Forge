@@ -622,18 +622,35 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         # ~/.forest/plugins/installed/ on startup and exposes the
         # /plugins HTTP surface. Daemon-internal mutations grab
         # write_lock before the runtime touches disk.
+        #
+        # B199 (2026-05-08): the initial reload INSIDE
+        # build_plugin_runtime emits one ``plugin_installed`` event
+        # per plugin found on disk. The previous implementation skipped
+        # write_lock here on the assumption that "lifespan owns the
+        # only handle and there are no concurrent writers yet" — but
+        # the scheduler started ticking on line 618 and is already
+        # writing scheduled_task_dispatched events to the same chain.
+        # Two writers, neither holding write_lock, racing the same
+        # head pointer: that is exactly the fork pattern at chain
+        # seqs 3728/3735-3738/3740 in
+        # docs/audits/2026-05-08-chain-fork-incident.md. The chain's
+        # internal lock (B199 Layer 2) now prevents the fork on the
+        # disk artifact, but acquiring write_lock here also keeps
+        # the cross-resource discipline honest — chain + plugin
+        # filesystem state should advance together.
         try:
             from pathlib import Path as _Path
             from forest_soul_forge.daemon.plugins_runtime import (
                 build_plugin_runtime,
             )
             plugin_root_override = _os.environ.get("FSF_PLUGIN_ROOT")
-            plugin_runtime = build_plugin_runtime(
-                plugin_root=(
-                    _Path(plugin_root_override) if plugin_root_override else None
-                ),
-                audit_chain=audit_chain,
-            )
+            with app.state.write_lock:
+                plugin_runtime = build_plugin_runtime(
+                    plugin_root=(
+                        _Path(plugin_root_override) if plugin_root_override else None
+                    ),
+                    audit_chain=audit_chain,
+                )
             app.state.plugin_runtime = plugin_runtime
             startup_diagnostics.append({
                 "component": "plugin_runtime",

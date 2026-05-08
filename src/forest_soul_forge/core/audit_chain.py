@@ -18,13 +18,23 @@ string ``"GENESIS"`` at seq=0.
 Timestamps are **not** hashed — clock skew would otherwise break verification.
 They're informational.
 
-Single-writer assumption in v0.1. Concurrent appends from separate processes
-are undefined behavior; documented rather than silently corrupt.
+Single-writer at the in-process level: ``append()`` holds an internal RLock
+(B199), so two threads racing the same chain instance can't fork the seq
+sequence even if neither caller acquired ``app.state.write_lock`` first.
+That lock remains the cross-resource serializer (chain + registry +
+plugin filesystem must all advance together) but the chain's own
+integrity is no longer hostage to caller discipline.
+
+Concurrent appends from separate **processes** to the same JSONL file
+remain undefined behavior; that's an OS-level fcntl-flock problem
+deferred per ADR-0005 § threat-model. The internal lock here covers the
+common case (one daemon process, multiple async tasks / threads).
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -186,6 +196,55 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # shortcut_id, shortcut_similarity, shortcut_action_kind,
     # args_digest, result_digest, tokens_used, call_count.
     "tool_call_shortcut",
+    # B199 (2026-05-08) — verifier KNOWN_EVENT_TYPES drift fix. The
+    # following events have been emitted to the chain by recent ADRs
+    # but the allowlist wasn't updated, so AuditChain.verify() was
+    # logging them as forward-compat warnings. They are first-class
+    # events; the warning was noise, not a real signal.
+    #
+    # ADR-0033 — plugin runtime lifecycle:
+    "plugin_installed",
+    # ADR-0041 — set-and-forget orchestrator scheduled-task lifecycle.
+    # Five entries: pre-dispatch, post-dispatch (success), post-dispatch
+    # (failure), and the two breaker transitions. Mirrors the tool-call
+    # lifecycle shape so an auditor can reconstruct any agent's actions
+    # from the chain alone, regardless of whether the action was an
+    # operator-initiated tool call or a scheduler-initiated one.
+    "scheduled_task_dispatched",
+    "scheduled_task_completed",
+    "scheduled_task_failed",
+    "scheduled_task_circuit_breaker_tripped",
+    "scheduled_task_circuit_breaker_reset",
+    # ADR-0045 — agent posture / trust-light system. Posture transitions
+    # are governance state changes, not tool calls; distinct event so the
+    # audit trail records *who* changed posture and *when*.
+    "agent_posture_changed",
+    # ADR-0034 — SW-track triune. Out-of-triune attempts are governance
+    # refusals (an agent in a triune tried to act outside its quorum
+    # constraint). Recorded so operators see the structural refusal vs.
+    # an ordinary tool_call_refused.
+    "out_of_triune_attempt",
+    # Hardware binding — local-first identity events. Emitted by the
+    # hardware-binding subsystem when the daemon's machine fingerprint
+    # changes (mismatch), is established (bound), or is intentionally
+    # cleared (unbound). Pairs with priv_client / migration flows.
+    "hardware_bound",
+    "hardware_mismatch",
+    "hardware_unbound",
+    # ADR-0053 — per-tool plugin grants. An operator granting a plugin
+    # tool to an agent is a constitutional change (the agent's allowed
+    # toolset just expanded); recorded distinctly from agent_created.
+    "agent_plugin_granted",
+    # ADR-0048 — computer-control allowance. Operator relaxing a
+    # governance constraint at runtime (e.g. enabling a side-effect tool
+    # for one session). One event per relaxation so the trail captures
+    # what was loosened, by whom, and against which agent.
+    "governance_relaxed",
+    # ADR-0056 E2 — experimenter ModeKitClampStep. The experimenter
+    # agent's three modes (explore/work/display) carry different tool
+    # caps; this event fires when the operator (or the agent itself
+    # during a mode transition) sets the active cap.
+    "task_caps_set",
 })
 
 
@@ -250,6 +309,38 @@ class VerificationResult:
     unknown_event_types: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ForkScanResult:
+    """Output of :meth:`AuditChain.scan_for_forks` — exhaustive walk that
+    reports EVERY structural anomaly in the chain, unlike :meth:`verify`
+    which stops at the first.
+
+    Two distinct anomaly classes:
+
+    * ``duplicate_seqs`` — sequence numbers that appear in more than one
+      entry. Signature of a write race where two threads grabbed the
+      same ``self._head`` and both wrote with ``seq = head.seq + 1``.
+      The pre-B199 forks at chain seqs 3728 / 3735-3738 / 3740 are the
+      canonical example.
+
+    * ``hash_mismatches`` — entries whose ``entry_hash`` doesn't match
+      the SHA-256 of their own canonical-form payload. This is either
+      (a) an external editor hand-mutating a line, (b) a writer using
+      stale canonical-form code (B134 spec drift class), or (c) bit
+      rot. Distinct from duplicate_seqs which is an in-process race.
+
+    ``ok`` is True iff both lists are empty. A chain with duplicate
+    seqs but no hash mismatches still has ``ok=False`` — the duplicate
+    is the corruption.
+    """
+
+    ok: bool
+    entries_scanned: int
+    duplicate_seqs: tuple[int, ...] = ()
+    hash_mismatches: tuple[int, ...] = ()
+    unknown_event_types: tuple[str, ...] = ()
+
+
 # ---------------------------------------------------------------------------
 # Canonical hash input
 # ---------------------------------------------------------------------------
@@ -298,6 +389,13 @@ class AuditChain:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self._head: ChainEntry | None = None
+        # B199: internal append lock. RLock so a writer that re-enters
+        # append() (e.g. genesis-on-init from a constructor running on
+        # the same thread, or a future refactor that does prev=head /
+        # head=append(...) inside the same call site) doesn't deadlock.
+        # See module docstring for why this lives here vs. relying
+        # solely on ``app.state.write_lock`` at every call site.
+        self._append_lock = threading.RLock()
         if not self.path.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.touch()
@@ -378,41 +476,57 @@ class AuditChain:
 
         Validates type, hashes the canonical form, links to the current head,
         and writes atomically *per line* (one write, one fsync-less flush —
-        adequate for the v0.1 single-writer threat model).
+        adequate for the in-process threat model).
+
+        B199 (2026-05-08, ADR audit `2026-05-08-chain-fork-incident.md`):
+        the read-of-head + compute-of-hash + write-of-line + advance-of-head
+        sequence is now wrapped in ``self._append_lock``. Without this,
+        two threads could both read ``self._head`` before either advanced
+        it, both compute ``next_seq = prev.seq + 1`` against the same
+        prev_hash, both call ``_write_line``, and both set ``self._head``
+        to *their* entry — leaving the chain on disk with two entries
+        sharing the same seq + prev_hash and only the loser's entry
+        actually link-reachable from head. That is exactly the fork
+        signature observed at seqs 3728/3735-3738/3740 in the live chain.
+
+        ``app.state.write_lock`` remains the cross-resource serializer
+        (chain + registry + plugin filesystem must move together) — this
+        lock is purely about chain self-consistency.
         """
         if not isinstance(event_type, str) or not event_type:
             raise InvalidAppendError("event_type must be a non-empty string")
         data = dict(event_data or {})  # defensive copy — caller mutations don't leak in
 
-        prev = self._head
-        if prev is None:
-            # Invariant: after __init__ the chain always has at least genesis.
-            # If we land here it means the file was truncated out from under us.
-            raise AuditChainError(
-                "chain has no head; refusing to append (file may have been truncated externally)"
-            )
+        with self._append_lock:
+            prev = self._head
+            if prev is None:
+                # Invariant: after __init__ the chain always has at least genesis.
+                # If we land here it means the file was truncated out from under us.
+                raise AuditChainError(
+                    "chain has no head; refusing to append (file may have been truncated externally)"
+                )
 
-        next_seq = prev.seq + 1
-        prev_hash = prev.entry_hash
-        entry_hash = _sha256_hex(_canonical_hash_input(
-            seq=next_seq,
-            prev_hash=prev_hash,
-            agent_dna=agent_dna,
-            event_type=event_type,
-            event_data=data,
-        ))
-        entry = ChainEntry(
-            seq=next_seq,
-            timestamp=_now_iso(),
-            prev_hash=prev_hash,
-            entry_hash=entry_hash,
-            agent_dna=agent_dna,
-            event_type=event_type,
-            event_data=data,
-        )
-        self._write_line(entry)
-        self._head = entry
-        return entry
+            next_seq = prev.seq + 1
+            prev_hash = prev.entry_hash
+            entry_hash = _sha256_hex(_canonical_hash_input(
+                seq=next_seq,
+                prev_hash=prev_hash,
+                agent_dna=agent_dna,
+                event_type=event_type,
+                event_data=data,
+            ))
+            entry = ChainEntry(
+                seq=next_seq,
+                timestamp=_now_iso(),
+                prev_hash=prev_hash,
+                entry_hash=entry_hash,
+                agent_dna=agent_dna,
+                event_type=event_type,
+                event_data=data,
+            )
+            self._write_line(entry)
+            self._head = entry
+            return entry
 
     # ---- verification ---------------------------------------------------
     def verify(self) -> VerificationResult:
@@ -503,6 +617,91 @@ class AuditChain:
         return VerificationResult(
             ok=True, entries_verified=count,
             broken_at_seq=None, reason=None,
+            unknown_event_types=tuple(sorted(set(unknown))),
+        )
+
+    def scan_for_forks(self) -> ForkScanResult:
+        """Walk the entire chain and report EVERY structural anomaly.
+
+        Sister of :meth:`verify`. The difference is short-circuit
+        behavior: ``verify()`` stops at the first problem (correct
+        for "is this chain still trustworthy" — one break is sufficient
+        signal); ``scan_for_forks()`` reports all of them (correct for
+        "where are all the breaches" — needed to remediate completely).
+
+        Two anomaly classes:
+
+        1. ``duplicate_seqs`` — sequence numbers appearing more than
+           once. Pre-B199 race condition signature (see audits/
+           2026-05-08-chain-fork-incident.md).
+        2. ``hash_mismatches`` — entries whose ``entry_hash`` doesn't
+           match SHA-256 of canonical form. Tampering or canonical-form
+           drift (B134 class).
+
+        Unknown event types are reported separately, as in :meth:`verify`.
+        ``ok`` is True iff both anomaly lists are empty.
+        """
+        seen_seqs: dict[int, int] = {}        # seq → first lineno
+        duplicate_seqs: list[int] = []
+        hash_mismatches: list[int] = []
+        unknown: list[str] = []
+        count = 0
+
+        try:
+            file_handle = self.path.open("r", encoding="utf-8")
+        except FileNotFoundError:
+            return ForkScanResult(
+                ok=False, entries_scanned=0,
+            )
+
+        with file_handle as f:
+            for lineno, raw in enumerate(f):
+                raw = raw.rstrip("\n")
+                if not raw:
+                    continue
+                try:
+                    obj = json.loads(raw)
+                    entry = _entry_from_dict(obj)
+                except (json.JSONDecodeError, AuditChainError):
+                    # Malformed lines aren't fork signatures per se —
+                    # verify() already covers structural breakage. The
+                    # fork scan focuses on the two specific classes
+                    # listed in the docstring. Skip malformed lines to
+                    # keep walking; verify() is the right tool when
+                    # the question is "is the chain valid?".
+                    continue
+                count += 1
+
+                # Duplicate seq detection
+                if entry.seq in seen_seqs:
+                    duplicate_seqs.append(entry.seq)
+                else:
+                    seen_seqs[entry.seq] = lineno
+
+                # Hash mismatch detection — recompute canonical form
+                # and compare. Independent of seq linkage; an entry
+                # with a valid prev_hash but wrong entry_hash still
+                # surfaces here.
+                expected_hash = _sha256_hex(_canonical_hash_input(
+                    seq=entry.seq,
+                    prev_hash=entry.prev_hash,
+                    agent_dna=entry.agent_dna,
+                    event_type=entry.event_type,
+                    event_data=entry.event_data,
+                ))
+                if entry.entry_hash != expected_hash:
+                    hash_mismatches.append(entry.seq)
+
+                if entry.event_type not in KNOWN_EVENT_TYPES:
+                    unknown.append(entry.event_type)
+
+        # De-duplicate the duplicate_seqs list itself so the result is
+        # clean (a triple-collision shouldn't show up twice).
+        return ForkScanResult(
+            ok=(not duplicate_seqs and not hash_mismatches),
+            entries_scanned=count,
+            duplicate_seqs=tuple(sorted(set(duplicate_seqs))),
+            hash_mismatches=tuple(sorted(set(hash_mismatches))),
             unknown_event_types=tuple(sorted(set(unknown))),
         )
 

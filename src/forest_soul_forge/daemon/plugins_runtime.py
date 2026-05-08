@@ -453,8 +453,17 @@ def build_plugin_runtime(
     """
     repo = PluginRepository(root=plugin_root)
     runtime = PluginRuntime(repo, audit_chain=audit_chain)
-    # Initial population — equivalent to a startup reload but without
-    # the write_lock since lifespan owns the only handle and there are
-    # no concurrent writers yet.
+    # Initial population. Pre-B199 this comment claimed "without the
+    # write_lock since lifespan owns the only handle and there are no
+    # concurrent writers yet" — that claim was false: the scheduler
+    # has already started ticking by the time lifespan reaches this
+    # call (see app.py § plugin runtime startup), so plugin_installed
+    # emits raced scheduled_task_dispatched emits and produced 6 chain
+    # forks (docs/audits/2026-05-08-chain-fork-incident.md). The chain
+    # itself now serializes via an internal RLock, AND the lifespan
+    # caller wraps this whole call in app.state.write_lock for
+    # cross-resource discipline. This function therefore does not
+    # acquire write_lock — that is the caller's responsibility, same
+    # as every other plugin-runtime mutation.
     runtime.reload()
     return runtime

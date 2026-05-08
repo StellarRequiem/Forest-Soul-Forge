@@ -401,18 +401,51 @@ class Scheduler:
             )
             return
 
+        # B199 (2026-05-08, audits/2026-05-08-chain-fork-incident.md):
+        # the audit emits + scheduler-state upsert all need
+        # app.state.write_lock to maintain cross-resource discipline.
+        # Pre-B199 _dispatch acquired no lock at all — chain.append
+        # raced with HTTP-route writers and produced 6 forks at chain
+        # seqs 3728/3735-3738/3740. Layer 2 added an internal RLock
+        # to chain.append so the on-disk artifact is now safe; this
+        # lock is the cross-resource guarantee (chain head + scheduler
+        # SQLite state advance together).
+        #
+        # Critical: the lock is acquired around the emit-and-persist
+        # *sections*, NOT around the await runner() call. Holding
+        # write_lock through a multi-second LLM-bound runner would
+        # block every HTTP route for the duration. RLock semantics +
+        # short critical sections keep the daemon responsive.
+        write_lock = getattr(
+            self._context.get("app").state, "write_lock", None
+        ) if self._context.get("app") is not None else None
+
         task.state.last_run_at = now
         task.state.next_run_at = task.schedule.next_after(now, now)
         task.state.total_runs += 1
 
-        self._emit_audit("scheduled_task_dispatched", {
-            "task_id":       task.id,
-            "task_type":     task.task_type,
-            "description":   task.description,
-            "scheduled_at":  now.isoformat(),
-            "total_runs":    task.state.total_runs,
-        })
+        if write_lock is not None:
+            with write_lock:
+                self._emit_audit("scheduled_task_dispatched", {
+                    "task_id":       task.id,
+                    "task_type":     task.task_type,
+                    "description":   task.description,
+                    "scheduled_at":  now.isoformat(),
+                    "total_runs":    task.state.total_runs,
+                })
+        else:
+            # Fallback for tests that construct Scheduler without an
+            # app.state. Layer 2 makes chain.append safe regardless;
+            # this branch just preserves the audit emit.
+            self._emit_audit("scheduled_task_dispatched", {
+                "task_id":       task.id,
+                "task_type":     task.task_type,
+                "description":   task.description,
+                "scheduled_at":  now.isoformat(),
+                "total_runs":    task.state.total_runs,
+            })
 
+        # NO LOCK HELD during the runner call — release between sections.
         try:
             outcome = await runner(task.config, self._context)
             ok = bool(outcome.get("ok", True))
@@ -421,53 +454,63 @@ class Scheduler:
             outcome = {"ok": False, "error": f"{type(e).__name__}: {e}"}
             logger.exception("task %s runner raised", task.id)
 
-        if ok:
-            task.state.consecutive_failures = 0
-            task.state.circuit_breaker_open = False
-            task.state.total_successes += 1
-            task.state.last_run_outcome = "succeeded"
-            task.state.last_failure_reason = None
-            self._emit_audit("scheduled_task_completed", {
-                "task_id":       task.id,
-                "task_type":     task.task_type,
-                "outcome":       _redact_outcome(outcome),
-                "total_successes": task.state.total_successes,
-            })
-        else:
-            task.state.consecutive_failures += 1
-            task.state.total_failures += 1
-            task.state.last_run_outcome = "failed"
-            task.state.last_failure_reason = str(outcome.get("error", "unknown"))
-            self._emit_audit("scheduled_task_failed", {
-                "task_id":       task.id,
-                "task_type":     task.task_type,
-                "error":         task.state.last_failure_reason,
-                "consecutive_failures": task.state.consecutive_failures,
-                "total_failures": task.state.total_failures,
-            })
-            if (
-                task.state.consecutive_failures >= task.max_consecutive_failures
-                and not task.state.circuit_breaker_open
-            ):
-                task.state.circuit_breaker_open = True
-                logger.warning(
-                    "task %s: circuit breaker tripped after %d consecutive failures",
-                    task.id,
-                    task.state.consecutive_failures,
-                )
-                self._emit_audit("scheduled_task_circuit_breaker_tripped", {
+        # Re-acquire for the post-outcome emit + persist section.
+        def _emit_outcome_and_persist() -> None:
+            if ok:
+                task.state.consecutive_failures = 0
+                task.state.circuit_breaker_open = False
+                task.state.total_successes += 1
+                task.state.last_run_outcome = "succeeded"
+                task.state.last_failure_reason = None
+                self._emit_audit("scheduled_task_completed", {
                     "task_id":       task.id,
                     "task_type":     task.task_type,
-                    "consecutive_failures": task.state.consecutive_failures,
-                    "max_consecutive_failures": task.max_consecutive_failures,
-                    "last_error":    task.state.last_failure_reason,
+                    "outcome":       _redact_outcome(outcome),
+                    "total_successes": task.state.total_successes,
                 })
+            else:
+                task.state.consecutive_failures += 1
+                task.state.total_failures += 1
+                task.state.last_run_outcome = "failed"
+                task.state.last_failure_reason = str(outcome.get("error", "unknown"))
+                self._emit_audit("scheduled_task_failed", {
+                    "task_id":       task.id,
+                    "task_type":     task.task_type,
+                    "error":         task.state.last_failure_reason,
+                    "consecutive_failures": task.state.consecutive_failures,
+                    "total_failures": task.state.total_failures,
+                })
+                if (
+                    task.state.consecutive_failures >= task.max_consecutive_failures
+                    and not task.state.circuit_breaker_open
+                ):
+                    task.state.circuit_breaker_open = True
+                    logger.warning(
+                        "task %s: circuit breaker tripped after %d consecutive failures",
+                        task.id,
+                        task.state.consecutive_failures,
+                    )
+                    self._emit_audit("scheduled_task_circuit_breaker_tripped", {
+                        "task_id":       task.id,
+                        "task_type":     task.task_type,
+                        "consecutive_failures": task.state.consecutive_failures,
+                        "max_consecutive_failures": task.max_consecutive_failures,
+                        "last_error":    task.state.last_failure_reason,
+                    })
 
-        # Persist the post-outcome state once, after every branch has
-        # had a chance to mutate it (Burst 90). Single upsert per
-        # dispatch keeps the SQLite write count stable regardless of
-        # outcome shape. Failure here is best-effort — see docstring.
-        self._persist_task_state(task)
+            # Persist the post-outcome state once, after every branch has
+            # had a chance to mutate it (Burst 90). Single upsert per
+            # dispatch keeps the SQLite write count stable regardless of
+            # outcome shape. Failure here is best-effort — see docstring.
+            # Persistence's own docstring says caller MUST hold write_lock;
+            # this is the call site that fulfills it.
+            self._persist_task_state(task)
+
+        if write_lock is not None:
+            with write_lock:
+                _emit_outcome_and_persist()
+        else:
+            _emit_outcome_and_persist()
 
     def _emit_audit(self, event_type: str, payload: dict[str, Any]) -> None:
         """Best-effort audit emit. Never raises out of the scheduler."""
