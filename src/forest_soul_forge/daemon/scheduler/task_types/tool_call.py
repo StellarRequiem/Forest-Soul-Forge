@@ -201,7 +201,7 @@ async def tool_call_runner(
             "tool": f"{tool_name}.v{tool_version}",
             "session_id": session_id,
             "tokens_used": outcome.result.tokens_used,
-            "result_digest": outcome.result.result_digest,
+            "result_digest": outcome.result.result_digest(),
         }
     if isinstance(outcome, DispatchRefused):
         return {

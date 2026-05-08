@@ -412,7 +412,7 @@ async def _step_dispatch_tool(
                 "ok": True,
                 "output": outcome.result.output,
                 "tokens_used": outcome.result.tokens_used,
-                "result_digest": outcome.result.result_digest,
+                "result_digest": outcome.result.result_digest(),
             }
         return
     if isinstance(outcome, DispatchRefused):
