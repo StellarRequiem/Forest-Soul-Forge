@@ -79,7 +79,12 @@ COMMITS_STATE=$(grep -E "Total commits" STATE.md | grep -oE "~?[0-9]+" | head -1
 row "STATE.md says"   "$COMMITS_STATE" "$COMMITS_ACT"
 
 bar "Latest tag"
-LATEST_TAG=$(git tag --sort=-version:refname | head -1)
+# Sort by creation date, not by version string. Pre-B200 used
+# `--sort=-version:refname` which placed pre-release suffixes (-rc,
+# -beta) AFTER the base version, so v0.5.0-rc shadowed v0.5.0 in
+# the report even though v0.5.0 was tagged a day later. The actual
+# question is "what's the most recent tag" — chronology answers it.
+LATEST_TAG=$(git for-each-ref --sort=-creatordate --count=1 --format='%(refname:short)' refs/tags)
 TAG_STATE=$(grep -E "v0\.[0-9]+\.[0-9]+ shipped" STATE.md | grep -oE "v0\.[0-9]+\.[0-9]+" | sort -V | tail -1)
 row "STATE.md says"   "$TAG_STATE"     "$LATEST_TAG"
 
