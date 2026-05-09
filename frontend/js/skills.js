@@ -296,9 +296,10 @@ async function fetchAndRender() {
     if (!skills.length) {
       const empty = document.createElement("div");
       empty.className = "empty";
-      empty.textContent =
-        "No skills installed. Forge one with `fsf forge skill \"...\"` "
-        + "and copy the manifest to data/forge/skills/installed/.";
+      empty.innerHTML =
+        "No skills installed yet. Click <strong>+ New skill</strong> above to "
+        + "describe a workflow and have the daemon forge a manifest "
+        + "(ADR-0057), or use the CLI: <code>fsf forge skill \"...\"</code>.";
       root.appendChild(empty);
       return;
     }
@@ -325,11 +326,299 @@ function refreshAgentSelectors(agents) {
 
 
 // ---------------------------------------------------------------------------
+// New Skill modal — ADR-0057 / B201
+// ---------------------------------------------------------------------------
+//
+// Two-stage flow:
+//   1. PROPOSE — operator types a description, clicks Forge. We POST
+//      /skills/forge, the daemon hits the LLM, parses the YAML, and
+//      writes a staged manifest. Multi-second latency expected; the
+//      modal shows a spinner.
+//   2. PREVIEW — daemon returns a manifest summary. We show name +
+//      requires + step count + the forge log excerpt. Operator
+//      clicks Install (POST /skills/install) or Discard (DELETE
+//      /skills/staged/{name}/{version}).
+//
+// All DOM is created inline rather than via a template, so the
+// modal is self-contained and disposable. We append to document.body
+// rather than into the Skills panel so it overlays other tabs.
+// Closing the modal (X, Escape, or Discard/Install completion)
+// removes the node entirely; no persistent state.
+function openNewSkillModal() {
+  // Backdrop + container.
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.style.cssText =
+    "position:fixed;inset:0;background:rgba(0,0,0,0.5);"
+    + "display:flex;align-items:center;justify-content:center;"
+    + "z-index:9999;backdrop-filter:blur(4px);";
+
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.style.cssText =
+    "background:var(--surface,#1c1f26);color:var(--text,#e7e9ee);"
+    + "border:1px solid var(--border,#2c303a);border-radius:8px;"
+    + "min-width:520px;max-width:720px;max-height:85vh;overflow:auto;"
+    + "padding:24px;box-shadow:0 12px 40px rgba(0,0,0,0.5);";
+  backdrop.appendChild(modal);
+
+  // Header.
+  const header = document.createElement("div");
+  header.style.cssText =
+    "display:flex;align-items:center;justify-content:space-between;"
+    + "margin-bottom:12px;";
+  const title = document.createElement("h3");
+  title.textContent = "Forge a new skill";
+  title.style.cssText = "margin:0;font-size:16px;";
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "btn btn--ghost btn--sm";
+  closeBtn.textContent = "×";
+  closeBtn.title = "Close (Esc)";
+  closeBtn.addEventListener("click", () => backdrop.remove());
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+  modal.appendChild(header);
+
+  // Hint paragraph.
+  const hint = document.createElement("p");
+  hint.className = "muted";
+  hint.style.cssText = "font-size:12px;line-height:1.4;margin:0 0 16px 0;";
+  hint.innerHTML =
+    "Describe a workflow in plain English. The daemon converts it to a "
+    + "<code>SkillDef</code> manifest by calling the configured LLM. "
+    + "Be explicit about inputs, outputs, and which tools should chain — "
+    + "vague descriptions yield manifests that reference tools by common "
+    + "name rather than versioned id. The propose stage stages the "
+    + "manifest under <code>data/forge/skills/staged/</code>; review the "
+    + "preview before installing.";
+  modal.appendChild(hint);
+
+  // Stage 1 form.
+  const form = document.createElement("div");
+  form.className = "modal__form";
+
+  const descLabel = document.createElement("label");
+  descLabel.className = "lbl";
+  descLabel.textContent = "Description (10–4000 chars)";
+  const descTextarea = document.createElement("textarea");
+  descTextarea.className = "inp";
+  descTextarea.placeholder =
+    "e.g. \"Summarize the last 10 audit chain entries by event type "
+    + "and write a one-line headline per group to memory under tag "
+    + "'daily_chain_summary'.\"";
+  descTextarea.rows = 6;
+  descTextarea.style.cssText =
+    "width:100%;font-family:inherit;font-size:13px;line-height:1.5;"
+    + "margin-bottom:12px;resize:vertical;";
+
+  const nameRow = document.createElement("div");
+  nameRow.style.cssText = "display:flex;gap:12px;margin-bottom:16px;";
+  const nameField = document.createElement("div");
+  nameField.style.flex = "1";
+  const nameLabel = document.createElement("label");
+  nameLabel.className = "lbl";
+  nameLabel.textContent = "Name (optional, snake_case)";
+  const nameInp = document.createElement("input");
+  nameInp.type = "text";
+  nameInp.className = "inp inp--sm";
+  nameInp.placeholder = "auto-derived if blank";
+  nameInp.style.width = "100%";
+  nameField.appendChild(nameLabel);
+  nameField.appendChild(nameInp);
+
+  const verField = document.createElement("div");
+  verField.style.width = "100px";
+  const verLabel = document.createElement("label");
+  verLabel.className = "lbl";
+  verLabel.textContent = "Version";
+  const verInp = document.createElement("input");
+  verInp.type = "text";
+  verInp.className = "inp inp--sm";
+  verInp.value = "1";
+  verInp.style.width = "100%";
+  verField.appendChild(verLabel);
+  verField.appendChild(verInp);
+
+  nameRow.appendChild(nameField);
+  nameRow.appendChild(verField);
+
+  form.appendChild(descLabel);
+  form.appendChild(descTextarea);
+  form.appendChild(nameRow);
+
+  const forgeBtn = document.createElement("button");
+  forgeBtn.className = "btn btn--primary";
+  forgeBtn.textContent = "Forge";
+  form.appendChild(forgeBtn);
+
+  modal.appendChild(form);
+
+  // Status / preview area (rendered after Forge).
+  const result = document.createElement("div");
+  result.style.marginTop = "16px";
+  modal.appendChild(result);
+
+  // Track the staged path so Install / Discard can reuse it.
+  let staged = null;
+
+  forgeBtn.addEventListener("click", async () => {
+    const description = descTextarea.value.trim();
+    if (description.length < 10) {
+      toast("description too short — minimum 10 chars", "danger");
+      return;
+    }
+    forgeBtn.disabled = true;
+    forgeBtn.textContent = "Forging…";
+    result.innerHTML =
+      "<div class=\"muted\" style=\"font-size:12px;\">"
+      + "Calling LLM provider — this may take several seconds…"
+      + "</div>";
+    try {
+      const body = { description };
+      if (nameInp.value.trim()) body.name = nameInp.value.trim();
+      if (verInp.value.trim()) body.version = verInp.value.trim();
+      const resp = await writeCall("/skills/forge", body);
+      staged = resp;
+      // Hide the form, show the preview.
+      form.style.display = "none";
+      result.innerHTML = "";
+      result.appendChild(_renderForgedPreview(resp, backdrop));
+      toast(`Forged ${resp.name}.v${resp.version}`, "success");
+    } catch (e) {
+      result.innerHTML = "";
+      const err = document.createElement("div");
+      err.style.cssText =
+        "color:var(--danger,#ff6b6b);font-size:12px;line-height:1.4;"
+        + "background:rgba(255,107,107,0.08);border:1px solid var(--danger,#ff6b6b);"
+        + "padding:8px;border-radius:4px;margin-top:8px;";
+      err.textContent = `Forge failed: ${e.message}`;
+      result.appendChild(err);
+      forgeBtn.disabled = false;
+      forgeBtn.textContent = "Forge";
+    }
+  });
+
+  // Esc to close.
+  function onKey(e) {
+    if (e.key === "Escape") {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+    }
+  }
+  document.addEventListener("keydown", onKey);
+
+  document.body.appendChild(backdrop);
+  descTextarea.focus();
+}
+
+
+function _renderForgedPreview(forged, backdrop) {
+  // Preview card with manifest summary + Install / Discard buttons.
+  const wrap = document.createElement("div");
+  wrap.style.cssText =
+    "background:rgba(255,255,255,0.03);border:1px solid var(--border,#2c303a);"
+    + "border-radius:6px;padding:12px;";
+
+  const titleRow = document.createElement("div");
+  titleRow.style.cssText =
+    "display:flex;justify-content:space-between;align-items:center;"
+    + "margin-bottom:8px;";
+  const title = document.createElement("strong");
+  title.textContent = `${forged.name}.v${forged.version}`;
+  const hash = document.createElement("span");
+  hash.className = "pill pill--ghost";
+  hash.textContent = forged.skill_hash.slice(0, 16);
+  hash.style.fontSize = "11px";
+  titleRow.appendChild(title);
+  titleRow.appendChild(hash);
+  wrap.appendChild(titleRow);
+
+  const summary = document.createElement("div");
+  summary.style.cssText = "font-size:12px;line-height:1.6;margin-bottom:12px;";
+  summary.innerHTML =
+    `<div><span class="muted">requires:</span> ${forged.requires.join(", ") || "—"}</div>`
+    + `<div><span class="muted">steps:</span> ${forged.step_count}</div>`
+    + `<div><span class="muted">staged at:</span> <code style="font-size:11px;">${forged.staged_path}</code></div>`
+    + (forged.audit_seq != null
+      ? `<div><span class="muted">audit seq:</span> #${forged.audit_seq}</div>`
+      : "");
+  wrap.appendChild(summary);
+
+  if (forged.forge_log_excerpt) {
+    const logTitle = document.createElement("div");
+    logTitle.className = "muted";
+    logTitle.style.cssText = "font-size:11px;margin-top:8px;margin-bottom:4px;";
+    logTitle.textContent = "forge.log (last 600 chars)";
+    wrap.appendChild(logTitle);
+    const logPre = document.createElement("pre");
+    logPre.style.cssText =
+      "font-size:11px;line-height:1.4;background:rgba(0,0,0,0.3);"
+      + "padding:8px;border-radius:4px;max-height:140px;overflow:auto;"
+      + "white-space:pre-wrap;word-break:break-word;margin:0 0 12px 0;";
+    logPre.textContent = forged.forge_log_excerpt;
+    wrap.appendChild(logPre);
+  }
+
+  const actions = document.createElement("div");
+  actions.style.cssText = "display:flex;gap:8px;justify-content:flex-end;";
+
+  const discardBtn = document.createElement("button");
+  discardBtn.className = "btn btn--ghost btn--sm";
+  discardBtn.textContent = "Discard";
+  discardBtn.addEventListener("click", async () => {
+    discardBtn.disabled = true;
+    try {
+      await api.del(`/skills/staged/${forged.name}/${forged.version}`);
+      toast(`Discarded ${forged.name}.v${forged.version}`, "info");
+      backdrop.remove();
+    } catch (e) {
+      toast(`Discard failed: ${e.message}`, "danger");
+      discardBtn.disabled = false;
+    }
+  });
+
+  const installBtn = document.createElement("button");
+  installBtn.className = "btn btn--primary btn--sm";
+  installBtn.textContent = "Install";
+  installBtn.addEventListener("click", async () => {
+    installBtn.disabled = true;
+    installBtn.textContent = "Installing…";
+    try {
+      const resp = await writeCall("/skills/install", {
+        staged_path: forged.staged_path,
+      });
+      toast(
+        `Installed ${resp.name}.v${resp.version} (audit #${resp.audit_seq})`,
+        "success",
+      );
+      backdrop.remove();
+      // Refresh the Skills tab so the new skill shows.
+      fetchAndRender();
+    } catch (e) {
+      toast(`Install failed: ${e.message}`, "danger");
+      installBtn.disabled = false;
+      installBtn.textContent = "Install";
+    }
+  });
+
+  actions.appendChild(discardBtn);
+  actions.appendChild(installBtn);
+  wrap.appendChild(actions);
+
+  return wrap;
+}
+
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 export function start() {
   const btn = document.getElementById("skills-refresh");
   if (btn) btn.addEventListener("click", fetchAndRender);
+
+  // ADR-0057 B201: New Skill button opens the forge modal.
+  const newBtn = document.getElementById("skills-new");
+  if (newBtn) newBtn.addEventListener("click", openNewSkillModal);
 
   // Refresh on tab activation.
   document.querySelectorAll(".tab").forEach((tab) => {

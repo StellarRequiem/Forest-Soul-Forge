@@ -193,6 +193,17 @@ class DaemonSettings(BaseSettings):
             "from data/forge/skills/staged/ into here once reviewed."
         ),
     )
+    skill_staged_dir: Path = Field(
+        default=Path("data/forge/skills/staged"),
+        description=(
+            "Where the Skill Forge engine (ADR-0031 T1) writes proposed "
+            "manifests before operator review. ADR-0057 / B201 added this "
+            "as a first-class setting so the HTTP /skills/forge + "
+            "/skills/staged endpoints can be tested in isolated tmp dirs "
+            "and so the staged-root path is uniformly resolvable from "
+            "settings rather than hard-coded inside the engine."
+        ),
+    )
     plugins_dir: Path = Field(
         default=Path("data/plugins"),
         description=(
