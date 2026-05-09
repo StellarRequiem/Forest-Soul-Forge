@@ -204,6 +204,24 @@ class DaemonSettings(BaseSettings):
             "settings rather than hard-coded inside the engine."
         ),
     )
+    tool_staged_dir: Path = Field(
+        default=Path("data/forge/tools/staged"),
+        description=(
+            "Where the Prompt-Tool Forge engine (ADR-0058 / B202) writes "
+            "proposed prompt-template tool specs before operator review. "
+            "Sister of skill_staged_dir."
+        ),
+    )
+    tool_install_dir: Path = Field(
+        default=Path("data/forge/tools/installed"),
+        description=(
+            "Where forged prompt-template tools land after install. "
+            "Lifespan walks this dir and registers one PromptTemplateTool "
+            "instance per spec.yaml found, augmenting tool_catalog so "
+            "the dispatcher's catalog cross-check accepts forged tools "
+            "(ADR-0058 / B202)."
+        ),
+    )
     plugins_dir: Path = Field(
         default=Path("data/plugins"),
         description=(

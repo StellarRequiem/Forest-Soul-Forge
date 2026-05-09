@@ -44,6 +44,7 @@ from forest_soul_forge.daemon.routers import skills_catalog as skills_catalog_ro
 from forest_soul_forge.daemon.routers import skills_forge as skills_forge_router
 from forest_soul_forge.daemon.routers import skills_reload as skills_reload_router
 from forest_soul_forge.daemon.routers import skills_run as skills_run_router
+from forest_soul_forge.daemon.routers import tools_forge as tools_forge_router
 from forest_soul_forge.daemon.routers import tool_dispatch as tool_dispatch_router
 from forest_soul_forge.daemon.routers import tools as tools_router
 from forest_soul_forge.daemon.routers import conversations as conversations_router
@@ -339,6 +340,68 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                  "path": str(settings.plugins_dir),
                  "error": f"{type(e).__name__}: {e}"}
             )
+
+        # ADR-0058 / B202: walk data/forge/tools/installed/ and register
+        # one PromptTemplateTool per spec.yaml. Forged tools are
+        # operator-direct prompt-template wrappers — they were created
+        # via /tools/forge + /tools/install at runtime; we replay them
+        # at every lifespan so they survive daemon restarts.
+        from pathlib import Path as _ForgedPath
+        forged_tool_root = _ForgedPath(settings.tool_install_dir)
+        forged_loaded = 0
+        forged_errors: list[str] = []
+        if forged_tool_root.exists():
+            from forest_soul_forge.forge.prompt_tool_forge import (
+                ToolSpecError,
+                parse_spec,
+            )
+            from forest_soul_forge.tools.builtin.prompt_template_tool import (
+                PromptTemplateTool,
+            )
+            from forest_soul_forge.tools.base import ToolError
+            try:
+                from forest_soul_forge.core.tool_catalog import ToolDef
+                _tool_def_available = True
+            except ImportError:
+                _tool_def_available = False
+            for spec_file in sorted(forged_tool_root.glob("*.yaml")):
+                try:
+                    spec = parse_spec(
+                        spec_file.read_text(encoding="utf-8"),
+                        forged_by="lifespan",
+                        forge_provider="lifespan",
+                    )
+                    tool = PromptTemplateTool(
+                        name=spec.name,
+                        version=spec.version,
+                        description=spec.description,
+                        input_schema=spec.input_schema,
+                        prompt_template=spec.prompt_template,
+                        archetype_tags=spec.archetype_tags,
+                        forged_by=spec.forged_by,
+                    )
+                    tool_registry.register(tool)
+                    if _tool_def_available:
+                        key = f"{spec.name}.v{spec.version}"
+                        if key not in tool_catalog.tools:
+                            tool_catalog.tools[key] = ToolDef(
+                                name=spec.name,
+                                version=spec.version,
+                                description=spec.description,
+                                input_schema=spec.input_schema,
+                                side_effects=tool.side_effects,
+                                archetype_tags=tuple(spec.archetype_tags),
+                            )
+                    forged_loaded += 1
+                except (ToolSpecError, ToolError, Exception) as e:
+                    forged_errors.append(f"{spec_file.name}: {type(e).__name__}: {e}")
+        startup_diagnostics.append({
+            "component": "forged_tool_loader",
+            "status": "degraded" if forged_errors else "ok",
+            "path": str(forged_tool_root),
+            "error": "; ".join(forged_errors) if forged_errors else None,
+            "loaded": forged_loaded,
+        })
 
         # ADR-0021 invariant: every TraitEngine role must be claimed by
         # some genre. Skip when either engine failed to load — running
@@ -708,6 +771,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(skills_catalog_router.router)
     app.include_router(skills_reload_router.router)
     app.include_router(skills_forge_router.router)  # ADR-0057 B201
+    app.include_router(tools_forge_router.router)  # ADR-0058 B202
     app.include_router(genres_router.router)
     app.include_router(memory_consents_router.router)
     app.include_router(verifier_router.router)

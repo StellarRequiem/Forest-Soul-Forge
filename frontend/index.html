@@ -331,8 +331,10 @@
           <h2 class="panel__title">Registered tools</h2>
           <div class="panel__actions">
             <span class="muted" id="tool-registry-status">—</span>
+            <button class="btn btn--primary btn--sm" id="tool-registry-new" type="button"
+                    title="Forge a new prompt-template tool from a description (ADR-0058)">+ New tool</button>
             <button class="btn btn--ghost btn--sm" id="tool-registry-refresh" type="button">refresh</button>
-            <button class="btn btn--primary btn--sm" id="tool-registry-reload" type="button"
+            <button class="btn btn--ghost btn--sm" id="tool-registry-reload" type="button"
                     title="Re-walk data/plugins/ and rebuild the registry without a daemon restart">
               reload from disk
             </button>
