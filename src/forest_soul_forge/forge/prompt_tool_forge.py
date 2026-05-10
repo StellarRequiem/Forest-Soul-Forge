@@ -122,13 +122,20 @@ _PROPOSE_SYSTEM = (
 
 
 def _propose_user_prompt(description: str, name_override: str | None,
-                          version: str) -> str:
+                          version: str, archetype_hints: str = "") -> str:
     parts = [
         "Generate a prompt-template tool spec.yaml for this workflow:",
         "",
         description.strip(),
         "",
     ]
+    if archetype_hints:
+        parts.extend([
+            "VALID archetype_tags values — use ONLY these strings (or omit "
+            "the field). Do NOT invent new archetype names.",
+            archetype_hints,
+            "",
+        ])
     if name_override:
         parts.extend([
             f"Use name: {name_override}",
@@ -140,6 +147,18 @@ def _propose_user_prompt(description: str, name_override: str | None,
         "Output the YAML spec only.",
     ])
     return "\n".join(parts)
+
+
+def _format_archetype_hints(genre_engine: Any) -> str:
+    """Compact list of valid archetype names the LLM may use in
+    archetype_tags. Empty string when no genre_engine is provided
+    (CLI fallback). B204."""
+    if genre_engine is None:
+        return ""
+    genres = getattr(genre_engine, "genres", None) or {}
+    if not genres:
+        return ""
+    return "  archetypes: " + ", ".join(sorted(genres.keys()))
 
 
 # ---------------------------------------------------------------------------
@@ -261,14 +280,21 @@ async def forge_prompt_tool(
     forged_by: str = "operator",
     name_override: str | None = None,
     version: str = "1",
+    genre_engine: Any = None,
 ) -> PromptToolForgeResult:
     """Run the propose stage end-to-end.
 
     Returns a PromptToolForgeResult whose ``staged_dir`` contains
     spec.yaml + forge.log. Raises ToolSpecError on parse / validation
     failure.
+
+    ``genre_engine`` (added B204): if provided, valid archetype_tags
+    values are surfaced to the LLM so it doesn't invent archetype
+    names. Pass ``app.state.genre_engine`` from the HTTP handler.
     """
-    user_prompt = _propose_user_prompt(description, name_override, version)
+    archetype_hints = _format_archetype_hints(genre_engine)
+    user_prompt = _propose_user_prompt(description, name_override, version,
+                                        archetype_hints=archetype_hints)
     log_lines = [
         f"# prompt-tool forge.log — {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"forged_by: {forged_by}",

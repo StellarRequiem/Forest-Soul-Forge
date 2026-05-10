@@ -112,6 +112,7 @@ async def forge_skill(
     forged_by: str = "operator",
     name_override: str | None = None,
     version: str = "1",
+    tool_catalog: Any = None,
 ) -> SkillForgeResult:
     """Run the propose stage end-to-end.
 
@@ -121,6 +122,17 @@ async def forge_skill(
 
     Raises :class:`ManifestError` propagated from the parser if the LLM
     output didn't validate.
+
+    ``tool_catalog`` (added B204): if provided, the engine injects a
+    compact summary of every tool in the catalog into the propose
+    user-prompt. Without it the LLM has to guess tool names from
+    common-sense knowledge — that produced the hallucinated
+    ``text_summarizer.v1`` reference observed in B203 smoke
+    (forge_skill_proposed at chain seq #6321 referenced a tool that
+    doesn't exist). Pass ``app.state.tool_catalog`` from the HTTP
+    handler; CLI usage can pass the loaded catalog from
+    ``daemon.lifespan`` or pass None and accept the hallucination
+    risk.
     """
     log: list[str] = []
     log.append(f"# skill forge.log — {_now_iso()}")
@@ -129,7 +141,11 @@ async def forge_skill(
     log.append(f"prompt_version: {PROMPT_VERSION}")
     log.append(f"description:\n  {description}\n")
 
-    propose_prompt = _build_propose_prompt(description)
+    catalog_summary = _format_catalog_for_propose(tool_catalog)
+    if catalog_summary:
+        log.append(f"catalog_injected: {catalog_summary.count(chr(10))} tools")
+
+    propose_prompt = _build_propose_prompt(description, catalog_summary)
     digest = _sha256(propose_prompt + "::" + PROMPT_VERSION)
     log.append(f"propose_prompt_digest: {digest}")
     log.append("=== PROPOSE: provider.complete ===")
@@ -175,13 +191,57 @@ async def forge_skill(
     )
 
 
-def _build_propose_prompt(description: str) -> str:
-    return (
-        "Workflow description:\n\n"
-        f"{description.strip()}\n\n"
+def _build_propose_prompt(description: str, catalog_summary: str = "") -> str:
+    parts = [
+        "Workflow description:\n",
+        description.strip(),
+        "",
+    ]
+    if catalog_summary:
+        parts.extend([
+            "AVAILABLE TOOLS — these are the ONLY tools you may reference in",
+            "`requires` and in step `tool:` fields. Do NOT invent or rename",
+            "tools. If no listed tool fits, the closest match is",
+            "llm_think.v1 — which can do arbitrary reasoning given a prompt.",
+            "",
+            catalog_summary,
+            "",
+        ])
+    parts.extend([
         "Emit the YAML skill manifest now. Output ONLY the manifest — "
-        "no fences, no preamble."
-    )
+        "no fences, no preamble.",
+    ])
+    return "\n".join(parts)
+
+
+def _format_catalog_for_propose(catalog: Any) -> str:
+    """Compact one-line-per-tool summary the LLM can reason against.
+
+    Returns empty string when ``catalog`` is None (CLI fallback path).
+    Format matches what ADR-0058 / B204 settled on:
+
+        - <name>.v<version> [<side_effects>]: <first sentence of description>
+
+    Side-effects bracket lets the LLM filter for read-only tools when
+    the operator's description suggests a read-only workflow. Keeping
+    the description to one sentence avoids blowing past prompt-length
+    caps on big catalogs (54 tools at ~80 chars each = ~4.3KB, well
+    under the 32KB MAX_PROMPT_LEN).
+    """
+    if catalog is None:
+        return ""
+    tools = getattr(catalog, "tools", None)
+    if not tools:
+        return ""
+    lines: list[str] = []
+    for key in sorted(tools):
+        td = tools[key]
+        # First sentence of description, capped.
+        desc = (getattr(td, "description", "") or "").strip()
+        first_sentence = desc.split(".", 1)[0].split("\n", 1)[0].strip()[:120]
+        side_effects = getattr(td, "side_effects", "?")
+        lines.append(f"  - {key} [{side_effects}]: {first_sentence}")
+    return "\n".join(lines)
 
 
 def _serialize(skill: SkillDef, *, raw_yaml: str) -> str:

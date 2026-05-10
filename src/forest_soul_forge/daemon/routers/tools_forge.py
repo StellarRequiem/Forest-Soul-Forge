@@ -259,6 +259,10 @@ async def forge_tool_endpoint(
     staged_root.mkdir(parents=True, exist_ok=True)
 
     try:
+        # B204: pass the live genre_engine so the propose prompt
+        # surfaces valid archetype_tags. Without it the LLM may invent
+        # archetype names that don't match any real genre. Same fix
+        # shape as B204's catalog injection on the skill forge side.
         result = await forge_prompt_tool(
             description=body.description,
             provider=provider,
@@ -266,6 +270,7 @@ async def forge_tool_endpoint(
             forged_by=_operator_label(request),
             name_override=body.name,
             version=body.version,
+            genre_engine=getattr(request.app.state, "genre_engine", None),
         )
     except ToolSpecError as e:
         raise HTTPException(

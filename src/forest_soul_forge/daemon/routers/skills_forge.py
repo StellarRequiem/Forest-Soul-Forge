@@ -118,6 +118,18 @@ class InstallSkillIn(BaseModel):
         description="If a skill at the target name+version already exists, "
         "overwrite it. Default False rejects the install with 409.",
     )
+    force_unknown_tools: bool = Field(
+        False,
+        description=(
+            "B204: if the manifest's `requires` list references tools that "
+            "aren't in the live catalog (a hallucinated tool name from the "
+            "propose stage, or a tool that was uninstalled since the forge "
+            "completed), install refuses with 422 by default. Set to true "
+            "to install anyway — the skill won't dispatch successfully "
+            "until the missing tools land, but the operator may want to "
+            "land a partial skill ahead of installing those tools."
+        ),
+    )
 
 
 class InstalledSkillOut(BaseModel):
@@ -227,6 +239,11 @@ async def forge_skill_endpoint(
     staged_root.mkdir(parents=True, exist_ok=True)
 
     try:
+        # B204: pass the live tool_catalog so the propose prompt
+        # includes the actual tool inventory. Without this the LLM
+        # invents tool names — the B203 smoke produced a manifest
+        # referencing the hallucinated text_summarizer.v1 because
+        # the engine had no catalog context.
         result = await forge_skill(
             description=body.description,
             provider=provider,
@@ -234,6 +251,7 @@ async def forge_skill_endpoint(
             forged_by=_operator_label(request),
             name_override=body.name,
             version=body.version,
+            tool_catalog=getattr(request.app.state, "tool_catalog", None),
         )
     except ManifestError as e:
         # Validation failed at the parser — the LLM produced YAML
@@ -363,6 +381,39 @@ async def install_skill_endpoint(
                 "detail": e.detail,
             },
         ) from e
+
+    # B204: cross-check requires[] against the live tool catalog.
+    # Pre-B204 the install path validated only the manifest schema,
+    # not whether the referenced tools actually exist. The LLM
+    # propose stage hallucinated tool names (B203 smoke produced
+    # text_summarizer.v1 which doesn't exist) and install would
+    # have happily landed an unrunnable manifest. Catch that here.
+    catalog = getattr(request.app.state, "tool_catalog", None)
+    if catalog is not None and not body.force_unknown_tools:
+        catalog_keys = set(getattr(catalog, "tools", {}).keys())
+        unknown = [
+            t for t in skill.requires
+            if t not in catalog_keys
+        ]
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": "unknown_tools_referenced",
+                    "unknown_tools": sorted(unknown),
+                    "skill_name": skill.name,
+                    "skill_version": skill.version,
+                    "hint": (
+                        "The manifest references tools that aren't in the "
+                        "live catalog. This usually means the propose stage "
+                        "hallucinated a tool name. Either edit the manifest "
+                        "to use a real tool (llm_think.v1 is the closest "
+                        "general-purpose match) or pass force_unknown_tools=true "
+                        "to install anyway (the skill won't dispatch until the "
+                        "missing tools land)."
+                    ),
+                },
+            )
 
     install_dir = Path(getattr(settings, "skill_install_dir", "data/forge/skills/installed")).resolve()
     install_dir.mkdir(parents=True, exist_ok=True)

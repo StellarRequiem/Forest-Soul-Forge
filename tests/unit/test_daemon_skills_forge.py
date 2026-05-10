@@ -273,6 +273,83 @@ class TestSkillsInstall:
         body = resp.json()
         assert body["detail"]["error"] == "manifest_validation_failed"
 
+    # B204 regression: hallucinated tool refs rejected by default
+    # ----------------------------------------------------------------
+
+    def test_unknown_tool_in_requires_returns_422(self, forge_env):
+        """B204: a manifest that references a tool not in the live
+        catalog must be rejected at install time. Pre-B204 install
+        validated only the manifest schema, not whether
+        ``requires[]`` resolved against real tools — that gap is
+        what produced the B203 smoke that referenced the
+        hallucinated text_summarizer.v1.
+        """
+        client, _, _, staged_root, _ = forge_env
+        bad_manifest = textwrap.dedent("""
+        schema_version: 1
+        name: hallucinated_skill
+        version: '1'
+        description: Skill that references a non-existent tool.
+        requires:
+          - text_summarizer.v1
+        inputs:
+          type: object
+          required: [text]
+          properties:
+            text: {type: string}
+        steps:
+          - id: summarize
+            tool: text_summarizer.v1
+            args:
+              input_text: ${inputs.text}
+        output:
+          summary: ${summarize.summary}
+        """).strip()
+        staged_dir = _stage_manifest(staged_root, "hallucinated_skill", "1", bad_manifest)
+        resp = client.post(
+            "/skills/install",
+            headers={"X-FSF-Token": API_TOKEN},
+            json={"staged_path": str(staged_dir)},
+        )
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["detail"]["error"] == "unknown_tools_referenced"
+        assert "text_summarizer.v1" in body["detail"]["unknown_tools"]
+
+    def test_unknown_tool_force_flag_allows_install(self, forge_env):
+        """force_unknown_tools=true overrides the B204 check. Operator
+        deliberately landing a partial skill ahead of installing the
+        missing tool is a real workflow."""
+        client, _, _, staged_root, _ = forge_env
+        bad_manifest = textwrap.dedent("""
+        schema_version: 1
+        name: partial_skill
+        version: '1'
+        description: References a tool that's not yet installed.
+        requires:
+          - future_tool.v1
+        inputs:
+          type: object
+          required: []
+          properties: {}
+        steps:
+          - id: stub
+            tool: future_tool.v1
+            args: {}
+        output:
+          ok: ${stub.ok}
+        """).strip()
+        staged_dir = _stage_manifest(staged_root, "partial_skill", "1", bad_manifest)
+        resp = client.post(
+            "/skills/install",
+            headers={"X-FSF-Token": API_TOKEN},
+            json={"staged_path": str(staged_dir),
+                  "force_unknown_tools": True},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["name"] == "partial_skill"
+
 
 # ---------------------------------------------------------------------------
 class TestSkillsStagedListing:
