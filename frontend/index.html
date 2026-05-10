@@ -295,6 +295,31 @@
           </div>
         </div>
       </div>
+
+      <!-- ========================================================== -->
+      <!-- B205 / ADR-0057+0058: Forged proposals subsection.        -->
+      <!-- Sibling to the per-agent tool-call queue above. Surfaces  -->
+      <!-- staged forge propose results (skills + prompt-template    -->
+      <!-- tools) so operators can review, install, or discard       -->
+      <!-- without finding the right modal. Polls /skills/staged +   -->
+      <!-- /tools/staged/forged. Different governance shape from     -->
+      <!-- tool-call approvals (per-artifact admission vs per-call   -->
+      <!-- dispatch) so kept in its own section per Alex 2026-05-09. -->
+      <!-- ========================================================== -->
+      <div class="panel" style="margin-top:16px;">
+        <div class="panel__header">
+          <h2 class="panel__title">Forged proposals</h2>
+          <div class="panel__actions">
+            <span class="muted" id="forged-proposals-status">—</span>
+            <button class="btn btn--ghost btn--sm" id="forged-proposals-refresh" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="forged-proposals-list" class="forged-proposals-list">
+            <div class="empty">Loading staged proposals…</div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ========================================================== -->

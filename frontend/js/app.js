@@ -13,6 +13,7 @@ import * as providersPanel from "./providers.js";
 import * as toolsPanel from "./tools.js";
 import * as genresPanel from "./genres.js";
 import * as pendingPanel from "./pending.js";
+import * as forgedProposalsPanel from "./forged-proposals.js";  // B205
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
 import * as mcpPluginsPanel from "./mcp-plugins.js";
@@ -68,6 +69,7 @@ async function boot() {
     agentsPanel.start();
     auditPanel.start();
     pendingPanel.start();
+    forgedProposalsPanel.start();  // B205
     skillsPanel.start();
     toolRegistryPanel.start();
     mcpPluginsPanel.start();
