@@ -1,13 +1,18 @@
 # ADR-0055 — Agentic Marketplace
 
-**Status:** Proposed (2026-05-06). Sibling-repo design — most
+**Status:** Proposed (2026-05-06, expanded 2026-05-11 with
+Decisions 8–11 + Tranches M7–M10). Sibling-repo design — most
 delivery lives outside Forest-Soul-Forge in a new
-`forest-marketplace` repo. Kernel-side scope is limited to one
-new endpoint (`GET /marketplace/index`) and one new audit
-event type. Pairs with ADR-0043 (MCP plugin protocol),
-ADR-0030/0031 (forge lifecycle events), and ADR-0001 (identity
-invariance — marketplace installs MUST NOT touch
-constitution_hash or DNA).
+`forest-marketplace` repo. Kernel-side scope is intentionally
+narrow: `GET /marketplace/index`, `POST /marketplace/install`,
+`GET /marketplace/reviews/<entry-id>`, and three new audit
+event types (`marketplace_plugin_installed`,
+`agent_birthed_from_template`, `marketplace_telemetry_submitted`).
+Pairs with ADR-0043 (MCP plugin protocol), ADR-0030/0031 (forge
+lifecycle), ADR-0060 (runtime tool grants — marketplace install
+flows into the grant pane), and ADR-0001 (identity invariance —
+marketplace installs MUST NOT touch constitution_hash or DNA;
+agent templates produce NEW DNA, not transplanted DNA).
 
 ## Context
 
@@ -278,6 +283,179 @@ ADR-0045 trust-tier picker. This makes a one-click "install
 + grant green-tier to the assistant" flow, which is the
 common case for read-only utility plugins.
 
+### Decision 8 — Reviews + star ratings (2026-05-11 expansion)
+
+The marketplace publishes per-entry reviews + numeric ratings so
+operators can rely on community signal, not just maintainer claims.
+
+**Storage shape:** reviews live in the sibling repo as one signed
+file per review under `registry/reviews/<entry-id>/<review-id>.yaml`.
+Each review carries:
+
+```yaml
+schema_version: 1
+entry_id: soulux-computer-control
+reviewer_pubkey: <ed25519 pubkey hex>
+reviewer_handle: stellarrequiem      # operator-visible name
+stars: 4                              # 1-5 integer
+verdict: approved                     # approved | flagged | broken
+body: |
+  Worked end-to-end on macOS 26 with no setup beyond the
+  posture clamp. Saved me an hour on the IR triage skill.
+attestations:
+  - "I have actually installed and used this plugin."
+  - "I am not affiliated with the maintainer."
+reviewed_at: 2026-05-11T14:23:00Z
+signature: <ed25519 signature over canonical JSON above>
+```
+
+**Trust model:**
+
+- Reviews are signed by a reviewer key. The kernel verifies the
+  signature on read; unsigned reviews don't display.
+- Operators configure trusted reviewer keys via
+  `FSF_MARKETPLACE_TRUSTED_REVIEWERS` (default: empty — show all
+  signed reviews regardless of trust list).
+- A separate trust tier ("verified reviewer") flags maintainers
+  who have demonstrated good-faith review activity. The
+  marketplace repo's policy controls this list; the kernel just
+  renders the badge.
+- Anti-sock-puppet: each reviewer pubkey can submit ONE review
+  per entry. Re-reviews replace the prior (the marketplace's CI
+  enforces this); the marketplace's own git history shows the
+  edit lineage.
+
+**Aggregation:** the kernel's `GET /marketplace/index` response
+gains per-entry `review_count` + `star_average` (computed
+server-side from the registry's review files). The full review
+text is fetched lazily via `GET /marketplace/reviews/<entry-id>`
+when the operator clicks through.
+
+**Off by default for anonymous installs:** operators can
+disable review-display entirely via
+`FSF_MARKETPLACE_REVIEWS_ENABLED=false` for environments where
+community signal is undesirable (air-gapped, regulated).
+
+### Decision 9 — Skill scoring (subjective + telemetric)
+
+Skills behave differently from tools — they're orchestrations of
+multiple tool calls, and their "quality" is measured by both
+operator opinion AND runtime telemetry.
+
+**Two score dimensions, both stored in the marketplace entry:**
+
+1. **Star rating** (subjective, same as tools per D8).
+2. **Telemetric score** (auto-computed): a 0-100 number derived
+   from chain-emitted `skill_completed` / `skill_step_failed`
+   events for that skill. Surfaced as "running success rate
+   across N operators" alongside the star rating.
+
+**Telemetric flow:**
+
+```
+operator opt-in (FSF_TELEMETRY_REPORT=true, default false)
+  → daemon batches skill_completed + skill_step_failed events
+    per skill_hash, per week
+  → POST to forest-marketplace's /telemetry/submit endpoint
+    with ed25519-signed batch (operator's daemon key)
+  → marketplace verifies + aggregates + republishes
+  → next /marketplace/index refresh exposes the new score
+```
+
+**Privacy:** telemetry batches carry skill_hash + step counts +
+success/failure tallies. NO conversation content, NO agent
+identities, NO operator identifiers (only the daemon's
+random-per-machine reporting key). Operator can audit what gets
+sent via `fsf telemetry preview`.
+
+**Trust:** sock-puppet daemons inflating success rates are
+mitigated by (a) per-key submission rate-limits, (b) statistical
+anomaly detection in the aggregator, (c) the score being
+explicitly labeled "community-reported, not Forest-verified."
+
+### Decision 10 — Agent templates (clone + modify workflow)
+
+Agents are first-class marketplace items. An "agent template" is
+a `.template` package containing:
+
+```
+soul-summarizer-v1.template/
+├── template.yaml           # marketplace metadata + role + traits
+├── soul.md.j2              # Jinja-rendered narrative starter
+├── constitution.yaml.j2    # constitution skeleton (tools_add list)
+├── recommended_grants.yaml # ADR-0060 tool grants to issue on instantiate
+└── README.md
+```
+
+**Workflow:**
+
+1. Operator browses marketplace's "Agents" section.
+2. Clicks "Use template" on `soul-summarizer-v1`.
+3. Frontend renders the editable form pre-filled from the
+   template (role, agent_name, trait_values, tools_add).
+4. Operator tweaks (or accepts defaults) and clicks Birth.
+5. Daemon's existing `/birth` endpoint handles it. Audit event
+   `agent_birthed_from_template` (NEW) records the template id +
+   version + render-time variables so an auditor can reproduce
+   the exact birth.
+6. Recommended runtime grants from `recommended_grants.yaml`
+   are presented as an "also grant these tools?" follow-up
+   (operator opts in per-grant, no autograb).
+
+**Cloning:** "Clone this agent" is a sibling action that takes
+an EXISTING alive agent's soul.md + constitution.yaml as the
+template source, renders a `.template` package locally, and
+opens the same edit form. Closes the "I want one just like
+Operator_Companion but for German" loop without a marketplace
+roundtrip.
+
+**Identity boundary:** templates produce NEW DNA + new
+`constitution_hash`. Cloning doesn't transplant memory or
+lineage — those stay with the source agent. This preserves the
+ADR-0001 invariant that DNA is per-agent, not per-template.
+
+### Decision 11 — Marketplace auditability
+
+The marketplace registry is a Git repository — Git's commit
+chain already gives us a tamper-evident history. ADR-0055
+formalizes the kernel's verification:
+
+1. **Pinned commit per registry source.** Operators can pin
+   `FSF_MARKETPLACE_REGISTRIES` to a specific commit
+   (`https://github.com/forest-org/forest-marketplace@abc1234`).
+   When pinned, the kernel only fetches at that commit; rolling
+   forward is an explicit operator action.
+
+2. **Per-entry change log.** The marketplace surfaces each
+   entry's `last_modified_at` + `last_modified_by` (signed
+   commit author) in the browse pane. An operator inspecting a
+   plugin can see the full edit history without leaving the
+   kernel UI (link out to the marketplace repo's `git log` for
+   that entry's files).
+
+3. **Review-chain replay.** Each review file is content-
+   addressed; a review's signature covers its full canonical
+   JSON including the entry-version it was written against.
+   When an entry updates, prior reviews flag with "review was
+   for vN-1, this is vN" so operators see stale signal
+   explicitly.
+
+4. **Marketplace audit-event mirror.** Significant marketplace
+   actions (entry added, entry deprecated, key revoked,
+   reviewer trust changed) emit signed announcements that the
+   kernel can subscribe to. These don't go in the agent audit
+   chain — they're per-machine notifications, surfaced in
+   the SoulUX status bar — so an operator sees "the plugin you
+   installed yesterday was deprecated this morning" without
+   polling.
+
+This decision doesn't change kernel storage (the agent audit
+chain stays orthogonal to marketplace state) but formalizes the
+trust path so an auditor reviewing "how did this tool get on
+this agent?" can trace from the kernel's
+`marketplace_plugin_installed` event → registry commit →
+manifest signature → maintainer key → reviewer attestations.
+
 ## Implementation Tranches
 
 - **M1** — kernel `GET /marketplace/index` endpoint that
@@ -310,9 +488,32 @@ common case for read-only utility plugins.
   sibling repo + verify in the kernel + frontend "untrusted"
   badge for unsigned entries + operator-confirmation
   override path.
-- **M7** — operator ratings + reviews. Deferred. Needs
-  separate design conversation: anonymity, gaming, off-by-
-  default.
+- **M7** — operator ratings + reviews per Decision 8.
+  Marketplace adds `registry/reviews/<entry>/<id>.yaml`
+  schema + ed25519 signing tool + verify on read. Kernel
+  adds `review_count` + `star_average` to
+  `/marketplace/index` response and a lazy
+  `GET /marketplace/reviews/<entry-id>` for full bodies.
+  Feature flag `FSF_MARKETPLACE_REVIEWS_ENABLED` (default on).
+- **M8** — telemetric skill scores per Decision 9. Daemon
+  side: opt-in batched submission to the marketplace's
+  `/telemetry/submit` endpoint behind
+  `FSF_TELEMETRY_REPORT=true` (default false).
+  Marketplace side: aggregator + statistical-anomaly
+  rejection + republishing to entries.
+  `fsf telemetry preview` operator CLI for transparency.
+- **M9** — agent templates per Decision 10. New
+  `.template` package shape. Marketplace gains a Templates
+  section. Kernel gains `agent_birthed_from_template` audit
+  event + the recommended-grants follow-up step. Clone-this-
+  agent action lives entirely in the frontend (renders a
+  local template from an alive agent's artifacts and opens
+  the edit form).
+- **M10** — marketplace auditability per Decision 11.
+  Per-source commit pinning + change-log surfacing + review-
+  staleness flagging + signed-announcement subscription
+  channel. Pure UX layer over Git's existing tamper-evident
+  history; no new kernel storage.
 
 ## Consequences
 
