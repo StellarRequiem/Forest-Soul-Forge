@@ -219,22 +219,17 @@ class McpCallTool:
             auth_env=auth_env,
         )
 
-        # Dispatch the call. v1 supports stdio: prefix only — JSON-RPC over
-        # the server's stdin/stdout. ws:// / http:// transports are future
-        # additions; refuse cleanly on unrecognized scheme.
+        # Dispatch the call. v1 supports two transports:
+        #   stdio:<path>         — subprocess JSON-RPC over stdin/stdout
+        #   http://...  https:// — JSON-RPC POST (B225 / ADR-0055 universality)
+        # All other schemes refuse cleanly. The transport choice is per-
+        # server in the registry config; both code paths converge on the
+        # same `response` dict for downstream handling.
         url = server_cfg.get("url", "")
-        if not url.startswith("stdio:"):
-            raise McpCallError(
-                f"server {server_name!r} url {url!r} uses unsupported transport; "
-                "v1 supports only stdio: (subprocess JSON-RPC)"
-            )
-        cmd_path = url[len("stdio:"):]
-        if not cmd_path:
-            raise McpCallError(
-                f"server {server_name!r} url is missing the command after stdio:"
-            )
 
-        # Build JSON-RPC request matching MCP wire format.
+        # Build JSON-RPC request matching MCP wire format (shared by
+        # both transports — the wire frame differs but the payload
+        # doesn't).
         request = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -244,53 +239,128 @@ class McpCallTool:
                 "arguments": tool_args,
             },
         }
-        request_bytes = (json.dumps(request) + "\n").encode("utf-8")
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                cmd_path,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, **auth_env},
-            )
-        except (FileNotFoundError, PermissionError) as e:
-            raise McpCallError(
-                f"failed to launch MCP server {server_name!r}: {e}"
-            ) from e
-
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=request_bytes),
-                timeout=timeout_s,
-            )
-        except asyncio.TimeoutError:
+        if url.startswith("stdio:"):
+            cmd_path = url[len("stdio:"):]
+            if not cmd_path:
+                raise McpCallError(
+                    f"server {server_name!r} url is missing the command after stdio:"
+                )
+            request_bytes = (json.dumps(request) + "\n").encode("utf-8")
             try:
-                proc.terminate()
-                await proc.wait()
-            except ProcessLookupError:
-                pass
+                proc = await asyncio.create_subprocess_exec(
+                    cmd_path,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env={**os.environ, **auth_env},
+                )
+            except (FileNotFoundError, PermissionError) as e:
+                raise McpCallError(
+                    f"failed to launch MCP server {server_name!r}: {e}"
+                ) from e
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(input=request_bytes),
+                    timeout=timeout_s,
+                )
+            except asyncio.TimeoutError:
+                try:
+                    proc.terminate()
+                    await proc.wait()
+                except ProcessLookupError:
+                    pass
+                raise McpCallError(
+                    f"MCP server {server_name!r} timed out after {timeout_s}s"
+                )
+            # Parse JSON-RPC response. MCP servers respond on a single
+            # stdout line per request; if the server emitted multiple
+            # lines, the result line is the last non-empty one.
+            if not stdout.strip():
+                stderr_preview = stderr.decode("utf-8", errors="replace")[:200]
+                raise McpCallError(
+                    f"MCP server {server_name!r} returned no stdout response. "
+                    f"stderr: {stderr_preview}"
+                )
+            last_line = stdout.decode("utf-8", errors="replace").strip().split("\n")[-1]
+            try:
+                response = json.loads(last_line)
+            except json.JSONDecodeError as e:
+                raise McpCallError(
+                    f"MCP server {server_name!r} returned malformed JSON: {e}; "
+                    f"raw: {last_line[:200]!r}"
+                ) from e
+        elif url.startswith("http://") or url.startswith("https://"):
+            # B225 — HTTP transport. JSON-RPC over HTTP POST per the
+            # MCP spec. Auth flows via env vars resolved above is NOT
+            # appropriate for HTTP — those are subprocess env vars.
+            # For HTTP MCPs, secrets must be passed as either:
+            #   - Authorization: Bearer <token> header (if the
+            #     server_cfg specifies auth_header_template), or
+            #   - a body field the server expects.
+            # ``server_cfg.get("auth_header_template")`` is an
+            # operator-supplied template string like
+            # "Bearer {GITHUB_TOKEN}"; we substitute auth_env values
+            # into it. Absent template = no auth header sent (the
+            # server must be open or use a different auth scheme).
+            import httpx  # lazy import — only fires on HTTP MCPs
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+            auth_header_template = server_cfg.get("auth_header_template")
+            if auth_header_template and auth_env:
+                try:
+                    headers["Authorization"] = auth_header_template.format(**auth_env)
+                except KeyError as e:
+                    raise McpCallError(
+                        f"server {server_name!r} auth_header_template references "
+                        f"missing secret {e}; resolved env keys: {list(auth_env)}"
+                    ) from e
+            # Operator can supply extra static headers for non-auth use
+            # (e.g., x-api-version). Filter to string values only;
+            # collisions with our defaults are ignored (defaults win).
+            for k, v in (server_cfg.get("extra_headers") or {}).items():
+                if isinstance(v, str) and k not in headers:
+                    headers[k] = v
+            try:
+                async with httpx.AsyncClient(timeout=timeout_s) as client:
+                    resp = await client.post(url, json=request, headers=headers)
+            except httpx.TimeoutException:
+                raise McpCallError(
+                    f"MCP server {server_name!r} (HTTP) timed out after {timeout_s}s"
+                )
+            except httpx.HTTPError as e:
+                raise McpCallError(
+                    f"MCP server {server_name!r} (HTTP) request failed: {e}"
+                ) from e
+            if resp.status_code >= 500:
+                # Transport-level server error — distinct from a
+                # JSON-RPC error payload which the server would return
+                # with HTTP 200 + an "error" field.
+                raise McpCallError(
+                    f"MCP server {server_name!r} returned HTTP {resp.status_code}; "
+                    f"body: {resp.text[:200]!r}"
+                )
+            if resp.status_code >= 400:
+                raise McpCallError(
+                    f"MCP server {server_name!r} refused the request (HTTP "
+                    f"{resp.status_code}). Check auth_header_template + "
+                    f"server-side allowlist. body: {resp.text[:200]!r}"
+                )
+            try:
+                response = resp.json()
+            except json.JSONDecodeError as e:
+                raise McpCallError(
+                    f"MCP server {server_name!r} (HTTP) returned malformed "
+                    f"JSON: {e}; raw: {resp.text[:200]!r}"
+                ) from e
+        else:
             raise McpCallError(
-                f"MCP server {server_name!r} timed out after {timeout_s}s"
+                f"server {server_name!r} url {url!r} uses unsupported transport; "
+                "v1 supports stdio: (subprocess JSON-RPC) and "
+                "http:// / https:// (JSON-RPC over HTTP POST)"
             )
-
-        # Parse JSON-RPC response. MCP servers respond on a single stdout
-        # line per request; if the server emitted multiple lines, the
-        # result line is the last non-empty one.
-        if not stdout.strip():
-            stderr_preview = stderr.decode("utf-8", errors="replace")[:200]
-            raise McpCallError(
-                f"MCP server {server_name!r} returned no stdout response. "
-                f"stderr: {stderr_preview}"
-            )
-        last_line = stdout.decode("utf-8", errors="replace").strip().split("\n")[-1]
-        try:
-            response = json.loads(last_line)
-        except json.JSONDecodeError as e:
-            raise McpCallError(
-                f"MCP server {server_name!r} returned malformed JSON: {e}; "
-                f"raw: {last_line[:200]!r}"
-            ) from e
 
         if "error" in response:
             err = response["error"]
