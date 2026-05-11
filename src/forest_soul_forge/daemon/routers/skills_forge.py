@@ -257,12 +257,41 @@ async def forge_skill_endpoint(
         # Validation failed at the parser — the LLM produced YAML
         # that doesn't match the SkillDef schema. Surface meaningfully
         # so the modal can show what went wrong rather than a 500.
+        # B207: also surface the quarantine dir + forge.log excerpt
+        # so the operator can read what the LLM produced. Pre-B207
+        # this diagnostic data evaporated on parse failure; the engine
+        # now writes the raw output + log BEFORE parsing so it
+        # survives. The quarantine dir naming uses either
+        # name_override or a timestamp-keyed fallback.
+        quarantine_log_excerpt = ""
+        quarantine_raw_path = ""
+        try:
+            # Find the most recent quarantine in staged_root (engine
+            # just wrote it). Best-effort — don't fail the error
+            # response if the quarantine isn't where we expect.
+            from datetime import datetime as _dt
+            candidates = sorted(
+                staged_root.iterdir(),
+                key=lambda p: p.stat().st_mtime if p.exists() else 0,
+                reverse=True,
+            )
+            for cand in candidates[:3]:
+                log_f = cand / "forge.log"
+                raw_f = cand / "manifest_raw.yaml"
+                if log_f.exists() and raw_f.exists():
+                    quarantine_log_excerpt = log_f.read_text(encoding="utf-8")[-1200:]
+                    quarantine_raw_path = str(cand)
+                    break
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "error": "manifest_validation_failed",
                 "path": e.path,
                 "detail": e.detail,
+                "quarantine_dir": quarantine_raw_path,
+                "forge_log_excerpt": quarantine_log_excerpt,
             },
         ) from e
     except Exception as e:

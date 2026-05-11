@@ -33,7 +33,7 @@ from forest_soul_forge.forge.skill_manifest import (
 )
 
 
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"  # B207 — block-YAML enforcement + flow-mapping caveat
 
 _PROPOSE_SYSTEM = (
     "You are a skill-manifest generator for the Forest Soul Forge runtime "
@@ -41,18 +41,38 @@ _PROPOSE_SYSTEM = (
     "a YAML manifest that describes the workflow as a DAG of tool calls.\n\n"
     "You MUST emit valid YAML and nothing else (no prose, no markdown "
     "fences, no preamble).\n\n"
+    # B207 — the critical YAML caveat. The ${...} expression syntax uses
+    # curly braces, which clash with YAML flow-mapping delimiters. A line
+    # like `output: { summary: ${step.out.text} }` blows up the parser
+    # because the parser sees a nested `{` it doesn't expect. Always use
+    # block style for any container that holds ${...} values.
+    "CRITICAL YAML STYLE RULE:\n"
+    "  - Use BLOCK-STYLE YAML for `output:`, `inputs:`, `args:`,\n"
+    "    `properties:`, and `steps:`. NEVER use flow-style `{...}`\n"
+    "    or `[...]` for those fields.\n"
+    "  - The expression syntax `${name.field}` contains curly braces.\n"
+    "    Flow-style YAML uses the same curly braces as mapping\n"
+    "    delimiters. They CONFLICT. The parser will fail.\n"
+    "  - Correct (block style):\n"
+    "        output:\n"
+    "          summary: ${step.out.text}\n"
+    "  - Wrong (flow style — DO NOT EMIT):\n"
+    "        output: { summary: ${step.out.text} }\n\n"
     "Top-level fields the manifest MUST have:\n"
     "  - schema_version: 1\n"
     "  - name:           snake_case identifier\n"
     "  - version:        '1'\n"
     "  - description:    one or two sentences\n"
-    "  - requires:       list of tool refs (name.vversion)\n"
+    "  - requires:       list of tool refs (name.vversion — ALWAYS\n"
+    "                    versioned, e.g. `llm_think.v1`, never bare\n"
+    "                    `llm_think`)\n"
     "  - inputs:         JSON Schema object describing skill inputs\n"
     "  - steps:          non-empty list of step mappings\n"
     "  - output:         mapping of name → ${expression}\n\n"
     "Each step has:\n"
     "  - id:    unique snake_case name\n"
-    "  - tool:  name.vversion of the tool to dispatch\n"
+    "  - tool:  name.vversion of the tool to dispatch (versioned,\n"
+    "           e.g. `llm_think.v1`)\n"
     "  - args:  mapping of arg name → ${expression} or literal\n"
     "  - when:  optional ${...} predicate; step skipped if false\n"
     "  - unless:optional inverse of when\n\n"
@@ -160,7 +180,41 @@ async def forge_skill(
     log.append(raw)
 
     cleaned = _strip_fences(raw)
-    skill = parse_manifest(cleaned)
+
+    # B207: stage the raw output + forge.log BEFORE attempting to parse.
+    # Pre-B207 this whole block was AFTER parse_manifest, so when the
+    # LLM produced invalid YAML (e.g., the flow-mapping vs ${} clash
+    # in the B204-shipped propose), the staged dir was never created
+    # and the operator lost all diagnostic data. Now we always have a
+    # quarantine dir with the raw reply + log, even when parse fails —
+    # operator can read forge.log to see what went wrong, edit
+    # manifest_raw.yaml by hand, and re-attempt install.
+    #
+    # If the LLM emitted a parseable name we use that for the staged
+    # dir; otherwise fall back to a timestamp-keyed quarantine name so
+    # multiple failed forges don't collide on disk.
+    fallback_name = (name_override or f"unparseable_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}")
+    raw_staged_dir = (out_dir / f"{fallback_name}.v{version}").resolve()
+    raw_staged_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_staged_dir / "manifest_raw.yaml"
+    raw_path.write_text(cleaned, encoding="utf-8")
+    raw_log_path = raw_staged_dir / "forge.log"
+    raw_log_path.write_text("\n".join(log) + "\n", encoding="utf-8")
+
+    try:
+        skill = parse_manifest(cleaned)
+    except Exception:
+        # Parse failed. The raw output + log are already on disk for
+        # diagnostics; surface the failure with the path so the
+        # caller can point the operator at the quarantine dir.
+        log.append("\n=== PROPOSE FAIL: parse_manifest raised ===")
+        log.append(f"raw_staged_dir: {raw_staged_dir}")
+        raw_log_path.write_text("\n".join(log) + "\n", encoding="utf-8")
+        raise
+
+    # Parse succeeded — relocate the raw quarantine into the canonical
+    # name.vversion staged dir (in case fallback_name was used) and
+    # rewrite the manifest in the canonical serialized form.
     if name_override:
         skill = replace(skill, name=name_override)
     if version != skill.version:
@@ -177,16 +231,28 @@ async def forge_skill(
     log.append(f"steps: {len(skill.steps)}")
     log.append(f"skill_hash: {skill.skill_hash}")
 
-    staged_dir = (out_dir / f"{skill.name}.v{skill.version}").resolve()
-    staged_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = staged_dir / "manifest.yaml"
+    canonical_staged_dir = (out_dir / f"{skill.name}.v{skill.version}").resolve()
+    if canonical_staged_dir != raw_staged_dir:
+        # Move the quarantine contents into the canonical dir. Keep
+        # the raw file for diagnostics even on success.
+        canonical_staged_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            (canonical_staged_dir / "manifest_raw.yaml").write_text(cleaned, encoding="utf-8")
+            # Remove the quarantine dir last (best-effort).
+            for f in raw_staged_dir.iterdir():
+                f.unlink(missing_ok=True)
+            raw_staged_dir.rmdir()
+        except OSError:
+            pass
+
+    manifest_path = canonical_staged_dir / "manifest.yaml"
     manifest_path.write_text(_serialize(skill, raw_yaml=cleaned), encoding="utf-8")
-    log_path = staged_dir / "forge.log"
+    log_path = canonical_staged_dir / "forge.log"
     log_path.write_text("\n".join(log) + "\n", encoding="utf-8")
 
     return SkillForgeResult(
         skill=skill, manifest_path=manifest_path,
-        log_path=log_path, staged_dir=staged_dir,
+        log_path=log_path, staged_dir=canonical_staged_dir,
         log_lines=log,
     )
 

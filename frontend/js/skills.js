@@ -491,7 +491,41 @@ function openNewSkillModal() {
         "color:var(--danger,#ff6b6b);font-size:12px;line-height:1.4;"
         + "background:rgba(255,107,107,0.08);border:1px solid var(--danger,#ff6b6b);"
         + "padding:8px;border-radius:4px;margin-top:8px;";
-      err.textContent = `Forge failed: ${e.message}`;
+      // B207: if the daemon surfaced a structured 422 with the
+      // forge_log_excerpt + quarantine_dir, show those so the
+      // operator can see what the LLM produced and where the raw
+      // file is. Pre-B207 the modal only showed the bare error
+      // string and the raw LLM output was thrown away.
+      const detail = e?.body?.detail;
+      if (detail && detail.error === "manifest_validation_failed") {
+        const lines = [
+          `<strong>Forge failed — manifest parse error</strong>`,
+          `<div style="margin-top:6px;font-family:var(--mono,monospace);font-size:11px;">`
+            + `<div>path: ${detail.path || "(root)"}</div>`
+            + `<div style="margin-top:4px;white-space:pre-wrap;">${(detail.detail || "").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</div>`
+            + `</div>`,
+        ];
+        if (detail.quarantine_dir) {
+          lines.push(
+            `<div style="margin-top:8px;font-size:11px;">`
+            + `Raw LLM output saved to:<br><code style="font-size:10px;">${detail.quarantine_dir}/manifest_raw.yaml</code>`
+            + `<br>You can edit it by hand and re-install via the Approvals tab, or try Forge again with a tighter description.`
+            + `</div>`,
+          );
+        }
+        if (detail.forge_log_excerpt) {
+          lines.push(
+            `<details style="margin-top:8px;font-size:11px;">`
+            + `<summary style="cursor:pointer;">forge.log (last 1200 chars — what the LLM produced)</summary>`
+            + `<pre style="margin-top:4px;background:rgba(0,0,0,0.3);padding:6px;border-radius:3px;font-size:10px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow:auto;">`
+            + (detail.forge_log_excerpt || "").replace(/&/g,"&amp;").replace(/</g,"&lt;")
+            + `</pre></details>`,
+          );
+        }
+        err.innerHTML = lines.join("");
+      } else {
+        err.textContent = `Forge failed: ${e.message}`;
+      }
       result.appendChild(err);
       forgeBtn.disabled = false;
       forgeBtn.textContent = "Forge";
