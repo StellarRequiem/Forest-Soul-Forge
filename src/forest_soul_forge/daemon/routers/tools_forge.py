@@ -457,6 +457,13 @@ async def list_staged_tools(
     if not staged_root.exists():
         return StagedToolsOut(count=0, staged=[])
 
+    # B211: skip entries with an existing installed yaml so the
+    # Approvals 'Forged proposals' panel only shows pending proposals
+    # after a successful install. The staged dir survives install
+    # (it's the propose audit trail), so without this filter the
+    # operator sees duplicates.
+    install_root = _resolve_install_root(settings)
+
     rows: list[StagedToolSummary] = []
     for staged_dir in sorted(staged_root.iterdir()):
         if not staged_dir.is_dir():
@@ -471,6 +478,10 @@ async def list_staged_tools(
                 forge_provider="listing",
             )
         except ToolSpecError:
+            continue
+        # B211: skip installed.
+        installed_path = install_root / f"{spec.name}.v{spec.version}.yaml"
+        if installed_path.exists():
             continue
         try:
             mtime = datetime.fromtimestamp(

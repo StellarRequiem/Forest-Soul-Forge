@@ -173,6 +173,17 @@ def _resolve_staged_root(settings: Any) -> Path:
     return Path(root).resolve()
 
 
+def _resolve_install_root(settings: Any) -> Path:
+    """Resolve the installed-manifests root. B211 uses this to filter
+    staged-list entries that have a corresponding installed yaml so
+    operators don't see duplicates in the Approvals 'Forged proposals'
+    panel after a successful install."""
+    root = getattr(settings, "skill_install_dir", None)
+    if root is None:
+        root = Path("data/forge/skills/installed")
+    return Path(root).resolve()
+
+
 def _ensure_under(parent: Path, child: Path) -> None:
     """Refuse path-traversal attempts. ``child`` must resolve inside ``parent``."""
     try:
@@ -524,6 +535,14 @@ async def list_staged_skills(
     if not staged_root.exists():
         return StagedManifestsOut(count=0, staged=[])
 
+    # B211: filter out entries that have a corresponding installed
+    # manifest. Pre-B211 the Approvals 'Forged proposals' panel kept
+    # showing artifacts after install, since the staged dir stays on
+    # disk (deliberately — it's the propose audit trail). Operators
+    # only want to see PENDING proposals in that panel; the install
+    # registry is browsed elsewhere.
+    install_root = _resolve_install_root(settings)
+
     rows: list[StagedManifestSummary] = []
     for staged_dir in sorted(staged_root.iterdir()):
         if not staged_dir.is_dir():
@@ -534,6 +553,11 @@ async def list_staged_skills(
         try:
             skill = parse_manifest(manifest_path.read_text(encoding="utf-8"))
         except ManifestError:
+            continue
+        # B211: skip if already installed. Match on canonical
+        # name.vversion.yaml filename per /skills/install convention.
+        installed_path = install_root / f"{skill.name}.v{skill.version}.yaml"
+        if installed_path.exists():
             continue
         # Heuristic: forged_at = manifest mtime, ISO-formatted.
         try:
