@@ -133,7 +133,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 16
+            assert r.schema_version() == 17
             assert r.list_agents() == []
             assert r.audit_tail() == []
         assert db.exists()
@@ -147,7 +147,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 16
+            assert r.schema_version() == 17
 
     def test_empty_existing_file_gets_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
@@ -158,7 +158,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 16
+            assert r.schema_version() == 17
 
     def test_schema_downgrade_raises(self, tmp_path: Path):
         """A file stamped at a version *newer* than the code refuses to open.
@@ -262,7 +262,7 @@ class TestBootstrap:
         # disclosure). The assertion tests that all migration steps
         # landed on the same pass.
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 16
+            assert r.schema_version() == 17
 
             # Data survives.
             row = r.get_agent(pre_existing)
@@ -416,7 +416,7 @@ class TestBootstrap:
 
         # Reopen — bootstrap should run MIGRATIONS[7].
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 16
+            assert r.schema_version() == 17
 
             raw = sqlite3.connect(str(db))
             raw.execute("PRAGMA foreign_keys = ON")
@@ -548,7 +548,7 @@ class TestBootstrap:
 
         # Reopen through bootstrap — should run MIGRATIONS[11].
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 16
+            assert r.schema_version() == 17
 
             raw = sqlite3.connect(str(db))
             raw.execute("PRAGMA foreign_keys = ON")

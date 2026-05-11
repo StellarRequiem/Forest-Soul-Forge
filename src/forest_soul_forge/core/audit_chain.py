@@ -106,6 +106,8 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "forge_skill_proposed",
     "forge_skill_installed",
     "forge_skill_uninstalled",  # B212 — DELETE /skills/installed
+    "agent_tool_granted",       # B219 / ADR-0060 — runtime catalog-tool grant added
+    "agent_tool_revoked",       # B219 / ADR-0060 — runtime catalog-tool grant revoked
     # ADR-0022 v0.1 + ADR-0027 — memory lifecycle. memory_read is
     # only emitted for cross-agent reads (per-agent self-reads are
     # too noisy and the data is already in scope). bulk operations

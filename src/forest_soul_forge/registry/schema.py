@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 16
+SCHEMA_VERSION: int = 17
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -569,6 +569,35 @@ DDL_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_plugin_grants_active "
         "ON agent_plugin_grants(instance_id) "
         "WHERE revoked_at_seq IS NULL;",
+    # ADR-0060 T1 (Burst 219): agent_catalog_grants.
+    # Sister table to agent_plugin_grants, keyed by
+    # (instance_id, tool_name, tool_version). Lets operators grant
+    # catalog-tool access to a born agent without rebirthing — the
+    # constitution_hash stays immutable while the effective tool
+    # surface expands at runtime. T2 (queued) wires the dispatcher
+    # to consult this on constitution-check miss.
+    """
+    CREATE TABLE IF NOT EXISTS agent_catalog_grants (
+        instance_id      TEXT NOT NULL,
+        tool_name        TEXT NOT NULL,
+        tool_version     TEXT NOT NULL,
+        trust_tier       TEXT NOT NULL DEFAULT 'yellow'
+                         CHECK (trust_tier IN ('green', 'yellow', 'red')),
+        granted_at_seq   INTEGER NOT NULL,
+        granted_by       TEXT,
+        granted_at       TEXT NOT NULL,
+        revoked_at_seq   INTEGER,
+        revoked_at       TEXT,
+        revoked_by       TEXT,
+        reason           TEXT,
+        PRIMARY KEY (instance_id, tool_name, tool_version),
+        FOREIGN KEY (instance_id)
+            REFERENCES agents(instance_id) ON DELETE CASCADE
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_catalog_grants_active "
+        "ON agent_catalog_grants(instance_id) "
+        "WHERE revoked_at_seq IS NULL;",
 )
 
 # Metadata rows written on bootstrap. ``canonical_contract`` is a tripwire —
@@ -1070,5 +1099,44 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         """,
         "CREATE INDEX IF NOT EXISTS idx_psh_instance "
             "ON memory_procedural_shortcuts(instance_id);",
+    ),
+    # v16 → v17 (ADR-0060 T1, Burst 219): agent_catalog_grants.
+    # Runtime grants of catalog-tool access without rebirthing the agent.
+    # Mirror of agent_plugin_grants (Burst 113) generalized to catalog
+    # tools keyed by (instance_id, tool_name, tool_version). The
+    # constitution_hash is immutable per agent (CLAUDE.md architectural
+    # invariant) — this table is consulted alongside the constitution,
+    # not in place of it. Effective at-dispatch decision:
+    #   constitution lists tool        → use constitution's resolved constraints
+    #   not listed, grant active       → use catalog defaults (T2 wiring)
+    #   not listed, no grant           → refuse tool_not_in_constitution
+    #
+    # trust_tier defaults to yellow per ADR-0060 D4 — operators must
+    # explicitly pass green for fully-autonomous grants. The CHECK
+    # constraint matches agent_plugin_grants so the GrantPolicy helper
+    # (queued T4) treats both grant types uniformly.
+    17: (
+        """
+        CREATE TABLE IF NOT EXISTS agent_catalog_grants (
+            instance_id      TEXT NOT NULL,
+            tool_name        TEXT NOT NULL,
+            tool_version     TEXT NOT NULL,
+            trust_tier       TEXT NOT NULL DEFAULT 'yellow'
+                             CHECK (trust_tier IN ('green', 'yellow', 'red')),
+            granted_at_seq   INTEGER NOT NULL,
+            granted_by       TEXT,
+            granted_at       TEXT NOT NULL,
+            revoked_at_seq   INTEGER,
+            revoked_at       TEXT,
+            revoked_by       TEXT,
+            reason           TEXT,
+            PRIMARY KEY (instance_id, tool_name, tool_version),
+            FOREIGN KEY (instance_id)
+                REFERENCES agents(instance_id) ON DELETE CASCADE
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_catalog_grants_active "
+            "ON agent_catalog_grants(instance_id) "
+            "WHERE revoked_at_seq IS NULL;",
     ),
 }

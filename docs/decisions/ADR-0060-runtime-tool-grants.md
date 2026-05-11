@@ -1,8 +1,12 @@
 # ADR-0060 — Runtime Tool Grants
 
-- **Status:** Draft
-- **Date:** 2026-05-11
+- **Status:** Accepted
+- **Date:** 2026-05-11 (drafted, accepted same day)
 - **Supersedes:** —
+- **Acceptance evidence:** T1 (this ADR's schema + accessor) lands in B219 alongside acceptance. Defaults frozen on the three open questions:
+  - **trust_tier default:** `yellow`. Operators must explicitly pass `trust_tier=green` to grant fully-autonomous tier; explicit confirmation prevents accidentally granting maximum trust.
+  - **T6 frontend scope:** deferred to a separate burst after T2-T5 land. The substrate must work via API before the UI surface adds polish.
+  - **plugin_grants rename:** declined. The two tables differ enough (per-plugin vs per-(tool, version)) that unification would force awkward null columns. Keep them separate, share the architectural pattern not the SQL.
 - **Related:** ADR-0001 (DNA + content-addressed soul — defines the immutable identity surface this ADR is the *runtime* counterpart to), ADR-0004 (Constitution builder), ADR-0018 (Tool catalog + tools_add at birth time), ADR-0033 (Security Swarm — primary near-term consumer when new threats land mid-deployment), ADR-0043 follow-up #2 (post-birth MCP plugin grants — the precedent this ADR generalizes), ADR-0045 (Posture / Trust-Light — posture is consulted by the grant gate).
 
 ## Context
@@ -134,10 +138,4 @@ Total estimate: 5 bursts. T1+T2+T3 land the substrate; T4 hardens; T5 ensures th
 
 ## Status
 
-**Draft.** Awaiting operator confirmation on:
-
-1. D4 trust_tier defaults (yellow vs green) — currently proposing yellow with explicit confirmation required for green.
-2. Whether T6 frontend lands as part of this arc or as a separate UX burst.
-3. Whether the existing plugin_grants table should be renamed `agent_plugin_grants` → `agent_grants` and unified with catalog_grants under one accessor. (Recommend NO: the schemas differ enough — plugin_grants is per-plugin, catalog_grants is per-(tool, version) — that unification would force awkward null columns.)
-
-Once operator-confirmed, advance to Accepted and start T1.
+**Accepted 2026-05-11.** All three open questions resolved as recorded in the acceptance-evidence header. T1 (schema + accessor) lands alongside this acceptance in B219. T2-T6 queued.

@@ -62,6 +62,9 @@ from forest_soul_forge.registry.tables import (
 from forest_soul_forge.registry.tables.plugin_grants import (
     PluginGrantsTable,
 )
+from forest_soul_forge.registry.tables.catalog_grants import (
+    CatalogGrantsTable,
+)
 from forest_soul_forge.registry.tables._helpers import transaction as _transaction
 
 REGISTRY_SCHEMA_VERSION: int = schema.SCHEMA_VERSION
@@ -242,6 +245,11 @@ class Registry:
         # constitution-declared list before mcp_call.v1's allowlist
         # check runs.
         self.plugin_grants = PluginGrantsTable(conn)
+        # ADR-0060 T1 (Burst 219): post-birth catalog-tool grants.
+        # Sister of plugin_grants — augments the constitution's allowed
+        # tool list without mutating constitution_hash. The dispatcher
+        # (T2, queued) consults this on constitution-check miss.
+        self.catalog_grants = CatalogGrantsTable(conn)
 
     # ============ construction / teardown ===================================
     @classmethod
