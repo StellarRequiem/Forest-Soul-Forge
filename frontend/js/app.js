@@ -14,6 +14,7 @@ import * as toolsPanel from "./tools.js";
 import * as genresPanel from "./genres.js";
 import * as pendingPanel from "./pending.js";
 import * as forgedProposalsPanel from "./forged-proposals.js";  // B205
+import * as catalogGrantsPanel from "./catalog-grants.js";       // B223 / ADR-0060 T6
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
 import * as mcpPluginsPanel from "./mcp-plugins.js";
@@ -70,6 +71,7 @@ async function boot() {
     auditPanel.start();
     pendingPanel.start();
     forgedProposalsPanel.start();  // B205
+    catalogGrantsPanel.start();    // B223 / ADR-0060 T6
     skillsPanel.start();
     toolRegistryPanel.start();
     mcpPluginsPanel.start();

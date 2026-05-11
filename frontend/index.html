@@ -261,6 +261,56 @@
           </div>
         </div>
       </div>
+
+      <!-- ========================================================== -->
+      <!-- ADR-0060 T6 (B223): runtime tool grants pane.              -->
+      <!-- Sibling of agents-split. Lets the operator grant catalog   -->
+      <!-- tools to a born agent without re-birth. Constitution hash  -->
+      <!-- stays immutable; the grant table is consulted by the       -->
+      <!-- dispatcher's ConstitutionGateStep when a tool isn't in the -->
+      <!-- agent's constitution.                                      -->
+      <!-- ========================================================== -->
+      <div class="panel" style="margin-top:16px;">
+        <div class="panel__header">
+          <h2 class="panel__title">Tool grants (runtime)</h2>
+          <div class="panel__actions">
+            <label for="catalog-grants-agent-select" class="lbl">agent</label>
+            <select id="catalog-grants-agent-select" class="inp inp--sm">
+              <option value="">— pick an agent —</option>
+            </select>
+            <span class="muted" id="catalog-grants-status">—</span>
+            <button class="btn btn--ghost btn--sm" id="catalog-grants-refresh" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="catalog-grants-list" class="catalog-grants-list" style="margin-bottom:16px;">
+            <div class="empty">Pick an agent to see its runtime tool grants.</div>
+          </div>
+          <div class="catalog-grants-form" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding:12px;border:1px dashed var(--border,#2c303a);border-radius:6px;">
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <label for="catalog-grants-tool-name" class="lbl">tool name</label>
+              <input type="text" id="catalog-grants-tool-name" class="inp inp--sm" placeholder="e.g. translate_to_french" style="min-width:240px;" />
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <label for="catalog-grants-tool-version" class="lbl">version</label>
+              <input type="text" id="catalog-grants-tool-version" class="inp inp--sm" value="1" style="width:60px;" />
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <label for="catalog-grants-tier" class="lbl">trust tier</label>
+              <select id="catalog-grants-tier" class="inp inp--sm">
+                <option value="yellow" selected>yellow</option>
+                <option value="green">green</option>
+                <option value="red">red</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px;">
+              <label for="catalog-grants-reason" class="lbl">reason (optional)</label>
+              <input type="text" id="catalog-grants-reason" class="inp inp--sm" placeholder="why this grant?" />
+            </div>
+            <button class="btn btn--primary btn--sm" id="catalog-grants-grant-btn" type="button">Grant</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ========================================================== -->
