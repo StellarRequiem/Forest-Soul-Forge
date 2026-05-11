@@ -58,6 +58,9 @@ from forest_soul_forge.daemon.routers import (
     plugin_grants as plugin_grants_router,
 )
 from forest_soul_forge.daemon.routers import (
+    catalog_grants as catalog_grants_router,
+)
+from forest_soul_forge.daemon.routers import (
     agent_posture as agent_posture_router,
 )
 from forest_soul_forge.daemon.routers import scheduler as scheduler_router
@@ -785,6 +788,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(scheduler_router.router)
     app.include_router(plugins_router.router)
     app.include_router(plugin_grants_router.router)
+    app.include_router(catalog_grants_router.router)  # ADR-0060 T3 (B220)
     app.include_router(agent_posture_router.router)
     app.include_router(secrets_router.router)
     app.include_router(marketplace_router.router)

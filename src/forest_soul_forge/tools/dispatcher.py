@@ -365,6 +365,21 @@ class ToolDispatcher:
     # pre-Burst-113 gap where mcp_call.v1 read this constraint but
     # nothing populated it.
     plugin_grants: Any = None
+    # ADR-0060 T2 (Burst 220): post-birth catalog-tool grants accessor.
+    # Sister of plugin_grants. When set, ConstraintResolutionStep
+    # consults this on constitution-check miss; an active grant
+    # substitutes catalog-default constraints for the missing
+    # constitution entry so the tool can dispatch without re-birth.
+    # Identity (constitution_hash + DNA) stays immutable. None when
+    # fsf_registry is None (test contexts) — the step falls through
+    # to refuse tool_not_in_constitution, identical to pre-B220 path.
+    catalog_grants: Any = None
+    # ADR-0060 T2 (Burst 220): tool_catalog reference for the grant
+    # lookup to read side_effects defaults from. When None, granted
+    # tools fall back to side_effects="unknown" — non-fatal but the
+    # downstream PostureGateStep can't gate on it. Wired from
+    # ``app.state.tool_catalog`` in deps.py.
+    tool_catalog: Any = None
     # ADR-0054 T3 (Burst 180): procedural-shortcut substrate. The
     # dispatcher pre-resolves a shortcut match BEFORE the pipeline
     # runs (the pipeline is sync; embed + search are async) and
@@ -423,6 +438,12 @@ class ToolDispatcher:
             ArgsValidationStep(),
             ConstraintResolutionStep(
                 load_resolved_constraints_fn=_load_resolved_constraints,
+                # ADR-0060 T2 (B220): wire the optional grant lookup.
+                # Closure captures self.catalog_grants + self.tool_catalog
+                # so the step can resolve catalog defaults when a grant
+                # fires. None when grants aren't wired (test contexts)
+                # — step falls through to pre-B220 refuse path.
+                catalog_grant_lookup_fn=self._lookup_catalog_grant,
             ),
             PostureOverrideStep(
                 audit=self.audit,
@@ -1278,6 +1299,63 @@ class ToolDispatcher:
             return {g.plugin_name: g.trust_tier for g in grants}
         except Exception:
             return None
+
+    def _lookup_catalog_grant(
+        self, instance_id: str, tool_name: str, tool_version: str,
+    ) -> tuple[_ResolvedToolConstraints, int] | None:
+        """ADR-0060 T2: resolve a runtime catalog-tool grant.
+
+        Called by ``ConstraintResolutionStep`` when the constitution
+        lookup returns None. Returns ``(resolved, granted_at_seq)``
+        if an active grant exists for this (agent, name, version),
+        else None.
+
+        The synthetic ``_ResolvedToolConstraints`` carries:
+          - ``side_effects`` from the catalog ToolDef (so PostureGateStep
+            still works); ``"unknown"`` when the catalog isn't wired
+            (test context) — non-fatal but blocks side-effect-aware
+            posture gates from tightening.
+          - empty ``constraints`` dict — per ADR-0060 D1, grants don't
+            inherit constitution overrides; they use catalog defaults
+            (max_calls_per_session=1000, requires_human_approval=false,
+            audit_every_call=true at the dispatcher level).
+          - ``applied_rules=("granted_via:catalog_grant",)`` so an
+            auditor reading the chain knows this dispatch came from
+            a grant rather than the constitution.
+
+        ``None`` paths:
+          - self.catalog_grants unwired (test context)
+          - no active grant for the (agent, name, version) triple
+          - read failure (defensive — same posture as
+            _load_plugin_grants_view)
+        """
+        if self.catalog_grants is None:
+            return None
+        try:
+            grant = self.catalog_grants.get_active(
+                instance_id, tool_name, tool_version,
+            )
+        except Exception:
+            return None
+        if grant is None:
+            return None
+        # Look up side_effects from the catalog when wired.
+        side_effects = "unknown"
+        if self.tool_catalog is not None:
+            try:
+                td = self.tool_catalog.tools.get(f"{tool_name}.v{tool_version}")
+                if td is not None:
+                    side_effects = td.side_effects
+            except Exception:
+                pass
+        resolved = _ResolvedToolConstraints(
+            name=tool_name,
+            version=tool_version,
+            side_effects=side_effects,
+            constraints={},
+            applied_rules=("granted_via:catalog_grant",),
+        )
+        return (resolved, grant.granted_at_seq)
 
     def _build_merged_mcp_registry(self) -> dict[str, Any] | None:
         """Compute the merged MCP registry view (YAML base + plugin

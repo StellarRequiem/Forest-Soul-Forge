@@ -239,6 +239,17 @@ def build_or_get_tool_dispatcher(app):
             getattr(fsf_registry, "plugin_grants", None)
             if fsf_registry is not None else None
         ),
+        # ADR-0060 T2 (B220): runtime catalog-tool grants accessor +
+        # tool_catalog for default-constraint lookup. The dispatcher
+        # uses both together — grants live in the registry, defaults
+        # come from the catalog. Either being None makes
+        # ConstraintResolutionStep skip the grant fallback and refuse
+        # tool_not_in_constitution as pre-B220.
+        catalog_grants=(
+            getattr(fsf_registry, "catalog_grants", None)
+            if fsf_registry is not None else None
+        ),
+        tool_catalog=getattr(app.state, "tool_catalog", None),
     )
     # ADR-0054 T6 (B194) — procedural-shortcut substrate wiring.
     # Master switch is ``settings.procedural_shortcut_enabled`` (default

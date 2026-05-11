@@ -167,6 +167,16 @@ class DispatchContext:
     posture_notes: list[str] = field(default_factory=list)
     active_model: str | None = None
 
+    # ADR-0060 T2 (B220): when ConstraintResolutionStep used a runtime
+    # grant rather than the constitution to resolve this tool, it sets
+    # ``granted_via="catalog_grant"`` and ``grant_seq`` to the source
+    # row's granted_at_seq. The dispatcher annotates
+    # tool_call_dispatched with these fields so an auditor can tell
+    # "this dispatch came from a runtime grant, not the constitution."
+    # None on the constitution path.
+    granted_via: str | None = None
+    grant_seq: int | None = None
+
     @property
     def key(self) -> str:
         return f"{self.tool_name}.v{self.tool_version}"
@@ -450,25 +460,52 @@ class ConstraintResolutionStep:
     Refuses if the constitution file is missing OR the tool isn't
     listed (different reasons; the dispatcher's caller may want to
     distinguish — e.g., trigger a registry rebuild on the former).
+
+    ADR-0060 T2 (B220) addition: when the constitution lookup misses
+    and a ``catalog_grant_lookup_fn`` was wired, the step consults
+    it as a fallback. An active grant resolves to catalog-default
+    constraints with ``applied_rules=("granted_via:catalog_grant",)``
+    and the step tags ``dctx.granted_via`` + ``dctx.grant_seq`` for
+    downstream audit annotation. The constitution path stays unchanged;
+    grants are an augmentation, not a mutation.
     """
 
     load_resolved_constraints_fn: Any  # callable(Path, name, version) -> _ResolvedToolConstraints | None
+    # ADR-0060 T2 — optional grant lookup. Signature:
+    #   (instance_id, tool_name, tool_version) -> tuple[_ResolvedToolConstraints, int] | None
+    # Returns (resolved_constraints, granted_at_seq) on grant hit, None otherwise.
+    # When None (default), behavior is identical to pre-B220.
+    catalog_grant_lookup_fn: Any = None
 
     def evaluate(self, dctx: DispatchContext) -> StepResult:
         resolved = self.load_resolved_constraints_fn(
             dctx.constitution_path, dctx.tool_name, dctx.tool_version,
         )
         if resolved is None:
+            # ADR-0060 T2: before refusing, check for an active runtime
+            # grant. constitution_missing wins over grant lookup — a
+            # missing constitution file is a registry / disk issue that
+            # the operator must fix; a grant can't paper over it.
             if not dctx.constitution_path.exists():
                 return StepResult.refuse(
                     "constitution_missing",
                     f"constitution.yaml not found at {dctx.constitution_path}",
                 )
+            if self.catalog_grant_lookup_fn is not None:
+                grant_result = self.catalog_grant_lookup_fn(
+                    dctx.instance_id, dctx.tool_name, dctx.tool_version,
+                )
+                if grant_result is not None:
+                    granted_resolved, grant_seq = grant_result
+                    dctx.resolved = granted_resolved
+                    dctx.granted_via = "catalog_grant"
+                    dctx.grant_seq = grant_seq
+                    return StepResult.go()
             return StepResult.refuse(
                 "tool_not_in_constitution",
                 (
                     f"agent's constitution does not list {dctx.key} — "
-                    "re-birth or add via tools_add to grant access"
+                    "re-birth or add via /agents/{instance_id}/tools/grant to grant access"
                 ),
             )
         dctx.resolved = resolved
