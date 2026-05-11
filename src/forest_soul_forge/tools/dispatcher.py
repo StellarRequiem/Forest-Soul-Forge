@@ -1302,13 +1302,13 @@ class ToolDispatcher:
 
     def _lookup_catalog_grant(
         self, instance_id: str, tool_name: str, tool_version: str,
-    ) -> tuple[_ResolvedToolConstraints, int] | None:
-        """ADR-0060 T2: resolve a runtime catalog-tool grant.
+    ) -> tuple[_ResolvedToolConstraints, int, str] | None:
+        """ADR-0060 T2 / T4: resolve a runtime catalog-tool grant.
 
         Called by ``ConstraintResolutionStep`` when the constitution
-        lookup returns None. Returns ``(resolved, granted_at_seq)``
-        if an active grant exists for this (agent, name, version),
-        else None.
+        lookup returns None. Returns
+        ``(resolved, granted_at_seq, trust_tier)`` if an active grant
+        exists for this (agent, name, version), else None.
 
         The synthetic ``_ResolvedToolConstraints`` carries:
           - ``side_effects`` from the catalog ToolDef (so PostureGateStep
@@ -1355,7 +1355,7 @@ class ToolDispatcher:
             constraints={},
             applied_rules=("granted_via:catalog_grant",),
         )
-        return (resolved, grant.granted_at_seq)
+        return (resolved, grant.granted_at_seq, grant.trust_tier)
 
     def _build_merged_mcp_registry(self) -> dict[str, Any] | None:
         """Compute the merged MCP registry view (YAML base + plugin

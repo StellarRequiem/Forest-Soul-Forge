@@ -176,6 +176,11 @@ class DispatchContext:
     # None on the constitution path.
     granted_via: str | None = None
     grant_seq: int | None = None
+    # ADR-0060 T4 (B221): the grant's trust_tier, threaded through so
+    # PostureGateStep can apply the posture × tier interaction matrix
+    # (ADR-0060 D4). None unless granted_via is set. Values:
+    # "green" | "yellow" | "red".
+    granted_trust_tier: str | None = None
 
     @property
     def key(self) -> str:
@@ -496,10 +501,11 @@ class ConstraintResolutionStep:
                     dctx.instance_id, dctx.tool_name, dctx.tool_version,
                 )
                 if grant_result is not None:
-                    granted_resolved, grant_seq = grant_result
+                    granted_resolved, grant_seq, grant_tier = grant_result
                     dctx.resolved = granted_resolved
                     dctx.granted_via = "catalog_grant"
                     dctx.grant_seq = grant_seq
+                    dctx.granted_trust_tier = grant_tier
                     return StepResult.go()
             return StepResult.refuse(
                 "tool_not_in_constitution",
@@ -926,6 +932,58 @@ class PostureGateStep:
                         effective_posture = (
                             grant_tier if grant_rank > agent_rank else posture
                         )
+
+        # ADR-0060 T4 (B221): catalog-grant trust_tier interaction
+        # matrix. When the dispatch came from a runtime grant
+        # (granted_via="catalog_grant"), apply the matrix directly
+        # per ADR-0060 D4. The agent's posture sets the floor; the
+        # grant's tier shifts the threshold above that floor.
+        #
+        # | Agent  | green grant | yellow grant | red grant |
+        # |--------|-------------|--------------|-----------|
+        # | green  | GO          | GO           | GO        |
+        # | yellow | GO          | GO           | PENDING   |
+        # | red    | PENDING     | PENDING      | REFUSE    |
+        #
+        # Rationale: the operator who granted this specific tool
+        # explicitly signaled trust at the grant's tier. A green-tier
+        # grant means "I trust this exact (tool, agent) combination
+        # fully," which is enough to override the agent's own posture
+        # for THIS tool only. A red-tier grant on a red-posture agent
+        # is the doubly-defended-against case — operator and agent
+        # both flagged for review — so it refuses outright.
+        #
+        # This bypasses the agent-level branching below; the matrix
+        # is the complete decision for grant-sourced dispatches.
+        if dctx.granted_trust_tier is not None:
+            grant_tier = dctx.granted_trust_tier
+            if effective_posture == "green":
+                # All grants allowed on a green agent.
+                return StepResult.go()
+            if effective_posture == "yellow":
+                if grant_tier == "red":
+                    return StepResult.pending(
+                        gate_source="posture_yellow_grant_red",
+                        side_effects=side_effects,
+                    )
+                return StepResult.go()
+            if effective_posture == "red":
+                if grant_tier == "red":
+                    return StepResult.refuse(
+                        "agent_posture_red_grant_red",
+                        (
+                            f"agent posture is RED and grant trust_tier is "
+                            f"red — doubly-defended refusal. Raise either "
+                            f"posture or grant tier to release."
+                        ),
+                    )
+                # red agent + green/yellow grant: requires approval
+                return StepResult.pending(
+                    gate_source="posture_red_grant_lower",
+                    side_effects=side_effects,
+                )
+            # Unknown posture value — fall through to legacy branching
+            # below as a safe default.
 
         if effective_posture == "red":
             return StepResult.refuse(
