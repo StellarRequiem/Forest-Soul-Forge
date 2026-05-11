@@ -33,7 +33,7 @@ from forest_soul_forge.forge.skill_manifest import (
 )
 
 
-PROMPT_VERSION = "2"  # B207 — block-YAML enforcement + flow-mapping caveat
+PROMPT_VERSION = "3"  # B208 — ref-scope rules + step shape strictness
 
 _PROPOSE_SYSTEM = (
     "You are a skill-manifest generator for the Forest Soul Forge runtime "
@@ -58,6 +58,31 @@ _PROPOSE_SYSTEM = (
     "          summary: ${step.out.text}\n"
     "  - Wrong (flow style — DO NOT EMIT):\n"
     "        output: { summary: ${step.out.text} }\n\n"
+    # B208 — explicit ref-scope rules. The parser uses scope-checked
+    # references: only `inputs`, `each` (inside for_each), and prior
+    # step ids are in scope as bare names. Bare references to an
+    # input field name (e.g. `${audit_chain_path}` when the schema
+    # has `inputs.audit_chain_path`) raise ManifestError because the
+    # bare token isn't in scope — you must say `${inputs.audit_chain_path}`.
+    # This rule existed in the parser since T1 but the prompt described
+    # it ambiguously as "bare name + .field chain", which the LLM
+    # interpreted as license to drop the `inputs.` prefix.
+    "CRITICAL REFERENCE SYNTAX RULE:\n"
+    "  - To reference a SKILL INPUT, you MUST write `${inputs.<name>}`.\n"
+    "    Bare `${<name>}` for an input field will FAIL — the parser\n"
+    "    only puts `inputs` (the whole object) in scope, not its\n"
+    "    individual fields.\n"
+    "  - To reference a previous STEP's output, write\n"
+    "    `${<step_id>.out.<field>}` — or `${<step_id>.out}` for the\n"
+    "    whole output. The step id is the value of `id:`.\n"
+    "  - Inside a for_each body, the current element is `${each}` or\n"
+    "    `${each.<field>}`.\n"
+    "  - Examples (assuming inputs.user_query and steps `search`,\n"
+    "    `summarize`):\n"
+    "        Correct: file_path: ${inputs.audit_chain_path}\n"
+    "        Wrong:   file_path: ${audit_chain_path}\n"
+    "        Correct: prompt: ${summarize.out.text}\n"
+    "        Wrong:   prompt: ${summarize}\n\n"
     "Top-level fields the manifest MUST have:\n"
     "  - schema_version: 1\n"
     "  - name:           snake_case identifier\n"
@@ -69,19 +94,28 @@ _PROPOSE_SYSTEM = (
     "  - inputs:         JSON Schema object describing skill inputs\n"
     "  - steps:          non-empty list of step mappings\n"
     "  - output:         mapping of name → ${expression}\n\n"
-    "Each step has:\n"
-    "  - id:    unique snake_case name\n"
-    "  - tool:  name.vversion of the tool to dispatch (versioned,\n"
-    "           e.g. `llm_think.v1`)\n"
+    "Each step has EXACTLY these fields:\n"
+    "  - id:    unique snake_case name (required)\n"
+    "  - tool:  name.vversion of the tool to dispatch (required;\n"
+    "           versioned, e.g. `llm_think.v1`)\n"
     "  - args:  mapping of arg name → ${expression} or literal\n"
+    "           (this is the ONLY way to pass data into a tool —\n"
+    "           there is no `inputs:` field on a step)\n"
     "  - when:  optional ${...} predicate; step skipped if false\n"
     "  - unless:optional inverse of when\n\n"
+    # B208 — strict step shape callout. The B207 smoke produced a step
+    # with `inputs: ${prior.out}` (string at the wrong field). The
+    # parser silently ignored it (args defaulted to {}), then the
+    # ${audit_chain_path} ref blew up — but the underlying confusion
+    # was the LLM treating step-level `inputs:` as a thing.
+    "Do NOT put `inputs:` on a step. `inputs` is a TOP-LEVEL field that\n"
+    "declares the skill's input schema. Step data flows in via `args:`.\n\n"
     "For iteration, replace `tool:` with `for_each: ${list_expr}` plus a\n"
     "nested `steps:` list. Inside the inner steps, the variable\n"
     "${each.field} refers to the current iteration element.\n\n"
     "The expression language is small. You may use:\n"
-    "  - Variables:    bare name + .field chain — refer to step ids,\n"
-    "                  ``inputs``, or ``each`` (inside for_each).\n"
+    "  - Variables:    `inputs.<field>`, `<step_id>.out` (and\n"
+    "                  `<step_id>.out.<field>`), `each` (in for_each).\n"
     "  - Literals:     strings, ints, floats, true/false, null.\n"
     "  - Functions:    count(list), any(list), all(list), len(value),\n"
     "                  default(value, fallback).\n"
@@ -203,11 +237,22 @@ async def forge_skill(
 
     try:
         skill = parse_manifest(cleaned)
-    except Exception:
+    except Exception as exc:
         # Parse failed. The raw output + log are already on disk for
         # diagnostics; surface the failure with the path so the
         # caller can point the operator at the quarantine dir.
+        # B208: capture the exception type + str into forge.log so the
+        # operator can see WHY parse failed without grepping the
+        # parser source. ManifestError already carries a useful
+        # path-prefixed detail; generic exceptions still get their
+        # repr captured for completeness.
         log.append("\n=== PROPOSE FAIL: parse_manifest raised ===")
+        log.append(f"exception_type: {type(exc).__name__}")
+        if isinstance(exc, ManifestError):
+            log.append(f"manifest_path:  {getattr(exc, 'path', '?')}")
+            log.append(f"manifest_msg:   {getattr(exc, 'detail', str(exc))}")
+        else:
+            log.append(f"exception_str:  {str(exc)}")
         log.append(f"raw_staged_dir: {raw_staged_dir}")
         raw_log_path.write_text("\n".join(log) + "\n", encoding="utf-8")
         raise
