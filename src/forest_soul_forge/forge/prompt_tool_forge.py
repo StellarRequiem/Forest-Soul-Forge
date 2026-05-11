@@ -32,7 +32,7 @@ import yaml
 
 
 SPEC_SCHEMA_VERSION = 1
-PROMPT_VERSION = "2"  # B209 — fence-stripping callout in propose-system
+PROMPT_VERSION = "3"  # B210 — runtime-model explanation for prompt_template
 
 
 def _strip_fences(raw: str) -> str:
@@ -118,12 +118,49 @@ _PROPOSE_SYSTEM = (
     "runtime (ADR-0058). Given a plain-English description of a workflow "
     "the operator wants as a callable tool, you emit a YAML spec that "
     "binds to the generic prompt_template_tool.v1 implementation.\n\n"
-    # B209 — the LLM keeps wrapping output in ```yaml fences despite
-    # the original "no markdown fences" line below. Belt-and-suspenders:
-    # the engine now strips fences before parsing (so this is harmless
-    # if the LLM still produces them), but we still tell the model the
-    # output must start with `schema_version:` or the YAML's first key,
-    # not with a fence.
+    # B210 — the critical conceptual fix. Live smoke surfaced the LLM
+    # producing templates that were literal expected answers with
+    # placeholders, e.g. `template: "- {paragraph}\n- {paragraph}\n
+    # - {paragraph}"` for a "summarize to three bullets" tool. That
+    # template, after substitution, becomes a useless prompt that just
+    # repeats the input. The LLM didn't understand: the template's
+    # substituted text becomes a NEW prompt sent to ANOTHER LLM at
+    # execute() time, so the template must be an INSTRUCTION the
+    # runtime LLM will follow, not the answer.
+    "HOW THIS TOOL ACTUALLY RUNS — read this carefully:\n"
+    "  1. At runtime, an agent calls the forged tool with `args` (e.g.\n"
+    "     `args = {paragraph: 'long text...'}`).\n"
+    "  2. The runtime substitutes those args into your prompt_template\n"
+    "     via Python str.format(**args) — every `{var}` is replaced\n"
+    "     with the agent's input value.\n"
+    "  3. The SUBSTITUTED TEXT becomes a NEW prompt that is sent to\n"
+    "     an LLM (the same provider that's calling you now).\n"
+    "  4. That LLM's response is what the agent gets back as the\n"
+    "     tool's output.\n\n"
+    "So prompt_template is an INSTRUCTION written FOR a downstream LLM.\n"
+    "It must tell that LLM what to do with the substituted args. It is\n"
+    "NOT the literal expected answer.\n\n"
+    "CONCRETE EXAMPLE:\n"
+    "  Description: 'summarize a paragraph as three concise bullets'\n"
+    "  WRONG (this is what a broken forge produced before B210):\n"
+    "      prompt_template: |\n"
+    "        - {paragraph}\n"
+    "        - {paragraph}\n"
+    "        - {paragraph}\n"
+    "    After substitution the downstream LLM sees three identical\n"
+    "    bullets of the same input text and produces garbage.\n"
+    "  RIGHT:\n"
+    "      prompt_template: |\n"
+    "        Summarize the paragraph below as exactly three concise\n"
+    "        bullet points. Each bullet captures one key idea in one\n"
+    "        sentence.\n\n"
+    "        Paragraph:\n"
+    "        {paragraph}\n\n"
+    "        Three bullet points:\n"
+    "    After substitution the downstream LLM sees a clear instruction\n"
+    "    plus the input and produces the requested summary.\n\n"
+    # B209 — engine strips fences before parsing but we still tell the
+    # model not to emit them. Belt-and-suspenders.
     "CRITICAL OUTPUT FORMAT:\n"
     "  - Your output MUST start with `schema_version:` or `name:` —\n"
     "    NEVER with a backtick or any markdown fence.\n"
@@ -146,6 +183,9 @@ _PROPOSE_SYSTEM = (
     "  - Keep input_schema simple: top-level required + properties with "
     "type only (string / integer / number / boolean). minimum/maximum "
     "for numbers OK.\n"
+    "  - The prompt_template should be an INSTRUCTION followed by the\n"
+    "    `{var}` placeholders for context, NOT a pre-written answer\n"
+    "    with placeholders. See the CONCRETE EXAMPLE above.\n"
 )
 
 
