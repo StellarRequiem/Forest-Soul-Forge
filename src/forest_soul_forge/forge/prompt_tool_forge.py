@@ -32,6 +32,23 @@ import yaml
 
 
 SPEC_SCHEMA_VERSION = 1
+PROMPT_VERSION = "2"  # B209 — fence-stripping callout in propose-system
+
+
+def _strip_fences(raw: str) -> str:
+    """Same shape as forge.skill_forge._strip_fences. LLMs wrap their
+    YAML output in ```yaml ... ``` markdown fences even when explicitly
+    told not to; strip a single outer fence if present so parse_spec
+    sees clean YAML.
+    """
+    s = raw.strip()
+    if s.startswith("```"):
+        nl = s.find("\n")
+        if nl != -1:
+            s = s[nl + 1:]
+    if s.endswith("```"):
+        s = s[: s.rfind("```")].rstrip()
+    return s.strip()
 
 
 @dataclass(frozen=True)
@@ -101,9 +118,20 @@ _PROPOSE_SYSTEM = (
     "runtime (ADR-0058). Given a plain-English description of a workflow "
     "the operator wants as a callable tool, you emit a YAML spec that "
     "binds to the generic prompt_template_tool.v1 implementation.\n\n"
+    # B209 — the LLM keeps wrapping output in ```yaml fences despite
+    # the original "no markdown fences" line below. Belt-and-suspenders:
+    # the engine now strips fences before parsing (so this is harmless
+    # if the LLM still produces them), but we still tell the model the
+    # output must start with `schema_version:` or the YAML's first key,
+    # not with a fence.
+    "CRITICAL OUTPUT FORMAT:\n"
+    "  - Your output MUST start with `schema_version:` or `name:` —\n"
+    "    NEVER with a backtick or any markdown fence.\n"
+    "  - Do NOT wrap the YAML in ```yaml ... ``` or any other fence.\n"
+    "  - Do NOT include any prose before or after the YAML.\n"
+    "  - The very first character of your reply is a YAML key name.\n\n"
     "OUTPUT REQUIREMENTS:\n"
-    "  - Output MUST be valid YAML and nothing else. No markdown fences, "
-    "no commentary, no leading text.\n"
+    "  - Output MUST be valid YAML and nothing else.\n"
     "  - Required keys: name (snake_case), version (string), description, "
     "input_schema (JSONSchema-shaped object with properties + required), "
     "prompt_template (string with {var_name} placeholders matching "
@@ -314,11 +342,47 @@ async def forge_prompt_tool(
     )
     log_lines.extend(["## raw-reply", raw, ""])
 
-    spec = parse_spec(
-        raw,
-        forged_by=forged_by,
-        forge_provider=getattr(provider, "name", "unknown"),
-    )
+    # B209: strip markdown fences before parse. LLMs wrap YAML output
+    # in ```yaml ... ``` even after being told not to.
+    cleaned = _strip_fences(raw)
+
+    # B209: stage raw output + forge.log BEFORE attempting to parse,
+    # mirroring B207's pattern for skill forge. On parse failure the
+    # quarantine dir stays on disk so the operator can read what the
+    # LLM produced. Pre-B209 a parse failure left no on-disk artifact —
+    # operator only saw the 422 detail string. Use timestamp-keyed
+    # quarantine name when the LLM didn't produce a parseable name
+    # (or its name fails _VALID_NAME) so collisions can't clobber
+    # earlier failed forges.
+    fallback_name = name_override or f"unparseable_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+    quarantine_dir = (out_dir / f"{fallback_name}.v{version}").resolve()
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+    (quarantine_dir / "spec_raw.yaml").write_text(cleaned, encoding="utf-8")
+    quarantine_log = quarantine_dir / "forge.log"
+    quarantine_log.write_text("\n".join(log_lines), encoding="utf-8")
+
+    try:
+        spec = parse_spec(
+            cleaned,
+            forged_by=forged_by,
+            forge_provider=getattr(provider, "name", "unknown"),
+        )
+    except Exception as exc:
+        # B209: surface the actual exception into forge.log so the
+        # operator can diagnose without reading parse_spec source.
+        # Mirrors B208's pattern for skill forge.
+        log_lines.append("")
+        log_lines.append("## parse_spec FAILED")
+        log_lines.append(f"exception_type: {type(exc).__name__}")
+        if isinstance(exc, ToolSpecError):
+            log_lines.append(f"spec_path:   {getattr(exc, 'path', '?')}")
+            log_lines.append(f"spec_detail: {getattr(exc, 'detail', str(exc))}")
+        else:
+            log_lines.append(f"exception_str: {str(exc)}")
+        log_lines.append(f"quarantine_dir: {quarantine_dir}")
+        quarantine_log.write_text("\n".join(log_lines), encoding="utf-8")
+        raise
+
     log_lines.extend([
         "## parsed",
         f"name: {spec.name}",
@@ -327,8 +391,20 @@ async def forge_prompt_tool(
         "",
     ])
 
+    # Parse succeeded — relocate the quarantine to the canonical
+    # name.vversion directory and write the canonical spec.yaml. Keep
+    # the raw alongside for diagnostics on success too.
     staged_dir = (out_dir / f"{spec.name}.v{spec.version}").resolve()
-    staged_dir.mkdir(parents=True, exist_ok=True)
+    if staged_dir != quarantine_dir:
+        staged_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            (staged_dir / "spec_raw.yaml").write_text(cleaned, encoding="utf-8")
+            for f in quarantine_dir.iterdir():
+                f.unlink(missing_ok=True)
+            quarantine_dir.rmdir()
+        except OSError:
+            pass
+
     spec_path = staged_dir / "spec.yaml"
     spec_path.write_text(spec.to_yaml(), encoding="utf-8")
     log_path = staged_dir / "forge.log"
