@@ -44,6 +44,14 @@ def _settings(tmp_path: Path, *, allow_writes: bool = True) -> DaemonSettings:
         frontier_enabled=False,
         allow_write_endpoints=allow_writes,
         enrich_narrative_default=False,
+        # B206: opt out of B148 auto-token-generation in unit tests so
+        # the test fixtures don't need to thread X-FSF-Token through
+        # every request. The api_token=None override is required
+        # because pydantic-settings loads FSF_API_TOKEN from .env
+        # automatically, and the constructor arg has to win over it.
+        # Production daemons leave both at their defaults.
+        api_token=None,
+        insecure_no_token=True,
     )
 
 

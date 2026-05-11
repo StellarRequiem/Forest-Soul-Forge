@@ -86,6 +86,9 @@ def verifier_env(tmp_path: Path):
         frontier_enabled=False,
         allow_write_endpoints=True,
         enrich_narrative_default=False,
+        # B206: bypass B148 auto-token. api_token=None overrides .env.
+        api_token=None,
+        insecure_no_token=True,
     )
     app = build_app(settings)
     with TestClient(app) as client:

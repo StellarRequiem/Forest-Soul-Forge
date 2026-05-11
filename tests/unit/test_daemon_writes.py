@@ -96,6 +96,13 @@ def write_env(tmp_path: Path):
         # opt in explicitly by passing enrich_narrative=True per request,
         # or via the dedicated enrich_env fixture below.
         enrich_narrative_default=False,
+        # B206: bypass B148 auto-token-generation in the unit fixture.
+        # Token-required behavior is exercised by the dedicated
+        # _auth_env fixture below which sets api_token explicitly.
+        # api_token=None is required to override FSF_API_TOKEN loaded
+        # from .env by pydantic-settings.
+        api_token=None,
+        insecure_no_token=True,
     )
     app = build_app(settings)
     with TestClient(app) as client:
@@ -291,6 +298,10 @@ class TestWritesDisabled:
             default_provider="local",
             frontier_enabled=False,
             allow_write_endpoints=False,
+            # B206: writes-disabled test; auth is orthogonal. Override
+            # FSF_API_TOKEN from .env explicitly.
+            api_token=None,
+            insecure_no_token=True,
         )
         app = build_app(settings)
         with TestClient(app) as client:
@@ -587,6 +598,9 @@ def enrich_env(tmp_path: Path):
         frontier_enabled=False,
         allow_write_endpoints=True,
         enrich_narrative_default=True,
+        # B206: bypass B148 auto-token; api_token=None overrides .env.
+        api_token=None,
+        insecure_no_token=True,
     )
     app = build_app(settings)
     with TestClient(app) as client:

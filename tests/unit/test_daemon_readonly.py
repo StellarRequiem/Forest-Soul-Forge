@@ -108,6 +108,10 @@ def daemon_env(tmp_path: Path, monkeypatch):
         audit_chain_path=audit,
         default_provider="local",
         frontier_enabled=False,
+        # B206: bypass B148 auto-token. api_token=None overrides
+        # FSF_API_TOKEN loaded from .env by pydantic-settings.
+        api_token=None,
+        insecure_no_token=True,
     )
     app = build_app(settings)
 
@@ -194,9 +198,21 @@ class TestAudit:
         resp = client.get("/audit/tail", params={"n": 10})
         assert resp.status_code == 200
         body = resp.json()
-        # Only genesis event — agent_dna is None so it was mirrored as-is.
-        assert body["count"] == 1
-        assert body["events"][0]["event_type"] == "chain_created"
+        # B206: relaxed from `count == 1` to `count >= 1` because the
+        # daemon's lifespan now emits additional events at startup
+        # (agent registration replay, plugin install discovery,
+        # forged_tool_loader init per ADR-0058 / B202, etc.) so a
+        # freshly-built TestClient sees more than just the genesis.
+        # The original assertion would silently break every time a new
+        # lifespan-time event got added; the count >= 1 + first-event
+        # check is the real invariant.
+        assert body["count"] >= 1
+        # Genesis is always the FIRST entry on a fresh chain. /audit/tail
+        # returns newest-first, so the chain_created event is at the END
+        # of the returned list (most-recent-N from the tail). Verify by
+        # finding it explicitly rather than indexing position 0.
+        event_types = [e["event_type"] for e in body["events"]]
+        assert "chain_created" in event_types
 
     def test_audit_tail_n_bounds(self, daemon_env):
         client, _, _ = daemon_env

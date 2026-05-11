@@ -124,19 +124,24 @@ class TestRegistrySecrets:
 
     def _agent(self, reg, instance_id="inst-test-001"):
         # Insert a minimal agent row so the FK on agent_secrets resolves.
-        with reg._conn:  # transaction
-            reg._conn.execute(
-                """
-                INSERT INTO agents (
-                    instance_id, dna, dna_full, role, agent_name,
-                    soul_path, constitution_path, constitution_hash,
-                    created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (instance_id, "abc123", "abc123" * 10, "log_analyst",
-                 "TestAgent", "soul.md", "const.yaml", "deadbeef" * 8,
-                 "2026-04-29T00:00:00Z"),
-            )
+        # B206: drop the `with reg._conn:` transaction wrapper —
+        # post-refactor reg._conn is a thread-local proxy, not a
+        # sqlite3.Connection, so it doesn't implement context-manager
+        # protocol. The proxy auto-commits on each execute (the proxy
+        # itself was constructed with isolation_level=None) so a single
+        # INSERT doesn't need explicit transaction batching.
+        reg._conn.execute(
+            """
+            INSERT INTO agents (
+                instance_id, dna, dna_full, role, agent_name,
+                soul_path, constitution_path, constitution_hash,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (instance_id, "abc123", "abc123" * 10, "log_analyst",
+             "TestAgent", "soul.md", "const.yaml", "deadbeef" * 8,
+             "2026-04-29T00:00:00Z"),
+        )
         return instance_id
 
     def test_set_and_get_round_trip(self, tmp_path: Path) -> None:

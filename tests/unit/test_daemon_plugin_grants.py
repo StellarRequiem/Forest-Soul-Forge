@@ -52,6 +52,10 @@ def _build_settings(tmp_path: Path, *, allow_writes: bool = True) -> DaemonSetti
         frontier_enabled=False,
         allow_write_endpoints=allow_writes,
         enrich_narrative_default=False,
+        # B206: bypass B148 auto-token in tests. api_token=None
+        # required to override the FSF_API_TOKEN loaded from .env.
+        api_token=None,
+        insecure_no_token=True,
     )
 
 
