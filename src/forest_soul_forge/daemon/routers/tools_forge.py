@@ -547,3 +547,72 @@ async def discard_staged_tool(
         )
 
     return {"ok": True, "discarded": f"{name}.v{version}"}
+
+
+# ---------------------------------------------------------------------------
+# DELETE /tools/installed/{name}/{version} — uninstall (B212)
+# ---------------------------------------------------------------------------
+@router.delete(
+    "/tools/installed/{name}/{version}",
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
+)
+async def uninstall_tool(
+    name: str,
+    version: str,
+    settings=Depends(get_settings),
+    audit_chain=Depends(get_audit_chain),
+    write_lock: threading.RLock = Depends(get_write_lock),
+    request: Request = None,
+) -> dict[str, Any]:
+    """Uninstall an installed forged prompt-template tool.
+
+    Removes the canonical ``data/forge/tools/installed/<name>.v<version>.yaml``
+    AND unregisters the live PromptTemplateTool instance from the
+    in-process registry so subsequent dispatches see it as unknown.
+    Emits a ``forge_tool_uninstalled`` chain event.
+
+    Pre-B212 the only path was rm + daemon restart, which left the
+    audit chain silent and required a process bounce to take effect.
+    """
+    install_root = _resolve_install_root(settings)
+    target = (install_root / f"{name}.v{version}.yaml").resolve()
+    _ensure_under(install_root, target)
+
+    if not target.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"installed tool not found: {name} v{version}",
+        )
+
+    with write_lock:
+        # Unregister live before removing the file so a concurrent
+        # /agents/{id}/tools/call doesn't race with the unlink.
+        key = f"{name}.v{version}"
+        registry = getattr(request.app.state, "tool_registry", None)
+        if registry is not None and key in getattr(registry, "tools", {}):
+            del registry.tools[key]
+        catalog = getattr(request.app.state, "tool_catalog", None)
+        if catalog is not None and key in getattr(catalog, "tools", {}):
+            del catalog.tools[key]
+
+        try:
+            target.unlink()
+        except OSError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"failed to remove installed spec: {e}",
+            ) from e
+
+        audit_chain.append(
+            "forge_tool_uninstalled",
+            {
+                "tool_name": name,
+                "tool_version": version,
+                "uninstalled_from": str(target),
+                "uninstalled_by": _operator_label(request) if request else "http_api",
+                "uninstalled_at": _now_iso(),
+                "mode": "http_api",
+            },
+        )
+
+    return {"ok": True, "uninstalled": f"{name}.v{version}"}

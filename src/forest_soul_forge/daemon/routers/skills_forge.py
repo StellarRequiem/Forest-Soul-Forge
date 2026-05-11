@@ -640,3 +640,78 @@ async def discard_staged_skill(
         )
 
     return {"ok": True, "discarded": f"{name}.v{version}"}
+
+
+# ---------------------------------------------------------------------------
+# DELETE /skills/installed/{name}/{version} — uninstall (B212)
+# ---------------------------------------------------------------------------
+@router.delete(
+    "/skills/installed/{name}/{version}",
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
+)
+async def uninstall_skill(
+    name: str,
+    version: str,
+    settings=Depends(get_settings),
+    audit_chain=Depends(get_audit_chain),
+    write_lock: threading.RLock = Depends(get_write_lock),
+    request: Request = None,
+) -> dict[str, Any]:
+    """Uninstall an installed skill.
+
+    Removes the canonical ``data/forge/skills/installed/<name>.v<version>.yaml``
+    and emits a ``forge_skill_uninstalled`` chain event. Pre-B212 the
+    only path was ``rm + daemon restart``, which left the audit chain
+    silent about who removed what and when.
+
+    The in-memory ``app.state.skill_catalog`` is reloaded best-effort
+    after the file is gone so subsequent GET /skills sees the new
+    state without a restart. Currently-dispatching skills aren't
+    cancelled; the runtime decision was made at start-of-dispatch.
+
+    Returns 404 when the skill isn't installed. The staged proposal
+    (if any) survives this operation — discard it separately via
+    DELETE /skills/staged/{name}/{version} if desired.
+    """
+    install_root = _resolve_install_root(settings)
+    target = (install_root / f"{name}.v{version}.yaml").resolve()
+    _ensure_under(install_root, target)
+
+    if not target.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"installed skill not found: {name} v{version}",
+        )
+
+    with write_lock:
+        try:
+            target.unlink()
+        except OSError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"failed to remove installed manifest: {e}",
+            ) from e
+
+        audit_chain.append(
+            "forge_skill_uninstalled",
+            {
+                "skill_name": name,
+                "skill_version": version,
+                "uninstalled_from": str(target),
+                "uninstalled_by": _operator_label(request) if request else "http_api",
+                "uninstalled_at": _now_iso(),
+                "mode": "http_api",
+            },
+        )
+
+        # Best-effort reload of the in-memory skill catalog so
+        # subsequent /skills GET reflects the removal. Failure to
+        # reload doesn't roll back the unlink — the file is gone.
+        try:
+            from forest_soul_forge.core.skill_catalog import load_catalog
+            catalog, _errors = load_catalog(install_root)
+            request.app.state.skill_catalog = catalog
+        except Exception:
+            pass
+
+    return {"ok": True, "uninstalled": f"{name}.v{version}"}
