@@ -19,6 +19,20 @@ cd "$HERE"
 bar() { printf "\n========== %s ==========\n" "$1"; }
 fail() { echo "FAILED at: $1" >&2; echo ""; echo "Press return to close."; read -r _; exit 1; }
 
+# B214 — auto-load FSF_API_TOKEN from .env if not already in the
+# environment. Post-B148 the daemon requires X-FSF-Token on every
+# write endpoint; the sub-scripts already honor FSF_API_TOKEN if
+# set, they just don't read .env on their own. Sourcing here means
+# /birth + /skills/install + /agents/.../tools/call all inherit
+# the token without per-script edits.
+if [[ -z "${FSF_API_TOKEN:-}" && -f ".env" ]]; then
+  TOK="$(grep -E '^FSF_API_TOKEN=' .env | head -1 | cut -d= -f2)"
+  if [[ -n "$TOK" ]]; then
+    export FSF_API_TOKEN="$TOK"
+    echo "Auto-loaded FSF_API_TOKEN from .env (${TOK:0:8}…)."
+  fi
+fi
+
 bar "0. Daemon health check"
 DAEMON="${FSF_DAEMON_URL:-http://127.0.0.1:7423}"
 if ! curl -sf "$DAEMON/healthz" > /tmp/fsf-health.$$ 2>&1; then

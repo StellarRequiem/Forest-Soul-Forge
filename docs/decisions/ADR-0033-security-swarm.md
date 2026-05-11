@@ -9,6 +9,23 @@
   `VaultWarden.key_audit`. 47 audit events, 4 skills, 3 `agent_delegated`
   hops, terminating cleanly at VaultWarden. See
   [`docs/audits/2026-04-28-phase-d-e-review.md`](../audits/2026-04-28-phase-d-e-review.md).
+- **Re-acceptance evidence (B214, 2026-05-11):** the canonical chain
+  fired again on the post-B212 daemon. Chain seqs **7593-7643** (50
+  events across the bringup arc), 3 `agent_delegated` hops, all 9
+  blue-team agents born + 21 swarm skills installed + the synthetic
+  smoke passed. Delegations at seqs:
+  - **7612** `log_lurker → anomaly_ace` (reason: "morning_sweep matched threshold")
+  - **7621** `anomaly_ace → response_rogue` (reason: "match_count >= threshold; route")
+  - **7630** `response_rogue → vault_warden` (reason: "post-incident key state snap")
+  Surfaced+fixed two latent bugs in the bringup scripts during this
+  pass: (1) `auth()` echoed `"-H X-FSF-Token: $TOKEN"` and was used
+  via `$(auth)` which word-split — curl saw header with empty value;
+  worked pre-B148 when the daemon didn't enforce tokens, fails 401
+  post-B148. (2) Scripts didn't auto-load `FSF_API_TOKEN` from the
+  repo `.env`. Both fixed by switching to a bash array
+  (`AUTH_HEADER=(-H "X-FSF-Token: $TOKEN")`) passed properly quoted
+  to curl, plus an .env autoload block in each of the three
+  sub-scripts.
 - **Related:** ADR-0019 (tool execution runtime — every Swarm tool ships through the dispatcher with audit + approval), ADR-0021 (role genres — this ADR adds three new genres `security_low/mid/high`), ADR-0022 (memory subsystem — Swarm chains depend on v0.2 cross-agent disclosure landing), ADR-0025 (threat model v2 — Swarm is a primary consumer of the model), ADR-0027 (memory privacy contract — per-tier ceilings flow from §1), ADR-0030 (Tool Forge — every Swarm tool is forged through the pipeline), ADR-0031 (Skill Forge — agent-level procedures are skill manifests).
 
 ## Context

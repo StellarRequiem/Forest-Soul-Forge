@@ -28,6 +28,16 @@ set -uo pipefail
 
 DAEMON="${FSF_DAEMON_URL:-http://127.0.0.1:7423}"
 TOKEN="${FSF_API_TOKEN:-}"
+
+# B214 — autoload FSF_API_TOKEN from repo .env if not set.
+if [[ -z "$TOKEN" ]]; then
+  ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env"
+  if [[ -f "$ENV_FILE" ]]; then
+    TOK="$(grep -E '^FSF_API_TOKEN=' "$ENV_FILE" | head -1 | cut -d= -f2)"
+    [[ -n "$TOK" ]] && TOKEN="$TOK"
+  fi
+fi
+
 TS="$(date +%s)"
 WORK="${TMPDIR:-/tmp}/fsf-security-smoke-${TS}"
 LOGFILE="${WORK}/seeded.log"
@@ -36,7 +46,12 @@ require() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 2;
 require curl
 require jq
 
-auth() { [[ -n "$TOKEN" ]] && echo "-H X-FSF-Token: $TOKEN" || echo ""; }
+# B214 — bash-array form so the header is passed as ONE argument.
+# Old form `auth() { echo "-H X-FSF-Token: $TOKEN"; }` + `"${AUTH_HEADER[@]}"`
+# word-split and produced a header with empty value. Pre-B148 the
+# daemon ignored that; post-B148 it 401s every write.
+declare -a AUTH_HEADER=()
+[[ -n "$TOKEN" ]] && AUTH_HEADER=(-H "X-FSF-Token: $TOKEN")
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 
@@ -58,7 +73,7 @@ log "seeded $LOGFILE"
 # 2. Find the LogLurker, AnomalyAce, ResponseRogue, VaultWarden agent IDs
 #    by querying /agents and matching role.
 # ---------------------------------------------------------------------------
-agents_json=$(curl -sf "$DAEMON/agents" $(auth) || true)
+agents_json=$(curl -sf "$DAEMON/agents" "${AUTH_HEADER[@]}" || true)
 if [[ -z "$agents_json" ]]; then
   echo "FAIL: /agents returned nothing — daemon up? agents born?" >&2
   exit 1
@@ -112,7 +127,7 @@ tmp="$(mktemp)"
 http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST \
   "$DAEMON/agents/$LL/skills/run" \
   -H "Content-Type: application/json" \
-  $(auth) \
+  "${AUTH_HEADER[@]}" \
   -d "$payload")
 resp="$(cat "$tmp")"; rm -f "$tmp"
 
@@ -128,7 +143,7 @@ log "morning_sweep ran (http=$http_code)"
 # ---------------------------------------------------------------------------
 # 4. Inspect the audit chain for the chain links.
 # ---------------------------------------------------------------------------
-chain=$(curl -sf "$DAEMON/audit/tail?n=200" $(auth) || true)
+chain=$(curl -sf "$DAEMON/audit/tail?n=200" "${AUTH_HEADER[@]}" || true)
 if [[ -z "$chain" ]]; then
   echo "WARN: /audit/tail returned empty" >&2
 fi

@@ -21,6 +21,15 @@ DEST="data/forge/skills/installed"
 DAEMON="${FSF_DAEMON_URL:-http://127.0.0.1:7423}"
 TOKEN="${FSF_API_TOKEN:-}"
 
+# B214 — autoload FSF_API_TOKEN from repo .env if not set.
+if [[ -z "$TOKEN" ]]; then
+  ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env"
+  if [[ -f "$ENV_FILE" ]]; then
+    TOK="$(grep -E '^FSF_API_TOKEN=' "$ENV_FILE" | head -1 | cut -d= -f2)"
+    [[ -n "$TOK" ]] && TOKEN="$TOK"
+  fi
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dest) DEST="$2"; shift 2;;
@@ -49,15 +58,19 @@ done
 echo "copied $copied manifests to $DEST"
 
 # Trigger /skills/reload so the catalog picks up new manifests.
-auth_header=""
-[[ -n "$TOKEN" ]] && auth_header="-H X-FSF-Token: $TOKEN"
+# B214: use a bash array for the header so the token is passed as ONE
+# argument. Previously $auth_header was unquoted and word-split,
+# causing curl to see "X-FSF-Token:" with empty value (pre-B148 the
+# daemon didn't enforce, masking the bug).
+declare -a AUTH_HEADER=()
+[[ -n "$TOKEN" ]] && AUTH_HEADER=(-H "X-FSF-Token: $TOKEN")
 
 # /skills/reload returns {count, errors, source_dir}. Earlier parser
 # looked for {status, loaded} which always printed loaded=0 even when
 # all 21 manifests loaded fine. Capture both body and HTTP status so
 # auth / 4xx surfaces don't disappear silently.
 tmp="$(mktemp)"
-http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST "$DAEMON/skills/reload" $auth_header)
+http_code=$(curl -s -o "$tmp" -w "%{http_code}" -X POST "$DAEMON/skills/reload" "${AUTH_HEADER[@]}")
 body="$(cat "$tmp")"; rm -f "$tmp"
 if [[ "$http_code" != "200" ]]; then
   echo "  reload HTTP $http_code: ${body:0:200}"
