@@ -1,9 +1,46 @@
 # ADR-0049 — Per-Event Digital Signatures for Agent Events
 
-**Status:** Proposed (2026-05-05). Phase 4 of the security-hardening
-arc opened by the 2026-05-05 outside review. Pairs with ADR-0050
-(encryption at rest) — both close the "audit chain is tamper-evident,
-not tamper-proof" gap the review surfaced.
+**Status:** Accepted 2026-05-12. **T1 shipped in Burst 242** as a
+thin wrapper over the ADR-0052 ``SecretStoreProtocol`` rather than
+the parallel ``KeyStore`` Protocol the original draft proposed —
+T1-T3 collapsed because ADR-0052 already ships the three backends
+(file / keychain / vaultwarden) this ADR called for. The wrapper
+lives at ``src/forest_soul_forge/security/keys/`` and exposes
+``AgentKeyStore.store/fetch/delete/list_agent_ids`` with bytes
+in/out, base64-encoded internally so the underlying string-valued
+secret store handles the transport. Agent private keys land under
+the secret name ``forest_agent_key:<instance_id>``. T4-T8 queued.
+Phase 4 of the security-hardening arc opened by the 2026-05-05
+outside review. Pairs with ADR-0050 (encryption at rest) — both
+close the "audit chain is tamper-evident, not tamper-proof" gap
+the review surfaced.
+
+## Design adjustment (post-drafting): leverage ADR-0052
+
+Original Decision 2 specified a fresh ``KeyStore`` Protocol with
+three new backends (memory_only / encrypted_file / keychain).
+Between drafting and acceptance, ADR-0052 shipped a
+``SecretStoreProtocol`` with the same backend coverage
+(file / keychain / vaultwarden) for plugin secrets. The B242
+implementation collapses ADR-0049 T1-T3 into a thin wrapper that
+leans on that substrate:
+
+- One operator-facing surface for "where do secrets live" (the
+  ADR-0052 ``FSF_SECRET_STORE`` env var governs both plugin
+  secrets and agent keys)
+- One ``fsf secret`` CLI for both surfaces (with the secret name
+  conventions making the namespaces visible)
+- One set of backend conformance tests
+- ed25519 bytes are base64-encoded at the wrapper boundary so the
+  underlying string-valued store can hold them
+
+The trade-off: the ``memory_only`` backend the ADR named for tests
+is gone (FileStore in a tmpdir replaces it — equivalent on-the-
+wire, slightly more I/O during test runs but still <0.1s for the
+full suite). The encrypted_file backend the ADR named is a future
+ADR-0052 extension, not a separate ADR-0049 deliverable.
+
+Decisions 1, 3, 4, 5, 6 below are unchanged.
 
 ## Context
 
@@ -221,9 +258,9 @@ breaking change to any of the seven v1.0 ABI surfaces.
 
 | # | Tranche | Description | Effort |
 |---|---|---|---|
-| T1 | KeyStore Protocol + memory_only impl | Define the Protocol, ship the in-memory backend for tests. | 1 burst |
-| T2 | encrypted_file backend | SQLite + `cryptography.fernet` for at-rest encryption. Master key from FSF_KEYSTORE_PASSPHRASE. | 1-2 bursts |
-| T3 | keychain backend (macOS) | `keyring` Python lib wrapper. Per-agent entry under "dev.forest.agent.<instance_id>". Falls back to encrypted_file if Keychain unavailable. | 1 burst |
+| T1 | KeyStore Protocol + memory_only impl | **DONE B242 (T1+T2+T3 collapsed)** — `AgentKeyStore` thin wrapper at `src/forest_soul_forge/security/keys/` over the ADR-0052 `SecretStoreProtocol`. Inherits all three backends (file / keychain / vaultwarden) without duplicating substrate. ed25519 bytes base64-encoded at the wrapper boundary; agent keys stored under `forest_agent_key:<instance_id>`. 19 tests cover the wrapper (round-trip, overwrite, multi-agent isolation, namespace prefix lock, base64-corruption error path). | shipped |
+| T2 | encrypted_file backend | **Subsumed by T1** — the ADR-0052 secrets store provides file + keychain + vaultwarden backends. The encrypted_file variant the original draft proposed becomes a future ADR-0052 extension if needed (the unencrypted FileStore today is `chmod 600`; OS-Keychain backend is the production path on Darwin). | superseded |
+| T3 | keychain backend (macOS) | **Subsumed by T1** — ADR-0052 `KeychainStore` already covers this. AgentKeyStore inherits via the resolver. | superseded |
 | T4 | Birth-time keypair generation | `ed25519.Ed25519PrivateKey.generate()` at birth, store private via KeyStore, public to agents.public_key column + soul.md frontmatter. Schema migration v15→v16. | 1-2 bursts |
 | T5 | Sign-on-emit | core/audit_chain.py extension: when emitting an event with agent_dna, look up the agent's private key, sign entry_hash, attach signature. | 1 burst |
 | T6 | Verifier extension | audit_chain_verify.v1 + scripts/verify_audit_chain.py: parse signature, look up public key, verify ed25519. Legacy entries skipped gracefully. | 1 burst |
