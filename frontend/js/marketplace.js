@@ -25,6 +25,16 @@ const TIER_LABEL = {
   external: "external",
 };
 
+// ADR-0055 D7: post-install grant trust_tier default derived from
+// the plugin's highest_side_effect_tier. Operator can override in
+// the grant picker before clicking Grant all.
+const SIDE_EFFECT_TO_TIER = {
+  read_only: "green",
+  network: "green",
+  filesystem: "yellow",
+  external: "yellow",
+};
+
 
 let _cachedEntries = [];
 let _cachedMeta = null;
@@ -177,7 +187,14 @@ async function _onInstall(entry, btn) {
       ttl: 6000,
     });
     btn.textContent = "Installed ✓";
-    // Keep disabled — re-installing without overwrite would 409.
+    // ADR-0055 M5 (B229): swap the Install button for the
+    // grant-to-agent picker so the operator can complete the
+    // forge -> install -> grant -> dispatch loop in one panel.
+    const row = btn.closest(".marketplace-entry");
+    if (row && entry.contributes && Array.isArray(entry.contributes.tools)
+        && entry.contributes.tools.length > 0) {
+      _swapInGrantPicker(row, entry);
+    }
   } catch (e) {
     let msg = e.message;
     if (e instanceof ApiError && e.body && typeof e.body.detail === "string") {
@@ -188,6 +205,179 @@ async function _onInstall(entry, btn) {
     toast({title: "Install failed", msg, kind: "error", ttl: 10000});
     btn.disabled = false;
     btn.textContent = "Install";
+  }
+}
+
+
+// M5 helpers -------------------------------------------------------------
+
+let _agentCache = null;
+
+async function _fetchAgents() {
+  if (_agentCache) return _agentCache;
+  try {
+    const resp = await api.get("/agents");
+    _agentCache = (resp.agents || []).slice();
+    _agentCache.sort((a, b) => {
+      const r = (a.role || "").localeCompare(b.role || "");
+      return r !== 0 ? r : (a.instance_id || "").localeCompare(b.instance_id || "");
+    });
+    return _agentCache;
+  } catch (e) {
+    return [];
+  }
+}
+
+
+function _defaultTierForEntry(entry) {
+  const tier = entry.highest_side_effect_tier || "external";
+  return SIDE_EFFECT_TO_TIER[tier] || "yellow";
+}
+
+
+async function _swapInGrantPicker(row, entry) {
+  // Replace the actions column with a grant picker. Hold a strong
+  // ref to the actions container so we don't accidentally render
+  // into the wrong row when the operator filters/searches mid-
+  // operation.
+  const actions = row.querySelector(".marketplace-entry > div:last-child")
+    || row.lastElementChild;
+  if (!actions) return;
+
+  actions.innerHTML = "";
+  actions.style.cssText =
+    "display:flex;flex-direction:column;gap:6px;min-width:240px;"
+    + "padding:8px;border:1px solid var(--accent,#9aa);"
+    + "border-radius:4px;background:var(--surface-soft,rgba(255,255,255,0.03));";
+
+  const title = document.createElement("div");
+  title.className = "muted";
+  title.style.cssText = "font-size:11px;text-transform:uppercase;letter-spacing:0.05em;";
+  title.textContent = `Use with — ${entry.contributes.tools.length} tool${entry.contributes.tools.length === 1 ? "" : "s"}`;
+  actions.appendChild(title);
+
+  const agentSelect = document.createElement("select");
+  agentSelect.className = "inp inp--sm";
+  agentSelect.style.cssText = "width:100%;";
+  const optPick = document.createElement("option");
+  optPick.value = "";
+  optPick.textContent = "— pick an agent —";
+  agentSelect.appendChild(optPick);
+  const agents = await _fetchAgents();
+  for (const a of agents) {
+    const opt = document.createElement("option");
+    opt.value = a.instance_id;
+    opt.textContent = `${a.role || "?"} · ${a.instance_id}`;
+    agentSelect.appendChild(opt);
+  }
+  actions.appendChild(agentSelect);
+
+  const tierSelect = document.createElement("select");
+  tierSelect.className = "inp inp--sm";
+  tierSelect.style.cssText = "width:100%;";
+  const defaultTier = _defaultTierForEntry(entry);
+  for (const t of ["green", "yellow", "red"]) {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = `tier: ${t}`;
+    if (t === defaultTier) opt.selected = true;
+    tierSelect.appendChild(opt);
+  }
+  actions.appendChild(tierSelect);
+
+  const grantBtn = document.createElement("button");
+  grantBtn.className = "btn btn--primary btn--sm";
+  grantBtn.textContent = "Grant all";
+  grantBtn.addEventListener("click", () => _grantAllTools(
+    row, entry, agentSelect.value, tierSelect.value, grantBtn,
+  ));
+  actions.appendChild(grantBtn);
+
+  const skipBtn = document.createElement("button");
+  skipBtn.className = "btn btn--ghost btn--sm";
+  skipBtn.textContent = "Skip";
+  skipBtn.addEventListener("click", () => {
+    actions.innerHTML = "";
+    actions.style.cssText = "display:flex;flex-direction:column;gap:4px;min-width:90px;";
+    const done = document.createElement("button");
+    done.className = "btn btn--ghost btn--sm";
+    done.textContent = "Installed ✓";
+    done.disabled = true;
+    actions.appendChild(done);
+  });
+  actions.appendChild(skipBtn);
+}
+
+
+async function _grantAllTools(row, entry, instanceId, tier, btn) {
+  if (!instanceId) {
+    toast({title: "Pick an agent first", kind: "warning"});
+    return;
+  }
+  const tools = entry.contributes.tools || [];
+  if (tools.length === 0) return;
+
+  btn.disabled = true;
+  btn.textContent = "Granting…";
+
+  let ok = 0;
+  const failures = [];
+  for (const t of tools) {
+    try {
+      await writeCall(`/agents/${instanceId}/tools/grant`, {
+        tool_name: t.name,
+        tool_version: String(t.version || "1"),
+        trust_tier: tier,
+        reason: `marketplace install of ${entry.id} v${entry.version}`,
+      });
+      ok += 1;
+    } catch (e) {
+      // 400 (unknown tool — plugin reload still pending) and 409
+      // (conflict — already granted) are both "non-fatal continue"
+      // cases. Capture them for the summary toast.
+      let msg = e.message;
+      if (e instanceof ApiError && e.body && typeof e.body.detail === "string") {
+        msg = e.body.detail;
+      }
+      failures.push({tool: `${t.name}.v${t.version || "1"}`, reason: msg});
+    }
+  }
+
+  if (failures.length === 0) {
+    toast({
+      title: `Granted ${ok} tool${ok === 1 ? "" : "s"} to ${instanceId}`,
+      msg: `tier=${tier}`,
+      kind: "success",
+      ttl: 6000,
+    });
+  } else if (ok > 0) {
+    toast({
+      title: `Granted ${ok} / ${tools.length}; ${failures.length} failed`,
+      msg: failures.map((f) => `${f.tool}: ${f.reason.slice(0, 80)}`).join(" · "),
+      kind: "warning",
+      ttl: 10000,
+    });
+  } else {
+    toast({
+      title: "All grants failed",
+      msg: failures.map((f) => `${f.tool}: ${f.reason.slice(0, 100)}`).join(" · "),
+      kind: "error",
+      ttl: 12000,
+    });
+  }
+
+  // Collapse to a finished state regardless of partial success —
+  // operator can re-attempt failures via the Agents tab grant pane.
+  const actions = row.querySelector(".marketplace-entry > div:last-child")
+    || row.lastElementChild;
+  if (actions) {
+    actions.innerHTML = "";
+    actions.style.cssText = "display:flex;flex-direction:column;gap:4px;min-width:90px;";
+    const done = document.createElement("button");
+    done.className = "btn btn--ghost btn--sm";
+    done.textContent = failures.length === 0 ? "Granted ✓" : `Granted ${ok}/${tools.length}`;
+    done.disabled = true;
+    actions.appendChild(done);
   }
 }
 
