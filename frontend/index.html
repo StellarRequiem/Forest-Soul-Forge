@@ -742,26 +742,25 @@
                       </div>
 
                       <details class="chat-assistant-allow-advanced" style="margin-top: 10px;">
-                        <summary>Advanced — per-tool reference</summary>
+                        <summary>Advanced — per-tool toggles</summary>
                         <div class="muted" style="font-size: 0.85em; margin: 8px 0 4px;">
-                          The plugin's six tools and their classification.
-                          Per-tool granularity in the UI awaits a substrate
-                          extension; today the grant is all-or-nothing at the
-                          plugin level. Posture (above) provides the
-                          orthogonal "global brake" — flip to red to refuse
-                          all action tools without revoking the plugin.
+                          Per-tool grants (ADR-0053). Toggle a row to
+                          issue or revoke a grant covering ONLY that
+                          tool. Per-tool grants override the plugin-
+                          level grant via specificity-wins resolution
+                          (ADR-0053 D3): a per-tool grant at green on
+                          a plugin-level grant at yellow effectively
+                          lets just that one tool fire without
+                          approval. Posture (above) is the orthogonal
+                          global brake — flip to red to refuse all
+                          action tools without revoking anything.
                         </div>
                         <table class="chat-assistant-tool-table">
                           <thead>
-                            <tr><th>Tool</th><th>Side effect</th><th>Approval</th></tr>
+                            <tr><th>Per-tool grant</th><th>Tool</th><th>Side effect</th><th>Approval</th></tr>
                           </thead>
-                          <tbody>
-                            <tr><td><code>computer_screenshot.v1</code></td><td>read_only</td><td>none</td></tr>
-                            <tr><td><code>computer_read_clipboard.v1</code></td><td>read_only</td><td>none</td></tr>
-                            <tr><td><code>computer_click.v1</code></td><td>external</td><td>per-call</td></tr>
-                            <tr><td><code>computer_type.v1</code></td><td>external</td><td>per-call</td></tr>
-                            <tr><td><code>computer_run_app.v1</code></td><td>external</td><td>per-call</td></tr>
-                            <tr><td><code>computer_launch_url.v1</code></td><td>network</td><td>per-call</td></tr>
+                          <tbody id="chat-assistant-allow-tools">
+                            <!-- JS-rendered by renderAssistantAllowances -->
                           </tbody>
                         </table>
                       </details>

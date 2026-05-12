@@ -668,22 +668,52 @@ async function renderAssistantConsents(instanceId) {
 }
 
 // ---------------------------------------------------------------------------
-// ADR-0048 T4 (B165) — Allowance UI for soulux-computer-control plugin.
+// ADR-0048 T4 (B165) + ADR-0053 T5 (B240) — Allowance UI.
 // ---------------------------------------------------------------------------
-// Three presets map to plugin-grant operations against the existing
-// /agents/{id}/plugin-grants endpoint:
+// Three presets map to plugin-grant operations against the
+// /agents/{id}/plugin-grants endpoint (and the per-tool DELETE
+// route added by ADR-0053 T3 / B238):
 //
-//   Restricted → DELETE the grant. No tools available.
-//   Specific   → POST grant with trust_tier='standard'.
-//   Full       → POST grant with trust_tier='elevated'. (Same effect
-//                today as Specific; ADR-0045 T3 substrate will
-//                differentiate per-tier behavior.)
+//   Restricted → DELETE the plugin-level grant + revoke ALL
+//                per-tool grants. Clean state.
+//   Specific   → revoke plugin-level + issue per-tool grants
+//                for the two read_only tools (screenshot +
+//                clipboard read) at yellow tier. Operator can
+//                tune via Advanced checkboxes from there.
+//   Full       → revoke ALL per-tool grants + POST a plugin-
+//                level grant at green tier. The plugin-level
+//                grant covers every tool the manifest declares.
 //
-// Per-tool granularity inside the Advanced disclosure awaits a
-// substrate extension — Forest's plugin-grants API operates at
-// plugin scope today. The reference table renders for transparency.
+// Per-tool granularity (ADR-0053 D5): each Advanced checkbox
+// toggles a per-tool grant via POST or DELETE on the new
+// `/tools/{tool_name}` path. Per-tool grants OVERRIDE the
+// plugin-level grant for the named tool via ADR-0053 D3
+// specificity-wins resolution: a per-tool yellow grant on top
+// of a plugin-level green grant gates THAT one tool while
+// leaving the others ungated.
 
 const ALLOW_PLUGIN_NAME = "soulux-computer-control";
+
+// The six tools the plugin declares. Keep in sync with
+// examples/plugins/soulux-computer-control/plugin.yaml and the
+// runtime tool catalog. read_only tools fire without approval;
+// external/network tools require per-call approval at standard/
+// yellow tier and ungate at green tier.
+const ALLOW_TOOLS = [
+  { name: "computer_screenshot.v1",     side_effects: "read_only", approval: "none"    },
+  { name: "computer_read_clipboard.v1", side_effects: "read_only", approval: "none"    },
+  { name: "computer_click.v1",          side_effects: "external",  approval: "per-call" },
+  { name: "computer_type.v1",           side_effects: "external",  approval: "per-call" },
+  { name: "computer_run_app.v1",        side_effects: "external",  approval: "per-call" },
+  { name: "computer_launch_url.v1",     side_effects: "network",   approval: "per-call" },
+];
+
+// The "Specific" preset's seeded set — the two read-only tools.
+// Operator can extend via Advanced toggles after applying.
+const SPECIFIC_PRESET_TOOLS = [
+  "computer_screenshot.v1",
+  "computer_read_clipboard.v1",
+];
 
 function _allowStatusEl() {
   return document.getElementById("chat-assistant-allow-status");
@@ -698,23 +728,56 @@ async function renderAssistantAllowances(instanceId) {
   try {
     const r = await api.get(`/agents/${instanceId}/plugin-grants`);
     const grants = r.grants || [];
-    const sccGrant = grants.find((g) => g.plugin_name === ALLOW_PLUGIN_NAME);
+    // ADR-0053 T2/T3: rows now distinguish plugin-level (tool_name
+    // null) from per-tool (tool_name non-null).
+    const sccPluginLevel = grants.find(
+      (g) => g.plugin_name === ALLOW_PLUGIN_NAME && g.tool_name == null
+        && g.is_active,
+    );
+    const sccPerTool = grants.filter(
+      (g) => g.plugin_name === ALLOW_PLUGIN_NAME && g.tool_name != null
+        && g.is_active,
+    );
 
-    let preset = "restricted";
-    if (sccGrant) {
-      // Mapping: green=Full, yellow=Specific. Anything else
-      // (including stale rows from earlier 'standard'/'elevated'
-      // experiments before B175) defaults to Specific so the UI
-      // doesn't silently downgrade an operator's intent.
-      preset = (sccGrant.trust_tier === "green") ? "full" : "specific";
+    // Preset resolution per ADR-0053 D5:
+    //   Full       — plugin-level grant exists (covers all manifest tools).
+    //   Specific   — no plugin-level grant, at least one per-tool grant active.
+    //   Restricted — no grants at all.
+    //   Mixed      — plugin-level + per-tool grants both exist. Not a
+    //                normal preset but possible if the operator left a
+    //                per-tool override on top of plugin-level. We show
+    //                "Full" as the active preset (plugin-level is the
+    //                dominant signal) and the per-tool rows show their
+    //                override state in the Advanced table.
+    let preset;
+    if (sccPluginLevel) {
+      preset = "full";
+    } else if (sccPerTool.length > 0) {
+      preset = "specific";
+    } else {
+      preset = "restricted";
     }
 
-    if (sccGrant) {
+    // Status line summary.
+    if (sccPluginLevel && sccPerTool.length > 0) {
       status.innerHTML = (
         `Plugin <code>${escapeHTML(ALLOW_PLUGIN_NAME)}</code> ` +
-        `granted (tier: <code>${escapeHTML(sccGrant.trust_tier || "standard")}</code>). ` +
-        `Read tools fire freely; action tools require per-call approval. ` +
-        `Posture clamps still apply.`
+        `granted at tier <code>${escapeHTML(sccPluginLevel.trust_tier)}</code> ` +
+        `with <strong>${sccPerTool.length}</strong> per-tool override` +
+        `${sccPerTool.length === 1 ? "" : "s"}. Per-tool grants win for ` +
+        `the tools they cover (specificity-wins resolution).`
+      );
+    } else if (sccPluginLevel) {
+      status.innerHTML = (
+        `Plugin <code>${escapeHTML(ALLOW_PLUGIN_NAME)}</code> ` +
+        `granted (plugin-level, tier: <code>${escapeHTML(sccPluginLevel.trust_tier)}</code>). ` +
+        `All ${ALLOW_TOOLS.length} tools available. Posture clamps still apply.`
+      );
+    } else if (sccPerTool.length > 0) {
+      status.innerHTML = (
+        `<strong>${sccPerTool.length}</strong> per-tool grant` +
+        `${sccPerTool.length === 1 ? "" : "s"} active. No plugin-level grant. ` +
+        `Only the granted tools fire; the rest stay refused.`
       );
     } else {
       status.innerHTML = (
@@ -727,13 +790,120 @@ async function renderAssistantAllowances(instanceId) {
     // Highlight the active preset button.
     document.querySelectorAll("[data-preset]").forEach((b) => {
       b.classList.toggle(
-        "chat-assistant-posture-btn--active",      // reuse existing highlight class
+        "chat-assistant-posture-btn--active",
         b.dataset.preset === preset,
       );
     });
+
+    // Render the per-tool toggle grid.
+    renderPerToolGrid(instanceId, sccPluginLevel, sccPerTool);
   } catch (e) {
     status.textContent = `grant state fetch failed: ${String(e.message || e).slice(0, 100)}`;
   }
+}
+
+// ADR-0053 T5 (B240): per-tool toggle grid. Each row is a checkbox
+// wired to POST a per-tool grant (checked) or DELETE one (unchecked).
+// Checkbox state reflects the EFFECTIVE coverage:
+//   - per-tool grant exists for this tool → checked (override active)
+//   - no per-tool grant, plugin-level exists → checked (covered by
+//     plugin-level)
+//   - neither → unchecked (no grant covers this tool)
+// The dispatcher's specificity-wins resolver (T4, B239) applies the
+// per-tool tier when one exists, else falls back to plugin-level —
+// the table mirrors that semantic.
+function renderPerToolGrid(instanceId, pluginLevelGrant, perToolGrants) {
+  const tbody = document.getElementById("chat-assistant-allow-tools");
+  if (!tbody) return;
+  const perToolByName = new Map(perToolGrants.map((g) => [g.tool_name, g]));
+
+  const rows = ALLOW_TOOLS.map((t) => {
+    const perTool = perToolByName.get(t.name);
+    const covered = perTool != null || pluginLevelGrant != null;
+    const coverageNote = perTool
+      ? `<span class="muted" style="font-size: 0.85em;">(per-tool ${escapeHTML(perTool.trust_tier)})</span>`
+      : (pluginLevelGrant
+          ? `<span class="muted" style="font-size: 0.85em;">(via plugin-level)</span>`
+          : "");
+    const cb = (
+      `<input type="checkbox" ` +
+      `data-tool="${escapeHTML(t.name)}" ` +
+      `data-has-per-tool="${perTool != null ? "1" : "0"}" ` +
+      (covered ? "checked " : "") +
+      `aria-label="grant ${escapeHTML(t.name)}">`
+    );
+    return (
+      `<tr>` +
+        `<td>${cb} ${coverageNote}</td>` +
+        `<td><code>${escapeHTML(t.name)}</code></td>` +
+        `<td>${escapeHTML(t.side_effects)}</td>` +
+        `<td>${escapeHTML(t.approval)}</td>` +
+      `</tr>`
+    );
+  }).join("");
+  tbody.innerHTML = rows;
+  wirePerToolCheckboxes(instanceId);
+}
+
+// Per-tool checkbox handler. Re-wires every render (idempotent —
+// we replace tbody.innerHTML wholesale above so the listeners
+// don't survive between renders anyway).
+function wirePerToolCheckboxes(instanceId) {
+  const tbody = document.getElementById("chat-assistant-allow-tools");
+  if (!tbody) return;
+  tbody.querySelectorAll('input[type="checkbox"][data-tool]').forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      const tool = cb.dataset.tool;
+      const hadPerTool = cb.dataset.hasPerTool === "1";
+      const wantsGranted = cb.checked;
+      const fb = _allowFeedbackEl();
+      cb.disabled = true;
+      try {
+        if (wantsGranted && !hadPerTool) {
+          // Operator wants this tool ON, no per-tool grant exists
+          // yet. Issue one at yellow tier (cautious default; matches
+          // the existing Specific preset semantic).
+          await writeCall(`/agents/${instanceId}/plugin-grants`, {
+            plugin_name: ALLOW_PLUGIN_NAME,
+            tool_name:   tool,
+            trust_tier:  "yellow",
+            reason:      "operator toggled on in Advanced disclosure",
+          });
+          if (fb) fb.textContent = `per-tool grant issued for ${tool}`;
+        } else if (!wantsGranted && hadPerTool) {
+          // Operator unchecking a tool that had its own per-tool
+          // grant. Revoke just that one.
+          await api.del(
+            `/agents/${instanceId}/plugin-grants/${ALLOW_PLUGIN_NAME}/tools/${encodeURIComponent(tool)}`,
+          );
+          if (fb) fb.textContent = `per-tool grant revoked for ${tool}`;
+        } else if (!wantsGranted && !hadPerTool) {
+          // Operator unchecking a tool that was covered by the
+          // plugin-level grant (no per-tool row to delete). Issue
+          // a per-tool grant at RED so the plugin-level grant gets
+          // overridden TO refused for this one tool via specificity-
+          // wins. This is "let everything else through but block
+          // this specific tool" — the use case ADR-0053 D2 calls out.
+          await writeCall(`/agents/${instanceId}/plugin-grants`, {
+            plugin_name: ALLOW_PLUGIN_NAME,
+            tool_name:   tool,
+            trust_tier:  "red",
+            reason:      "operator carved out per-tool denial against plugin-level grant",
+          });
+          if (fb) fb.textContent = `per-tool denial recorded for ${tool} (red tier)`;
+        }
+        // The remaining case (wantsGranted && hadPerTool) is a no-op:
+        // the box was already checked because of its per-tool row;
+        // re-clicking-to-check would be unusual. Just refresh.
+        await renderAssistantAllowances(instanceId);
+      } catch (e) {
+        if (fb) fb.textContent = `per-tool toggle failed: ${String(e.message || e).slice(0, 100)}`;
+        cb.checked = !cb.checked; // revert
+      } finally {
+        cb.disabled = false;
+      }
+    });
+  });
 }
 
 function wireAssistantAllowanceButtons(instanceId) {
@@ -823,12 +993,35 @@ async function renderAssistantSecrets() {
 }
 
 async function applyAssistantAllowancePreset(instanceId, preset) {
+  // ADR-0053 D5: presets compose plugin-level + per-tool grants.
+  // Always start by clearing existing per-tool rows for this plugin
+  // so a preset switch is a clean state transition rather than an
+  // additive layering. The plugin-level grant gets its own
+  // dispositions per branch below.
+  const current = await api.get(`/agents/${instanceId}/plugin-grants`);
+  const existingPerTool = (current.grants || []).filter(
+    (g) => g.plugin_name === ALLOW_PLUGIN_NAME && g.tool_name != null
+      && g.is_active,
+  );
+
+  async function clearAllPerTool() {
+    // Revoke every active per-tool grant on this plugin.
+    // 404s shouldn't happen because we just listed them, but treat
+    // as idempotent in case of a race.
+    for (const g of existingPerTool) {
+      try {
+        await api.del(
+          `/agents/${instanceId}/plugin-grants/${ALLOW_PLUGIN_NAME}/tools/${encodeURIComponent(g.tool_name)}`,
+        );
+      } catch (e) {
+        if (e?.status !== 404) throw e;
+      }
+    }
+  }
+
   if (preset === "restricted") {
-    // Revoke the grant. api.del routes the X-FSF-Token header for
-    // auth; writeCall's 401-retry-prompt isn't needed here because
-    // the prior GET (renderAssistantAllowances) would have already
-    // surfaced an auth issue. 404 is treated as success — the
-    // desired end-state is "no grant" and that's what we have.
+    // Clean state: no plugin-level + no per-tool.
+    await clearAllPerTool();
     try {
       await api.del(`/agents/${instanceId}/plugin-grants/${ALLOW_PLUGIN_NAME}`);
     } catch (e) {
@@ -836,25 +1029,39 @@ async function applyAssistantAllowancePreset(instanceId, preset) {
     }
     return;
   }
-  // Specific or Full → issue/upsert a grant. trust_tier uses the
-  // same green/yellow/red traffic-light dial as posture per ADR-0045
-  // T3 (B115 substrate) — the GrantRequest schema validates against
-  // that exact regex. Mapping:
-  //   Specific → "yellow" (cautious; per-call approval fires for
-  //                        non-read tools regardless of agent posture)
-  //   Full     → "green"  (trusted; combined with agent posture
-  //                        green, downgrades approval to "granted-
-  //                        skip" per the posture × per-grant matrix)
-  // B175 fix: previously mistakenly sent "standard"/"elevated"
-  // which got rejected with 422. The ADR-0048 Decision 3 amendment
-  // text described the abstraction in operator terms; the substrate
-  // uses green/yellow/red.
-  const trust_tier = (preset === "full") ? "green" : "yellow";
-  await writeCall(`/agents/${instanceId}/plugin-grants`, {
-    plugin_name: ALLOW_PLUGIN_NAME,
-    trust_tier,
-    reason: `operator selected ${preset} preset`,
-  });
+
+  if (preset === "full") {
+    // Plugin-level grant at green covers everything. Strip any
+    // conflicting per-tool overrides so the operator's intent
+    // ("full access") isn't accidentally narrowed.
+    await clearAllPerTool();
+    await writeCall(`/agents/${instanceId}/plugin-grants`, {
+      plugin_name: ALLOW_PLUGIN_NAME,
+      trust_tier:  "green",
+      reason:      "operator selected full preset",
+    });
+    return;
+  }
+
+  // Specific: no plugin-level grant; seed per-tool grants for the
+  // SPECIFIC_PRESET_TOOLS list (the two read_only tools). Operator
+  // can extend via Advanced checkboxes from there.
+  try {
+    await api.del(`/agents/${instanceId}/plugin-grants/${ALLOW_PLUGIN_NAME}`);
+  } catch (e) {
+    if (e?.status !== 404) throw e;
+  }
+  // Clear stale per-tool rows from a previous preset, then issue
+  // the seeded set fresh.
+  await clearAllPerTool();
+  for (const toolName of SPECIFIC_PRESET_TOOLS) {
+    await writeCall(`/agents/${instanceId}/plugin-grants`, {
+      plugin_name: ALLOW_PLUGIN_NAME,
+      tool_name:   toolName,
+      trust_tier:  "yellow",
+      reason:      "operator selected specific preset (seeded read-only tools)",
+    });
+  }
 }
 
 async function loadAssistantTurns() {
