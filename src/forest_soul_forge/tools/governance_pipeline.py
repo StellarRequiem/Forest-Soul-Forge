@@ -139,7 +139,24 @@ class DispatchContext:
     # ONLY when the dispatched tool is mcp_call.v1 (the per-grant
     # tier is plugin-specific, not agent-wide). ``None`` when no
     # plugin_grants table is wired (test contexts).
+    #
+    # Pre-ADR-0053 T4 this was the SOLE input PostureGateStep used
+    # for plugin-grant tier lookup. Post-T4 (B239) the step prefers
+    # ``plugin_grant_lookup_fn`` when present (specificity-wins per-
+    # tool resolution); this flat view is kept as a fallback for
+    # legacy contexts that don't wire the lookup function.
     plugin_grants_view: dict[str, str] | None = None
+
+    # ADR-0053 T4 (Burst 239): specificity-wins plugin-grant
+    # resolver. Callable(plugin_name: str, tool_name: str | None)
+    # → trust_tier | None. When set, PostureGateStep prefers this
+    # over the flat ``plugin_grants_view`` for mcp_call dispatches
+    # because it resolves per-tool grants per ADR-0053 D3
+    # (per-tool overrides plugin-level when the dispatched tool
+    # has its own grant). ``None`` in test contexts that don't
+    # wire the dispatcher's resolver — the step then falls back
+    # to the flat view.
+    plugin_grant_lookup_fn: Any = None  # Callable[[str, str | None], str | None] | None
 
     # ADR-0054 T3 (Burst 180): pre-computed procedural-shortcut match.
     # The dispatcher resolves this BEFORE running the pipeline because
@@ -913,25 +930,40 @@ class PostureGateStep:
         if (
             self.enforce_per_grant
             and dctx.tool_name == "mcp_call"
-            and dctx.plugin_grants_view is not None
         ):
             server_name = dctx.args.get("server_name")
+            sub_tool_name = dctx.args.get("tool_name")
+            grant_tier: str | None = None
             if isinstance(server_name, str):
-                grant_tier = dctx.plugin_grants_view.get(server_name)
-                if grant_tier is not None:
-                    rank = {"green": 0, "yellow": 1, "red": 2}
-                    agent_rank = rank.get(posture, 0)
-                    grant_rank = rank.get(grant_tier, 0)
-                    # Special downgrade: agent yellow + grant green
-                    # = green for THIS mcp_call. Operator explicitly
-                    # vouched for this plugin, so ungate it.
-                    if posture == "yellow" and grant_tier == "green":
-                        effective_posture = "green"
-                    else:
-                        # Otherwise red-dominates: stronger signal wins.
-                        effective_posture = (
-                            grant_tier if grant_rank > agent_rank else posture
-                        )
+                # ADR-0053 T4 (B239) preferred path: ask the
+                # dispatcher's specificity-wins resolver. It returns
+                # the per-tool grant's tier when one exists for the
+                # exact (plugin, tool) being dispatched, else the
+                # plugin-level grant's tier, else None.
+                if dctx.plugin_grant_lookup_fn is not None:
+                    grant_tier = dctx.plugin_grant_lookup_fn(
+                        server_name,
+                        sub_tool_name if isinstance(sub_tool_name, str) else None,
+                    )
+                # Legacy fallback for contexts that don't wire the
+                # resolver (test fixtures pre-B239). Plugin-level only.
+                elif dctx.plugin_grants_view is not None:
+                    grant_tier = dctx.plugin_grants_view.get(server_name)
+            if grant_tier is not None:
+                rank = {"green": 0, "yellow": 1, "red": 2}
+                agent_rank = rank.get(posture, 0)
+                grant_rank = rank.get(grant_tier, 0)
+                # Special downgrade: agent yellow + grant green = green
+                # for THIS mcp_call. Operator explicitly vouched for
+                # this plugin (or for the exact tool inside it, per
+                # ADR-0053 D3), so ungate it.
+                if posture == "yellow" and grant_tier == "green":
+                    effective_posture = "green"
+                else:
+                    # Otherwise red-dominates: stronger signal wins.
+                    effective_posture = (
+                        grant_tier if grant_rank > agent_rank else posture
+                    )
 
         # ADR-0060 T4 (B221): catalog-grant trust_tier interaction
         # matrix. When the dispatch came from a runtime grant

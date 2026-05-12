@@ -253,3 +253,272 @@ class TestGrantPluginIsolation:
         dctx.plugin_grants_view = {"github": "red"}
         result = _step().evaluate(dctx)
         assert result.verdict == "GO"
+
+
+# ============================================================================
+# ADR-0053 T4 (Burst 239) — specificity-wins per-tool resolver
+# ============================================================================
+# When the dispatcher wires plugin_grant_lookup_fn (the post-B239
+# normal path), PostureGateStep prefers it over the flat
+# plugin_grants_view. The resolver returns the per-tool grant's
+# tier when the dispatched tool has its own grant, else the
+# plugin-level grant's tier, else None.
+
+class TestSpecificityWinsResolver:
+    """ADR-0053 D3: per-tool grant overrides plugin-level when
+    the dispatched (server, tool) has a per-tool grant."""
+
+    def _dctx_with_resolver(
+        self,
+        *,
+        posture: str,
+        resolver,
+        server_name: str = "github",
+        sub_tool: str = "github_list_issues.v1",
+    ) -> DispatchContext:
+        return DispatchContext(
+            instance_id="agent_a",
+            agent_dna="dna",
+            role="role",
+            genre=None,
+            session_id="s1",
+            constitution_path=Path("/dev/null"),
+            tool_name="mcp_call",
+            tool_version="1",
+            args={"server_name": server_name, "tool_name": sub_tool},
+            agent_posture=posture,
+            plugin_grants_view=None,  # force the resolver path
+            plugin_grant_lookup_fn=resolver,
+            tool=_StubTool(side_effects="external"),
+            resolved=_StubResolved(),
+        )
+
+    def test_per_tool_grant_tier_used_when_resolver_returns_one(self):
+        """A per-tool grant at tier "green" should downgrade an
+        agent-yellow posture to green for THIS dispatch — same
+        semantic as the plugin-level downgrade, just per-tool."""
+        called = []
+
+        def resolver(plugin, tool):
+            called.append((plugin, tool))
+            if plugin == "github" and tool == "github_list_issues.v1":
+                return "green"
+            return None
+
+        dctx = self._dctx_with_resolver(
+            posture="yellow",
+            resolver=resolver,
+            sub_tool="github_list_issues.v1",
+        )
+        result = _step().evaluate(dctx)
+        assert result.verdict == "GO", result
+        assert called == [("github", "github_list_issues.v1")]
+
+    def test_resolver_returns_none_means_no_grant_input(self):
+        """Resolver returning None → posture rules unchanged
+        (yellow + external = PENDING)."""
+        def resolver(plugin, tool):
+            return None
+
+        dctx = self._dctx_with_resolver(
+            posture="yellow", resolver=resolver,
+        )
+        result = _step().evaluate(dctx)
+        assert result.verdict == "PENDING", result
+
+    def test_per_tool_red_grant_refuses_even_on_green_agent(self):
+        """Red per-tool grant signals "this exact tool needs
+        gating" — red-dominates per ADR-0045 applies to per-tool."""
+        def resolver(plugin, tool):
+            if tool == "github_merge_pr.v1":
+                return "red"
+            return None
+
+        dctx = self._dctx_with_resolver(
+            posture="green",
+            resolver=resolver,
+            sub_tool="github_merge_pr.v1",
+        )
+        result = _step().evaluate(dctx)
+        assert result.verdict == "REFUSE", result
+
+    def test_resolver_preferred_over_plugin_grants_view(self):
+        """When both wires are present, the resolver wins."""
+        def resolver(plugin, tool):
+            return "green"
+
+        dctx = self._dctx_with_resolver(
+            posture="yellow",
+            resolver=resolver,
+        )
+        dctx.plugin_grants_view = {"github": "red"}
+        result = _step().evaluate(dctx)
+        # Resolver says green → agent-yellow + grant-green → GO.
+        assert result.verdict == "GO", result
+
+    def test_flat_view_used_when_resolver_absent(self):
+        """Back-compat: pre-B239 contexts still use the flat view."""
+        dctx = _mcp_dctx(
+            posture="yellow", grant_tier="green",
+        )
+        assert dctx.plugin_grant_lookup_fn is None
+        result = _step().evaluate(dctx)
+        assert result.verdict == "GO", result
+
+    def test_resolver_called_with_none_tool_when_args_missing_tool(self):
+        """Malformed mcp_call request (no tool_name arg) → resolver
+        receives None as tool; falls back to plugin-level grant."""
+        called = []
+
+        def resolver(plugin, tool):
+            called.append((plugin, tool))
+            if plugin == "github":
+                return "yellow"
+            return None
+
+        dctx = DispatchContext(
+            instance_id="agent_a",
+            agent_dna="dna",
+            role="role",
+            genre=None,
+            session_id="s1",
+            constitution_path=Path("/dev/null"),
+            tool_name="mcp_call",
+            tool_version="1",
+            args={"server_name": "github"},  # no tool_name
+            agent_posture="green",
+            plugin_grants_view=None,
+            plugin_grant_lookup_fn=resolver,
+            tool=_StubTool(side_effects="external"),
+            resolved=_StubResolved(),
+        )
+        _step().evaluate(dctx)
+        assert called == [("github", None)]
+
+
+# ============================================================================
+# ADR-0053 T4 — the resolver itself
+# ============================================================================
+# Unit-test ToolDispatcher._resolve_plugin_grant_tier directly
+# against a minimal Registry + PluginGrantsTable.
+
+from forest_soul_forge.registry import Registry
+from forest_soul_forge.tools.dispatcher import ToolDispatcher
+
+
+def _seed_resolver_agent(reg, instance_id: str = "agent_a"):
+    reg._conn.execute(
+        """
+        INSERT INTO agents(instance_id, dna, dna_full, role, agent_name,
+                           soul_path, constitution_path, constitution_hash,
+                           created_at)
+        VALUES(?, 'abc', 'abcdef', 'swarm', 'TestAgent',
+               's.md', 'c.yaml', 'hash1', '2026-05-12T00:00:00Z')
+        """,
+        (instance_id,),
+    )
+    reg._conn.commit()
+
+
+@pytest.fixture
+def resolver_setup(tmp_path):
+    """Minimal Registry + sparse ToolDispatcher wired only with
+    plugin_grants so the resolver can run. Avoids the heavy
+    __init__ wiring not needed for this targeted test."""
+    reg = Registry.bootstrap(tmp_path / "r.db")
+    _seed_resolver_agent(reg)
+    disp = ToolDispatcher.__new__(ToolDispatcher)
+    disp.plugin_grants = reg.plugin_grants
+    yield disp, reg
+    reg.close()
+
+
+class TestResolverMethod:
+    def test_returns_none_when_no_grants(self, resolver_setup):
+        disp, _ = resolver_setup
+        assert disp._resolve_plugin_grant_tier(
+            "agent_a", "github", "github_list_issues.v1",
+        ) is None
+
+    def test_plugin_level_grant_returned_when_no_per_tool(
+        self, resolver_setup,
+    ):
+        disp, reg = resolver_setup
+        reg.plugin_grants.grant(
+            instance_id="agent_a",
+            plugin_name="github",
+            trust_tier="yellow",
+            granted_at_seq=1,
+        )
+        assert disp._resolve_plugin_grant_tier(
+            "agent_a", "github", "github_list_issues.v1",
+        ) == "yellow"
+
+    def test_per_tool_grant_overrides_plugin_level(self, resolver_setup):
+        disp, reg = resolver_setup
+        reg.plugin_grants.grant(
+            instance_id="agent_a",
+            plugin_name="github",
+            trust_tier="yellow",
+            granted_at_seq=1,
+        )
+        reg.plugin_grants.grant(
+            instance_id="agent_a",
+            plugin_name="github",
+            tool_name="github_list_issues.v1",
+            trust_tier="green",
+            granted_at_seq=2,
+        )
+        assert disp._resolve_plugin_grant_tier(
+            "agent_a", "github", "github_list_issues.v1",
+        ) == "green"
+
+    def test_per_tool_grant_doesnt_apply_to_different_tool(
+        self, resolver_setup,
+    ):
+        disp, reg = resolver_setup
+        reg.plugin_grants.grant(
+            instance_id="agent_a",
+            plugin_name="github",
+            trust_tier="yellow",
+            granted_at_seq=1,
+        )
+        reg.plugin_grants.grant(
+            instance_id="agent_a",
+            plugin_name="github",
+            tool_name="github_list_issues.v1",
+            trust_tier="green",
+            granted_at_seq=2,
+        )
+        # Different tool — should get the plugin-level fallback.
+        assert disp._resolve_plugin_grant_tier(
+            "agent_a", "github", "github_merge_pr.v1",
+        ) == "yellow"
+
+    def test_only_per_tool_grants_no_plugin_level(self, resolver_setup):
+        disp, reg = resolver_setup
+        reg.plugin_grants.grant(
+            instance_id="agent_a",
+            plugin_name="github",
+            tool_name="github_list_issues.v1",
+            trust_tier="green",
+            granted_at_seq=1,
+        )
+        # Matched tool: returns its tier.
+        assert disp._resolve_plugin_grant_tier(
+            "agent_a", "github", "github_list_issues.v1",
+        ) == "green"
+        # Unmatched tool: no fallback because there's no plugin-
+        # level grant for github. Returns None.
+        assert disp._resolve_plugin_grant_tier(
+            "agent_a", "github", "github_merge_pr.v1",
+        ) is None
+
+    def test_resolver_returns_none_when_table_unwired(self):
+        """Dispatcher without plugin_grants returns None
+        defensively rather than raising."""
+        disp = ToolDispatcher.__new__(ToolDispatcher)
+        disp.plugin_grants = None
+        assert disp._resolve_plugin_grant_tier(
+            "agent_a", "github", "github_list_issues.v1",
+        ) is None

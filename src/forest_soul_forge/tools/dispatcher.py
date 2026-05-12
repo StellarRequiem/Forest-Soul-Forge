@@ -595,6 +595,14 @@ class ToolDispatcher:
             raw_mode = task_caps.get("mode")
             if isinstance(raw_mode, str) and raw_mode.strip():
                 mode = raw_mode.strip().lower()
+        # ADR-0053 T4 (B239): bind the specificity-wins resolver so
+        # PostureGateStep can ask "what's the effective trust_tier for
+        # plugin X tool Y on this agent?" with per-tool overrides
+        # honored. Captures instance_id; resolver itself is on the
+        # dispatcher so the table read happens lazily per dispatch.
+        def _plugin_grant_lookup(plugin: str, tool: str | None) -> str | None:
+            return self._resolve_plugin_grant_tier(instance_id, plugin, tool)
+
         dctx = DispatchContext(
             instance_id=instance_id,
             agent_dna=agent_dna,
@@ -610,6 +618,7 @@ class ToolDispatcher:
             mcp_registry=merged_mcp_registry,
             agent_posture=agent_posture,
             plugin_grants_view=plugin_grants_view,
+            plugin_grant_lookup_fn=_plugin_grant_lookup,
             shortcut_match=shortcut_match,
             mode=mode,
         )
@@ -1283,27 +1292,18 @@ class ToolDispatcher:
     def _load_plugin_grants_view(
         self, instance_id: str,
     ) -> dict[str, str] | None:
-        """Read active plugin grants for the agent as a
-        plugin_name → trust_tier dict. ADR-0045 T3 forward-compat.
+        """Read active plugin-level grants for the agent as a
+        plugin_name → trust_tier dict.
 
         Returns ``None`` when self.plugin_grants is unwired or any
         read fails. Empty dict (no active grants) returns as ``{}``,
-        which is distinct from None — the step then knows the table
-        IS wired but the agent has no grants, so per-grant tier is
-        irrelevant for any tool call.
+        which is distinct from None.
 
-        Post-ADR-0053 T2 (B237): the underlying ``list_active``
-        returns BOTH plugin-level and per-tool grants. This view
-        flattens to ``plugin_name -> trust_tier`` and only makes
-        sense for plugin-level rows; per-tool granularity needs
-        the T4 specificity-wins resolver, not a flat dict. Filter
-        here to plugin-level rows so this view's pre-B237 contract
-        ("the trust_tier the agent has on plugin X") stays exact
-        even when per-tool grants exist on the same plugin. When
-        T4 lands, it can replace this method with a richer view
-        keyed by (plugin, tool) — current call site is the
-        ADR-0045 PostureGateStep forward-compat hook that doesn't
-        consume per-tool tiers yet.
+        Filters to plugin-level rows only — per-tool grants need the
+        T4 specificity-wins resolver (``_resolve_plugin_grant_tier``
+        below), not this flat dict. PostureGateStep prefers the
+        resolver when available; this method is kept as a fallback
+        for legacy test contexts that don't wire the resolver.
         """
         if self.plugin_grants is None:
             return None
@@ -1316,6 +1316,61 @@ class ToolDispatcher:
             }
         except Exception:
             return None
+
+    def _resolve_plugin_grant_tier(
+        self,
+        instance_id: str,
+        plugin_name: str,
+        tool_name: str | None,
+    ) -> str | None:
+        """ADR-0053 T4 (B239): specificity-wins plugin-grant resolver.
+
+        Returns the trust_tier of the most-specific active grant for
+        ``(instance_id, plugin_name, tool_name)``:
+
+          1. Per-tool grant for the exact (plugin, tool) — if one
+             exists active, use its trust_tier (this is the override).
+          2. Plugin-level grant for plugin_name — fallback when no
+             per-tool grant covers the named tool.
+          3. ``None`` — no active grant covers the dispatch at any
+             granularity (caller's job to decide what that means;
+             PostureGateStep treats it as "no grant input, posture
+             rules unchanged").
+
+        Reads via ``list_active_for_plugin`` which the table orders
+        plugin-level-first then per-tool-alphabetical, so the walk
+        below can do a single pass and pick the per-tool override if
+        it exists.
+
+        Defensive: returns None on any read error so a corrupt grants
+        row can't break dispatch. Returns None when ``plugin_grants``
+        is unwired (test contexts).
+        """
+        if self.plugin_grants is None:
+            return None
+        try:
+            rows = self.plugin_grants.list_active_for_plugin(
+                instance_id, plugin_name,
+            )
+        except Exception:
+            return None
+        if not rows:
+            return None
+
+        plugin_level_tier: str | None = None
+        for g in rows:
+            if g.tool_name is None:
+                # Plugin-level fallback. Remember it; per-tool match
+                # may still override below.
+                plugin_level_tier = g.trust_tier
+            elif tool_name is not None and g.tool_name == tool_name:
+                # Exact per-tool match: this is the most specific
+                # grant for the dispatch. Specificity wins.
+                return g.trust_tier
+        # No per-tool override: fall back to plugin-level (which may
+        # also be None if only per-tool grants exist for OTHER tools
+        # in this plugin, i.e. the dispatched tool isn't covered).
+        return plugin_level_tier
 
     def _lookup_catalog_grant(
         self, instance_id: str, tool_name: str, tool_version: str,
