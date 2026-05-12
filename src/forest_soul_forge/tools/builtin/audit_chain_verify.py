@@ -48,6 +48,15 @@ class AuditChainVerifyTool:
         Larger chains with many forward-compat events get truncated
         to keep the response bounded; the full count is still
         reported in metadata.
+      strict (bool, optional): ADR-0049 T7 — when true, require
+        every agent-emitted entry (agent_dna != None) to carry a
+        non-null `signature` field. Refuses the chain on the first
+        agent-emitted entry without a signature. Default false
+        keeps the ADR-0049 D5 'tolerant' contract — legacy
+        pre-ADR-0049 entries pass with hash check only. Strict
+        mode is for operators verifying that EVERY agent action
+        post-ADR-0049 is digitally signed; useful for compliance
+        snapshots + tamper-proof archival.
 
     Output:
       {
@@ -71,12 +80,18 @@ class AuditChainVerifyTool:
                 raise ToolValidationError(
                     f"max_unknown_to_report must be an int 1..1000; got {cap!r}"
                 )
+        strict = args.get("strict")
+        if strict is not None and not isinstance(strict, bool):
+            raise ToolValidationError(
+                f"strict must be a bool; got {type(strict).__name__}"
+            )
 
     async def execute(
         self, args: dict[str, Any], ctx: ToolContext,
     ) -> ToolResult:
         chain = _resolve_chain(ctx)
-        result = chain.verify()
+        strict = bool(args.get("strict", False))
+        result = chain.verify(strict=strict)
         cap = int(args.get("max_unknown_to_report") or 20)
         unknown_full = list(result.unknown_event_types)
         unknown_capped = unknown_full[:cap]

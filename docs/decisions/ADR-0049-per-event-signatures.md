@@ -1,11 +1,16 @@
 # ADR-0049 — Per-Event Digital Signatures for Agent Events
 
-**Status:** Accepted 2026-05-12. **T1 + T4 shipped (B242 + B243).**
-T1 wraps ADR-0052 `SecretStoreProtocol`; T4 wires birth-time
-ed25519 keypair generation through the soul.md frontmatter + the
-new `agents.public_key` column (schema v18→v19). T5 (sign-on-emit)
-+ T6 (verifier extension) + T7 (strict mode) + T8 (runbook)
-queued.
+**Status:** Accepted 2026-05-12. **All eight tranches shipped
+across Bursts 242-244** — the audit chain is now tamper-PROOF
+for agent-emitted events. T1 wraps ADR-0052
+`SecretStoreProtocol`; T4 wires birth-time ed25519 keypair gen
+through soul.md frontmatter + `agents.public_key` (schema
+v18→v19); T5 sign-on-emit in `AuditChain.append`; T6 verifier
+extension in `AuditChain.verify`; T7 strict-mode flag refusing
+legacy unsigned entries; T8 operator runbook at
+`docs/runbooks/per-event-signatures.md`. Lifespan wires the
+signer + verifier closures via the registry + AgentKeyStore at
+daemon startup.
 
 T1 ships as a thin wrapper over ADR-0052's secret-store substrate
 (T1-T3 collapsed because ADR-0052 already provides the three
@@ -277,10 +282,10 @@ breaking change to any of the seven v1.0 ABI surfaces.
 | T2 | encrypted_file backend | **Subsumed by T1** — the ADR-0052 secrets store provides file + keychain + vaultwarden backends. The encrypted_file variant the original draft proposed becomes a future ADR-0052 extension if needed (the unencrypted FileStore today is `chmod 600`; OS-Keychain backend is the production path on Darwin). | superseded |
 | T3 | keychain backend (macOS) | **Subsumed by T1** — ADR-0052 `KeychainStore` already covers this. AgentKeyStore inherits via the resolver. | superseded |
 | T4 | Birth-time keypair generation | **DONE B243** — `_perform_create` (in `daemon/routers/writes/birth.py`, shared by /birth + /spawn) generates an `Ed25519PrivateKey` inside the write lock right after `instance_id` is computed. Private bytes go to `AgentKeyStore.store(instance_id, ...)`; public bytes are base64-encoded and threaded into both (a) `SoulGenerator.generate(public_key=...)` so the canonical frontmatter carries the key, and (b) through the registry's ingest path (`ParsedSoul.public_key` populated by `parse_soul_file`, written into the new `agents.public_key` column by `_insert_agent_row`). Schema migration v18→v19 adds the nullable column; the migration is `ALTER TABLE agents ADD COLUMN public_key TEXT` with no default — legacy pre-v19 agents stay NULL (verifier treats them as 'legacy unsigned' per ADR-0049 D5). The two surfaces (frontmatter + agents column) must agree at rebuild-from-artifacts time; a test asserts this. 6 new tests cover the path (frontmatter write, agents column write, agreement check, key-store fetch, distinct keypairs per agent, ed25519 round-trip validity). | shipped |
-| T5 | Sign-on-emit | core/audit_chain.py extension: when emitting an event with agent_dna, look up the agent's private key, sign entry_hash, attach signature. | 1 burst |
-| T6 | Verifier extension | audit_chain_verify.v1 + scripts/verify_audit_chain.py: parse signature, look up public key, verify ed25519. Legacy entries skipped gracefully. | 1 burst |
-| T7 | Strict-mode verifier flag | Optional `--strict` flag for the CLI verifier that rejects ANY unsigned post-v16 event. | 0.5 burst |
-| T8 | Documentation + migration runbook | docs/runbooks/per-event-signatures.md: what changed, key-rotation thoughts (deferred), key-loss recovery (no recovery — agent identity is permanent). | 0.5 burst |
+| T5 | Sign-on-emit | **DONE B244** — `AuditChain.set_signer` injection point; `append` calls signer when `agent_dna is not None` and attaches `signature: "ed25519:<base64 64 bytes>"`. Signer exception is swallowed (entry lands unsigned) so a transient keystore failure doesn't block audit appends. Signature is OUTSIDE `entry_hash` per Decision 4 — hash-chain semantic unchanged. | shipped |
+| T6 | Verifier extension | **DONE B244** — `AuditChain.set_verifier` injection point; `verify()` parses `"ed25519:"` prefix, base64-decodes payload, calls verifier(entry_hash_bytes, signature_bytes, agent_dna). Legacy unsigned entries pass with hash-chain check only (D5). Unsupported algorithm prefix + base64-corruption + verifier-exception all refuse the chain. Operator-emitted entry carrying a signature also refuses (defense in depth). | shipped |
+| T7 | Strict-mode verifier flag | **DONE B244** — `AuditChain.verify(strict=False)` parameter; when True, every agent-emitted entry (`agent_dna != None`) must carry a non-null signature or the chain refuses. `audit_chain_verify.v1` tool exposes `strict: bool` arg. Default tolerant mode preserves the D5 legacy-unsigned contract. Documented use cases: compliance snapshots, tamper-proof archival, trust-but-verify external integration. | shipped |
+| T8 | Documentation + migration runbook | **DONE B244** — `docs/runbooks/per-event-signatures.md` covers: what changed, where the surfaces live, how to run a verify (tolerant + strict), how to read + filter signed events, failure modes (keystore loss = no recovery, agent identity permanent), when to use strict mode, references to substrate files. | shipped |
 
 Total estimate: 6-8 bursts. Largest single ADR implementation
 in the security-hardening arc.

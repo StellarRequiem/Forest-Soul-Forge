@@ -280,6 +280,14 @@ class ChainEntry:
     Mostly immutable — ``event_data`` is a plain ``dict`` so entries created
     from parsed JSON keep their structure. Callers should treat event_data as
     read-only.
+
+    ADR-0049 T5 (B244): the optional ``signature`` field carries an
+    ed25519 signature over ``entry_hash`` (raw bytes, not hex). Format:
+    ``"ed25519:" + base64(signature_bytes)``. Present on agent-emitted
+    events when the dispatching agent has a public key in the registry
+    (ADR-0049 D3). Outside ``entry_hash`` per ADR-0049 D4 so the hash-
+    chain semantic is unchanged and signing doesn't loop on its own
+    output.
     """
 
     seq: int
@@ -289,9 +297,14 @@ class ChainEntry:
     agent_dna: str | None
     event_type: str
     event_data: dict[str, Any]
+    signature: str | None = None
 
     def to_json_line(self) -> str:
-        """Serialize this entry as one JSONL line (with trailing newline)."""
+        """Serialize this entry as one JSONL line (with trailing newline).
+
+        Signature field is omitted when None so pre-ADR-0049 entries
+        round-trip byte-for-byte through the canonical-form encoder.
+        """
         payload = {
             "seq": self.seq,
             "timestamp": self.timestamp,
@@ -301,6 +314,8 @@ class ChainEntry:
             "event_type": self.event_type,
             "event_data": self.event_data,
         }
+        if self.signature is not None:
+            payload["signature"] = self.signature
         return json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
 
 
@@ -407,12 +422,53 @@ class AuditChain:
         # See module docstring for why this lives here vs. relying
         # solely on ``app.state.write_lock`` at every call site.
         self._append_lock = threading.RLock()
+        # ADR-0049 T5 (B244): optional signer + verifier callables.
+        # Daemon lifespan wires these to closures that consult the
+        # AgentKeyStore (private keys) + the registry's agents.public_key
+        # column (verification). Core/audit_chain stays decoupled from
+        # both via this injection point — the test harness can leave
+        # them None and the chain still hashes correctly, just without
+        # signatures.
+        self._signer: Any = None       # Callable[[bytes, str], bytes | None] | None
+        self._verifier: Any = None     # Callable[[bytes, bytes, str], bool] | None
         if not self.path.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.touch()
         self._head = self._recompute_head()
         if self._head is None:
             self._write_genesis()
+
+    # ---- ADR-0049 signer / verifier injection ---------------------------
+    def set_signer(self, signer: Any) -> None:
+        """Install the sign-on-emit closure (ADR-0049 T5).
+
+        ``signer`` must accept ``(entry_hash_bytes: bytes, agent_dna:
+        str) -> bytes | None`` and return raw ed25519 signature bytes
+        (64 bytes) or ``None`` to skip signing for this agent. ``None``
+        is the right return when the agent has no public key on file
+        (pre-ADR-0049 legacy agents) — the chain entry then lands
+        unsigned and the verifier treats it as "legacy unsigned" per
+        ADR-0049 D5.
+
+        Pass ``None`` to disable signing entirely (test contexts that
+        want the pre-ADR-0049 chain shape).
+        """
+        self._signer = signer
+
+    def set_verifier(self, verifier: Any) -> None:
+        """Install the verify-on-replay closure (ADR-0049 T6).
+
+        ``verifier`` must accept ``(entry_hash_bytes: bytes,
+        signature_bytes: bytes, agent_dna: str) -> bool`` and return
+        True iff the signature is a valid ed25519 signature by the
+        agent identified by ``agent_dna`` (looked up via the registry's
+        agents.public_key column). Return False on any mismatch
+        (corrupt sig, wrong key, missing public key). The verifier
+        method ``verify()`` consults this for every entry that has a
+        non-None ``signature`` field; legacy unsigned entries are
+        unaffected.
+        """
+        self._verifier = verifier
 
     # ---- introspection --------------------------------------------------
     @property
@@ -526,6 +582,32 @@ class AuditChain:
                 event_type=event_type,
                 event_data=data,
             ))
+
+            # ADR-0049 T5 (B244): sign-on-emit. Only agent-emitted
+            # events (agent_dna != None) get signed; operator-emitted
+            # events (genesis, births, etc.) stay unsigned per
+            # ADR-0049 D3. The signer closure is responsible for
+            # resolving agent_dna → instance_id → private key and
+            # returning the raw 64-byte ed25519 signature (or None
+            # to skip signing — legacy pre-ADR-0049 agents that
+            # don't have a keypair). Any exception from the signer
+            # is logged + swallowed: signing failure must not block
+            # the audit append, otherwise the daemon couldn't make
+            # forward progress after a transient KeyStore error.
+            signature_field: str | None = None
+            if agent_dna is not None and self._signer is not None:
+                try:
+                    sig_bytes = self._signer(
+                        bytes.fromhex(entry_hash), agent_dna,
+                    )
+                except Exception:
+                    sig_bytes = None
+                if sig_bytes is not None:
+                    import base64 as _b64
+                    signature_field = (
+                        "ed25519:" + _b64.b64encode(sig_bytes).decode("ascii")
+                    )
+
             entry = ChainEntry(
                 seq=next_seq,
                 timestamp=_now_iso(),
@@ -534,18 +616,26 @@ class AuditChain:
                 agent_dna=agent_dna,
                 event_type=event_type,
                 event_data=data,
+                signature=signature_field,
             )
             self._write_line(entry)
             self._head = entry
             return entry
 
     # ---- verification ---------------------------------------------------
-    def verify(self) -> VerificationResult:
+    def verify(self, *, strict: bool = False) -> VerificationResult:
         """Walk the chain from genesis forward, checking hashes and sequencing.
 
         Stops at the first structural problem and reports it. Unknown event
         types are recorded as warnings but don't flip ``ok`` — the chain can
         contain forward-compat entries from a later runtime version.
+
+        ADR-0049 T7 (B244): ``strict=True`` additionally requires every
+        agent-emitted entry (agent_dna != None) to carry a non-null
+        ``signature`` field. Refuses on the first agent-emitted entry
+        without one. Default (False) preserves the ADR-0049 D5
+        'tolerant' contract — legacy pre-ADR-0049 entries pass with
+        hash-chain check only.
         """
         unknown: list[str] = []
         count = 0
@@ -617,6 +707,87 @@ class AuditChain:
                         reason="entry_hash mismatch",
                         unknown_event_types=tuple(sorted(set(unknown))),
                     )
+
+                # ADR-0049 T7 (B244): strict mode rejects any agent-
+                # emitted entry that lacks a signature. Default
+                # (strict=False) tolerates legacy unsigned entries
+                # per ADR-0049 D5. Operator turns strict on for
+                # compliance snapshots / tamper-proof archival.
+                if (
+                    strict
+                    and entry.agent_dna is not None
+                    and entry.signature is None
+                ):
+                    return VerificationResult(
+                        ok=False, entries_verified=count,
+                        broken_at_seq=entry.seq,
+                        reason=(
+                            "strict mode: agent-emitted entry has no "
+                            "signature"
+                        ),
+                        unknown_event_types=tuple(sorted(set(unknown))),
+                    )
+
+                # ADR-0049 T6 (B244): signature verification. Only
+                # runs when the verifier closure is wired AND the
+                # entry carries a signature. Legacy unsigned entries
+                # pass through with hash-chain check only (the
+                # ADR-0049 D5 contract). A signature that fails to
+                # parse OR fails ed25519.verify is a hard refusal
+                # — that's the tamper-proof property the ADR
+                # delivers over hash-chain alone.
+                if entry.signature is not None and self._verifier is not None:
+                    if entry.agent_dna is None:
+                        # Operator-emitted events shouldn't carry
+                        # signatures — that combination is malformed.
+                        return VerificationResult(
+                            ok=False, entries_verified=count,
+                            broken_at_seq=entry.seq,
+                            reason="signature present on operator-emitted entry",
+                            unknown_event_types=tuple(sorted(set(unknown))),
+                        )
+                    # Parse algorithm prefix + base64 payload.
+                    if not entry.signature.startswith("ed25519:"):
+                        return VerificationResult(
+                            ok=False, entries_verified=count,
+                            broken_at_seq=entry.seq,
+                            reason=(
+                                f"unsupported signature algorithm in "
+                                f"{entry.signature.split(':', 1)[0]!r}"
+                            ),
+                            unknown_event_types=tuple(sorted(set(unknown))),
+                        )
+                    import base64 as _b64
+                    try:
+                        sig_b64 = entry.signature[len("ed25519:"):]
+                        sig_bytes = _b64.b64decode(sig_b64.encode("ascii"))
+                    except Exception:
+                        return VerificationResult(
+                            ok=False, entries_verified=count,
+                            broken_at_seq=entry.seq,
+                            reason="signature is not valid base64",
+                            unknown_event_types=tuple(sorted(set(unknown))),
+                        )
+                    try:
+                        valid = self._verifier(
+                            bytes.fromhex(entry.entry_hash),
+                            sig_bytes,
+                            entry.agent_dna,
+                        )
+                    except Exception as e:
+                        return VerificationResult(
+                            ok=False, entries_verified=count,
+                            broken_at_seq=entry.seq,
+                            reason=f"verifier raised: {e!r}",
+                            unknown_event_types=tuple(sorted(set(unknown))),
+                        )
+                    if not valid:
+                        return VerificationResult(
+                            ok=False, entries_verified=count,
+                            broken_at_seq=entry.seq,
+                            reason="ed25519 signature verification failed",
+                            unknown_event_types=tuple(sorted(set(unknown))),
+                        )
 
                 # Unknown event type → warn, don't fail
                 if entry.event_type not in KNOWN_EVENT_TYPES:
@@ -786,6 +957,12 @@ def _entry_from_dict(obj: dict[str, Any]) -> ChainEntry:
     event_data = obj.get("event_data") or {}
     if not isinstance(event_data, dict):
         raise AuditChainError(f"event_data must be an object, got {type(event_data).__name__}")
+    # ADR-0049 T5 (B244): signature is an OPTIONAL field. Absent on
+    # legacy pre-ADR-0049 entries + on operator-emitted events
+    # (genesis, births). Present on agent-emitted events when the
+    # agent had a keypair at emit time.
+    signature_raw = obj.get("signature")
+    signature = str(signature_raw) if signature_raw is not None else None
     return ChainEntry(
         seq=int(obj["seq"]),
         timestamp=str(obj["timestamp"]),
@@ -794,4 +971,5 @@ def _entry_from_dict(obj: dict[str, Any]) -> ChainEntry:
         agent_dna=(str(obj["agent_dna"]) if obj.get("agent_dna") is not None else None),
         event_type=str(obj["event_type"]),
         event_data=event_data,
+        signature=signature,
     )

@@ -567,6 +567,117 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.providers = providers
         app.state.trait_engine = trait_engine
         app.state.audit_chain = audit_chain
+        # ADR-0049 T5+T6 (B244): wire the sign-on-emit + verify-on-replay
+        # closures into the audit chain. The closures resolve agent_dna
+        # → instance_id → key (private for signing, public for verify)
+        # via the registry's agents table + the AgentKeyStore. Wired
+        # here (lifespan) so core/audit_chain.py stays decoupled from
+        # both the registry and the keystore — both are runtime
+        # dependencies that core shouldn't know about. Failure to
+        # install the closures (registry unavailable, etc.) is non-
+        # fatal — the chain still hashes correctly without them, just
+        # without the per-event signature property.
+        if audit_chain is not None and registry is not None:
+            try:
+                from forest_soul_forge.security.keys import (
+                    resolve_agent_key_store,
+                )
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+                    Ed25519PrivateKey, Ed25519PublicKey,
+                )
+                from cryptography.exceptions import InvalidSignature
+                import base64 as _b64_lifespan
+
+                _agent_key_store = resolve_agent_key_store()
+
+                def _instance_id_for_dna(agent_dna: str) -> str | None:
+                    """Resolve agent_dna → instance_id via the agents
+                    table. The dna column is the short form (12 char);
+                    the audit chain stores the short form too."""
+                    try:
+                        row = registry._conn.execute(
+                            "SELECT instance_id FROM agents "
+                            "WHERE dna = ? LIMIT 1;",
+                            (agent_dna,),
+                        ).fetchone()
+                    except Exception:
+                        return None
+                    if row is None:
+                        return None
+                    return row[0]
+
+                def _public_key_for_dna(agent_dna: str) -> bytes | None:
+                    """Resolve agent_dna → agents.public_key (base64
+                    string) → raw 32-byte ed25519 public-key bytes."""
+                    try:
+                        row = registry._conn.execute(
+                            "SELECT public_key FROM agents "
+                            "WHERE dna = ? LIMIT 1;",
+                            (agent_dna,),
+                        ).fetchone()
+                    except Exception:
+                        return None
+                    if row is None or row[0] is None:
+                        return None
+                    try:
+                        return _b64_lifespan.b64decode(
+                            row[0].encode("ascii"), validate=True,
+                        )
+                    except Exception:
+                        return None
+
+                def _signer(entry_hash_bytes: bytes, agent_dna: str) -> bytes | None:
+                    """Look up the agent's private key + sign
+                    entry_hash. Returns None when the agent has no
+                    keypair on file (legacy pre-ADR-0049 agent), so
+                    the chain entry lands unsigned and the verifier
+                    treats it as legacy."""
+                    instance_id = _instance_id_for_dna(agent_dna)
+                    if instance_id is None:
+                        return None
+                    priv_bytes = _agent_key_store.fetch(instance_id)
+                    if priv_bytes is None:
+                        return None
+                    try:
+                        priv = Ed25519PrivateKey.from_private_bytes(priv_bytes)
+                        return priv.sign(entry_hash_bytes)
+                    except Exception:
+                        return None
+
+                def _verifier(
+                    entry_hash_bytes: bytes,
+                    signature_bytes: bytes,
+                    agent_dna: str,
+                ) -> bool:
+                    pub_bytes = _public_key_for_dna(agent_dna)
+                    if pub_bytes is None:
+                        # No public key on file — entry SHOULD NOT
+                        # have a signature in that case. Treat as
+                        # invalid: an attacker who attached a sig to
+                        # a legacy agent's entry shouldn't pass.
+                        return False
+                    try:
+                        pub = Ed25519PublicKey.from_public_bytes(pub_bytes)
+                        pub.verify(signature_bytes, entry_hash_bytes)
+                        return True
+                    except InvalidSignature:
+                        return False
+                    except Exception:
+                        return False
+
+                audit_chain.set_signer(_signer)
+                audit_chain.set_verifier(_verifier)
+                startup_diagnostics.append(
+                    {"component": "audit_chain_signer",
+                     "status": "ok",
+                     "message": "ed25519 sign/verify wired (ADR-0049 T5+T6)"}
+                )
+            except Exception as e:
+                startup_diagnostics.append(
+                    {"component": "audit_chain_signer",
+                     "status": "failed",
+                     "error": f"{type(e).__name__}: {e}"}
+                )
         app.state.tool_catalog = tool_catalog
         app.state.genre_engine = genre_engine
         app.state.tool_registry = tool_registry
