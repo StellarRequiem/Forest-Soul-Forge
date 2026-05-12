@@ -1,0 +1,56 @@
+schema_version: 1
+name: tone_shift
+version: '1'
+description: >
+  Rewrite a piece of text in a different tone while preserving its
+  meaning and structure. Useful for shifting a Slack message from
+  casual to formal, softening a direct critique to diplomatic,
+  or making a stiff status update warmer. Read-only; the input is
+  not stored.
+implementation: prompt_template_tool.v1
+side_effects: read_only
+archetype_tags:
+  - assistant
+  - companion
+  - briefer
+  - status_reporter
+input_schema:
+  type: object
+  properties:
+    text:
+      type: string
+      description: The text to rewrite.
+    target_tone:
+      type: string
+      description: >
+        Target tone — e.g. "formal", "casual", "diplomatic", "direct",
+        "warm", "concise", "apologetic", "confident". Any adjective
+        the model can interpret. Pass one word for cleanest results.
+    preserve:
+      type: string
+      description: >
+        Comma-separated list of things to preserve verbatim from the
+        original — e.g. "names, dates, specific numbers" or "the
+        action item at the end". Pass "nothing" to give the model
+        free rein on phrasing throughout.
+  required:
+    - text
+    - target_tone
+    - preserve
+prompt_template: |
+  Rewrite the text below in a {target_tone} tone, preserving the
+  meaning and overall structure. Keep the rewrite the same rough
+  length as the original (don't expand or compress more than 20%).
+
+  Preserve verbatim: {preserve}
+
+  Output only the rewritten text — no commentary, no quote marks,
+  no preamble.
+
+  Original:
+  {text}
+
+  Rewritten ({target_tone}):
+forged_at: '2026-05-11T18:00:05Z'
+forged_by: forest-team
+forge_provider: hand-authored

@@ -1,0 +1,67 @@
+schema_version: 1
+name: action_items_extract
+version: '1'
+description: >
+  Pull discrete action items from meeting notes, transcripts, email
+  threads, or chat logs. Each item is normalized to {owner, action,
+  due_date_hint, source_quote}. The model never invents items — if
+  no actions are present, returns an empty list. Useful for
+  meeting-followup workflows, status reports, project trackers.
+implementation: prompt_template_tool.v1
+side_effects: read_only
+archetype_tags:
+  - assistant
+  - briefer
+  - status_reporter
+  - operator_companion
+input_schema:
+  type: object
+  properties:
+    text:
+      type: string
+      description: >
+        The source text — meeting notes, transcript, email thread,
+        chat log. Any format. The longer / messier the input, the
+        more value this tool provides over hand-extraction.
+    known_attendees:
+      type: string
+      description: >
+        Comma-separated list of names of people present
+        (e.g. "Alex, Smith, Sarah"). Helps the model attribute
+        unowned items ("we'll handle the migration") to a likely
+        owner from context. Pass an empty string "" if unknown —
+        the model will mark unattributed items as owner: "?".
+  required:
+    - text
+    - known_attendees
+prompt_template: |
+  Extract every concrete action item from the text below. An action
+  item is a specific task someone committed to do. Do NOT include
+  vague intent ("we should think about this"), questions, or
+  observations.
+
+  Output format — pure YAML list, nothing else, ready to parse:
+
+  - owner: <person's name, or "?" if not attributable>
+    action: <one-sentence imperative-mood description of the task>
+    due_date_hint: <ISO date if specified, else relative phrase
+                    like "this week" or "before Friday", else "?">
+    source_quote: <short verbatim quote from the input that
+                   contains this commitment, ≤120 chars>
+
+  If NO action items are present, output the single line:
+  []
+
+  Don't invent items. Don't merge multiple distinct tasks into one
+  item. Don't drop context that changes the meaning (a deadline
+  that was attached to a task, a conditional, etc.).
+
+  Known attendees: {known_attendees}
+
+  Source text:
+  {text}
+
+  Action items (YAML):
+forged_at: '2026-05-11T18:00:08Z'
+forged_by: forest-team
+forge_provider: hand-authored

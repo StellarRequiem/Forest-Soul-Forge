@@ -1,0 +1,55 @@
+schema_version: 1
+name: slug_generate
+version: '1'
+description: >
+  Convert a title or heading into a clean URL slug — lowercase,
+  hyphen-separated, ASCII-folded (drops accents), no punctuation
+  except hyphens. Optionally constrains max length. Useful for
+  blog post URLs, file names, audit-doc filenames, branch names.
+implementation: prompt_template_tool.v1
+side_effects: read_only
+archetype_tags:
+  - assistant
+  - briefer
+  - software_engineer
+input_schema:
+  type: object
+  properties:
+    title:
+      type: string
+      description: The title or heading to slugify.
+    max_length:
+      type: integer
+      description: >
+        Maximum length of the resulting slug. Common values: 60
+        (URL-friendly), 40 (file-system-safe), 24 (compact).
+        Pass 0 for no limit. Truncation drops trailing words rather
+        than cutting mid-word.
+      minimum: 0
+      maximum: 200
+  required:
+    - title
+    - max_length
+prompt_template: |
+  Convert the title below into a URL slug. Rules:
+    - All lowercase.
+    - Words separated by single hyphens.
+    - ASCII-fold all accented characters (é → e, ü → u, ñ → n).
+    - Drop all punctuation (apostrophes, periods, slashes, etc.)
+      except the word-separating hyphens.
+    - Collapse multiple consecutive spaces or hyphens to one
+      hyphen.
+    - No leading or trailing hyphens.
+    - If max_length is greater than 0, truncate by dropping
+      trailing words until the slug fits — never cut mid-word.
+
+  Output only the slug — no quote marks, no commentary, just the
+  slug on a single line.
+
+  Title: {title}
+  Max length: {max_length}
+
+  Slug:
+forged_at: '2026-05-11T18:00:06Z'
+forged_by: forest-team
+forge_provider: hand-authored

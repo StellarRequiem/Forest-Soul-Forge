@@ -1,0 +1,68 @@
+schema_version: 1
+name: sql_explain
+version: '1'
+description: >
+  Explain a SQL query in plain English and flag potential performance
+  or correctness issues. Covers what the query returns, what tables
+  it touches, and risks like full table scans, missing WHERE clauses,
+  cartesian joins, NULL-handling gotchas, or N+1 patterns. Read-only —
+  the query is NOT executed; only analyzed statically.
+implementation: prompt_template_tool.v1
+side_effects: read_only
+archetype_tags:
+  - software_engineer
+  - code_reviewer
+  - knowledge_consolidator
+input_schema:
+  type: object
+  properties:
+    sql:
+      type: string
+      description: >
+        The SQL query to explain. Any dialect — Postgres, MySQL,
+        SQLite, BigQuery, Snowflake, etc. Multi-statement input is
+        fine; the tool will treat them as a sequence.
+    dialect:
+      type: string
+      description: >
+        SQL dialect hint — "postgres", "mysql", "sqlite", "bigquery",
+        "snowflake", or "auto" if unknown. Affects the risk flagging
+        (e.g. NULL-comparison semantics, RETURNING-clause support,
+        window-function syntax).
+  required:
+    - sql
+    - dialect
+prompt_template: |
+  Analyze the SQL query below. The query is NOT executed — your
+  task is static analysis only.
+
+  Output shape (use exactly these headings):
+
+  ## What it does
+  One-paragraph description of what the query returns and why a
+  user would run it.
+
+  ## Tables touched
+  Bullet list of every table the query reads from or writes to,
+  with the operation (read, insert, update, delete) noted.
+
+  ## Risks
+  Bullet list of potential issues. Common categories:
+    - Full table scans (no usable index)
+    - Missing WHERE clause on a large table
+    - Cartesian / unintended cross joins
+    - NULL handling that differs by dialect
+    - N+1 patterns (subqueries that should be JOINs)
+    - SQL injection vectors if values look like string-interpolated
+    - Locking risks for write-path queries
+  Skip the heading entirely if NO risks found. Don't pad with
+  manufactured concerns.
+
+  Dialect: {dialect}
+  SQL:
+  {sql}
+
+  Analysis:
+forged_at: '2026-05-11T18:00:07Z'
+forged_by: forest-team
+forge_provider: hand-authored
