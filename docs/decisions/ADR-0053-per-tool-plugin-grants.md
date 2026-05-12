@@ -1,11 +1,26 @@
 # ADR-0053 — Per-Tool Plugin Grants
 
-**Status:** Proposed (2026-05-06). Pairs with ADR-0048 (Computer
-Control Allowance) — directly unlocks the per-tool toggles in the
-ADR-0048 T4 Advanced disclosure that B165 shipped as a read-only
-reference table. Userspace-only delivery — uses existing audit-
-chain event family; ADDS a column to one schema table (additive
-v15→v16 migration).
+**Status:** Accepted 2026-05-12. T1 shipped in Burst 235. T2-T6
+queued. Pairs with ADR-0048 (Computer Control Allowance) —
+directly unlocks the per-tool toggles in the ADR-0048 T4 Advanced
+disclosure that B165 shipped as a read-only reference table.
+Userspace-only delivery — uses existing audit-chain event family;
+ADDS a column to one schema table (additive **v17→v18 migration**,
+not v15→v16 as the original proposal estimated — v16 was consumed
+by ADR-0054 T1 / B178 memory_procedural_shortcuts and v17 by
+ADR-0060 T1 / B219 agent_catalog_grants between this ADR's
+drafting and acceptance).
+
+**Migration shape correction (post-drafting):** SQLite can't ALTER
+TABLE to change a PRIMARY KEY in place. The v18 migration does a
+standard table-rebuild (CREATE new shape → INSERT SELECT → DROP
+old → RENAME) rather than the simpler ADD COLUMN + indexes the
+ADR's Decision 6 describes. Every existing row migrates as a
+plugin-level grant (NULL tool_name), so the operator-visible
+semantic is unchanged — only the on-disk PK changes from
+(instance_id, plugin_name) to (instance_id, plugin_name,
+tool_name). No incoming FK references this table; the rebuild is
+contained.
 
 ## Context
 
@@ -206,7 +221,7 @@ plugin-level via the NULL-coalesce.
 
 | # | Tranche | Description | Effort |
 |---|---|---|---|
-| T1 | Schema migration v15→v16 | ADD COLUMN + indexes + audit-replay path coalesces to plugin-level | 1 burst |
+| T1 | Schema migration v17→v18 | **DONE B235** — Table rebuild (CREATE new → INSERT SELECT → DROP → RENAME) because PRIMARY KEY change requires it. ADD COLUMN was insufficient. Two new indexes: `idx_plugin_grants_active` re-created post-rename + `ux_plugin_grants_plugin_level` partial-unique on (instance_id, plugin_name) WHERE tool_name IS NULL. All existing rows migrate as plugin-level grants (NULL tool_name) — byte-for-byte effective-grants compatibility with v17. | shipped |
 | T2 | Registry surface | `plugin_grants.grant(instance_id, plugin, tool=None, ...)` + `revoke(instance_id, plugin, tool=None, ...)` + `list_active` returns the new column | 0.5 burst |
 | T3 | HTTP API | POST/DELETE accept `tool_name` field; new path `/tools/{tool_name}` for per-tool revocation; GET response includes `tool_name` per row | 0.5 burst |
 | T4 | Dispatcher resolution | Specificity-wins lookup in the grants step of the governance pipeline | 0.5 burst |

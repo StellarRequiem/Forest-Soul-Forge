@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 17
+SCHEMA_VERSION: int = 18
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -531,27 +531,41 @@ DDL_STATEMENTS: tuple[str, ...] = (
     # architectural invariants — so we add an explicit augmentation
     # layer rather than mutate the constitution).
     #
+    # ADR-0053 extension (Burst 235): per-tool granularity via the
+    # optional ``tool_name`` column. NULL ``tool_name`` = plugin-level
+    # grant (the ADR-0043 original semantic, all tools the manifest
+    # declares). Non-NULL ``tool_name`` = per-tool grant covering ONLY
+    # that one tool. The dispatcher's grant-resolution path applies
+    # specificity-wins precedence: per-tool grant beats plugin-level
+    # when both exist (ADR-0053 Decision 3).
+    #
     # Effective allowed_mcp_servers at dispatch time =
-    #   constitution.allowed_mcp_servers ∪ {grants where revoked_at_seq IS NULL}
+    #   constitution.allowed_mcp_servers
+    #     ∪ {plugin where any active grant row exists (plugin- or
+    #        per-tool-level) for that plugin}
+    #   …with per-tool grants further narrowing the effective TOOL
+    #   set inside that plugin to the named tool(s).
     #
     # ``trust_tier`` is forward-compatible storage for ADR-0045
-    # (Agent Posture / Trust-Light System, queued next). For Burst 113
-    # the value is recorded but the dispatcher only treats it as
-    # informational — gating still flows through the existing
-    # per-tool requires_human_approval path. ADR-0045's
-    # PostureGateStep will start consulting it once filed.
+    # (Agent Posture / Trust-Light System). For Burst 113 the value
+    # was informational; ADR-0045's PostureGateStep + ADR-0060's
+    # GrantPolicy now consult it.
     #
-    # Composite primary key (instance_id, plugin_name) — at most one
-    # ACTIVE grant per (agent, plugin). Re-granting an already-active
-    # grant is idempotent (ON CONFLICT no-op). Revoking flips
-    # revoked_at_seq from NULL → an audit seq; granting after a
-    # revoke creates a fresh row (the previous revoked row stays as
-    # historical record, replaced via INSERT OR REPLACE only when
-    # the operator explicitly re-grants).
+    # Composite PRIMARY KEY (instance_id, plugin_name, tool_name) —
+    # SQLite treats NULL as distinct for PRIMARY KEY uniqueness, so
+    # the partial unique index ``ux_plugin_grants_plugin_level`` is
+    # what enforces "at most one plugin-level grant per (agent, plugin)"
+    # in the NULL-tool_name case. The PRIMARY KEY does the work for
+    # non-NULL rows (at most one per-tool grant per (agent, plugin,
+    # tool)). Re-granting an already-active grant is idempotent
+    # (ON CONFLICT no-op). Revoking flips revoked_at_seq NULL → seq;
+    # granting after a revoke creates a fresh row, preserving the
+    # historical record.
     """
     CREATE TABLE IF NOT EXISTS agent_plugin_grants (
         instance_id      TEXT NOT NULL,
         plugin_name      TEXT NOT NULL,
+        tool_name        TEXT,
         trust_tier       TEXT NOT NULL DEFAULT 'yellow'
                          CHECK (trust_tier IN ('green', 'yellow', 'red')),
         granted_at_seq   INTEGER NOT NULL,
@@ -561,7 +575,7 @@ DDL_STATEMENTS: tuple[str, ...] = (
         revoked_at       TEXT,
         revoked_by       TEXT,
         reason           TEXT,
-        PRIMARY KEY (instance_id, plugin_name),
+        PRIMARY KEY (instance_id, plugin_name, tool_name),
         FOREIGN KEY (instance_id)
             REFERENCES agents(instance_id) ON DELETE CASCADE
     );
@@ -569,6 +583,12 @@ DDL_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_plugin_grants_active "
         "ON agent_plugin_grants(instance_id) "
         "WHERE revoked_at_seq IS NULL;",
+    # ADR-0053 D1 (Burst 235): plugin-level uniqueness in the
+    # NULL-tool_name partition. PRIMARY KEY can't enforce this on
+    # its own because SQLite allows multiple NULLs in a PK column.
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_plugin_grants_plugin_level "
+        "ON agent_plugin_grants(instance_id, plugin_name) "
+        "WHERE tool_name IS NULL;",
     # ADR-0060 T1 (Burst 219): agent_catalog_grants.
     # Sister table to agent_plugin_grants, keyed by
     # (instance_id, tool_name, tool_version). Lets operators grant
@@ -1138,5 +1158,82 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX IF NOT EXISTS idx_catalog_grants_active "
             "ON agent_catalog_grants(instance_id) "
             "WHERE revoked_at_seq IS NULL;",
+    ),
+    # v17 → v18 (ADR-0053 T1, Burst 235): per-tool plugin grants.
+    #
+    # Extends agent_plugin_grants with an optional tool_name column.
+    # NULL tool_name = plugin-level grant (ADR-0043 original semantic,
+    # byte-for-byte compatible). Non-NULL tool_name = per-tool grant
+    # covering ONLY that one tool. ADR-0053 D3 dispatcher resolution
+    # is specificity-wins: per-tool beats plugin-level when both
+    # exist.
+    #
+    # SQLite can't ALTER TABLE to change a PRIMARY KEY in place. We
+    # do a standard table-rebuild: build the new shape, copy rows
+    # (existing rows get tool_name = NULL → plugin-level by the new
+    # semantic, preserving every operator's effective grants), drop
+    # the old table, rename the new one in. Indexes are recreated
+    # explicitly because SQLite drops them with the old table.
+    #
+    # No incoming FKs reference agent_plugin_grants (only outgoing
+    # FK to agents.instance_id), so the rebuild is contained.
+    # CASCADE on agents stays correct after rename.
+    #
+    # Defense in depth: a pre-v18 daemon reading a v18-shape table
+    # would see the unfamiliar tool_name column and would either
+    # ignore it (column-position-stable SELECT) or fail loudly
+    # (SELECT *). Forest's registry uses named-column SELECTs, so a
+    # downgrade reads cleanly with tool_name silently dropped.
+    18: (
+        # 1. Build the new table with the v18 shape.
+        """
+        CREATE TABLE agent_plugin_grants_v18 (
+            instance_id      TEXT NOT NULL,
+            plugin_name      TEXT NOT NULL,
+            tool_name        TEXT,
+            trust_tier       TEXT NOT NULL DEFAULT 'yellow'
+                             CHECK (trust_tier IN ('green', 'yellow', 'red')),
+            granted_at_seq   INTEGER NOT NULL,
+            granted_by       TEXT,
+            granted_at       TEXT NOT NULL,
+            revoked_at_seq   INTEGER,
+            revoked_at       TEXT,
+            revoked_by       TEXT,
+            reason           TEXT,
+            PRIMARY KEY (instance_id, plugin_name, tool_name),
+            FOREIGN KEY (instance_id)
+                REFERENCES agents(instance_id) ON DELETE CASCADE
+        );
+        """,
+        # 2. Copy every existing row as a plugin-level grant
+        #    (tool_name = NULL → matches the ADR-0043 semantic).
+        """
+        INSERT INTO agent_plugin_grants_v18
+            (instance_id, plugin_name, tool_name, trust_tier,
+             granted_at_seq, granted_by, granted_at,
+             revoked_at_seq, revoked_at, revoked_by, reason)
+        SELECT
+            instance_id, plugin_name, NULL, trust_tier,
+            granted_at_seq, granted_by, granted_at,
+            revoked_at_seq, revoked_at, revoked_by, reason
+        FROM agent_plugin_grants;
+        """,
+        # 3. Drop the old table.
+        "DROP TABLE agent_plugin_grants;",
+        # 4. Rename the new table in.
+        "ALTER TABLE agent_plugin_grants_v18 RENAME TO agent_plugin_grants;",
+        # 5. Recreate the active-row index from v14 (DROP TABLE
+        #    discards it along with the old table).
+        "CREATE INDEX IF NOT EXISTS idx_plugin_grants_active "
+            "ON agent_plugin_grants(instance_id) "
+            "WHERE revoked_at_seq IS NULL;",
+        # 6. Create the new partial-unique index that enforces
+        #    "at most one plugin-level grant per (agent, plugin)"
+        #    in the NULL-tool_name partition. The PRIMARY KEY can't
+        #    do this on its own — SQLite allows multiple NULL
+        #    combinations in a composite PK.
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_plugin_grants_plugin_level "
+            "ON agent_plugin_grants(instance_id, plugin_name) "
+            "WHERE tool_name IS NULL;",
     ),
 }

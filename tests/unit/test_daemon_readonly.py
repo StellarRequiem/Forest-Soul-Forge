@@ -148,11 +148,14 @@ class TestHealth:
         # dial), v13 added scheduled_task_state for the ADR-0041
         # scheduler's persistence (Burst 90), v14 added
         # agent_plugin_grants (Burst 113a), v15 added agents.posture
-        # (Burst 114), and v16 added memory_procedural_shortcuts
-        # (Burst 178, ADR-0054 T1). Daemon reports the registry's
+        # (Burst 114), v16 added memory_procedural_shortcuts
+        # (Burst 178, ADR-0054 T1), v17 added agent_catalog_grants
+        # (Burst 219, ADR-0060 T1), and v18 added the tool_name
+        # column on agent_plugin_grants for per-tool granularity
+        # (Burst 235, ADR-0053 T1). Daemon reports the registry's
         # live schema_version; assertion tracks the live value
         # rather than a stale literal.
-        assert body["schema_version"] == 16
+        assert body["schema_version"] == 18
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"

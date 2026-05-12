@@ -38,11 +38,13 @@ from forest_soul_forge.registry.tables.procedural_shortcuts import (
 # Schema version + table presence
 # ---------------------------------------------------------------------------
 
-def test_schema_version_is_16():
-    """v16 was introduced by ADR-0054 T1. If a future migration bumps
-    it, that landing should add a clear entry in MIGRATIONS[N] +
-    update DDL_STATEMENTS — the test itself bumps to track."""
-    assert SCHEMA_VERSION == 16
+def test_schema_version_is_18():
+    """v16 was introduced by ADR-0054 T1. Subsequent migrations:
+    v17 (ADR-0060 T1, B219, agent_catalog_grants), v18 (ADR-0053
+    T1, B235, agent_plugin_grants.tool_name). Each migration bump
+    should add a clear MIGRATIONS[N] entry + update DDL_STATEMENTS
+    — the test itself bumps to track."""
+    assert SCHEMA_VERSION == 18
 
 
 def test_fresh_install_creates_procedural_shortcuts_table(tmp_path: Path):
@@ -585,6 +587,10 @@ def test_v15_to_v16_upgrade(tmp_path: Path):
             "WHERE type='table' AND name='memory_procedural_shortcuts';"
         )
         assert cur.fetchone() is not None
-        assert reg.schema_version() == 16
+        # Current schema floor — v16 was the ADR-0054 introduction
+        # version; later migrations (v17 ADR-0060, v18 ADR-0053)
+        # are additive. Track the live SCHEMA_VERSION so this test
+        # is honest after each bump.
+        assert reg.schema_version() == 18
     finally:
         reg.close()
