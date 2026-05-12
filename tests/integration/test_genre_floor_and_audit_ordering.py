@@ -205,8 +205,15 @@ def test_tool_catalog_includes_mcp_call_v1(daemon_env):
         )
 
 
-def test_traits_endpoint_lists_42_roles(daemon_env):
-    """GET /traits surfaces the 42-role roster post-Burst-124."""
+def test_traits_endpoint_lists_44_roles(daemon_env):
+    """GET /traits surfaces the 44-role roster.
+
+    Started at 42 roles post-Burst-124 (the role-genre dropdown fix).
+    Two roles added since: ``assistant`` (ADR-0047 / B135) and
+    ``experimenter`` (ADR-0056 / B188). Counted-from-disk every
+    bump so the assertion tracks the trait_tree.yaml roster
+    rather than a stale literal.
+    """
     app = daemon_env["app"]
     with TestClient(app) as client:
         resp = client.get("/traits")
@@ -219,6 +226,8 @@ def test_traits_endpoint_lists_42_roles(daemon_env):
             role_count = len(roles)
         else:
             pytest.skip(f"unexpected /traits shape: {type(body)}")
-        assert role_count == 42, (
-            f"trait engine should have 42 roles post-Burst-124; got {role_count}"
+        assert role_count == 44, (
+            f"trait engine should have 44 roles "
+            f"(42 from B124 + assistant B135 + experimenter B188); "
+            f"got {role_count}"
         )
