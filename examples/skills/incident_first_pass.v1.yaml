@@ -1,0 +1,82 @@
+schema_version: 1
+name: incident_first_pass
+version: '1'
+description: |
+  Light-weight incident triage — different from the ADR-0033 swarm
+  chain (LogLurker.morning_sweep → AnomalyAce → ResponseRogue →
+  VaultWarden) which is the full coordinated response. This is the
+  one-agent first-pass: scan recent logs for a pattern, verify
+  chain integrity, and produce a "what looks anomalous" report.
+
+  Use case: a security_low agent (log_lurker) on a schedule that
+  isn't worth waking the full swarm for — confidence-low first-pass
+  that produces a finding the operator can escalate manually if it
+  matters.
+
+requires:
+  - log_scan.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+
+inputs:
+  type: object
+  required: [log_paths, pattern, since]
+  properties:
+    log_paths:
+      type: array
+      items:
+        type: string
+      description: >
+        Absolute paths to log files or directories. log_scan walks
+        directories recursively.
+    pattern:
+      type: string
+      description: >
+        Regex to scan for. Compose multi-signal scans with '|'
+        (e.g. "401 Unauthorized|403 Forbidden|429 Too Many").
+    since:
+      type: string
+      description: >
+        Natural-language time window — e.g. "last 24 hours",
+        "since 2026-05-10".
+
+steps:
+  - id: scan
+    tool: log_scan.v1
+    args:
+      paths: ${inputs.log_paths}
+      pattern: ${inputs.pattern}
+
+  - id: chain_check
+    tool: audit_chain_verify.v1
+    args: {}
+
+  - id: triage
+    tool: llm_think.v1
+    args:
+      prompt: |
+        Scan summary:
+          - pattern: ${inputs.pattern}
+          - window: ${inputs.since}
+          - match count: ${scan.out.match_count}
+          - files scanned: ${scan.out.files_scanned}
+          - first few matches: ${scan.out.matches}
+
+        Chain integrity check: ${chain_check.out}
+
+        Produce a one-paragraph first-pass triage:
+          1. Severity hint (low / medium / high) — based on match
+             count + which patterns lit up.
+          2. What kind of pattern this looks like (auth failure
+             cluster, rate-limit spike, scan attempts, etc.).
+          3. ONE recommended next step the operator should take.
+             Be specific.
+
+        If the scan found nothing or only a small benign-looking
+        count, say so plainly — don't manufacture severity.
+
+output:
+  triage_report: ${triage.out.response}
+  match_count: ${scan.out.match_count}
+  chain_ok: ${chain_check.out.ok}
+  pattern: ${inputs.pattern}

@@ -1,0 +1,66 @@
+schema_version: 1
+name: release_notes
+version: '1'
+description: |
+  Generate user-facing release notes from a raw multi-commit diff.
+  Three-step: commit_message structures the diff, text_summarize
+  compresses to 3 bullets, tone_shift adapts the result to the
+  target audience and voice ("friendly" for end users, "technical"
+  for engineers, "concise" for changelogs).
+
+  Use case: a software_engineer agent or operator runs this at the
+  end of a sprint/burst-arc; the operator pastes the output into
+  the release notes channel / GitHub release / changelog file.
+
+requires:
+  - commit_message.v1
+  - text_summarize.v1
+  - tone_shift.v1
+
+inputs:
+  type: object
+  required: [diff, audience, tone]
+  properties:
+    diff:
+      type: string
+      description: >
+        Multi-commit diff or aggregated change description for the
+        release period. Output of `git log --stat` plus changes
+        works well.
+    audience:
+      type: string
+      description: >
+        Who the notes are for — "end_users", "operators",
+        "developers". Shapes the technical depth that survives.
+    tone:
+      type: string
+      description: >
+        Target voice — "friendly", "technical", "concise",
+        "celebratory". Used by the final tone_shift step.
+
+steps:
+  - id: structure
+    tool: commit_message.v1
+    args:
+      diff: ${inputs.diff}
+      scope: ""
+
+  - id: bulletize
+    tool: text_summarize.v1
+    args:
+      text: |
+        Audience: ${inputs.audience}
+        Source commit message:
+        ${structure.out.response}
+
+  - id: voice
+    tool: tone_shift.v1
+    args:
+      text: ${bulletize.out.response}
+      target_tone: ${inputs.tone}
+      preserve: "version numbers, specific feature names, any breaking-change callouts"
+
+output:
+  release_notes: ${voice.out.response}
+  structured_commit_message: ${structure.out.response}
+  bullet_draft: ${bulletize.out.response}

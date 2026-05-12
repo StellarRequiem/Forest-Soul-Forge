@@ -1,0 +1,79 @@
+schema_version: 1
+name: memory_consolidate
+version: '1'
+description: |
+  Pull scattered memories on a topic and consolidate them into a
+  single coherent document via llm_think. Useful when an agent has
+  accumulated many small episodic memories on a recurring topic
+  and the operator wants a unified picture.
+
+  memory_recall pulls the raw episodic entries; llm_think weaves
+  them into prose. text_summarize then produces a brief executive
+  overview that sits at the top.
+
+  Use case: a knowledge_consolidator agent runs this weekly per
+  topic the operator cares about. Output is a single doc the
+  operator can read instead of scrolling through 30 individual
+  memory entries.
+
+requires:
+  - memory_recall.v1
+  - llm_think.v1
+  - text_summarize.v1
+
+inputs:
+  type: object
+  required: [topic, layer]
+  properties:
+    topic:
+      type: string
+      description: >
+        The subject to consolidate around — e.g. "vendor X
+        evaluations", "auth refactor decisions", "post-incident
+        learnings". Used as the memory_recall query.
+    layer:
+      type: string
+      description: >
+        Memory layer to pull from — "episodic" (lived events),
+        "semantic" (durable facts), or "procedural" (learned
+        how-tos). Episodic is the typical choice for activity
+        consolidation; semantic for fact-doc consolidation.
+
+steps:
+  - id: pull
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.topic}
+      layer: ${inputs.layer}
+      limit: 50
+
+  - id: consolidate
+    tool: llm_think.v1
+    args:
+      prompt: |
+        Below is a set of memory entries on the topic of
+        "${inputs.topic}" (layer=${inputs.layer}).
+
+        Write a coherent prose document that consolidates them into
+        a single narrative. Cover:
+          - The chronological arc (if there is one)
+          - Recurring themes / patterns
+          - Contradictions or shifts in position (call them out
+            explicitly)
+          - Open questions left unresolved
+
+        Don't invent details. If an entry is too vague to use,
+        skip it rather than embellish.
+
+        Memory entries:
+        ${pull.out}
+
+  - id: tldr
+    tool: text_summarize.v1
+    args:
+      text: ${consolidate.out.response}
+
+output:
+  consolidated_doc: ${consolidate.out.response}
+  executive_summary: ${tldr.out.response}
+  source_count: ${pull.out.count}

@@ -1,0 +1,54 @@
+schema_version: 1
+name: agent_activity_digest
+version: '1'
+description: |
+  Generate a per-agent activity digest covering recent dispatches
+  from memory and the audit chain. Uses memory_recall to surface
+  what's been on this agent's mind, then text_summarize to compress
+  into a 3-bullet snapshot.
+
+  Different from morning_briefing — that's operator-facing; this is
+  agent-facing self-reflection or operator-facing "what is this
+  agent up to" inspection.
+
+  Use case: an operator_companion checks in on a long-running 24/7
+  agent (dashboard_watcher, signal_listener) and produces a
+  digest that surfaces drift or patterns the operator should know
+  about.
+
+requires:
+  - memory_recall.v1
+  - text_summarize.v1
+
+inputs:
+  type: object
+  required: [agent_focus_topic]
+  properties:
+    agent_focus_topic:
+      type: string
+      description: >
+        Topic or domain to filter memories on
+        (e.g. "incidents", "tool failures", "vendor research").
+        Pass "" for an undirected recall — the model digests
+        everything recent.
+
+steps:
+  - id: recall
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.agent_focus_topic}
+      layer: episodic
+      limit: 25
+
+  - id: digest
+    tool: text_summarize.v1
+    args:
+      text: |
+        Topic filter: ${inputs.agent_focus_topic}
+        Recent memories (most recent first):
+        ${recall.out}
+
+output:
+  digest: ${digest.out.response}
+  memory_hit_count: ${recall.out.count}
+  topic: ${inputs.agent_focus_topic}

@@ -1,0 +1,78 @@
+schema_version: 1
+name: agent_introspect
+version: '1'
+description: |
+  Self-reflection skill — an agent introspects its own recent
+  memory + dispatches and produces a "what am I currently focused
+  on, what's my working style this week" report. The output is
+  meta-cognitive: not what the agent DID but what its patterns
+  reveal.
+
+  Different from agent_activity_digest (which is third-person
+  "what is this agent up to"). This is first-person —
+  the agent talking about itself, suitable for sharing with
+  the operator or with peer agents in a lineage chain.
+
+  Use case: a knowledge_consolidator / experimenter / assistant
+  agent runs this weekly as part of a self-review cycle. Output
+  can land in memory_write for later memory_consolidate calls.
+
+requires:
+  - memory_recall.v1
+  - llm_think.v1
+  - text_summarize.v1
+
+inputs:
+  type: object
+  required: [reflection_window, voice]
+  properties:
+    reflection_window:
+      type: string
+      description: >
+        How far back to recall — phrased as a memory query
+        (e.g. "this week", "last 7 days", "since the auth refactor").
+    voice:
+      type: string
+      description: >
+        Self-narrative voice — "candid", "professional", "playful",
+        "anxious", "confident". Shapes how the agent talks about
+        itself. Operators choosing the agent's reflective tone
+        intentionally affects what self-perceptions surface.
+
+steps:
+  - id: pull
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.reflection_window}
+      layer: episodic
+      limit: 40
+
+  - id: reflect
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are the agent whose recent activity is below. Write a
+        first-person reflection covering:
+
+          1. What you've been focused on
+          2. Patterns you notice in your own behavior
+            (recurring tools, recurring failure modes, blind spots)
+          3. What's working
+          4. What you'd like to change
+
+        Voice: {voice}. Don't be performative — describe what you
+        actually see in the memories below, not what sounds good.
+        If the memories don't support a claim, don't make it.
+
+        Recent activity:
+        ${pull.out}
+
+  - id: tldr
+    tool: text_summarize.v1
+    args:
+      text: ${reflect.out.response}
+
+output:
+  reflection: ${reflect.out.response}
+  summary: ${tldr.out.response}
+  source_memory_count: ${pull.out.count}
