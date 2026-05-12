@@ -88,6 +88,11 @@
         <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M11 3 L13 5 L8 10 L7 13 L4 10 L9 5 Z M3 13 L4 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>
         Tools
       </button>
+      <!-- ADR-0055 M4 (B228): Marketplace tab — browse + install plugins -->
+      <button class="tab" data-tab="marketplace" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5 H14 L13 12 H3 Z M5 5 V3 H11 V5 M6 8 H10" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>
+        Marketplace
+      </button>
       <button class="tab" data-tab="memory" role="tab" aria-selected="false">
         <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3 C3 3 2 5 2 7 C2 8 2.5 9 3 9.5 C3 11 4 13 6 13 L10 13 C12 13 13 11 13 9.5 C13.5 9 14 8 14 7 C14 5 13 3 11 3 Z M8 3 V13" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
         Memory
@@ -445,6 +450,48 @@
         <div class="panel__body">
           <div id="mcp-plugins-list" class="mcp-plugins-list">
             <div class="empty">Loading plugins…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Marketplace tab — ADR-0055 M4 (B228).                       -->
+    <!-- Browse + install plugins from configured registries.        -->
+    <!-- Renders against GET /marketplace/index; install goes via    -->
+    <!-- POST /marketplace/install (M3, B227). Filters: text search  -->
+    <!-- + side_effects tier. Every entry carries an "untrusted"     -->
+    <!-- badge until M6 signing enforcement lands.                   -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="marketplace" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Marketplace</h2>
+          <div class="panel__actions">
+            <span class="muted" id="marketplace-status">—</span>
+            <button class="btn btn--ghost btn--sm" id="marketplace-refresh" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div class="marketplace-filters" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
+            <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:240px;">
+              <label for="marketplace-search" class="lbl">search</label>
+              <input type="text" id="marketplace-search" class="inp inp--sm" placeholder="name, description, capability..." />
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <label for="marketplace-tier-filter" class="lbl">max side_effects</label>
+              <select id="marketplace-tier-filter" class="inp inp--sm">
+                <option value="">all</option>
+                <option value="read_only">read_only only</option>
+                <option value="network">≤ network</option>
+                <option value="filesystem">≤ filesystem</option>
+                <option value="external">≤ external (all)</option>
+              </select>
+            </div>
+          </div>
+          <div class="marketplace-meta muted" id="marketplace-meta" style="font-size:11px;font-family:var(--mono,monospace);margin-bottom:12px;">—</div>
+          <div id="marketplace-list" class="marketplace-list">
+            <div class="empty">Loading marketplace…</div>
           </div>
         </div>
       </div>
