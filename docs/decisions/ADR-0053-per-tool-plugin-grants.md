@@ -1,7 +1,7 @@
 # ADR-0053 — Per-Tool Plugin Grants
 
-**Status:** Accepted 2026-05-12. T1 shipped in Burst 235. T2-T6
-queued. Pairs with ADR-0048 (Computer Control Allowance) —
+**Status:** Accepted 2026-05-12. T1 + T2 shipped in Bursts 235 +
+237. T3-T6 queued. Pairs with ADR-0048 (Computer Control Allowance) —
 directly unlocks the per-tool toggles in the ADR-0048 T4 Advanced
 disclosure that B165 shipped as a read-only reference table.
 Userspace-only delivery — uses existing audit-chain event family;
@@ -222,7 +222,7 @@ plugin-level via the NULL-coalesce.
 | # | Tranche | Description | Effort |
 |---|---|---|---|
 | T1 | Schema migration v17→v18 | **DONE B235** — Table rebuild (CREATE new → INSERT SELECT → DROP → RENAME) because PRIMARY KEY change requires it. ADD COLUMN was insufficient. Two new indexes: `idx_plugin_grants_active` re-created post-rename + `ux_plugin_grants_plugin_level` partial-unique on (instance_id, plugin_name) WHERE tool_name IS NULL. All existing rows migrate as plugin-level grants (NULL tool_name) — byte-for-byte effective-grants compatibility with v17. | shipped |
-| T2 | Registry surface | `plugin_grants.grant(instance_id, plugin, tool=None, ...)` + `revoke(instance_id, plugin, tool=None, ...)` + `list_active` returns the new column | 0.5 burst |
+| T2 | Registry surface | **DONE B237** — `PluginGrant` dataclass gains `tool_name: str \| None` + `is_plugin_level` / `is_per_tool` convenience properties. `grant()` + `revoke()` accept optional `tool_name` kwarg (default `None` = plugin-level, ADR-0043-compatible). `get_active()` accepts optional `tool_name` to look up the exact triple (no fallback — that's T4's job). New `list_active_for_plugin()` returns both plugin-level and per-tool grants ordered plugin-level-first for the T4 resolver. `active_plugin_names()` uses `SELECT DISTINCT` so per-tool + plugin-level rows on the same plugin yield one entry. 8 new unit tests cover the per-tool path; 32 pre-existing plugin-grants tests stay green proving backward compat. Defensive dispatcher fix: `_load_plugin_grants_view` filters to `is_plugin_level` so pre-T4 consumers don't accidentally see per-tool tiers in the flat plugin→tier dict. | shipped |
 | T3 | HTTP API | POST/DELETE accept `tool_name` field; new path `/tools/{tool_name}` for per-tool revocation; GET response includes `tool_name` per row | 0.5 burst |
 | T4 | Dispatcher resolution | Specificity-wins lookup in the grants step of the governance pipeline | 0.5 burst |
 | T5 | Frontend UI | ADR-0048 T4 Advanced disclosure: read-only table → interactive toggle grid wired to the new endpoints | 1 burst |

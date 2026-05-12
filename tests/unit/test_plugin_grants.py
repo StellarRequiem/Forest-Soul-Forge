@@ -304,3 +304,300 @@ def test_load_constitution_mcp_allowlist_filters_non_strings(tmp_path: Path):
     )
     result = _load_constitution_mcp_allowlist(cpath)
     assert result == ("github", "linear")
+
+
+# ============================================================================
+# ADR-0053 T2 (Burst 237) — per-tool grant surface
+# ============================================================================
+# Coverage for the optional ``tool_name`` parameter on grant / revoke /
+# get_active / list_active / list_active_for_plugin. Plugin-level
+# semantics (tool_name=None, the ADR-0043 original) stay unchanged —
+# the 32 pre-existing tests above already prove that path. These
+# tests add the per-tool path: per-tool grants coexist with plugin-
+# level grants for the same (agent, plugin), get_active distinguishes
+# them by the triple key, revoke targets only the specified triple,
+# active_plugin_names dedupes when both grant types exist.
+
+def test_grant_per_tool_creates_distinct_row(reg: Registry):
+    """A per-tool grant is a separate row from any plugin-level
+    grant on the same (agent, plugin). list_active returns both."""
+    _seed_agent(reg)
+
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="soulux-computer-control",
+        trust_tier="yellow",
+        granted_at_seq=10,
+        granted_by="alex",
+        reason="Restricted preset",
+    )
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="soulux-computer-control",
+        tool_name="computer_screenshot.v1",
+        trust_tier="green",
+        granted_at_seq=11,
+        granted_by="alex",
+        reason="elevate just the screenshot tool",
+    )
+
+    rows = reg.plugin_grants.list_active("agent_a")
+    assert len(rows) == 2
+    plugin_level = [r for r in rows if r.is_plugin_level]
+    per_tool = [r for r in rows if r.is_per_tool]
+    assert len(plugin_level) == 1
+    assert len(per_tool) == 1
+    assert per_tool[0].tool_name == "computer_screenshot.v1"
+    assert per_tool[0].trust_tier == "green"
+    assert plugin_level[0].trust_tier == "yellow"
+
+
+def test_get_active_distinguishes_plugin_level_from_per_tool(reg: Registry):
+    """get_active(..., tool_name=None) returns plugin-level only;
+    get_active(..., tool_name='X') returns per-tool only. No
+    fallback between them — that's the T4 resolver's job, not the
+    storage layer's."""
+    _seed_agent(reg)
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="slack",
+        trust_tier="yellow",
+        granted_at_seq=20,
+    )
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="slack",
+        tool_name="slack_send_message.v1",
+        trust_tier="green",
+        granted_at_seq=21,
+    )
+
+    plug = reg.plugin_grants.get_active("agent_a", "slack")
+    assert plug is not None and plug.is_plugin_level
+    assert plug.trust_tier == "yellow"
+
+    per = reg.plugin_grants.get_active(
+        "agent_a", "slack", tool_name="slack_send_message.v1",
+    )
+    assert per is not None and per.is_per_tool
+    assert per.trust_tier == "green"
+
+    # No fallback: asking for a tool that has no per-tool row
+    # returns None even though the plugin-level row exists.
+    missing = reg.plugin_grants.get_active(
+        "agent_a", "slack", tool_name="slack_create_channel.v1",
+    )
+    assert missing is None
+
+
+def test_revoke_per_tool_leaves_plugin_level_intact(reg: Registry):
+    """Revoking the per-tool grant must not touch the plugin-level
+    row on the same (agent, plugin). Mirrors the inverse case."""
+    _seed_agent(reg)
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="github",
+        trust_tier="yellow",
+        granted_at_seq=30,
+    )
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="github",
+        tool_name="github_merge_pr.v1",
+        trust_tier="red",  # extra-cautious — operator wants gating
+        granted_at_seq=31,
+    )
+
+    affected = reg.plugin_grants.revoke(
+        instance_id="agent_a",
+        plugin_name="github",
+        tool_name="github_merge_pr.v1",
+        revoked_at_seq=32,
+        revoked_by="alex",
+        reason="too risky",
+    )
+    assert affected is True
+
+    # Plugin-level survives.
+    plug = reg.plugin_grants.get_active("agent_a", "github")
+    assert plug is not None
+    assert plug.is_active
+
+    # Per-tool is gone from active set.
+    per = reg.plugin_grants.get_active(
+        "agent_a", "github", tool_name="github_merge_pr.v1",
+    )
+    assert per is None
+
+
+def test_revoke_plugin_level_leaves_per_tool_intact(reg: Registry):
+    """The inverse: revoking the plugin-level grant must not touch
+    a per-tool row on the same (agent, plugin)."""
+    _seed_agent(reg)
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="linear",
+        trust_tier="yellow",
+        granted_at_seq=40,
+    )
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="linear",
+        tool_name="linear_create_issue.v1",
+        trust_tier="green",
+        granted_at_seq=41,
+    )
+
+    affected = reg.plugin_grants.revoke(
+        instance_id="agent_a",
+        plugin_name="linear",
+        # tool_name=None → revokes plugin-level
+        revoked_at_seq=42,
+        revoked_by="alex",
+    )
+    assert affected is True
+
+    assert reg.plugin_grants.get_active("agent_a", "linear") is None
+    per = reg.plugin_grants.get_active(
+        "agent_a", "linear", tool_name="linear_create_issue.v1",
+    )
+    assert per is not None and per.is_active
+
+
+def test_list_active_for_plugin_orders_plugin_level_first(reg: Registry):
+    """The dispatcher's T4 resolver wants to scan plugin-level first
+    (the fallback), then per-tool (the override). list_active_for_plugin
+    returns rows in that order so the resolver can short-circuit."""
+    _seed_agent(reg)
+    # Insert per-tool first to prove the ordering is by query, not
+    # insertion order.
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="slack",
+        tool_name="slack_send_message.v1",
+        trust_tier="green",
+        granted_at_seq=50,
+    )
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="slack",
+        tool_name="slack_react.v1",
+        trust_tier="yellow",
+        granted_at_seq=51,
+    )
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="slack",
+        trust_tier="yellow",
+        granted_at_seq=52,
+    )
+
+    rows = reg.plugin_grants.list_active_for_plugin("agent_a", "slack")
+    assert len(rows) == 3
+    # Plugin-level (NULL tool_name) sorts first.
+    assert rows[0].is_plugin_level
+    # Per-tool rows follow in tool_name alphabetical order.
+    assert rows[1].tool_name == "slack_react.v1"
+    assert rows[2].tool_name == "slack_send_message.v1"
+
+
+def test_active_plugin_names_dedupes_when_per_tool_and_plugin_level_coexist(
+    reg: Registry,
+):
+    """active_plugin_names is the dispatcher's cheap allowlist input.
+    Per-tool + plugin-level rows on the same plugin should yield ONE
+    plugin name, not two — the DISTINCT in the query enforces this."""
+    _seed_agent(reg)
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="slack",
+        trust_tier="yellow",
+        granted_at_seq=60,
+    )
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="slack",
+        tool_name="slack_send_message.v1",
+        trust_tier="green",
+        granted_at_seq=61,
+    )
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="github",
+        tool_name="github_list_issues.v1",
+        trust_tier="green",
+        granted_at_seq=62,
+    )
+
+    names = reg.plugin_grants.active_plugin_names("agent_a")
+    assert names == {"slack", "github"}  # not 3 entries — per-tool dedupes
+
+
+def test_per_tool_grant_idempotent_on_redo(reg: Registry):
+    """Re-granting the same triple (INSERT OR REPLACE) overwrites,
+    so a duplicate grant at the same (agent, plugin, tool) leaves
+    one active row, not two."""
+    _seed_agent(reg)
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="slack",
+        tool_name="slack_send_message.v1",
+        trust_tier="yellow",
+        granted_at_seq=70,
+        granted_by="alex",
+    )
+    # Re-grant with a different trust_tier — should overwrite.
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="slack",
+        tool_name="slack_send_message.v1",
+        trust_tier="green",
+        granted_at_seq=71,
+        granted_by="alex",
+    )
+
+    rows = reg.plugin_grants.list_active("agent_a")
+    assert len(rows) == 1
+    assert rows[0].trust_tier == "green"  # newer tier wins
+    assert rows[0].granted_at_seq == 71
+
+
+def test_per_tool_grant_then_revoke_then_regrant_creates_fresh_active(
+    reg: Registry,
+):
+    """Revoking flips the row to historical; re-granting at the
+    same triple replaces the historical row with a fresh active
+    one (INSERT OR REPLACE semantics). list_active sees only the
+    fresh row; list_all still sees the historical revocation
+    isn't there (it was overwritten — that's the documented
+    semantic on grant()'s docstring)."""
+    _seed_agent(reg)
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="github",
+        tool_name="github_merge_pr.v1",
+        trust_tier="red",
+        granted_at_seq=80,
+    )
+    reg.plugin_grants.revoke(
+        instance_id="agent_a",
+        plugin_name="github",
+        tool_name="github_merge_pr.v1",
+        revoked_at_seq=81,
+    )
+    # Active list is empty
+    assert reg.plugin_grants.list_active("agent_a") == []
+
+    # Re-grant
+    reg.plugin_grants.grant(
+        instance_id="agent_a",
+        plugin_name="github",
+        tool_name="github_merge_pr.v1",
+        trust_tier="yellow",
+        granted_at_seq=82,
+    )
+    active = reg.plugin_grants.list_active("agent_a")
+    assert len(active) == 1
+    assert active[0].is_active
+    assert active[0].trust_tier == "yellow"
+    assert active[0].granted_at_seq == 82

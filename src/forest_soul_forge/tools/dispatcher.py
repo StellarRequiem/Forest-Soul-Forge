@@ -1291,12 +1291,29 @@ class ToolDispatcher:
         which is distinct from None — the step then knows the table
         IS wired but the agent has no grants, so per-grant tier is
         irrelevant for any tool call.
+
+        Post-ADR-0053 T2 (B237): the underlying ``list_active``
+        returns BOTH plugin-level and per-tool grants. This view
+        flattens to ``plugin_name -> trust_tier`` and only makes
+        sense for plugin-level rows; per-tool granularity needs
+        the T4 specificity-wins resolver, not a flat dict. Filter
+        here to plugin-level rows so this view's pre-B237 contract
+        ("the trust_tier the agent has on plugin X") stays exact
+        even when per-tool grants exist on the same plugin. When
+        T4 lands, it can replace this method with a richer view
+        keyed by (plugin, tool) — current call site is the
+        ADR-0045 PostureGateStep forward-compat hook that doesn't
+        consume per-tool tiers yet.
         """
         if self.plugin_grants is None:
             return None
         try:
             grants = self.plugin_grants.list_active(instance_id)
-            return {g.plugin_name: g.trust_tier for g in grants}
+            return {
+                g.plugin_name: g.trust_tier
+                for g in grants
+                if g.is_plugin_level
+            }
         except Exception:
             return None
 
