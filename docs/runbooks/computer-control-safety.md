@@ -82,8 +82,9 @@ allowances" preset row.
 
 ### Restricted
 
-The plugin grant is **revoked**. The assistant has zero access to
-any of the six tools — including the read-only ones. Use this when:
+**All grants revoked** — plugin-level AND any per-tool grants.
+The assistant has zero access to any of the six tools, including
+the read-only ones. Use this when:
 
 - You're handing the chat over to someone else and don't want
   the assistant to see your screen
@@ -99,29 +100,29 @@ touch the computer.
 
 ### Specific (default for the cautious operator)
 
-Plugin granted at **standard** trust tier. Effect today:
+**No plugin-level grant. Per-tool grants seeded for the two
+read_only tools** (`computer_screenshot`, `computer_read_clipboard`)
+at yellow tier. Operator extends via the Advanced toggle grid
+(see below) to add action tools selectively.
 
-- Read tools (`computer_screenshot`, `computer_read_clipboard`)
-  fire freely — the assistant can see your screen + read your
-  clipboard whenever it asks.
-- Action tools (`computer_click`, `computer_type`,
-  `computer_run_app`, `computer_launch_url`) require **per-call
-  approval**. Each time the assistant wants to click or type,
-  you'll see an approval prompt in the Approvals tab (or the
-  in-Chat floating prompt) showing the args before approving.
+Effect:
+
+- The assistant can see your screen + read your clipboard
+  whenever it asks (the two seeded per-tool grants).
+- Every other tool stays refused unless you toggle it on in
+  Advanced.
 
 This is the recommended default for operators who want the
-assistant to be useful but want to stay in the loop on every
-action.
+assistant to be useful for observation but want to extend
+write access one tool at a time.
 
 ### Full
 
-Plugin granted at **elevated** trust tier. Today this has the
-**same effect** as Specific because ADR-0045 T3 per-grant-tier
-enforcement is forward-compat substrate (operator preference is
-recorded, not yet enforced). When that substrate flips on, Full
-will mean granted-skip-approval for action tools — the assistant
-acts without per-call gating.
+**Plugin-level grant at green tier covers all six tools** +
+per-tool overrides cleared. Combined with green agent posture,
+the assistant skips per-call approval for action tools (per the
+ADR-0045 T3 posture × per-grant matrix — yellow agent + green
+grant downgrades to ungated for THIS plugin's calls).
 
 Use this when:
 
@@ -133,6 +134,49 @@ Use this when:
 **Don't pick Full as a default.** Per-call approval is your
 single biggest visibility surface into what the assistant
 actually does.
+
+### Per-tool granularity in Advanced (ADR-0053)
+
+Expand the "Advanced — per-tool toggles" disclosure below the
+preset row to see all six tools with individual checkboxes. The
+**Per-tool grant** column shows the current coverage state:
+
+- `(per-tool <tier>)` — an explicit per-tool grant exists. This
+  override takes precedence over the plugin-level grant for THIS
+  tool (specificity-wins resolution per ADR-0053 D3).
+- `(via plugin-level)` — no per-tool row exists; this tool is
+  covered by the plugin-level grant.
+- blank — no grant covers this tool. It will be refused at
+  dispatch.
+
+**Toggle semantics:**
+
+- **Check a row that was unchecked** → issues a per-tool grant
+  at yellow tier (cautious default; per-call approval still
+  fires for action tools, none for read tools).
+- **Uncheck a row that had a per-tool grant** → revokes that
+  per-tool grant. If the plugin-level grant also exists, the
+  tool falls back to plugin-level coverage; otherwise it
+  becomes refused.
+- **Uncheck a row covered ONLY by the plugin-level grant** →
+  issues a per-tool grant at **red** tier. This is the "carve
+  out a denial inside a broad grant" pattern: the rest of the
+  plugin stays open under the plugin-level grant; this one
+  tool gets explicitly refused via the per-tool override.
+
+**Canonical configurations:**
+
+| Goal | Setup |
+|---|---|
+| Let the assistant SEE but not act | Specific preset (seeds the 2 read tools). Don't toggle any others. |
+| Let it see + click but never type | Specific + toggle on `computer_click.v1`. Leave type/run_app/launch_url off. |
+| Open it all up except merging PRs (hypothetical mirror to a GitHub plugin) | Full + uncheck the specific tool you want denied; it lands as a red per-tool override against the green plugin-level grant. |
+| Reset cleanly | Restricted. Everything zeroed. |
+
+Per-tool grants emit `agent_plugin_granted` audit events with a
+non-null `tool_name` field — see the Audit-chain forensics section
+below for the jq query that filters per-tool grants from
+plugin-level grants.
 
 ---
 
@@ -189,6 +233,16 @@ jq 'select(.event_type == "agent_posture_changed")' \
 # Did anyone change allowances?
 jq 'select(.event_type | startswith("agent_plugin_"))' \
    examples/audit_chain.jsonl
+
+# Only the per-tool grant/revoke operations (ADR-0053 surface):
+jq 'select(.event_type | startswith("agent_plugin_")) |
+    select(.event_data.tool_name != null)' \
+   examples/audit_chain.jsonl
+
+# Only the plugin-level grant/revoke operations (ADR-0043 original):
+jq 'select(.event_type | startswith("agent_plugin_")) |
+    select(.event_data.tool_name == null)' \
+   examples/audit_chain.jsonl
 ```
 
 The chain is append-only and hash-linked (ADR-0005); tampering is
@@ -219,8 +273,14 @@ preset and posture **green**, what can it do?
 - `computer_click.v1` requires integer coords — no string-
   injection into the osascript body.
 - All four action tools surface `requires_human_approval=true`
-  in the manifest. Even at Full preset today, per-call approval
-  fires (ADR-0045 T3 hasn't enabled granted-skip yet).
+  in the manifest. The Full preset (green tier plugin-level
+  grant) combined with green agent posture is what unlocks
+  granted-skip behavior per the ADR-0045 T3 posture × per-grant
+  matrix; without both green signals, per-call approval fires.
+  Per ADR-0053 D3 the per-tool resolver applies the same matrix
+  using the per-tool grant's tier when one exists, so a yellow
+  per-tool grant on a green plugin-level grant still gates THAT
+  specific tool while leaving the others ungated.
 
 **Bounded by posture:**
 

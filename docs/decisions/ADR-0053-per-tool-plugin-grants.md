@@ -1,11 +1,12 @@
 # ADR-0053 — Per-Tool Plugin Grants
 
-**Status:** Accepted 2026-05-12. T1 + T2 + T3 + T4 + T5 shipped
-in Bursts 235 + 237 + 238 + 239 + 240. **Operator-usable end-
-to-end via the Chat-tab Advanced disclosure** — per-tool
-toggles wire directly to the new ADR-0053 endpoints and the
-dispatcher honors specificity-wins resolution. T6 (cross-doc
-updates) is the only tranche remaining. Pairs with ADR-0048 (Computer Control Allowance) —
+**Status:** Accepted 2026-05-12. **All six tranches shipped
+2026-05-12 in Bursts 235-241.** Operator-usable end-to-end via
+the Chat-tab Advanced disclosure: per-tool toggles wire directly
+to the per-tool endpoints and the dispatcher honors specificity-
+wins resolution. Cross-doc updates (T6) closed the substrate-gap
+references in ADR-0043, ADR-0048, and
+`docs/runbooks/computer-control-safety.md`. Pairs with ADR-0048 (Computer Control Allowance) —
 directly unlocks the per-tool toggles in the ADR-0048 T4 Advanced
 disclosure that B165 shipped as a read-only reference table.
 Userspace-only delivery — uses existing audit-chain event family;
@@ -230,7 +231,7 @@ plugin-level via the NULL-coalesce.
 | T3 | HTTP API | **DONE B238** — `POST /agents/{id}/plugin-grants` body accepts optional `tool_name` field (null → plugin-level, ADR-0043 default). New route `DELETE /agents/{id}/plugin-grants/{plugin}/tools/{tool}` for per-tool revocation; the existing plugin-level DELETE is left unchanged. `GET /agents/{id}/plugin-grants` response includes `tool_name` per row (null for plugin-level grants). Per-tool DELETE targets only the (agent, plugin, tool) triple — does NOT cascade to or affect any plugin-level grant on the same plugin (the inverse holds too). `agent_plugin_granted` / `agent_plugin_revoked` event_data gain optional `tool_name` field per ADR-0053 D4; event_type stays the same so chronological queries cover both grant shapes. 8 new endpoint tests cover the per-tool path; 13 pre-existing daemon-side tests stay green proving backward compat. Plus: registered `agent_plugin_revoked` in `KNOWN_EVENT_TYPES` (pre-existing gap that was warning at every chain verification). | shipped |
 | T4 | Dispatcher resolution | **DONE B239** — New `ToolDispatcher._resolve_plugin_grant_tier(instance_id, plugin, tool)` walks `list_active_for_plugin` rows: returns the per-tool grant's tier when one matches the exact (plugin, tool) being dispatched (the override), else the plugin-level grant's tier (the fallback), else None. New `DispatchContext.plugin_grant_lookup_fn` field carries a closure over the dispatcher; `PostureGateStep` prefers it over the flat `plugin_grants_view` when wired. Pre-B239 contexts that don't wire the resolver fall back to the flat view (backward compat for legacy tests). The existing ADR-0045 posture × tier precedence (red-dominates with the yellow+green downgrade exception) applies uniformly — per-tool tiers feed the same matrix as plugin-level. 12 new tests cover the resolver behavior (6 via PostureGateStep, 6 directly against the method); 28 pre-existing posture-per-grant tests stay green proving back-compat. | shipped |
 | T5 | Frontend UI | **DONE B240** — Chat-tab Advanced disclosure went from read-only reference table to interactive per-tool toggle grid. Each row's checkbox issues or revokes a per-tool grant via the new T3 endpoints. Coverage indicator distinguishes "per-tool grant (X tier)" from "via plugin-level" so the operator sees what's overriding what. Preset semantics rewritten per ADR-0053 D5: Restricted clears all grants (plugin-level + per-tool); Specific seeds per-tool yellow grants for the two read_only tools and operator extends from there; Full issues a plugin-level green grant after clearing any per-tool overrides. Unchecking a tool currently covered by a plugin-level grant records a per-tool RED grant — the "carve out a denial inside a broad grant" use case ADR-0053 D2 calls out. | shipped |
-| T6 | Documentation | Update ADR-0048 + ADR-0043 + the operator safety guide (`docs/runbooks/computer-control-safety.md`) to reflect per-tool granularity | 0.5 burst |
+| T6 | Documentation | **DONE B241** — ADR-0048 T4 row updated from "DONE B165 (partial)" to "DONE B165 + B240 (fully)" with the substrate-gap wording struck. ADR-0043 References list gained an explicit ADR-0053 pointer so readers following the plugin-protocol chain see the per-tool extension. `docs/runbooks/computer-control-safety.md` got: refreshed three-preset descriptions matching the ADR-0053 D5 semantics (Restricted=all clear; Specific=per-tool seeds for read tools; Full=plugin-level green); a new "Per-tool granularity in Advanced" section describing the toggle grid + the carve-out-denial pattern + a canonical-configurations table; jq snippets for filtering per-tool vs plugin-level audit events; threat-model section corrected (granted-skip behavior IS shipped now, not "hasn't been enabled yet"). | shipped |
 
 Total estimate: 4 bursts.
 

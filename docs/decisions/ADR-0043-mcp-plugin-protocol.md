@@ -404,6 +404,15 @@ serve as authoring examples for community contributors.
   + audit-emit + hot-reload patterns)
 - ADR-0042 (v0.5 Product Direction — D2 SMB thesis demands
   low-friction extension)
+- **ADR-0053 (Per-Tool Plugin Grants)** — extension of follow-up
+  #2's plugin-level grant substrate to per-tool granularity.
+  Shipped end-to-end Bursts 235-240 (schema v18 → registry
+  surface → HTTP API → specificity-wins dispatcher resolver →
+  Chat-tab toggle grid → cross-doc updates). The original
+  `agent_plugin_grants` table from follow-up #2 (Burst 113a)
+  still exists and is byte-for-byte compatible — per-tool grants
+  are new rows with non-null `tool_name`, plugin-level grants
+  retain the ADR-0043 semantic via NULL `tool_name`.
 - `docs/roadmap/2026-05-04-integrations-strategy.md` (Burst 102
   framing this as the highest-leverage integration move)
 - `config/mcp_servers.yaml.example` (existing config layer this
