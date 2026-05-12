@@ -534,6 +534,46 @@ def _perform_create(
             settings.soul_output_dir, req.agent_name, instance_id
         )
 
+        # ADR-0049 T4 (Burst 243): per-agent ed25519 keypair generated
+        # at birth + bound to the agent's identity. Private key stored
+        # in the AgentKeyStore (backed by the ADR-0052 secret store);
+        # public key written to:
+        #   - the soul.md frontmatter (canonical artifact, hash-stable)
+        #   - the agents.public_key column (runtime lookup at sign /
+        #     verify time)
+        # Both copies must agree — the registry's ingest path reads
+        # public_key from the frontmatter at register_birth time, so a
+        # single source-of-truth (the bytes generated here) flows into
+        # both surfaces via the soul.md round-trip.
+        #
+        # Failure path: keygen + key-store write happens INSIDE the
+        # lock. A keystore failure raises before audit + register, so
+        # a half-born agent isn't left without a key. The artifact
+        # rollback path below catches any post-keygen failure too.
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+        from cryptography.hazmat.primitives import serialization
+        import base64 as _b64
+
+        from forest_soul_forge.security.keys import resolve_agent_key_store
+
+        _privkey_obj = Ed25519PrivateKey.generate()
+        _privkey_bytes = _privkey_obj.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        _pubkey_bytes = _privkey_obj.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        public_key_b64 = _b64.b64encode(_pubkey_bytes).decode("ascii")
+        # Store the private key BEFORE writing artifacts so a keystore
+        # failure aborts the birth before any disk side-effects.
+        _agent_key_store = resolve_agent_key_store()
+        _agent_key_store.store(instance_id, _privkey_bytes)
+
         generator = SoulGenerator(engine)
         # Pass parent_instance only when there is one — SoulGenerator
         # signs the parent linkage into the soul markdown so it has to
@@ -552,6 +592,7 @@ def _perform_create(
             tool_catalog_version=tool_catalog.version,
             genre=genre,
             genre_description=genre_description,
+            public_key=public_key_b64,
         )
         if parent_row is not None:
             gen_kwargs["parent_instance"] = parent_row.instance_id

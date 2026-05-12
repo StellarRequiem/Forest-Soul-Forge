@@ -429,8 +429,9 @@ class AgentsTable:
                     instance_id, dna, dna_full, role, agent_name,
                     parent_instance, owner_id, model_name, model_version,
                     soul_path, constitution_path, constitution_hash,
-                    created_at, status, legacy_minted, sibling_index
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    created_at, status, legacy_minted, sibling_index,
+                    public_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     instance_id,
@@ -449,6 +450,11 @@ class AgentsTable:
                     status,
                     1 if legacy_minted else 0,
                     sibling_index,
+                    # ADR-0049 T4 (Burst 243): per-agent ed25519 public
+                    # key (base64-encoded). NULL when the soul's
+                    # frontmatter lacked the field (legacy pre-v19
+                    # rebuilds + tests that bypass the birth pipeline).
+                    soul.public_key,
                 ),
             )
         except sqlite3.IntegrityError as e:

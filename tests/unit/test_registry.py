@@ -133,7 +133,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 18
+            assert r.schema_version() == 19
             assert r.list_agents() == []
             assert r.audit_tail() == []
         assert db.exists()
@@ -147,7 +147,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 18
+            assert r.schema_version() == 19
 
     def test_empty_existing_file_gets_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
@@ -158,7 +158,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 18
+            assert r.schema_version() == 19
 
     def test_schema_downgrade_raises(self, tmp_path: Path):
         """A file stamped at a version *newer* than the code refuses to open.
@@ -262,7 +262,7 @@ class TestBootstrap:
         # disclosure). The assertion tests that all migration steps
         # landed on the same pass.
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 18
+            assert r.schema_version() == 19
 
             # Data survives.
             row = r.get_agent(pre_existing)
@@ -416,7 +416,7 @@ class TestBootstrap:
 
         # Reopen — bootstrap should run MIGRATIONS[7].
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 18
+            assert r.schema_version() == 19
 
             raw = sqlite3.connect(str(db))
             raw.execute("PRAGMA foreign_keys = ON")
@@ -492,14 +492,29 @@ class TestBootstrap:
         # recreates them via CREATE INDEX IF NOT EXISTS.
         conn.execute("DROP INDEX IF EXISTS idx_memory_last_challenged;")
         conn.execute("DROP INDEX IF EXISTS idx_memory_claim_type;")
+        # ADR-0049 (v19): drop the agents.public_key column so the
+        # MIGRATIONS[19] ADD COLUMN runs against a clean shape.
+        conn.execute("ALTER TABLE agents DROP COLUMN public_key;")
+        # ADR-0060 (v17): drop the catalog_grants table + index so the
+        # MIGRATIONS[17] CREATE TABLE runs against a clean shape.
+        conn.execute("DROP INDEX IF EXISTS idx_catalog_grants_active;")
+        conn.execute("DROP TABLE IF EXISTS agent_catalog_grants;")
+        # ADR-0054 (v16): drop the memory_procedural_shortcuts table
+        # + index so the MIGRATIONS[16] CREATE TABLE runs against a
+        # clean shape.
+        conn.execute("DROP INDEX IF EXISTS idx_psh_instance;")
+        conn.execute("DROP TABLE IF EXISTS memory_procedural_shortcuts;")
         # ADR-0045 (v15): drop the posture index + column too, so the
         # MIGRATIONS[15] ADD COLUMN runs against a clean shape.
         conn.execute("DROP INDEX IF EXISTS idx_agents_posture;")
         conn.execute("ALTER TABLE agents DROP COLUMN posture;")
         # Drop the v14 plugin-grants table + its partial index — they
         # were created by DDL_STATEMENTS during bootstrap and need to
-        # be absent so MIGRATIONS[14] runs cleanly.
+        # be absent so MIGRATIONS[14] runs cleanly. (Also drops the
+        # ADR-0053 v18 ux_plugin_grants_plugin_level + tool_name
+        # column transitively — the whole table is gone.)
         conn.execute("DROP INDEX IF EXISTS idx_plugin_grants_active;")
+        conn.execute("DROP INDEX IF EXISTS ux_plugin_grants_plugin_level;")
         conn.execute("DROP TABLE IF EXISTS agent_plugin_grants;")
         # Drop the v13 scheduler-state table + its partial index too.
         conn.execute("DROP INDEX IF EXISTS idx_scheduled_task_state_breaker;")
@@ -548,7 +563,7 @@ class TestBootstrap:
 
         # Reopen through bootstrap — should run MIGRATIONS[11].
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 18
+            assert r.schema_version() == 19
 
             raw = sqlite3.connect(str(db))
             raw.execute("PRAGMA foreign_keys = ON")

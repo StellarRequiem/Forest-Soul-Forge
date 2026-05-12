@@ -1,15 +1,30 @@
 # ADR-0049 — Per-Event Digital Signatures for Agent Events
 
-**Status:** Accepted 2026-05-12. **T1 shipped in Burst 242** as a
-thin wrapper over the ADR-0052 ``SecretStoreProtocol`` rather than
-the parallel ``KeyStore`` Protocol the original draft proposed —
-T1-T3 collapsed because ADR-0052 already ships the three backends
-(file / keychain / vaultwarden) this ADR called for. The wrapper
-lives at ``src/forest_soul_forge/security/keys/`` and exposes
-``AgentKeyStore.store/fetch/delete/list_agent_ids`` with bytes
-in/out, base64-encoded internally so the underlying string-valued
-secret store handles the transport. Agent private keys land under
-the secret name ``forest_agent_key:<instance_id>``. T4-T8 queued.
+**Status:** Accepted 2026-05-12. **T1 + T4 shipped (B242 + B243).**
+T1 wraps ADR-0052 `SecretStoreProtocol`; T4 wires birth-time
+ed25519 keypair generation through the soul.md frontmatter + the
+new `agents.public_key` column (schema v18→v19). T5 (sign-on-emit)
++ T6 (verifier extension) + T7 (strict mode) + T8 (runbook)
+queued.
+
+T1 ships as a thin wrapper over ADR-0052's secret-store substrate
+(T1-T3 collapsed because ADR-0052 already provides the three
+backends file / keychain / vaultwarden this ADR called for). The
+wrapper lives at `src/forest_soul_forge/security/keys/` and
+exposes `AgentKeyStore.store/fetch/delete/list_agent_ids` with
+bytes in/out, base64-encoded internally so the underlying string-
+valued secret store handles the transport. Agent private keys
+land under the secret name `forest_agent_key:<instance_id>`.
+
+T4 wires the birth pipeline (`daemon/routers/writes/birth.py
+::_perform_create`) to generate an `Ed25519PrivateKey` inside the
+write lock, store the private bytes via `AgentKeyStore.store`,
+then thread the base64-encoded public key into both
+`SoulGenerator.generate(public_key=...)` (lands in soul.md
+frontmatter) and through `parse_soul_file → ParsedSoul.public_key
+→ _insert_agent_row` (lands in the `agents.public_key` column).
+Schema migration v18→v19 adds the column.
+
 Phase 4 of the security-hardening arc opened by the 2026-05-05
 outside review. Pairs with ADR-0050 (encryption at rest) — both
 close the "audit chain is tamper-evident, not tamper-proof" gap
@@ -261,7 +276,7 @@ breaking change to any of the seven v1.0 ABI surfaces.
 | T1 | KeyStore Protocol + memory_only impl | **DONE B242 (T1+T2+T3 collapsed)** — `AgentKeyStore` thin wrapper at `src/forest_soul_forge/security/keys/` over the ADR-0052 `SecretStoreProtocol`. Inherits all three backends (file / keychain / vaultwarden) without duplicating substrate. ed25519 bytes base64-encoded at the wrapper boundary; agent keys stored under `forest_agent_key:<instance_id>`. 19 tests cover the wrapper (round-trip, overwrite, multi-agent isolation, namespace prefix lock, base64-corruption error path). | shipped |
 | T2 | encrypted_file backend | **Subsumed by T1** — the ADR-0052 secrets store provides file + keychain + vaultwarden backends. The encrypted_file variant the original draft proposed becomes a future ADR-0052 extension if needed (the unencrypted FileStore today is `chmod 600`; OS-Keychain backend is the production path on Darwin). | superseded |
 | T3 | keychain backend (macOS) | **Subsumed by T1** — ADR-0052 `KeychainStore` already covers this. AgentKeyStore inherits via the resolver. | superseded |
-| T4 | Birth-time keypair generation | `ed25519.Ed25519PrivateKey.generate()` at birth, store private via KeyStore, public to agents.public_key column + soul.md frontmatter. Schema migration v15→v16. | 1-2 bursts |
+| T4 | Birth-time keypair generation | **DONE B243** — `_perform_create` (in `daemon/routers/writes/birth.py`, shared by /birth + /spawn) generates an `Ed25519PrivateKey` inside the write lock right after `instance_id` is computed. Private bytes go to `AgentKeyStore.store(instance_id, ...)`; public bytes are base64-encoded and threaded into both (a) `SoulGenerator.generate(public_key=...)` so the canonical frontmatter carries the key, and (b) through the registry's ingest path (`ParsedSoul.public_key` populated by `parse_soul_file`, written into the new `agents.public_key` column by `_insert_agent_row`). Schema migration v18→v19 adds the nullable column; the migration is `ALTER TABLE agents ADD COLUMN public_key TEXT` with no default — legacy pre-v19 agents stay NULL (verifier treats them as 'legacy unsigned' per ADR-0049 D5). The two surfaces (frontmatter + agents column) must agree at rebuild-from-artifacts time; a test asserts this. 6 new tests cover the path (frontmatter write, agents column write, agreement check, key-store fetch, distinct keypairs per agent, ed25519 round-trip validity). | shipped |
 | T5 | Sign-on-emit | core/audit_chain.py extension: when emitting an event with agent_dna, look up the agent's private key, sign entry_hash, attach signature. | 1 burst |
 | T6 | Verifier extension | audit_chain_verify.v1 + scripts/verify_audit_chain.py: parse signature, look up public key, verify ed25519. Legacy entries skipped gracefully. | 1 burst |
 | T7 | Strict-mode verifier flag | Optional `--strict` flag for the CLI verifier that rejects ANY unsigned post-v16 event. | 0.5 burst |

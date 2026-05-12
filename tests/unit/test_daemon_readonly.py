@@ -155,7 +155,7 @@ class TestHealth:
         # (Burst 235, ADR-0053 T1). Daemon reports the registry's
         # live schema_version; assertion tracks the live value
         # rather than a stale literal.
-        assert body["schema_version"] == 18
+        assert body["schema_version"] == 19
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"

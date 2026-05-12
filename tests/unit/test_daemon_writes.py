@@ -284,6 +284,127 @@ class TestAuditMirror:
         assert "agent_archived" in types
 
 
+# ============================================================================
+# ADR-0049 T4 (Burst 243) — birth-time ed25519 keypair generation
+# ============================================================================
+# Birth issues a per-agent keypair. Private key lands in the
+# AgentKeyStore (backed by the ADR-0052 secrets store); public key
+# lands in BOTH the agents.public_key column AND the soul.md
+# frontmatter. The two copies must agree (the registry reads the
+# frontmatter to populate the column during ingest).
+
+class TestBirthGeneratesKeypair:
+    def _read_pubkey_from_soul(self, soul_path: Path) -> str | None:
+        """Parse the soul.md frontmatter and pull the public_key
+        field. Returns None if missing (legacy soul)."""
+        import re
+        text = Path(soul_path).read_text(encoding="utf-8")
+        m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, flags=re.DOTALL)
+        if not m:
+            return None
+        body = m.group(1)
+        for line in body.splitlines():
+            if line.startswith("public_key:"):
+                # ` public_key: "abc=" ` — strip whitespace + quotes.
+                v = line.split(":", 1)[1].strip().strip('"').strip("'")
+                return v or None
+        return None
+
+    def test_birth_writes_pubkey_to_soul_frontmatter(self, write_env):
+        client, _, _ = write_env
+        resp = client.post("/birth", json=_sample_birth_body())
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        soul_pubkey = self._read_pubkey_from_soul(Path(body["soul_path"]))
+        assert soul_pubkey is not None, "public_key missing from soul.md frontmatter"
+        # base64-encoded raw 32-byte ed25519 public key → 44 chars
+        # (32 bytes base64 = ceil(32/3)*4 = 44 chars with padding).
+        assert len(soul_pubkey) == 44, (
+            f"expected 44-char base64 public key, got {len(soul_pubkey)}: {soul_pubkey!r}"
+        )
+
+    def test_birth_writes_pubkey_to_agents_table(self, write_env):
+        client, app, _ = write_env
+        resp = client.post("/birth", json=_sample_birth_body())
+        assert resp.status_code == 201, resp.text
+        instance_id = resp.json()["instance_id"]
+        registry = app.state.registry
+        row = registry._conn.execute(
+            "SELECT public_key FROM agents WHERE instance_id = ?;",
+            (instance_id,),
+        ).fetchone()
+        assert row is not None
+        pubkey = row["public_key"] if hasattr(row, "keys") else row[0]
+        assert pubkey is not None, "agents.public_key not populated at birth"
+        assert len(pubkey) == 44
+
+    def test_soul_pubkey_matches_agents_row_pubkey(self, write_env):
+        """The two copies (soul frontmatter + agents column) MUST
+        agree — they're derived from the same generated key. Drift
+        between them would invalidate the verify-on-replay path."""
+        client, app, _ = write_env
+        resp = client.post("/birth", json=_sample_birth_body())
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        soul_pubkey = self._read_pubkey_from_soul(Path(body["soul_path"]))
+        registry = app.state.registry
+        row = registry._conn.execute(
+            "SELECT public_key FROM agents WHERE instance_id = ?;",
+            (body["instance_id"],),
+        ).fetchone()
+        agents_pubkey = row[0]
+        assert soul_pubkey == agents_pubkey
+
+    def test_private_key_stored_in_agent_keystore(self, write_env):
+        """The matching private key must be fetchable from the
+        AgentKeyStore by instance_id. This is the sign-on-emit
+        path's input (T5 will use it)."""
+        from forest_soul_forge.security.keys import resolve_agent_key_store
+
+        client, _, _ = write_env
+        resp = client.post("/birth", json=_sample_birth_body())
+        instance_id = resp.json()["instance_id"]
+        store = resolve_agent_key_store()
+        priv = store.fetch(instance_id)
+        assert priv is not None, "private key not stored after birth"
+        # ed25519 raw private keys are 32 bytes.
+        assert len(priv) == 32, f"expected 32-byte ed25519 private, got {len(priv)}"
+
+    def test_each_birth_yields_distinct_keypair(self, write_env):
+        """Two distinct agents must get distinct keypairs — public
+        key is part of the agent's identity per ADR-0049 D1."""
+        client, app, _ = write_env
+        r1 = client.post("/birth", json=_sample_birth_body(agent_name="A"))
+        r2 = client.post("/birth", json=_sample_birth_body(agent_name="B"))
+        instance1 = r1.json()["instance_id"]
+        instance2 = r2.json()["instance_id"]
+        assert instance1 != instance2
+        registry = app.state.registry
+        pk1 = registry._conn.execute(
+            "SELECT public_key FROM agents WHERE instance_id = ?;", (instance1,),
+        ).fetchone()[0]
+        pk2 = registry._conn.execute(
+            "SELECT public_key FROM agents WHERE instance_id = ?;", (instance2,),
+        ).fetchone()[0]
+        assert pk1 != pk2
+
+    def test_birth_pubkey_is_valid_ed25519(self, write_env):
+        """The stored public key bytes must round-trip through
+        ed25519's loader without raising — proves the public key
+        format on the wire is what verifiers expect."""
+        import base64 as _b64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PublicKey,
+        )
+
+        client, _, _ = write_env
+        resp = client.post("/birth", json=_sample_birth_body())
+        soul_pubkey = self._read_pubkey_from_soul(Path(resp.json()["soul_path"]))
+        # Decode + load — raises on shape mismatch.
+        pk_bytes = _b64.b64decode(soul_pubkey)
+        Ed25519PublicKey.from_public_bytes(pk_bytes)
+
+
 class TestWritesDisabled:
     def test_birth_blocked_when_writes_disabled(self, tmp_path: Path):
         if not TRAIT_TREE.exists() or not CONST_TEMPLATES.exists():

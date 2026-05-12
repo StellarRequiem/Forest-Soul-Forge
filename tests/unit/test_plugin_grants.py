@@ -61,14 +61,14 @@ def reg(tmp_path: Path):
 
 # ---- schema layer ----------------------------------------------------------
 
-def test_schema_version_is_18():
+def test_schema_version_is_19():
     """Locked at v18 post-Burst 235 (ADR-0053 T1, per-tool plugin grants).
     Function name moved through v14 (Burst 113a, agent_plugin_grants)
     → v15 (Burst 114, agents.posture) → v16 (Burst 178,
     memory_procedural_shortcuts) → v17 (Burst 219, agent_catalog_grants)
     → v18 (Burst 235, agent_plugin_grants.tool_name). Renamed each
     time for honesty."""
-    assert REGISTRY_SCHEMA_VERSION == 18
+    assert REGISTRY_SCHEMA_VERSION == 19
 
 
 def test_agent_plugin_grants_table_exists(reg: Registry):

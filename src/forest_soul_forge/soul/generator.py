@@ -154,6 +154,7 @@ class SoulGenerator:
         tool_catalog_version: str | None = None,
         genre: str | None = None,
         genre_description: str | None = None,
+        public_key: str | None = None,
     ) -> SoulDocument:
         """Generate a soul.md from a profile.
 
@@ -222,6 +223,7 @@ class SoulGenerator:
             tool_catalog_version=tool_catalog_version,
             genre=genre,
             genre_description=genre_description,
+            public_key=public_key,
         ))
 
         # ---- header ------------------------------------------------------
@@ -348,6 +350,7 @@ class SoulGenerator:
         tool_catalog_version: str | None = None,
         genre: str | None = None,
         genre_description: str | None = None,
+        public_key: str | None = None,
     ) -> list[str]:
         """Hand-rolled YAML emitter — avoids the pyyaml dep at generation-time
         and guarantees a stable, sorted trait_values block (which keeps
@@ -390,6 +393,14 @@ class SoulGenerator:
         if constitution_hash is not None and constitution_file is not None:
             out.append(f'constitution_hash: "{constitution_hash}"')
             out.append(f'constitution_file: "{constitution_file}"')
+
+        # ADR-0049 T4 (Burst 243): ed25519 public key for per-event
+        # signature verification. Base64-encoded raw 32-byte
+        # public-key bytes. Omitted on legacy births (no key generated)
+        # — the verifier treats those agents' chain entries as
+        # 'legacy unsigned' per ADR-0049 D5.
+        if public_key is not None:
+            out.append(f'public_key: "{public_key}"')
 
         # Narrative provenance (ADR-0017) — purely informational, not in any
         # hash. Records which provider+model wrote the Voice section, or

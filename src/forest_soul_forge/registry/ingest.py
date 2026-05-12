@@ -64,6 +64,13 @@ class ParsedSoul:
     # Sibling index (1-based) for twin disambiguation — same DNA, different
     # births. ``None`` means legacy/pre-v2 soul; rebuild will compute one.
     sibling_index: int | None = None
+    # ADR-0049 T4 (Burst 243): per-agent ed25519 public key for
+    # per-event signature verification. Base64-encoded raw 32-byte
+    # public-key bytes. ``None`` for pre-v19 souls; the verifier
+    # (ADR-0049 D5) treats their chain entries as 'legacy unsigned.'
+    # New agents born on v19+ get a public_key populated by the
+    # birth pipeline.
+    public_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +165,12 @@ def parse_soul_file(path: Path) -> ParsedSoul:
 
     constitution_path = path.parent / constitution_file
 
+    # ADR-0049 T4 (Burst 243): per-agent ed25519 public key. Optional;
+    # legacy souls (pre-v19) lack the field and register with NULL
+    # public_key. New agents born post-v19 carry the base64-encoded
+    # raw public-key bytes in frontmatter.
+    public_key = _optional_str(frontmatter.get("public_key"))
+
     return ParsedSoul(
         soul_path=path,
         dna=dna,
@@ -177,6 +190,7 @@ def parse_soul_file(path: Path) -> ParsedSoul:
         model_name=_optional_str(frontmatter.get("model_name")),
         model_version=_optional_str(frontmatter.get("model_version")),
         sibling_index=sibling_index,
+        public_key=public_key,
     )
 
 

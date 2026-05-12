@@ -38,13 +38,13 @@ from forest_soul_forge.registry.tables.procedural_shortcuts import (
 # Schema version + table presence
 # ---------------------------------------------------------------------------
 
-def test_schema_version_is_18():
+def test_schema_version_is_19():
     """v16 was introduced by ADR-0054 T1. Subsequent migrations:
     v17 (ADR-0060 T1, B219, agent_catalog_grants), v18 (ADR-0053
     T1, B235, agent_plugin_grants.tool_name). Each migration bump
     should add a clear MIGRATIONS[N] entry + update DDL_STATEMENTS
     — the test itself bumps to track."""
-    assert SCHEMA_VERSION == 18
+    assert SCHEMA_VERSION == 19
 
 
 def test_fresh_install_creates_procedural_shortcuts_table(tmp_path: Path):
@@ -567,11 +567,24 @@ def test_v15_to_v16_upgrade(tmp_path: Path):
     DDL_STATEMENTS."""
     db = tmp_path / "v15.db"
 
-    # Open a fresh Registry then nuke the new table + schema_version
-    # to simulate a v15 install. (Easier than hand-replicating all v15
-    # DDL.)
+    # Open a fresh Registry then nuke the post-v15 additions +
+    # stamp schema_version back to 15 to simulate a v15 install.
+    # (Easier than hand-replicating all v15 DDL.)
+    #
+    # Drops since fresh bootstraps at the current SCHEMA_VERSION:
+    #   v16 → DROP TABLE memory_procedural_shortcuts
+    #   v17 → DROP TABLE agent_catalog_grants
+    #   v18 → table-rebuild reverse on agent_plugin_grants is
+    #         hard; the v18 migration is idempotent enough (it
+    #         creates a _v18 table from scratch) that re-running
+    #         it on a v18-shape table works, so we don't need to
+    #         undo it
+    #   v19 → DROP COLUMN agents.public_key (SQLite 3.35+ supports
+    #         this, modern macOS + sandbox both qualify)
     reg = Registry.bootstrap(db)
     reg._conn.execute("DROP TABLE memory_procedural_shortcuts;")
+    reg._conn.execute("DROP TABLE IF EXISTS agent_catalog_grants;")
+    reg._conn.execute("ALTER TABLE agents DROP COLUMN public_key;")
     reg._conn.execute(
         "UPDATE registry_meta SET value = '15' "
         "WHERE key = 'schema_version';"
@@ -591,6 +604,6 @@ def test_v15_to_v16_upgrade(tmp_path: Path):
         # version; later migrations (v17 ADR-0060, v18 ADR-0053)
         # are additive. Track the live SCHEMA_VERSION so this test
         # is honest after each bump.
-        assert reg.schema_version() == 18
+        assert reg.schema_version() == 19
     finally:
         reg.close()

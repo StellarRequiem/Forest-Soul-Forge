@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 18
+SCHEMA_VERSION: int = 19
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -50,6 +50,12 @@ DDL_STATEMENTS: tuple[str, ...] = (
         -- non-read_only / red=refuse non-read_only outright.
         posture          TEXT NOT NULL DEFAULT 'yellow'
                          CHECK (posture IN ('green', 'yellow', 'red')),
+        -- ADR-0049 T4 (Burst 243): ed25519 public key for per-event
+        -- signatures. Base64-encoded raw 32-byte public-key bytes
+        -- (matches the in-soul-frontmatter representation).
+        -- Nullable: legacy pre-v19 agents stay NULL; verifier treats
+        -- their entries as 'legacy unsigned' per ADR-0049 D5.
+        public_key       TEXT,
         FOREIGN KEY (parent_instance) REFERENCES agents(instance_id)
     );
     """,
@@ -1235,5 +1241,27 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_plugin_grants_plugin_level "
             "ON agent_plugin_grants(instance_id, plugin_name) "
             "WHERE tool_name IS NULL;",
+    ),
+    # v18 → v19 (ADR-0049 T4, Burst 243): per-agent ed25519 public
+    # key column on agents.
+    #
+    # ADR-0049 closes the audit-chain tamper-evident-vs-tamper-proof
+    # gap with per-event ed25519 signatures. The public key lives
+    # here for runtime lookup (chain replay needs O(1) access by
+    # agent_dna → instance_id → public_key); private keys live in
+    # the ADR-0052 secrets store via AgentKeyStore. T4 ships the
+    # storage substrate. T5 wires sign-on-emit; T6 wires verify-on-
+    # replay.
+    #
+    # Nullable for back-compat: pre-v19 agents stay NULL, and the
+    # verifier (ADR-0049 D5) treats their chain entries as "legacy
+    # unsigned" — passes hash-chain check, skips signature check.
+    # New agents born on v19+ get a public_key populated at birth.
+    #
+    # No index — the agents table is small (tens to low thousands
+    # of rows even for power operators) and lookups go through
+    # instance_id (primary key) or dna (already indexed).
+    19: (
+        "ALTER TABLE agents ADD COLUMN public_key TEXT;",
     ),
 }
