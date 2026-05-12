@@ -360,3 +360,229 @@ class TestListPluginGrants:
             )
             # Should be 200 (GET is ungated).
             assert resp.status_code == 200, resp.text
+
+
+# ============================================================================
+# ADR-0053 T3 (Burst 238) — per-tool endpoint coverage
+# ============================================================================
+# Covers the optional ``tool_name`` field on POST and the new
+# DELETE .../tools/{tool_name} route. Pre-B238 tests (above)
+# already prove the plugin-level path stays unchanged when
+# ``tool_name`` is omitted.
+
+def test_post_with_tool_name_creates_per_tool_grant(grant_env):
+    """POST body with non-null tool_name creates a per-tool grant.
+    The response surfaces tool_name and is_active=True."""
+    client = grant_env["client"]
+    instance_id = grant_env["instance_id"]
+
+    resp = client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={
+            "plugin_name":  "soulux-computer-control",
+            "tool_name":    "computer_screenshot.v1",
+            "trust_tier":   "green",
+            "reason":       "operator chose Specific: read screen on",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    grant = body["grant"]
+    assert grant["tool_name"] == "computer_screenshot.v1"
+    assert grant["plugin_name"] == "soulux-computer-control"
+    assert grant["trust_tier"] == "green"
+    assert grant["is_active"] is True
+
+
+def test_post_per_tool_emits_audit_event_with_tool_name(grant_env):
+    """ADR-0053 D4: the agent_plugin_granted event_data gains
+    tool_name. Same event_type as plugin-level grants so
+    chronological queries cover both."""
+    client = grant_env["client"]
+    app = grant_env["app"]
+    instance_id = grant_env["instance_id"]
+
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={"plugin_name": "slack", "tool_name": "slack_send_message.v1"},
+    )
+
+    events = _audit_events(app, "agent_plugin_granted")
+    assert events, "expected at least one agent_plugin_granted event"
+    last = events[-1]
+    payload = last.get("event_data", last)
+    assert payload.get("tool_name") == "slack_send_message.v1"
+    assert payload.get("plugin_name") == "slack"
+
+
+def test_plugin_level_and_per_tool_grants_coexist(grant_env):
+    """Issuing a plugin-level grant followed by a per-tool grant on
+    the same plugin should leave two active rows. GET surfaces both."""
+    client = grant_env["client"]
+    instance_id = grant_env["instance_id"]
+
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={"plugin_name": "linear", "trust_tier": "yellow"},
+    )
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={
+            "plugin_name":  "linear",
+            "tool_name":    "linear_create_issue.v1",
+            "trust_tier":   "green",
+        },
+    )
+
+    resp = client.get(f"/agents/{instance_id}/plugin-grants")
+    assert resp.status_code == 200, resp.text
+    grants = resp.json()["grants"]
+    assert len(grants) == 2
+    by_tool = {g["tool_name"]: g for g in grants}
+    assert None in by_tool                       # plugin-level
+    assert "linear_create_issue.v1" in by_tool   # per-tool
+    assert by_tool[None]["trust_tier"] == "yellow"
+    assert by_tool["linear_create_issue.v1"]["trust_tier"] == "green"
+
+
+def test_delete_per_tool_route_revokes_only_that_tool(grant_env):
+    """DELETE .../plugin-grants/{plugin}/tools/{tool} targets the
+    triple. The plugin-level grant on the same plugin survives."""
+    client = grant_env["client"]
+    instance_id = grant_env["instance_id"]
+
+    # Issue both shapes.
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={"plugin_name": "github", "trust_tier": "yellow"},
+    )
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={
+            "plugin_name":  "github",
+            "tool_name":    "github_merge_pr.v1",
+            "trust_tier":   "red",
+        },
+    )
+
+    # Revoke only the per-tool grant. TestClient.delete doesn't
+    # accept a json kwarg in this httpx version — use .request.
+    resp = client.request(
+        "DELETE",
+        f"/agents/{instance_id}/plugin-grants/github/tools/github_merge_pr.v1",
+        json={"reason": "too risky for now"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["tool_name"] == "github_merge_pr.v1"
+
+    # Plugin-level grant still active.
+    grants = client.get(
+        f"/agents/{instance_id}/plugin-grants",
+    ).json()["grants"]
+    assert len(grants) == 1
+    assert grants[0]["tool_name"] is None
+    assert grants[0]["is_active"] is True
+
+
+def test_delete_plugin_level_route_does_not_touch_per_tool(grant_env):
+    """The inverse: revoking the plugin-level grant must NOT touch
+    a per-tool row at the same plugin."""
+    client = grant_env["client"]
+    instance_id = grant_env["instance_id"]
+
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={"plugin_name": "slack", "trust_tier": "yellow"},
+    )
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={
+            "plugin_name":  "slack",
+            "tool_name":    "slack_send_message.v1",
+            "trust_tier":   "green",
+        },
+    )
+
+    resp = client.request(
+        "DELETE",
+        f"/agents/{instance_id}/plugin-grants/slack",
+        json={"reason": "revoke broad access; keep send-message"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["tool_name"] is None  # plugin-level revoke
+
+    grants = client.get(
+        f"/agents/{instance_id}/plugin-grants",
+    ).json()["grants"]
+    assert len(grants) == 1
+    assert grants[0]["tool_name"] == "slack_send_message.v1"
+    assert grants[0]["is_active"] is True
+
+
+def test_delete_per_tool_404_when_no_such_grant(grant_env):
+    """Asking to revoke a per-tool grant that doesn't exist returns
+    404 — does NOT fall back to the plugin-level row."""
+    client = grant_env["client"]
+    instance_id = grant_env["instance_id"]
+
+    # Plugin-level grant exists; per-tool does not.
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={"plugin_name": "slack", "trust_tier": "yellow"},
+    )
+
+    resp = client.delete(
+        f"/agents/{instance_id}/plugin-grants/slack/tools/slack_send_message.v1",
+    )
+    assert resp.status_code == 404, resp.text
+
+
+def test_delete_per_tool_emits_audit_event_with_tool_name(grant_env):
+    """agent_plugin_revoked carries tool_name for per-tool revokes."""
+    client = grant_env["client"]
+    app = grant_env["app"]
+    instance_id = grant_env["instance_id"]
+
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={
+            "plugin_name":  "linear",
+            "tool_name":    "linear_create_issue.v1",
+        },
+    )
+    client.delete(
+        f"/agents/{instance_id}/plugin-grants/linear/tools/linear_create_issue.v1",
+    )
+
+    events = _audit_events(app, "agent_plugin_revoked")
+    assert events, "expected at least one agent_plugin_revoked event"
+    last = events[-1]
+    payload = last.get("event_data", last)
+    assert payload.get("tool_name") == "linear_create_issue.v1"
+    assert payload.get("plugin_name") == "linear"
+
+
+def test_get_response_includes_tool_name_per_row(grant_env):
+    """Pre-B238 callers that don't read tool_name still work
+    (ignored field); new callers see null for plugin-level and a
+    string for per-tool."""
+    client = grant_env["client"]
+    instance_id = grant_env["instance_id"]
+
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={"plugin_name": "p1"},
+    )
+    client.post(
+        f"/agents/{instance_id}/plugin-grants",
+        json={"plugin_name": "p2", "tool_name": "p2_thing.v1"},
+    )
+
+    grants = client.get(
+        f"/agents/{instance_id}/plugin-grants",
+    ).json()["grants"]
+    # Every row exposes tool_name (None or str). In py3 None and
+    # str aren't comparable for sort, so verify via membership.
+    assert all("tool_name" in g for g in grants)
+    assert {g["tool_name"] for g in grants} == {None, "p2_thing.v1"}

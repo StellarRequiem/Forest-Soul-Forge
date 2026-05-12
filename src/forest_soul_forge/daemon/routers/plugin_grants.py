@@ -1,38 +1,54 @@
 """``/agents/{instance_id}/plugin-grants`` — ADR-0043 follow-up #2
-operator surface (Burst 113b).
+operator surface (Burst 113b) + ADR-0053 T3 per-tool extension
+(Burst 238).
 
 GET surface (ungated, same posture as /audit + /healthz +
 /plugins):
   GET /agents/{instance_id}/plugin-grants
-       — list active + historical grants for the agent.
+       — list active + historical grants for the agent. Rows
+       include ``tool_name`` (null for plugin-level grants,
+       string for per-tool grants per ADR-0053 T2).
 
 Mutating surface (require_writes_enabled + require_api_token,
 same posture as /plugins write endpoints + the writes routes):
   POST /agents/{instance_id}/plugin-grants
-       body: {plugin_name, trust_tier?, reason?}
-       — issue (or re-issue) a grant. trust_tier defaults to
-       'yellow' (current behavior). trust_tier values are
-       forward-compat per ADR-0045; T3 / Burst 115 turns on
-       enforcement.
+       body: {plugin_name, trust_tier?, tool_name?, reason?}
+       — issue (or re-issue) a grant. ``tool_name`` is optional;
+       omit (or null) for a plugin-level grant covering all the
+       manifest's tools (ADR-0043 original semantic); pass a
+       non-null value for a per-tool grant covering only that
+       one tool (ADR-0053 D2).
   DELETE /agents/{instance_id}/plugin-grants/{plugin_name}
        optional body: {reason?}
-       — revoke an active grant. Returns 404 if no active
-       grant exists for the (agent, plugin) pair.
+       — revoke the active plugin-level grant for (agent,
+       plugin). Returns 404 if no plugin-level active grant
+       exists at that pair.
+  DELETE /agents/{instance_id}/plugin-grants/{plugin_name}/tools/{tool_name}
+       optional body: {reason?}
+       — revoke ONLY the per-tool grant at the (agent, plugin,
+       tool) triple. Leaves the plugin-level grant (if any)
+       intact. Returns 404 if no per-tool active grant exists.
 
 Both mutations hold ``app.state.write_lock`` (single-writer
 SQLite discipline). They emit ``agent_plugin_granted`` /
 ``agent_plugin_revoked`` audit events with the grant's
-trust_tier and the operator-supplied reason in the payload.
+trust_tier and operator-supplied reason. Per ADR-0053 D4 the
+events carry an optional ``tool_name`` field — null for
+plugin-level operations, the named tool for per-tool ones.
+The event_type stays the same in both cases so an auditor
+querying ``event_type = 'agent_plugin_granted'`` gets the
+full chronological view; filtering by ``tool_name`` is the
+secondary lens.
 
 Why ``agent_plugin_granted`` carries the trust_tier:
-ADR-0045 T3 / Burst 115 will start enforcing per-grant
-trust_tier in PostureGateStep. The audit chain is the source
-of truth for the grant's trust at the moment it was issued —
-operators querying "was this agent allowed to call X without
-gating at time T?" need the tier in the event payload, not
-just in the table. Storing in both places (table = current
-state, chain = history) is the same posture as every other
-grant-shaped event.
+ADR-0045 T3 / Burst 115 enforces per-grant trust_tier in
+PostureGateStep. The audit chain is the source of truth for
+the grant's trust at the moment it was issued — operators
+querying "was this agent allowed to call X without gating at
+time T?" need the tier in the event payload, not just in the
+table. Storing in both places (table = current state, chain =
+history) is the same posture as every other grant-shaped
+event.
 """
 from __future__ import annotations
 
@@ -57,6 +73,21 @@ router = APIRouter(tags=["plugin-grants"])
 class GrantRequest(BaseModel):
     plugin_name: str = Field(..., min_length=1, max_length=80)
     trust_tier: str = Field("yellow", pattern="^(green|yellow|red)$")
+    # ADR-0053 T3 (B238): null = plugin-level grant (ADR-0043
+    # original semantic, covers all manifest tools); non-null =
+    # per-tool grant covering only this tool. The constraint
+    # matches the tool_name shape used in mcp_call.v1's tool
+    # identifiers — versioned dotted strings ("foo_bar.v1") are
+    # the common case, but plain names are also valid.
+    tool_name: str | None = Field(
+        None,
+        min_length=1,
+        max_length=120,
+        description=(
+            "Optional. Pass to issue a per-tool grant (ADR-0053). "
+            "Omit or null for a plugin-level grant (ADR-0043 default)."
+        ),
+    )
     reason: str | None = Field(None, max_length=500)
 
 
@@ -68,6 +99,9 @@ def _serialize_grant(g: PluginGrant) -> dict[str, Any]:
     return {
         "instance_id": g.instance_id,
         "plugin_name": g.plugin_name,
+        # ADR-0053 T3 (B238): expose tool_name on the wire.
+        # Null for plugin-level grants; string for per-tool grants.
+        "tool_name": g.tool_name,
         "trust_tier": g.trust_tier,
         "granted_at_seq": g.granted_at_seq,
         "granted_by": g.granted_by,
@@ -174,11 +208,16 @@ def grant_plugin(
     with write_lock:
         # Append-then-record discipline: chain entry is the commit
         # point. seq from the entry is what the table row references.
+        # ADR-0053 D4: event_data gains optional tool_name (null for
+        # plugin-level grants, string for per-tool). Event type
+        # stays the same so chronological queries still cover both
+        # grant shapes.
         entry = chain.append(
             "agent_plugin_granted",
             {
                 "instance_id": instance_id,
                 "plugin_name": body.plugin_name,
+                "tool_name": body.tool_name,
                 "trust_tier": body.trust_tier,
                 "granted_by": operator_id,
                 "reason": body.reason,
@@ -188,6 +227,7 @@ def grant_plugin(
         reg.plugin_grants.grant(
             instance_id=instance_id,
             plugin_name=body.plugin_name,
+            tool_name=body.tool_name,
             trust_tier=body.trust_tier,
             granted_at_seq=entry.seq,
             granted_by=operator_id,
@@ -195,20 +235,30 @@ def grant_plugin(
             when=entry.timestamp,
         )
 
-    grant = reg.plugin_grants.get_active(instance_id, body.plugin_name)
+    grant = reg.plugin_grants.get_active(
+        instance_id, body.plugin_name, tool_name=body.tool_name,
+    )
     return {"ok": True, "grant": _serialize_grant(grant)}
 
 
-@router.delete(
-    "/agents/{instance_id}/plugin-grants/{plugin_name}",
-    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
-)
-def revoke_plugin(
-    instance_id: str, plugin_name: str, request: Request,
-    body: RevokeRequest | None = None,
+def _do_revoke(
+    *,
+    instance_id: str,
+    plugin_name: str,
+    tool_name: str | None,
+    request: Request,
+    reason: str | None,
 ) -> dict[str, Any]:
-    """Revoke an active grant. 404 when no active grant exists.
-    Holds the write lock. Emits ``agent_plugin_revoked``."""
+    """Shared revoke implementation for both plugin-level and per-tool
+    DELETE routes. Looks up the exact (agent, plugin, tool) triple —
+    no fallback. ``tool_name=None`` targets the plugin-level row;
+    non-None targets only the per-tool row.
+
+    Per ADR-0053 D4 the ``agent_plugin_revoked`` audit event gains an
+    optional ``tool_name`` field — null for plugin-level operations,
+    the named tool for per-tool ones. event_type stays the same in
+    both cases.
+    """
     reg = _registry(request)
     chain = _audit_chain(request)
     write_lock = getattr(request.app.state, "write_lock", None)
@@ -226,19 +276,26 @@ def revoke_plugin(
         )
 
     operator_id = getattr(request.state, "operator_id", None)
-    reason = body.reason if body else None
 
-    # Pre-check the grant exists. We need the table info for the
-    # audit event payload (we want to record the trust_tier the grant
-    # was at when it was revoked, since operators querying the chain
-    # later won't know what it was).
-    existing = reg.plugin_grants.get_active(instance_id, plugin_name)
+    # Pre-check the grant exists at this exact triple. We need the
+    # table info for the audit event payload (record the trust_tier
+    # the grant was at when revoked; operators querying the chain
+    # later won't know what it was). For per-tool revokes the
+    # plugin-level grant — if any — is NOT touched; this method
+    # looks up only the exact triple.
+    existing = reg.plugin_grants.get_active(
+        instance_id, plugin_name, tool_name=tool_name,
+    )
     if existing is None:
+        scope = (
+            f"tool {tool_name!r} on plugin {plugin_name!r}"
+            if tool_name is not None
+            else f"plugin {plugin_name!r}"
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
-                f"no active grant for plugin {plugin_name!r} on agent "
-                f"{instance_id!r}"
+                f"no active grant for {scope} on agent {instance_id!r}"
             ),
         )
 
@@ -248,6 +305,7 @@ def revoke_plugin(
             {
                 "instance_id": instance_id,
                 "plugin_name": plugin_name,
+                "tool_name": tool_name,
                 "prior_trust_tier": existing.trust_tier,
                 "revoked_by": operator_id,
                 "reason": reason,
@@ -257,6 +315,7 @@ def revoke_plugin(
         affected = reg.plugin_grants.revoke(
             instance_id=instance_id,
             plugin_name=plugin_name,
+            tool_name=tool_name,
             revoked_at_seq=entry.seq,
             revoked_by=operator_id,
             reason=reason,
@@ -269,4 +328,53 @@ def revoke_plugin(
                 detail="grant disappeared between pre-check and revoke",
             )
 
-    return {"ok": True, "instance_id": instance_id, "plugin_name": plugin_name}
+    return {
+        "ok": True,
+        "instance_id": instance_id,
+        "plugin_name": plugin_name,
+        "tool_name": tool_name,
+    }
+
+
+@router.delete(
+    "/agents/{instance_id}/plugin-grants/{plugin_name}",
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
+)
+def revoke_plugin(
+    instance_id: str, plugin_name: str, request: Request,
+    body: RevokeRequest | None = None,
+) -> dict[str, Any]:
+    """Revoke the active plugin-level grant for (agent, plugin).
+    Returns 404 if no plugin-level active grant exists. Does NOT
+    touch per-tool grants on the same plugin — those have their
+    own DELETE route at ``.../tools/{tool_name}`` (ADR-0053 T3).
+    Holds the write lock. Emits ``agent_plugin_revoked``."""
+    return _do_revoke(
+        instance_id=instance_id,
+        plugin_name=plugin_name,
+        tool_name=None,
+        request=request,
+        reason=body.reason if body else None,
+    )
+
+
+@router.delete(
+    "/agents/{instance_id}/plugin-grants/{plugin_name}/tools/{tool_name}",
+    dependencies=[Depends(require_writes_enabled), Depends(require_api_token)],
+)
+def revoke_per_tool(
+    instance_id: str, plugin_name: str, tool_name: str,
+    request: Request, body: RevokeRequest | None = None,
+) -> dict[str, Any]:
+    """ADR-0053 T3 — revoke a per-tool grant. Targets only the
+    (agent, plugin, tool) triple; the plugin-level grant (if any)
+    on the same (agent, plugin) is untouched. Returns 404 if no
+    per-tool active grant exists at the triple. Holds the write
+    lock. Emits ``agent_plugin_revoked`` with ``tool_name`` set."""
+    return _do_revoke(
+        instance_id=instance_id,
+        plugin_name=plugin_name,
+        tool_name=tool_name,
+        request=request,
+        reason=body.reason if body else None,
+    )

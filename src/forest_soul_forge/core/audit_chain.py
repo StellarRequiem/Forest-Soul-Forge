@@ -236,10 +236,16 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "hardware_bound",
     "hardware_mismatch",
     "hardware_unbound",
-    # ADR-0053 — per-tool plugin grants. An operator granting a plugin
-    # tool to an agent is a constitutional change (the agent's allowed
-    # toolset just expanded); recorded distinctly from agent_created.
+    # ADR-0043 follow-up #2 (B113b) + ADR-0053 (B238) per-tool. An
+    # operator granting a plugin (or single tool inside a plugin) to
+    # an agent is a constitutional change — the agent's allowed
+    # toolset just expanded — recorded distinctly from agent_created.
+    # event_data carries optional tool_name: null for plugin-level
+    # grants, string for per-tool grants. The event_type is the same
+    # in both cases so chronological queries cover the whole grant
+    # lifecycle.
     "agent_plugin_granted",
+    "agent_plugin_revoked",
     # ADR-0048 — computer-control allowance. Operator relaxing a
     # governance constraint at runtime (e.g. enabling a side-effect tool
     # for one session). One event per relaxation so the trail captures
