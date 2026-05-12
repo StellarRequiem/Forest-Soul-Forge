@@ -1,0 +1,65 @@
+schema_version: 1
+name: commit_changelog
+version: '1'
+description: |
+  Generate a polished changelog entry from a raw diff. Two-step:
+  commit_message.v1 produces a conventional-commits-shaped message,
+  then text_summarize.v1 compresses it into a 3-bullet user-facing
+  changelog entry suitable for release notes.
+
+  Use case: a software_engineer agent runs this per commit (or per
+  burst) as part of release preparation. The operator concatenates
+  the outputs into the release notes draft. Avoids the agent
+  inventing changes that weren't in the diff — every bullet traces
+  back to the conventional commit subject.
+
+requires:
+  - commit_message.v1
+  - text_summarize.v1
+
+inputs:
+  type: object
+  required: [diff, scope_hint, audience]
+  properties:
+    diff:
+      type: string
+      description: >
+        The git diff or change description. Multi-file diffs are
+        fine; the commit_message step will pick a primary scope.
+    scope_hint:
+      type: string
+      description: >
+        Suggested scope for the conventional commit message
+        (e.g. "auth", "registry", "frontend"). Pass "" if you
+        want the model to infer.
+    audience:
+      type: string
+      description: >
+        Who the changelog is for — "users", "operators",
+        "developers". Affects what details survive the
+        summarization step. "users" keeps the highest-level
+        narrative; "developers" preserves more technical
+        specifics.
+
+steps:
+  - id: cm
+    tool: commit_message.v1
+    args:
+      diff: ${inputs.diff}
+      scope: ${inputs.scope_hint}
+
+  - id: summarize_for_audience
+    tool: text_summarize.v1
+    args:
+      text: |
+        Audience: ${inputs.audience}
+
+        Source commit message:
+        ${cm.out.response}
+
+        Summarize for the audience above. The audience defines what
+        level of detail survives.
+
+output:
+  conventional_commit: ${cm.out.response}
+  changelog_entry: ${summarize_for_audience.out.response}

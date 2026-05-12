@@ -1,0 +1,79 @@
+schema_version: 1
+name: code_review_quick
+version: '1'
+description: |
+  Quick code review for one file. Reads the file via code_read.v1,
+  pipes the contents into code_explain.v1, then runs llm_think.v1
+  with a critic prompt to surface specific concerns.
+
+  Not a substitute for a full PR review — it's the fast first-pass
+  that lets a software_engineer agent answer "what is this code
+  doing and is anything obviously wrong" before the operator dives
+  in themselves.
+
+  Use case: agent triages a stack of changed files, runs this skill
+  per file, marks any with concerns for human attention. Lower-stakes
+  files might skip the human gate entirely if the agent's posture
+  allows.
+
+requires:
+  - code_read.v1
+  - code_explain.v1
+  - llm_think.v1
+
+inputs:
+  type: object
+  required: [file_path, language]
+  properties:
+    file_path:
+      type: string
+      description: >
+        Absolute path to the file to review. Must be within the
+        agent's constitution's allowed_paths — code_read enforces
+        this; the skill propagates any access refusal cleanly.
+    language:
+      type: string
+      description: >
+        Programming language of the file (e.g. python, rust,
+        javascript). Pass "auto" if you want the model to infer.
+        Required for the code_explain step.
+
+steps:
+  - id: read_file
+    tool: code_read.v1
+    args:
+      path: ${inputs.file_path}
+      max_bytes: 200000
+
+  - id: explain
+    tool: code_explain.v1
+    args:
+      code: ${read_file.out.content}
+      language: ${inputs.language}
+
+  - id: critic
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are reviewing the file at ${inputs.file_path}.
+
+        Plain-English explanation of the code:
+        ${explain.out.response}
+
+        Your job: flag SPECIFIC concerns about this code — bugs,
+        missing edge cases, performance gotchas, security issues,
+        unclear naming, missing tests for risky paths. Be concrete:
+        cite line numbers or function names. Skip generic advice
+        ("add docstrings", "use type hints") unless the lack of
+        them is actively misleading.
+
+        If the code looks fine, say so in one sentence — don't
+        manufacture concerns.
+
+        Format your response as a bullet list of concerns, each
+        ≤80 chars, followed by an "Overall:" one-line verdict.
+
+output:
+  explanation: ${explain.out.response}
+  concerns: ${critic.out.response}
+  file_path: ${inputs.file_path}

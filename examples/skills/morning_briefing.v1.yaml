@@ -1,0 +1,55 @@
+schema_version: 1
+name: morning_briefing
+version: '1'
+description: |
+  Operator's morning report. Verifies audit chain integrity (sanity
+  check that the daemon's tamper-evident log is intact), pulls recent
+  episodic memories the agent has access to, and summarizes them
+  into three concise bullets via text_summarize.v1.
+
+  Composition over the new B230 seed tools — the result is a
+  scan-friendly digest the operator can read before opening
+  Forest's UI.
+
+  Use case: a status_reporter / operator_companion / briefer
+  agent runs this on a schedule (or on demand) and the operator
+  reads the output as "what should I pay attention to first today."
+
+requires:
+  - audit_chain_verify.v1
+  - memory_recall.v1
+  - text_summarize.v1
+
+inputs:
+  type: object
+  required: [focus]
+  properties:
+    focus:
+      type: string
+      description: >
+        One-word or short-phrase focus for the briefing — e.g.
+        "yesterday's incidents", "open action items", "recent learnings",
+        "this week's progress". Steers the memory_recall query and
+        the summarization framing.
+
+steps:
+  - id: verify_chain
+    tool: audit_chain_verify.v1
+    args: {}
+
+  - id: recall_recent
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.focus}
+      layer: episodic
+      limit: 20
+
+  - id: summarize
+    tool: text_summarize.v1
+    args:
+      text: "focus=${inputs.focus}\n\nchain_state: ${verify_chain.out}\n\nrecalled:\n${recall_recent.out}"
+
+output:
+  briefing: ${summarize.out.response}
+  chain_ok: ${verify_chain.out.ok}
+  memory_hit_count: ${recall_recent.out.count}

@@ -1,0 +1,84 @@
+schema_version: 1
+name: bug_report_polish
+version: '1'
+description: |
+  Turn a rough bug observation + the suspect code into a formal
+  bug report ready to file in a tracker. Reads the suspect code,
+  explains what it's supposed to do, then drafts a polished bug
+  report email format covering the issue, repro steps, and an
+  initial hypothesis.
+
+  Use case: a software_engineer agent notices something odd
+  during a routine check, captures a rough note + code pointer,
+  runs this skill. The output goes into the bug tracker via the
+  operator. The agent never files directly — read_only end to end.
+
+requires:
+  - code_read.v1
+  - code_explain.v1
+  - email_draft.v1
+
+inputs:
+  type: object
+  required: [raw_note, suspect_file, language, tracker_recipient]
+  properties:
+    raw_note:
+      type: string
+      description: >
+        The agent's or operator's rough observation. Can be a
+        one-liner ("the retry loop never exits if upstream returns
+        409") or a paragraph.
+    suspect_file:
+      type: string
+      description: >
+        Absolute path to the file that probably contains the bug.
+        Must be within the agent's allowed_paths.
+    language:
+      type: string
+      description: >
+        Language of the suspect file (e.g. python, rust). Pass
+        "auto" to let the model infer.
+    tracker_recipient:
+      type: string
+      description: >
+        Who the bug report is for — "the backend team", "@channel",
+        "Alex via Linear ticket". Shapes the email's framing.
+
+steps:
+  - id: read_suspect
+    tool: code_read.v1
+    args:
+      path: ${inputs.suspect_file}
+      max_bytes: 100000
+
+  - id: explain_suspect
+    tool: code_explain.v1
+    args:
+      code: ${read_suspect.out.content}
+      language: ${inputs.language}
+
+  - id: draft_report
+    tool: email_draft.v1
+    args:
+      bullets: |
+        Observation: ${inputs.raw_note}
+
+        Suspect code lives at: ${inputs.suspect_file}
+
+        What this code is intended to do (per static analysis):
+        ${explain_suspect.out.response}
+
+        Specifically I think the bug is in this code based on the
+        observation above. Include in the report:
+          - a clear repro section
+          - the expected vs actual behavior
+          - the file:line of the suspect logic
+          - an initial hypothesis for what's going wrong
+      recipient: ${inputs.tracker_recipient}
+      intent: "file a bug report with reproduction steps and initial diagnosis"
+      tone: professional
+
+output:
+  bug_report: ${draft_report.out.response}
+  suspect_explanation: ${explain_suspect.out.response}
+  suspect_file: ${inputs.suspect_file}

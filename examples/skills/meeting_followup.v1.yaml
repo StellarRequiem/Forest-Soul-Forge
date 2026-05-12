@@ -1,0 +1,70 @@
+schema_version: 1
+name: meeting_followup
+version: '1'
+description: |
+  Turn raw meeting notes into a polished followup email with the
+  action items called out. Two-step: action_items_extract.v1 pulls
+  every commitment from the notes; email_draft.v1 then composes
+  a structured email with those items as bullets.
+
+  Agent NEVER sends — both tools are read_only. The output is a
+  ready-to-paste email body the operator reviews and sends.
+
+  Use case: an operator_companion or assistant agent runs this after
+  a synced/recorded meeting; the operator pastes the result into
+  their email client.
+
+requires:
+  - action_items_extract.v1
+  - email_draft.v1
+
+inputs:
+  type: object
+  required: [notes, recipient, known_attendees, tone]
+  properties:
+    notes:
+      type: string
+      description: >
+        Raw meeting notes / transcript / chat log. Any format —
+        the action_items_extract step handles messy input.
+    recipient:
+      type: string
+      description: >
+        Who the followup email is to — "the team", "Alex",
+        "@channel", etc. Shapes greeting + tone.
+    known_attendees:
+      type: string
+      description: >
+        Comma-separated names of meeting attendees. Helps the
+        extraction step attribute unowned items. Pass "" if unknown.
+    tone:
+      type: string
+      description: >
+        Email tone — "professional", "casual", "diplomatic", "warm".
+        Defaults to "professional" if you're unsure.
+
+steps:
+  - id: extract
+    tool: action_items_extract.v1
+    args:
+      text: ${inputs.notes}
+      known_attendees: ${inputs.known_attendees}
+
+  - id: draft
+    tool: email_draft.v1
+    args:
+      bullets: |
+        Followup from our recent meeting.
+
+        Action items extracted:
+        ${extract.out.response}
+
+        Please review these and let me know if anything is missing
+        or incorrectly attributed.
+      recipient: ${inputs.recipient}
+      intent: "summarize the meeting and confirm action items"
+      tone: ${inputs.tone}
+
+output:
+  action_items: ${extract.out.response}
+  email_body: ${draft.out.response}
