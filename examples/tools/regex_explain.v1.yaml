@@ -1,0 +1,48 @@
+schema_version: 1
+name: regex_explain
+version: '1'
+description: >
+  Explain a regular expression in plain English and provide 2-3
+  example strings it matches plus 1-2 it doesn't. Useful for code
+  review, debugging cryptic regex bugs, or learning. Read-only.
+implementation: prompt_template_tool.v1
+side_effects: read_only
+archetype_tags:
+  - software_engineer
+  - code_reviewer
+  - knowledge_consolidator
+input_schema:
+  type: object
+  properties:
+    pattern:
+      type: string
+      description: The regex pattern. Any common flavor (PCRE, JS, Python re).
+    flavor:
+      type: string
+      description: >
+        Regex flavor hint — "python", "javascript", "pcre", "posix",
+        or "auto" if unsure. The model adjusts its explanation to
+        flavor-specific syntax (e.g. lookbehind support, named groups).
+  required:
+    - pattern
+    - flavor
+prompt_template: |
+  Explain the regular expression below in plain English, then
+  provide examples.
+
+  Required output shape:
+    1. One-sentence summary of what the regex matches.
+    2. Token-by-token breakdown: walk through each anchor, group,
+       quantifier, character class. Explain WHY each piece is there.
+    3. "Matches" — 2-3 example strings that the regex matches,
+       with a brief note on which capture group catches what.
+    4. "Doesn't match" — 1-2 example strings that are close but
+       don't match, with a brief note on why.
+
+  Regex flavor: {flavor}
+  Pattern: {pattern}
+
+  Explanation:
+forged_at: '2026-05-11T18:00:03Z'
+forged_by: forest-team
+forge_provider: hand-authored

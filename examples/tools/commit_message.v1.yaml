@@ -1,0 +1,56 @@
+schema_version: 1
+name: commit_message
+version: '1'
+description: >
+  Generate a conventional-commits-style commit message from a diff
+  or change description. Output follows the convention
+  "<type>(<scope>): <subject>\n\n<body>\n\n<footer>" where type is
+  feat | fix | docs | refactor | test | chore | perf | ci.
+  Useful for software engineers, release notes, and changelog
+  generation. Read-only.
+implementation: prompt_template_tool.v1
+side_effects: read_only
+archetype_tags:
+  - software_engineer
+  - code_reviewer
+input_schema:
+  type: object
+  properties:
+    diff:
+      type: string
+      description: >
+        The diff or change description. Can be raw `git diff` output,
+        a list of changed files with notes, or a paragraph describing
+        what changed.
+    scope:
+      type: string
+      description: >
+        Optional scope hint (e.g. "auth", "forge", "registry"). Pass
+        an empty string "" if you want the model to infer or omit.
+  required:
+    - diff
+    - scope
+prompt_template: |
+  Generate a conventional commit message for the change below.
+
+  Format requirements:
+    - First line: <type>(<scope>): <subject>
+      where type is one of: feat, fix, docs, refactor, test, chore,
+      perf, ci. Subject is imperative mood, ≤72 chars, no period.
+    - Blank line, then body wrapped at 72 chars explaining WHY
+      (not what — the diff says what).
+    - Blank line, then optional footer with BREAKING CHANGE: notes
+      or "Refs: #123" issue references.
+
+  If the scope hint is empty, infer a scope from the diff or omit
+  the (scope) entirely.
+
+  Scope hint: {scope}
+
+  Diff or change description:
+  {diff}
+
+  Commit message:
+forged_at: '2026-05-11T18:00:02Z'
+forged_by: forest-team
+forge_provider: hand-authored

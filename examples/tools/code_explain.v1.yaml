@@ -1,0 +1,50 @@
+schema_version: 1
+name: code_explain
+version: '1'
+description: >
+  Explain a code snippet in plain English: what the code does, how
+  the pieces fit together, any non-obvious details. Useful for code
+  review, onboarding, debugging, or talking through a snippet with
+  a non-developer collaborator. Read-only; the code is not executed.
+implementation: prompt_template_tool.v1
+side_effects: read_only
+archetype_tags:
+  - software_engineer
+  - code_reviewer
+  - knowledge_consolidator
+input_schema:
+  type: object
+  properties:
+    code:
+      type: string
+      description: The code snippet to explain. Any language.
+    language:
+      type: string
+      description: >
+        Programming language hint (e.g. python, rust, javascript).
+        Pass "auto" when unknown; the model infers from syntax.
+        Required because the prompt_template_tool.v1 substrate does
+        not substitute defaults for missing args — pass an explicit
+        value every time.
+  required:
+    - code
+    - language
+prompt_template: |
+  Explain the following code in plain English. Cover:
+  1. The overall purpose (one sentence).
+  2. How the pieces fit together (2-4 sentences).
+  3. Any non-obvious details, edge cases, or potential issues
+     (call out only if real; don't invent issues).
+
+  Use prose, not bullet points. Assume the reader knows programming
+  but hasn't seen this specific code before.
+
+  Language hint: {language}
+
+  Code:
+  {code}
+
+  Plain-English explanation:
+forged_at: '2026-05-11T18:00:01Z'
+forged_by: forest-team
+forge_provider: hand-authored
