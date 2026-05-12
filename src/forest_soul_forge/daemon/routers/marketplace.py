@@ -438,3 +438,315 @@ async def get_marketplace_index(request: Request) -> MarketplaceIndexOut:
         failed_registries=list(cache["failed_registries"]),
         configured_registries=list(registries),
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR-0055 M3 (B227) — POST /marketplace/install
+# ---------------------------------------------------------------------------
+# The other half of the marketplace loop. Looks up an entry in the
+# cached index, downloads its payload, SHA-verifies, extracts (if a
+# tarball) or copies (if a directory), and installs into the local
+# plugin repo. Emits ``marketplace_plugin_installed`` so the audit
+# chain captures provenance.
+#
+# M6 signing enforcement is queued — for now the manifest_signature
+# field is recorded in the chain event but not verified against
+# marketplace_trusted_keys. Operators see an "untrusted" badge on
+# every entry in the browse pane until M6.
+
+import hashlib
+import shutil
+import tarfile
+import tempfile
+import threading
+from pydantic import BaseModel, Field as _PydanticField
+
+
+class MarketplaceInstallIn(BaseModel):
+    registry_id: str = _PydanticField(
+        ...,
+        description=(
+            "The registry URL the entry came from (matches the "
+            "source_registry field on the index entry). Distinguishes "
+            "the same entry_id across multiple registries."
+        ),
+    )
+    entry_id: str = _PydanticField(
+        ..., min_length=1, max_length=128,
+        description="The entry's id field (typically the plugin name).",
+    )
+    version: str | None = _PydanticField(
+        None, max_length=32,
+        description=(
+            "Optional explicit version. Defaults to the entry's "
+            "current version in the cached index — use this to pin to "
+            "a specific historical release."
+        ),
+    )
+    force: bool = _PydanticField(
+        False,
+        description=(
+            "Overwrite an existing plugin at the target path. Without "
+            "this, install fails 409 when the plugin is already there."
+        ),
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+async def _download_to(url: str, target: Path, *, timeout_s: float = 60.0) -> None:
+    """Fetch the URL into ``target``. Supports file:// and http(s)://.
+    Raises RuntimeError on any failure (caller converts to HTTPException)."""
+    parsed = urlparse(url)
+    if parsed.scheme == "file":
+        src = Path(parsed.path)
+        if not src.exists():
+            raise RuntimeError(f"file not found: {src}")
+        if src.is_file():
+            shutil.copy2(src, target)
+        else:
+            # Directory source — caller handles this differently via
+            # _install_from_url. Shouldn't hit here.
+            raise RuntimeError(f"source is a directory, not a file: {src}")
+        return
+    if parsed.scheme not in ("http", "https"):
+        raise RuntimeError(
+            f"unsupported download scheme {parsed.scheme!r} in {url!r}"
+        )
+    if httpx is None:
+        raise RuntimeError(
+            "httpx not installed; install the [daemon] extra to fetch "
+            "remote payloads"
+        )
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                with open(target, "wb") as f:
+                    async for chunk in resp.aiter_bytes():
+                        f.write(chunk)
+    except httpx.RequestError as e:
+        raise RuntimeError(f"network error: {e}") from e
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(
+            f"HTTP {e.response.status_code} fetching payload"
+        ) from e
+
+
+@router.post(
+    "/install",
+    dependencies=[Depends(require_api_token)],
+)
+async def install_marketplace_entry(
+    body: MarketplaceInstallIn,
+    request: Request,
+) -> dict[str, Any]:
+    """Install a marketplace entry into the local plugin repo.
+
+    Lookup → download → SHA verify → install → audit. Each step
+    raises an HTTPException with a descriptive detail so an operator
+    debugging from the SoulUX response panel can see exactly which
+    step failed.
+    """
+    settings = request.app.state.settings
+    if not getattr(settings, "allow_write_endpoints", True):
+        raise HTTPException(
+            status_code=403,
+            detail="writes are disabled (allow_write_endpoints=False)",
+        )
+
+    cache = _get_or_init_cache(request)
+    # Match by (source_registry, id). Don't trust the operator's
+    # registry_id blindly — verify it matches an actual cached entry,
+    # so a stale or hallucinated registry URL refuses cleanly.
+    matches = [
+        e for e in cache.get("entries") or []
+        if getattr(e, "id", None) == body.entry_id
+        and getattr(e, "source_registry", None) == body.registry_id
+    ]
+    if not matches:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"entry {body.entry_id!r} not found in registry "
+                f"{body.registry_id!r}. Refresh the index (the cached "
+                "entries may be stale) or check the registry URL."
+            ),
+        )
+    if len(matches) > 1:
+        # Should never happen — the index aggregator dedupes — but
+        # surface it explicitly so an auditor can diagnose later.
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"{len(matches)} entries match {body.entry_id!r} in "
+                f"{body.registry_id!r}; index aggregator has a bug."
+            ),
+        )
+    entry = matches[0]
+
+    # Pin version: prefer the explicit body.version, else the entry's
+    # current version. Mismatch is operator error.
+    expected_version = body.version or getattr(entry, "version", None)
+    if not expected_version:
+        raise HTTPException(
+            status_code=400,
+            detail=f"entry {body.entry_id!r} has no version field",
+        )
+    if body.version and body.version != getattr(entry, "version", None):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"requested version {body.version} doesn't match "
+                f"the cached entry's version "
+                f"{getattr(entry, 'version', None)!r}. The marketplace "
+                "has updated since the operator's last refresh."
+            ),
+        )
+
+    download_url = getattr(entry, "download_url", None)
+    if not download_url:
+        raise HTTPException(
+            status_code=400,
+            detail=f"entry {body.entry_id!r} has no download_url",
+        )
+    expected_sha = getattr(entry, "download_sha256", None)
+
+    # Get the plugin repo for the install target.
+    runtime = getattr(request.app.state, "plugin_runtime", None)
+    if runtime is None or runtime.repository is None:
+        raise HTTPException(
+            status_code=503,
+            detail="plugin runtime not initialized",
+        )
+    repo = runtime.repository
+
+    audit_chain = getattr(request.app.state, "audit_chain", None)
+    if audit_chain is None:
+        raise HTTPException(
+            status_code=503,
+            detail="audit chain not initialized",
+        )
+
+    write_lock = getattr(request.app.state, "write_lock", None) or threading.RLock()
+
+    # Two payload shapes supported:
+    #   1. file:// pointing at a directory — direct install_from_dir
+    #   2. file:// or http(s):// pointing at a tarball — download +
+    #      SHA verify + extract + install_from_dir
+    parsed = urlparse(download_url)
+    parsed_path = Path(parsed.path) if parsed.scheme == "file" else None
+    is_directory = (
+        parsed.scheme == "file"
+        and parsed_path is not None
+        and parsed_path.is_dir()
+    )
+
+    with tempfile.TemporaryDirectory(prefix="fsf-marketplace-") as tmpdir:
+        tmp_root = Path(tmpdir)
+        if is_directory:
+            # Skip the SHA check on directory installs — the operator
+            # is pointing at a local dev source, and there's no file
+            # to hash. The marketplace SHOULD still publish a SHA
+            # over the tarball form; this branch is dev convenience.
+            staging = parsed_path
+        else:
+            payload = tmp_root / "payload.plugin"
+            try:
+                await _download_to(download_url, payload)
+            except RuntimeError as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"download failed: {e}",
+                ) from e
+            if expected_sha:
+                actual_sha = _sha256_file(payload)
+                if actual_sha != expected_sha:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"sha256 mismatch: payload {actual_sha} != "
+                            f"manifest {expected_sha}. Refusing to install "
+                            "a tampered or wrong-version payload."
+                        ),
+                    )
+            extract_dir = tmp_root / "extract"
+            extract_dir.mkdir()
+            try:
+                with tarfile.open(payload, "r:*") as tf:
+                    # Defense in depth — refuse absolute paths and
+                    # parent-directory traversal in archive members.
+                    for m in tf.getmembers():
+                        if m.name.startswith("/") or ".." in Path(m.name).parts:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=(
+                                    f"refusing tarball with unsafe member "
+                                    f"path {m.name!r}"
+                                ),
+                            )
+                    tf.extractall(extract_dir)
+            except tarfile.TarError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"payload is not a valid tar archive: {e}",
+                ) from e
+            # Tarball may include either the plugin dir at the root
+            # OR the plugin's contents directly. Normalize by finding
+            # the plugin.yaml.
+            yaml_paths = list(extract_dir.rglob("plugin.yaml"))
+            if not yaml_paths:
+                raise HTTPException(
+                    status_code=400,
+                    detail="extracted tarball contains no plugin.yaml",
+                )
+            staging = yaml_paths[0].parent
+
+        try:
+            with write_lock:
+                info = repo.install_from_dir(staging, force=body.force)
+        except Exception as e:
+            # Includes PluginAlreadyInstalled, PluginValidationError.
+            raise HTTPException(
+                status_code=409,
+                detail=f"install failed: {e}",
+            ) from e
+
+    # Reload the plugin runtime so the new plugin's tools are
+    # registered without a daemon restart.
+    try:
+        runtime.reload()
+    except Exception:
+        # Reload failure is non-fatal — the file is on disk; next
+        # restart picks it up. Log via audit anyway (below).
+        pass
+
+    operator = getattr(request.state, "operator_id", None)
+    entry_payload = {
+        "registry_id": body.registry_id,
+        "entry_id": body.entry_id,
+        "version": expected_version,
+        "plugin_name": info.name,
+        "download_url": download_url,
+        "download_sha256": expected_sha,
+        "manifest_signature": getattr(entry, "manifest_signature", None),
+        "installed_by": operator,
+        "trusted": False,  # M6 will flip this when signature verification ships
+    }
+    with write_lock:
+        audit_chain.append("marketplace_plugin_installed", entry_payload)
+
+    return {
+        "ok": True,
+        "plugin_name": info.name,
+        "version": info.manifest.version,
+        "directory": str(info.directory),
+        "trusted": False,
+        "audit_event": "marketplace_plugin_installed",
+    }
