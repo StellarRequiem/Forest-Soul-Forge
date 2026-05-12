@@ -138,4 +138,11 @@ Total estimate: 5 bursts. T1+T2+T3 land the substrate; T4 hardens; T5 ensures th
 
 ## Status
 
-**Accepted 2026-05-11.** All three open questions resolved as recorded in the acceptance-evidence header. T1 (schema + accessor) lands alongside this acceptance in B219. T2-T6 queued.
+**Accepted 2026-05-11. All six tranches shipped 2026-05-11.** All three open questions resolved as recorded in the acceptance-evidence header. Tranche landings:
+
+- **T1 — schema + accessor:** B219 (commit `d01ee2e`). Schema v17 `agent_catalog_grants` table with trust_tier CHECK constraint + `idx_catalog_grants_active` partial index, mirroring the v14 `agent_plugin_grants` shape. `CatalogGrantsTable` exposes grant/revoke/list_active/list_all/get_active/active_tool_keys.
+- **T2 — dispatcher integration:** B220 (commit `0f4243c`). `DispatchContext` gained `granted_via` + `grant_seq` + `granted_trust_tier` fields; `ConstraintResolutionStep` consults a `catalog_grant_lookup_fn` injected by the dispatcher; `ToolDispatcher._lookup_catalog_grant` returns `(resolved, granted_at_seq, trust_tier)`.
+- **T3 — HTTP endpoints:** B220 (same commit). `POST/DELETE/GET /agents/{id}/tools/grant` with ADR-0060 D3 idempotent revoke and D5 catalog-membership validation. New audit events `agent_tool_granted` + `agent_tool_revoked`.
+- **T4 — posture × trust_tier interaction matrix:** B221 (commit `e058212`). Nine-cell matrix wired into `PostureGateStep` with three new `gate_source` values: `posture_clamp_with_grant`, `grant_overrides_posture`, `grant_blocked_by_red_posture`. More permissive than plugin_grants red-dominates precedence per D4.
+- **T5 — comprehensive tests:** B222 (commit `dbf8652`). 15 tests in `test_daemon_catalog_grants.py` + 13 tests in `test_posture_catalog_grant_matrix.py` — 28 new tests covering the full interaction surface.
+- **T6 — frontend grants pane:** B223 (commit `64c1679`). New `frontend/js/catalog-grants.js` per-agent grants pane on the Agents tab. Closes ADR-0060 fully.

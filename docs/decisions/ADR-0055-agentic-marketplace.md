@@ -1,18 +1,25 @@
 # ADR-0055 — Agentic Marketplace
 
 **Status:** Proposed (2026-05-06, expanded 2026-05-11 with
-Decisions 8–11 + Tranches M7–M10). Sibling-repo design — most
-delivery lives outside Forest-Soul-Forge in a new
-`forest-marketplace` repo. Kernel-side scope is intentionally
-narrow: `GET /marketplace/index`, `POST /marketplace/install`,
-`GET /marketplace/reviews/<entry-id>`, and three new audit
-event types (`marketplace_plugin_installed`,
-`agent_birthed_from_template`, `marketplace_telemetry_submitted`).
-Pairs with ADR-0043 (MCP plugin protocol), ADR-0030/0031 (forge
-lifecycle), ADR-0060 (runtime tool grants — marketplace install
-flows into the grant pane), and ADR-0001 (identity invariance —
-marketplace installs MUST NOT touch constitution_hash or DNA;
-agent templates produce NEW DNA, not transplanted DNA).
+Decisions 8–11 + Tranches M7–M10). **Phase A shipped 2026-05-11
+(Bursts 227–229) + 20-item seed catalog 2026-05-11 to 2026-05-12
+(Bursts 230–233)** per the phased rollout in
+`docs/roadmap/2026-05-11-marketplace-roadmap.md`. Phases B/C/D
+queued. Sibling-repo design — most delivery lives outside
+Forest-Soul-Forge in a new `forest-marketplace` repo (org not yet
+scaffolded as of 2026-05-12). Kernel-side scope is intentionally
+narrow: `GET /marketplace/index` (M1, shipped B184), `POST
+/marketplace/install` (M3, shipped B227 with tarball-traversal
+defense), `GET /marketplace/reviews/<entry-id>` (M7, Phase B),
+and three new audit event types (`marketplace_plugin_installed`
+— live since B227; `agent_birthed_from_template` — Phase D;
+`marketplace_telemetry_submitted` — Phase C). Pairs with ADR-0043
+(MCP plugin protocol), ADR-0030/0031 (forge lifecycle), ADR-0060
+(runtime tool grants — marketplace install flows into the grant
+pane via the B229 post-install grant-to-agent picker), and
+ADR-0001 (identity invariance — marketplace installs MUST NOT
+touch constitution_hash or DNA; agent templates produce NEW DNA,
+not transplanted DNA).
 
 ## Context
 
