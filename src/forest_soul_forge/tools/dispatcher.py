@@ -35,6 +35,8 @@ without external serialization corrupt the count and the chain.
 """
 from __future__ import annotations
 
+import os
+import pickle
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -70,6 +72,18 @@ from forest_soul_forge.tools.governance_pipeline import (
     TaskUsageCapStep,
     ToolLookupStep,
 )
+# ADR-0051 T4 (B264): per-tool subprocess sandbox. T1-T3 shipped the
+# substrate (Sandbox Protocol, MacOSSandboxExec, LinuxBwrap, the
+# SerializableToolContext, the sandbox_eligible catalog flag); T4
+# wires the dispatcher to actually USE it when FSF_TOOL_SANDBOX is
+# set. Default ``off`` preserves bit-identical pre-T4 behavior.
+from forest_soul_forge.tools.sandbox import (
+    Sandbox,
+    SandboxResult,
+    build_profile,
+    default_sandbox,
+)
+from forest_soul_forge.tools.sandbox_context import SerializableToolContext
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +286,76 @@ def _load_resolved_constraints(
 
 
 # ---------------------------------------------------------------------------
+# ADR-0051 T4 — per-tool subprocess sandbox routing.
+#
+# Substrate is opt-in via FSF_TOOL_SANDBOX={off,strict,permissive}.
+# Default "off" preserves bit-identical pre-T4 behavior — tools run
+# in the daemon's own Python process exactly as before. Operators
+# running untrusted plugins or hardened deployments opt in to
+# "strict" (refuse on sandbox failure) or "permissive" (fall back
+# to in-process on sandbox failure with an audit annotation).
+# ---------------------------------------------------------------------------
+
+
+# Valid FSF_TOOL_SANDBOX values. Anything else is logged + treated
+# as "off" so a typo never silently escalates a production daemon
+# into strict mode.
+_SANDBOX_MODES: frozenset[str] = frozenset({"off", "strict", "permissive"})
+
+
+def _read_sandbox_mode() -> str:
+    """Read ``FSF_TOOL_SANDBOX`` env var → one of {off,strict,permissive}.
+
+    Defaults to ``off`` (current behavior). Unknown values fall back
+    to ``off`` so a typo doesn't silently put a daemon in strict
+    mode and start refusing dispatches.
+    """
+    raw = (os.environ.get("FSF_TOOL_SANDBOX") or "").strip().lower()
+    if raw in _SANDBOX_MODES:
+        return raw
+    return "off"
+
+
+class SandboxRefused(ToolError):
+    """Raised when strict-mode sandbox setup fails before the tool runs.
+
+    The dispatcher catches this, emits a ``tool_call_failed`` event
+    with ``sandbox_violation=true`` and ``error_kind="setup_failed"``,
+    and returns a :class:`DispatchFailed`. Operators see the refusal
+    in the audit chain + the operator-facing approval/queue UI.
+
+    Construct via the kind: ``SandboxRefused(kind="setup_failed",
+    stderr=...)``. ``kind`` mirrors ``SandboxResult.error_kind``.
+    """
+
+    def __init__(self, *, kind: str, stderr: str = "") -> None:
+        super().__init__(f"sandbox refused: {kind}")
+        self.kind = kind
+        self.stderr = stderr
+
+
+@dataclass(frozen=True)
+class SandboxExecutionOutcome:
+    """What ``_execute_tool_maybe_sandboxed`` returns to the dispatcher.
+
+    Carries both the successful ToolResult and the metadata the
+    audit-emit needs (sandbox_mode + sandbox_used + skip reason),
+    or the failure path on ToolError (sandboxed worker raised, or
+    in-process tool raised — either way the dispatcher's existing
+    EVENT_FAILED branch handles it).
+
+    On sandbox-side failure (violation / timeout / unexpected), the
+    method raises directly so the dispatcher's surrounding try/except
+    catches and emits EVENT_FAILED with the sandbox metadata.
+    """
+
+    result: ToolResult
+    sandbox_mode: str
+    sandbox_used: bool
+    sandbox_skipped_reason: str | None = None
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 def _now_iso() -> str:
@@ -280,6 +364,26 @@ def _now_iso() -> str:
 
 def _tool_key(name: str, version: str) -> str:
     return f"{name}.v{version}"
+
+
+def _sandbox_meta(
+    *, mode: str, used: bool, skipped_reason: str | None = None,
+) -> dict[str, Any]:
+    """Compose the additive sandbox event_data fields per ADR-0051 T6.
+
+    Returns a dict with the three to four sandbox-related keys the
+    audit emitter adds to existing event_data. Helper exists so every
+    call site uses the same key names + types (drift detector via
+    grep: if these keys ever change the dispatcher tests catch the
+    miss immediately).
+    """
+    out: dict[str, Any] = {
+        "sandbox_mode":          mode,
+        "sandbox_used":          used,
+    }
+    if skipped_reason is not None:
+        out["sandbox_skipped_reason"] = skipped_reason
+    return out
 
 
 @dataclass
@@ -411,6 +515,20 @@ class ToolDispatcher:
     # agents semantic. The step is otherwise a pure-function
     # mode→eligible-tools clamp.
     experimenter_role: str = "experimenter"
+
+    # ADR-0051 T4 (B264): per-tool subprocess sandbox runtime.
+    # When None (default), the dispatcher calls ``default_sandbox()``
+    # to pick the platform impl (MacOSSandboxExec / LinuxBwrap).
+    # Tests inject a FakeSandbox to deterministically exercise the
+    # sandbox / setup_failed / sandbox_violation paths without
+    # spawning real subprocesses.
+    sandbox: Any = None
+    # Closure returning the live FSF_TOOL_SANDBOX env-var value so
+    # an operator can flip modes at runtime without restarting the
+    # daemon. Default closure reads the env var on every call;
+    # tests pass a fixed-value lambda to deterministically set
+    # the mode under test.
+    sandbox_mode_fn: Any = None  # callable() -> str
 
     # R3 (2026-04-30): the pipeline of pre-execute checks. Built
     # once per dispatcher in __post_init__ from the dispatcher's
@@ -769,8 +887,64 @@ class ToolDispatcher:
             agent_registry=self.agent_registry,
             procedural_shortcuts=self.procedural_shortcuts_table,
         )
+        # ADR-0051 T4 (B264): route through the sandbox-aware execution
+        # helper. When FSF_TOOL_SANDBOX=off (default) this is bit-
+        # identical to ``await tool.execute(args, ctx)`` plus a meta
+        # dict; the in-process path stays the hot path. Strict/permissive
+        # modes branch through the sandbox.
         try:
-            result = await tool.execute(args, ctx)
+            outcome = await self._execute_tool_maybe_sandboxed(
+                tool=tool,
+                args=args,
+                ctx=ctx,
+                side_effects=(resolved.side_effects or tool.side_effects),
+                tool_key=key,
+            )
+            result = outcome.result
+            sandbox_meta = _sandbox_meta(
+                mode=outcome.sandbox_mode,
+                used=outcome.sandbox_used,
+                skipped_reason=outcome.sandbox_skipped_reason,
+            )
+        except SandboxRefused as e:
+            # ADR-0051 T6: sandbox refusal lands on EVENT_FAILED with
+            # sandbox_violation=true so the operator can grep the chain
+            # for "what got blocked at the OS boundary." kind carries
+            # the worker's error classification (sandbox_violation /
+            # setup_failed / timeout / etc).
+            failed_entry = self.audit.append(
+                EVENT_FAILED,
+                {
+                    "tool_key": key,
+                    "instance_id": instance_id,
+                    "session_id": session_id,
+                    "dispatched_seq": dispatched_entry.seq,
+                    "exception_type": type(e).__name__,
+                    "exception_message": str(e),
+                    "sandbox_mode": self._resolve_sandbox_mode(),
+                    "sandbox_used": False,
+                    "sandbox_violation": True,
+                    "sandbox_error_kind": e.kind,
+                    "sandbox_stderr": (e.stderr or "")[:1500],
+                },
+                agent_dna=agent_dna,
+            )
+            self._record_call_safe(
+                audit_seq=failed_entry.seq,
+                instance_id=instance_id,
+                session_id=session_id,
+                tool_key=key,
+                status="failed",
+                tokens_used=None,
+                cost_usd=None,
+                side_effect_summary=None,
+                finished_at=failed_entry.timestamp,
+            )
+            return DispatchFailed(
+                tool_key=key,
+                exception_type=type(e).__name__,
+                audit_seq=failed_entry.seq,
+            )
         except ToolError as e:
             failed_entry = self.audit.append(
                 EVENT_FAILED,
@@ -781,6 +955,9 @@ class ToolDispatcher:
                     "dispatched_seq": dispatched_entry.seq,
                     "exception_type": type(e).__name__,
                     "exception_message": str(e),
+                    **_sandbox_meta(
+                        mode=self._resolve_sandbox_mode(), used=False,
+                    ),
                 },
                 agent_dna=agent_dna,
             )
@@ -815,6 +992,9 @@ class ToolDispatcher:
                     "exception_type": type(e).__name__,
                     "exception_message": str(e),
                     "unexpected": True,
+                    **_sandbox_meta(
+                        mode=self._resolve_sandbox_mode(), used=False,
+                    ),
                 },
                 agent_dna=agent_dna,
             )
@@ -847,6 +1027,7 @@ class ToolDispatcher:
                 "tokens_used": result.tokens_used,
                 "cost_usd": result.cost_usd,
                 "side_effect_summary": result.side_effect_summary,
+                **sandbox_meta,
             },
             agent_dna=agent_dna,
         )
@@ -872,6 +1053,209 @@ class ToolDispatcher:
         )
 
     # ---- helpers -----------------------------------------------------
+
+    # ---- ADR-0051 T4 — sandbox-aware tool execution ------------------
+
+    def _resolve_sandbox_mode(self) -> str:
+        """Read the current FSF_TOOL_SANDBOX mode.
+
+        Tests inject ``sandbox_mode_fn`` (a fixed lambda) so the
+        env var doesn't leak across test ordering. Production uses
+        the default closure that re-reads the env each call so
+        operators can flip modes mid-daemon-lifetime.
+        """
+        if self.sandbox_mode_fn is not None:
+            try:
+                m = self.sandbox_mode_fn()
+            except Exception:
+                m = "off"
+        else:
+            m = _read_sandbox_mode()
+        if m not in _SANDBOX_MODES:
+            return "off"
+        return m
+
+    def _lookup_sandbox_eligible(self, key: str) -> bool:
+        """Read ``ToolDef.sandbox_eligible`` for this dispatch's key.
+
+        Returns True when:
+          - ``self.tool_catalog`` is None (test contexts) — default
+            eligible per ADR-0051 T1's additive-schema rule.
+          - The catalog has no entry for ``key`` (granted-tool path
+            that bypassed the catalog, defensive fallback).
+          - The catalog entry's ``sandbox_eligible`` is True.
+
+        Returns False when the catalog explicitly opted the tool out
+        (memory_*, delegate, llm_think per T3 catalog annotations).
+        """
+        catalog = self.tool_catalog
+        if catalog is None:
+            return True
+        tools = getattr(catalog, "tools", None) or {}
+        td = tools.get(key)
+        if td is None:
+            return True
+        return bool(getattr(td, "sandbox_eligible", True))
+
+    def _resolve_sandbox(self) -> Sandbox | None:
+        """Pick the Sandbox impl. Tests inject; production reads
+        platform default."""
+        if self.sandbox is not None:
+            return self.sandbox
+        return default_sandbox()
+
+    async def _execute_tool_maybe_sandboxed(
+        self,
+        tool: Any,
+        args: dict[str, Any],
+        ctx: ToolContext,
+        *,
+        side_effects: str,
+        tool_key: str,
+    ) -> SandboxExecutionOutcome:
+        """Run ``tool.execute(args, ctx)``, possibly inside a subprocess
+        sandbox per ADR-0051 Decision 1+2+3.
+
+        Decision matrix:
+
+          FSF_TOOL_SANDBOX=off          → run in-process, no annotation
+          sandbox_eligible=False        → run in-process,
+                                          skipped_reason="ineligible"
+          no platform sandbox + strict  → raise SandboxRefused
+          no platform sandbox + permissive → run in-process,
+                                          skipped_reason="no_sandbox_on_platform"
+          sandbox.run() setup_failed + strict   → raise SandboxRefused
+          sandbox.run() setup_failed + permissive → run in-process,
+                                          skipped_reason="setup_failed_permissive_fallback"
+          sandbox.run() tool_error      → raise the ToolError the worker
+                                          reported (same shape as
+                                          in-process would have raised)
+          sandbox.run() sandbox_violation → raise SandboxRefused
+                                          (caller's EVENT_FAILED branch
+                                          catches via ToolError MRO)
+          sandbox.run() success         → unpickle ToolResult, return
+
+        The caller's existing try/except ToolError + EVENT_FAILED
+        branch handles every failure shape WITHOUT needing per-shape
+        special-cases — SandboxRefused IS a ToolError subclass.
+        """
+        mode = self._resolve_sandbox_mode()
+
+        # ----- Off mode: bit-identical pre-T4 behavior -----
+        if mode == "off":
+            result = await tool.execute(args, ctx)
+            return SandboxExecutionOutcome(
+                result=result, sandbox_mode="off", sandbox_used=False,
+            )
+
+        # ----- Tool opted out of sandbox per ADR-0051 T3 catalog
+        # annotation. Run in-process and emit skipped_reason for the
+        # audit trail so the operator sees the gap.
+        if not self._lookup_sandbox_eligible(tool_key):
+            result = await tool.execute(args, ctx)
+            return SandboxExecutionOutcome(
+                result=result, sandbox_mode=mode, sandbox_used=False,
+                sandbox_skipped_reason="ineligible",
+            )
+
+        # ----- Platform sandbox availability check -----
+        sb = self._resolve_sandbox()
+        if sb is None:
+            if mode == "strict":
+                raise SandboxRefused(
+                    kind="no_sandbox_on_platform",
+                    stderr=(
+                        "FSF_TOOL_SANDBOX=strict but no sandbox runtime "
+                        "available on this platform (need sandbox-exec on "
+                        "macOS or bwrap on Linux)"
+                    ),
+                )
+            # permissive: in-process fallback.
+            result = await tool.execute(args, ctx)
+            return SandboxExecutionOutcome(
+                result=result, sandbox_mode=mode, sandbox_used=False,
+                sandbox_skipped_reason="no_sandbox_on_platform",
+            )
+
+        # ----- Build profile from constitution constraints (T5) -----
+        profile = build_profile(
+            side_effects=side_effects,
+            allowed_paths=list(ctx.constraints.get("allowed_paths") or []),
+            allowed_commands=list(ctx.constraints.get("allowed_commands") or []),
+            allowed_hosts=list(ctx.constraints.get("allowed_hosts") or []),
+            timeout_s=float(ctx.constraints.get("sandbox_timeout_s") or 30.0),
+        )
+
+        # ----- Spawn the sandboxed worker -----
+        sandbox_result: SandboxResult = sb.run(
+            tool_module=type(tool).__module__,
+            tool_class=type(tool).__name__,
+            args=args,
+            ctx=SerializableToolContext.from_tool_context(ctx),
+            profile=profile,
+        )
+
+        # ----- Classify outcome -----
+        if sandbox_result.success and sandbox_result.result_pickle is not None:
+            try:
+                result = pickle.loads(sandbox_result.result_pickle)
+            except Exception as e:
+                # Worker pickled something we can't decode — surface as
+                # an unexpected sandbox failure.
+                raise SandboxRefused(
+                    kind="result_unpickle_failed",
+                    stderr=f"could not unpickle worker result: {e}",
+                ) from e
+            if not isinstance(result, ToolResult):
+                raise SandboxRefused(
+                    kind="result_type_mismatch",
+                    stderr=(
+                        f"worker returned non-ToolResult type "
+                        f"{type(result).__name__}"
+                    ),
+                )
+            return SandboxExecutionOutcome(
+                result=result, sandbox_mode=mode, sandbox_used=True,
+            )
+
+        # Failure path. Classify by error_kind.
+        ek = sandbox_result.error_kind or "unexpected"
+
+        if ek == "tool_error":
+            # Worker pickled the ToolError. Rebuild + raise so the
+            # caller's existing EVENT_FAILED branch catches it as if
+            # the tool had raised in-process.
+            te = None
+            if sandbox_result.result_pickle is not None:
+                try:
+                    te = pickle.loads(sandbox_result.result_pickle)
+                except Exception:
+                    te = None
+            if isinstance(te, ToolError):
+                raise te
+            # Fall back to a generic ToolError carrying the stderr.
+            raise ToolError(sandbox_result.stderr or "tool error")
+
+        if ek == "setup_failed":
+            if mode == "strict":
+                raise SandboxRefused(
+                    kind="setup_failed", stderr=sandbox_result.stderr,
+                )
+            # permissive: fall back in-process.
+            result = await tool.execute(args, ctx)
+            return SandboxExecutionOutcome(
+                result=result, sandbox_mode=mode, sandbox_used=False,
+                sandbox_skipped_reason="setup_failed_permissive_fallback",
+            )
+
+        # sandbox_violation / timeout / unexpected — refuse in both
+        # strict and permissive modes (these are genuine failures, not
+        # platform unavailability that permissive can paper over).
+        # The caller's EVENT_FAILED branch sees SandboxRefused (a
+        # ToolError) and emits a failed event with sandbox_violation=True
+        # in the event_data via the dispatcher-side check.
+        raise SandboxRefused(kind=ek, stderr=sandbox_result.stderr)
+
     def _record_call_safe(self, **kwargs) -> None:
         """Best-effort write to tool_calls. ``record_call=None`` skips
         the mirror entirely (used by tests with in-memory fakes).
@@ -1774,8 +2158,55 @@ class ToolDispatcher:
             priv_client=self.priv_client,
             procedural_shortcuts=self.procedural_shortcuts_table,
         )
+        # ADR-0051 T4: same sandbox-aware path as the primary dispatch.
+        # When FSF_TOOL_SANDBOX=off this is bit-identical to in-process.
         try:
-            result = await tool.execute(args, ctx)
+            outcome = await self._execute_tool_maybe_sandboxed(
+                tool=tool,
+                args=args,
+                ctx=ctx,
+                side_effects=(
+                    resolved.side_effects if resolved else tool.side_effects
+                ),
+                tool_key=key,
+            )
+            result = outcome.result
+            sandbox_meta = _sandbox_meta(
+                mode=outcome.sandbox_mode,
+                used=outcome.sandbox_used,
+                skipped_reason=outcome.sandbox_skipped_reason,
+            )
+        except SandboxRefused as e:
+            failed_entry = self.audit.append(
+                EVENT_FAILED,
+                {
+                    "tool_key": key,
+                    "instance_id": instance_id,
+                    "session_id": session_id,
+                    "dispatched_seq": dispatched_entry.seq,
+                    "exception_type": type(e).__name__,
+                    "exception_message": str(e),
+                    "resumed_from_ticket": ticket_id,
+                    "sandbox_mode": self._resolve_sandbox_mode(),
+                    "sandbox_used": False,
+                    "sandbox_violation": True,
+                    "sandbox_error_kind": e.kind,
+                    "sandbox_stderr": (e.stderr or "")[:1500],
+                },
+                agent_dna=agent_dna,
+            )
+            self._record_call_safe(
+                audit_seq=failed_entry.seq,
+                instance_id=instance_id, session_id=session_id,
+                tool_key=key, status="failed",
+                tokens_used=None, cost_usd=None,
+                side_effect_summary=None,
+                finished_at=failed_entry.timestamp,
+            )
+            return DispatchFailed(
+                tool_key=key, exception_type=type(e).__name__,
+                audit_seq=failed_entry.seq,
+            )
         except ToolError as e:
             failed_entry = self.audit.append(
                 EVENT_FAILED,
@@ -1787,6 +2218,9 @@ class ToolDispatcher:
                     "exception_type": type(e).__name__,
                     "exception_message": str(e),
                     "resumed_from_ticket": ticket_id,
+                    **_sandbox_meta(
+                        mode=self._resolve_sandbox_mode(), used=False,
+                    ),
                 },
                 agent_dna=agent_dna,
             )
@@ -1814,6 +2248,9 @@ class ToolDispatcher:
                     "exception_message": str(e),
                     "unexpected": True,
                     "resumed_from_ticket": ticket_id,
+                    **_sandbox_meta(
+                        mode=self._resolve_sandbox_mode(), used=False,
+                    ),
                 },
                 agent_dna=agent_dna,
             )
@@ -1842,6 +2279,7 @@ class ToolDispatcher:
                 "cost_usd": result.cost_usd,
                 "side_effect_summary": result.side_effect_summary,
                 "resumed_from_ticket": ticket_id,
+                **sandbox_meta,
             },
             agent_dna=agent_dna,
         )

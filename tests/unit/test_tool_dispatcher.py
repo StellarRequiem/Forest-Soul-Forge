@@ -1169,3 +1169,380 @@ class TestLoadInitiativeLevel:
             encoding="utf-8",
         )
         assert _load_initiative_level(p) == "L3"
+
+
+# ---------------------------------------------------------------------------
+# ADR-0051 T4+T5+T6+T7 — sandbox dispatcher integration
+# ---------------------------------------------------------------------------
+
+
+class _FakeSandbox:
+    """Test-only Sandbox impl. Captures the args it was invoked with
+    and returns a pre-canned SandboxResult so tests can deterministically
+    exercise every error_kind branch in
+    ``_execute_tool_maybe_sandboxed`` without spawning real
+    subprocesses."""
+
+    def __init__(self, canned_result):
+        self.canned_result = canned_result
+        self.called_with = None
+
+    def run(self, *, tool_module, tool_class, args, ctx, profile):
+        self.called_with = {
+            "tool_module": tool_module,
+            "tool_class":  tool_class,
+            "args":        args,
+            "ctx":         ctx,
+            "profile":     profile,
+        }
+        return self.canned_result
+
+
+def _pickle_tool_result(span_seconds=60):
+    """Helper: pickle a ToolResult mimicking TimestampWindowTool output
+    so the FakeSandbox can return it as a successful sandbox payload."""
+    import pickle
+    return pickle.dumps(ToolResult(
+        output={"span_seconds": span_seconds},
+        metadata={},
+        tokens_used=None,
+        cost_usd=None,
+        side_effect_summary=None,
+    ))
+
+
+class TestSandboxOffMode:
+    """FSF_TOOL_SANDBOX=off (default) preserves bit-identical pre-T4
+    behavior. The succeeded event carries sandbox_mode='off' +
+    sandbox_used=False but the tool runs in-process."""
+
+    def test_off_mode_runs_in_process_with_meta(self, dispatcher_env):
+        from forest_soul_forge.tools.dispatcher import EVENT_SUCCEEDED
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        # Force off mode via the closure (avoids env-var leakage).
+        dispatcher_env["dispatcher"].sandbox_mode_fn = lambda: "off"
+
+        _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        succeeded = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_SUCCEEDED
+        ][-1]
+        assert succeeded.event_data["sandbox_mode"] == "off"
+        assert succeeded.event_data["sandbox_used"] is False
+        # Off-mode events do NOT carry skipped_reason (no skip
+        # decision was made).
+        assert "sandbox_skipped_reason" not in succeeded.event_data
+
+
+class TestSandboxStrictMode:
+    """FSF_TOOL_SANDBOX=strict + sandbox_eligible=True + working
+    sandbox = tool runs sandboxed, succeeded event marks
+    sandbox_used=True. timestamp_window is sandbox_eligible=True by
+    default (catalog absence → True per T1.1 additive rule)."""
+
+    def test_strict_eligible_routes_through_sandbox(self, dispatcher_env):
+        from forest_soul_forge.tools.dispatcher import EVENT_SUCCEEDED
+        from forest_soul_forge.tools.sandbox import SandboxResult
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        # Inject the fake sandbox + force strict mode.
+        fake = _FakeSandbox(SandboxResult(
+            success=True,
+            result_pickle=_pickle_tool_result(span_seconds=42),
+        ))
+        dispatcher_env["dispatcher"].sandbox = fake
+        dispatcher_env["dispatcher"].sandbox_mode_fn = lambda: "strict"
+
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchSucceeded)
+        # The sandbox was actually consulted with the tool's
+        # module/class strings, the validated args, and a profile.
+        assert fake.called_with["tool_module"].endswith("timestamp_window")
+        assert fake.called_with["tool_class"] == "TimestampWindowTool"
+        # The result came from the sandbox (span_seconds=42, not the
+        # real tool's output for 'last 1 minutes' which would be 60).
+        assert outcome.result.output["span_seconds"] == 42
+        # Audit event reflects the sandboxed dispatch.
+        succeeded = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_SUCCEEDED
+        ][-1]
+        assert succeeded.event_data["sandbox_mode"] == "strict"
+        assert succeeded.event_data["sandbox_used"] is True
+
+
+class TestSandboxNoSandboxOnPlatform:
+    """If default_sandbox()/self.sandbox is None on strict mode,
+    refuse with SandboxRefused → tool_call_failed +
+    sandbox_violation=True."""
+
+    def test_strict_no_sandbox_refuses(self, dispatcher_env):
+        from forest_soul_forge.tools.dispatcher import EVENT_FAILED
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        # Force strict mode but explicitly no sandbox runtime.
+        dispatcher_env["dispatcher"].sandbox = None
+        dispatcher_env["dispatcher"].sandbox_mode_fn = lambda: "strict"
+
+        # Make default_sandbox return None too via monkey-patch.
+        import forest_soul_forge.tools.dispatcher as disp_mod
+        original = disp_mod.default_sandbox
+        disp_mod.default_sandbox = lambda: None
+        try:
+            outcome = _run(dispatcher_env["dispatcher"].dispatch(
+                instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+                genre="observer", session_id="s1",
+                constitution_path=constitution,
+                tool_name="timestamp_window", tool_version="1",
+                args={"expression": "last 1 minutes"},
+            ))
+        finally:
+            disp_mod.default_sandbox = original
+
+        assert isinstance(outcome, DispatchFailed)
+        failed = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_FAILED
+        ][-1]
+        assert failed.event_data["sandbox_violation"] is True
+        assert failed.event_data["sandbox_error_kind"] == "no_sandbox_on_platform"
+
+    def test_permissive_no_sandbox_falls_back_to_in_process(self, dispatcher_env):
+        from forest_soul_forge.tools.dispatcher import EVENT_SUCCEEDED
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        dispatcher_env["dispatcher"].sandbox = None
+        dispatcher_env["dispatcher"].sandbox_mode_fn = lambda: "permissive"
+
+        import forest_soul_forge.tools.dispatcher as disp_mod
+        original = disp_mod.default_sandbox
+        disp_mod.default_sandbox = lambda: None
+        try:
+            outcome = _run(dispatcher_env["dispatcher"].dispatch(
+                instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+                genre="observer", session_id="s1",
+                constitution_path=constitution,
+                tool_name="timestamp_window", tool_version="1",
+                args={"expression": "last 1 minutes"},
+            ))
+        finally:
+            disp_mod.default_sandbox = original
+
+        assert isinstance(outcome, DispatchSucceeded)
+        # In-process fallback: real tool ran (span_seconds=60 for
+        # 'last 1 minutes'), event marks sandbox_used=False with
+        # skipped_reason=no_sandbox_on_platform.
+        assert outcome.result.output["span_seconds"] == 60
+        succeeded = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_SUCCEEDED
+        ][-1]
+        assert succeeded.event_data["sandbox_mode"] == "permissive"
+        assert succeeded.event_data["sandbox_used"] is False
+        assert succeeded.event_data["sandbox_skipped_reason"] == "no_sandbox_on_platform"
+
+
+class TestSandboxSetupFailed:
+    """sandbox.run() returns SandboxResult(success=False,
+    error_kind='setup_failed') — strict refuses, permissive falls
+    back in-process."""
+
+    def test_strict_setup_failed_refuses(self, dispatcher_env):
+        from forest_soul_forge.tools.dispatcher import EVENT_FAILED
+        from forest_soul_forge.tools.sandbox import SandboxResult
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        fake = _FakeSandbox(SandboxResult(
+            success=False, error_kind="setup_failed",
+            stderr="sandbox-exec binary missing",
+        ))
+        dispatcher_env["dispatcher"].sandbox = fake
+        dispatcher_env["dispatcher"].sandbox_mode_fn = lambda: "strict"
+
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchFailed)
+        failed = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_FAILED
+        ][-1]
+        assert failed.event_data["sandbox_violation"] is True
+        assert failed.event_data["sandbox_error_kind"] == "setup_failed"
+        assert "sandbox-exec binary missing" in failed.event_data["sandbox_stderr"]
+
+    def test_permissive_setup_failed_falls_back(self, dispatcher_env):
+        from forest_soul_forge.tools.dispatcher import EVENT_SUCCEEDED
+        from forest_soul_forge.tools.sandbox import SandboxResult
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        fake = _FakeSandbox(SandboxResult(
+            success=False, error_kind="setup_failed",
+            stderr="user namespaces unavailable",
+        ))
+        dispatcher_env["dispatcher"].sandbox = fake
+        dispatcher_env["dispatcher"].sandbox_mode_fn = lambda: "permissive"
+
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchSucceeded)
+        # Real tool produced the output via in-process fallback.
+        assert outcome.result.output["span_seconds"] == 60
+        succeeded = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_SUCCEEDED
+        ][-1]
+        assert succeeded.event_data["sandbox_used"] is False
+        assert succeeded.event_data["sandbox_skipped_reason"] == "setup_failed_permissive_fallback"
+
+
+class TestSandboxViolation:
+    """sandbox.run() returns SandboxResult(error_kind='sandbox_violation')
+    — refuse in BOTH strict and permissive modes (violations are real
+    blocks, not platform-unavailability that permissive can fall back
+    around)."""
+
+    def test_sandbox_violation_refuses_in_strict(self, dispatcher_env):
+        from forest_soul_forge.tools.dispatcher import EVENT_FAILED
+        from forest_soul_forge.tools.sandbox import SandboxResult
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        fake = _FakeSandbox(SandboxResult(
+            success=False, error_kind="sandbox_violation",
+            violated_rule="file-write-data /etc/hosts",
+            stderr="Sandbox: python deny(1) file-write-data /etc/hosts",
+        ))
+        dispatcher_env["dispatcher"].sandbox = fake
+        dispatcher_env["dispatcher"].sandbox_mode_fn = lambda: "strict"
+
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchFailed)
+        failed = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_FAILED
+        ][-1]
+        assert failed.event_data["sandbox_violation"] is True
+        assert failed.event_data["sandbox_error_kind"] == "sandbox_violation"
+
+    def test_sandbox_violation_refuses_in_permissive(self, dispatcher_env):
+        """Permissive mode falls back on setup failures BUT NOT on
+        violations — a violation means the tool actually tried to do
+        something outside its declared scope, which is a real failure
+        the operator wants to see."""
+        from forest_soul_forge.tools.dispatcher import EVENT_FAILED
+        from forest_soul_forge.tools.sandbox import SandboxResult
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        fake = _FakeSandbox(SandboxResult(
+            success=False, error_kind="sandbox_violation",
+            violated_rule="file-write-data /etc/hosts",
+            stderr="Sandbox: python deny(1) file-write-data /etc/hosts",
+        ))
+        dispatcher_env["dispatcher"].sandbox = fake
+        dispatcher_env["dispatcher"].sandbox_mode_fn = lambda: "permissive"
+
+        outcome = _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        assert isinstance(outcome, DispatchFailed)
+        failed = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_FAILED
+        ][-1]
+        assert failed.event_data["sandbox_violation"] is True
+        assert failed.event_data["sandbox_error_kind"] == "sandbox_violation"
+
+
+class TestSandboxModeFromEnv:
+    """The default sandbox_mode_fn reads FSF_TOOL_SANDBOX from os.environ.
+    Validates that the dispatcher honors the env var when no closure
+    is injected."""
+
+    def test_env_var_off_default(self, dispatcher_env, monkeypatch):
+        from forest_soul_forge.tools.dispatcher import EVENT_SUCCEEDED
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        monkeypatch.delenv("FSF_TOOL_SANDBOX", raising=False)
+        # No sandbox_mode_fn injection → uses _read_sandbox_mode().
+        dispatcher_env["dispatcher"].sandbox_mode_fn = None
+        _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        succeeded = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_SUCCEEDED
+        ][-1]
+        assert succeeded.event_data["sandbox_mode"] == "off"
+
+    def test_env_var_unknown_falls_back_to_off(self, dispatcher_env, monkeypatch):
+        from forest_soul_forge.tools.dispatcher import (
+            EVENT_SUCCEEDED, _read_sandbox_mode,
+        )
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+
+        monkeypatch.setenv("FSF_TOOL_SANDBOX", "ULTRA_STRICT")
+        # A typo or unrecognized value MUST NOT escalate the daemon
+        # into strict mode — that would silently start refusing
+        # dispatches in production. _read_sandbox_mode() returns "off"
+        # for any non-canonical value.
+        assert _read_sandbox_mode() == "off"
+
+        dispatcher_env["dispatcher"].sandbox_mode_fn = None
+        _run(dispatcher_env["dispatcher"].dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1",
+            constitution_path=constitution,
+            tool_name="timestamp_window", tool_version="1",
+            args={"expression": "last 1 minutes"},
+        ))
+        succeeded = [
+            e for e in dispatcher_env["chain"].read_all()
+            if e.event_type == EVENT_SUCCEEDED
+        ][-1]
+        assert succeeded.event_data["sandbox_mode"] == "off"
