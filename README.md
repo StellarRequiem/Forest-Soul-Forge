@@ -606,9 +606,11 @@ A Forest Soul Forge agent that protects its user but doesn't try to understand t
 
 ## 📜 License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+**Elastic License 2.0 (ELv2)** — source-available, with three restrictions: no competing managed service, no license-key circumvention, no notice removal. See [LICENSE](LICENSE) for the canonical text and [LICENSE.history](LICENSE.history) for the cutover context (commits through B244 / `f799757` remain irrevocably Apache 2.0; B245 onward is ELv2 per ADR-0046 Amendment 1).
 
-This project does not collect data. There is no telemetry. There is no phone-home. Your agents and their souls live entirely on your hardware. The license to use them is the same as the license to use any other text file you've written: yours, fully, with no asterisks.
+Use that doesn't violate the three restrictions stays free: running Forest on your own hardware, integrating it into your own product running on your customers' hardware, experimenting + contributing back. Offering Forest as a hosted service to third parties needs a separate commercial license — contact the project.
+
+This project does not collect data. There is no telemetry. There is no phone-home. Your agents and their souls live entirely on your hardware. The audit chain stays on your disk. None of that changes under ELv2.
 
 ---
 

@@ -1,0 +1,73 @@
+# Forest Soul Forge — License History
+
+## Active license: Elastic License 2.0 (ELv2)
+
+From commit B245 (2026-05-12) onward, Forest Soul Forge is licensed
+under the **Elastic License 2.0**. See the `LICENSE` file for the
+full text.
+
+The Licensor is Alexander Price / StellarRequiem.
+
+## Historical license: Apache License 2.0 (commits prior to B245)
+
+All commits up to and including `f799757` (B244 — ADR-0049 tamper-
+proof audit chain, 2026-05-12) were released under the **Apache
+License 2.0**. Per Apache 2.0 §4, that license is irrevocable for the
+specific versions of the Software released under it. Anyone who
+received those versions before the relicense retains their Apache 2.0
+grants for those versions.
+
+## Why the change
+
+The Apache 2.0 era served the project's bootstrap: maximize integrator
+paths during the v0 phase per ADR-0046's original justification. The
+ELv2 switch (per ADR-0046 Amendment 2026-05-12) supports the long-
+running platform business model the project is building:
+
+- Forest Soul Forge runs as a hosted service.
+- Operators can download their agents (hardware-bound at birth per
+  ADR-003X K6; cryptographically signed per ADR-0049) to run on their
+  own machines.
+- The hosted service itself is the commercial offering.
+
+ELv2's three restrictions exactly match this shape:
+
+1. **No competing managed service** — protects the hosted Forge service
+   from being commoditized by cloud providers.
+2. **No license-key circumvention** — protects subscription / tier
+   enforcement when those land.
+3. **No notice removal** — protects the project's trademark + author
+   attribution.
+
+Use that doesn't violate the three restrictions remains free —
+individuals running Forest locally, operators running their downloaded
+agents on their own hardware, developers experimenting + studying
+the code, etc.
+
+## What this means in practice
+
+| If you... | Then... |
+|---|---|
+| Forked the repo before 2026-05-12 | Your fork at that point is Apache 2.0; you may continue to use and distribute that snapshot under Apache 2.0 forever. Improvements you sync from upstream after 2026-05-12 carry the ELv2 license. |
+| Want to integrate Forest into a closed-source product running on customer hardware | Permitted under ELv2 — the "no competing managed service" restriction only triggers when YOU offer Forest as a hosted service to YOUR customers. |
+| Want to offer Forest as a managed service to third parties | Requires a separate commercial license from the Licensor. Contact the project. |
+| Are a small developer experimenting with Forest commercially on your own hardware | Permitted under ELv2. |
+| Are an enterprise integrator who wants to ship Forest inside an on-prem appliance | Permitted under ELv2 as long as the three restrictions hold; commercial licenses available for accelerated terms. |
+
+For ambiguous cases, the canonical text in `LICENSE` controls. This
+file is operator-facing context, not the license itself.
+
+## Future evolution
+
+The ELv2 license has no automatic conversion clause. The Licensor
+reserves the right to release future versions of the Software under a
+different license (more permissive or otherwise) at the Licensor's
+discretion. Any such future change will appear here as a new section.
+
+## References
+
+- `LICENSE` — current license text (ELv2)
+- `docs/decisions/ADR-0046-license-and-governance.md` — full
+  justification + governance posture
+- Original Apache 2.0 license text: https://www.apache.org/licenses/LICENSE-2.0
+- ELv2 official text: https://www.elastic.co/licensing/elastic-license

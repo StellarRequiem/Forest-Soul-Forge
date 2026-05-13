@@ -101,14 +101,29 @@ Reference the ADR number when the commit lands implementation
 work. Reference the burst number when work is part of a tracked
 arc. Both is best; either is acceptable.
 
-### Signed-off-by (DCO)
+### Signed-off-by (DCO) + relicense grant
 
 Forest uses the [Developer Certificate of Origin](https://developercertificate.org/)
-posture rather than a CLA. Every commit should include a
+posture rather than a full CLA. Every commit should include a
 `Signed-off-by: Your Name <your@email>` trailer. Add it
-automatically with `git commit -s`. The trailer is your
-attestation that you have the right to submit the contribution
-under the project's Apache 2.0 license.
+automatically with `git commit -s`.
+
+**ADR-0046 Amendment 1 (2026-05-12) addition:** by adding the
+Signed-off-by trailer, you also grant the Licensor (Alexander
+Price / StellarRequiem) a perpetual, worldwide, royalty-free,
+non-exclusive, sublicensable right to license your contribution
+under ELv2 AND under any other license the Licensor may choose
+in the future (more permissive or otherwise). This grant
+preserves the project's flexibility to relicense in future
+amendments without needing to track down every contributor
+individually for permission. Your contribution otherwise lands
+under the project's current license (Elastic License 2.0,
+post-B245) — the relicense grant doesn't change which license
+applies to your work today; it preserves future flexibility.
+
+If you object to the relicense grant, don't add a Signed-off-by
+trailer; the maintainer will reach out for an explicit
+discussion before accepting the contribution.
 
 ## Code of conduct
 
@@ -131,9 +146,18 @@ The steward enforces.
 
 ## Forking + distributing your own thing
 
-You're encouraged to. Apache 2.0 permits commercial forks,
-proprietary derivatives, or building your own distribution on top
-of the Forest kernel. The conventions Forest reserves:
+Permitted under the Elastic License 2.0 (ELv2) with three
+restrictions per the license text: no offering as a competing
+managed service, no license-key circumvention, no notice
+removal. Inside those bounds you can fork, build commercial
+products on top, ship Forest inside on-prem appliances or
+desktop apps, etc. Commits prior to B245 (`f799757`) are also
+available under Apache 2.0 — that snapshot can be freely
+forked under Apache by anyone who pulled the code before the
+relicense, per Apache's irrevocability clause. See
+`LICENSE.history` for the full cutover context.
+
+The conventions Forest reserves regardless of license:
 
 - **"Forest" as a project name** refers to the kernel as
   maintained by the steward(s). Forks can use the code, but

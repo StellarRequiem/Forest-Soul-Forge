@@ -10,11 +10,15 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Alexander Price" }]
-keywords = ["ai-agents", "blue-team", "local-first", "langgraph", "ollama"]
+keywords = ["ai-agents", "blue-team", "local-first", "langgraph", "ollama", "source-available", "elastic-license-v2"]
+# ADR-0046 Amendment 1 (2026-05-12, B245): license switched from
+# Apache 2.0 to Elastic License 2.0 (ELv2). The PyPI classifier
+# below switched to "Other/Proprietary License" since ELv2 is not
+# OSI-approved. See LICENSE + LICENSE.history for the cutover.
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: Other/Proprietary License",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",

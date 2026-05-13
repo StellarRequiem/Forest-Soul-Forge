@@ -1,9 +1,17 @@
 # ADR-0046 — License Posture + Governance
 
-**Status:** Accepted (2026-05-05). Phase 5 of the ADR-0044
-kernel-positioning roadmap. Confirms Apache 2.0 (already in
-`LICENSE`) as the deliberate choice for kernel-shape positioning,
-and locks the governance model that v0.6+ work executes against.
+**Status:** Accepted 2026-05-05; **Amended 2026-05-12 (B245) — license
+switched from Apache 2.0 to Elastic License 2.0 (ELv2).** Commits
+through `f799757` (B244 — ADR-0049 tamper-proof chain) remain
+irrevocably under Apache 2.0 per Apache's §4. From B245 onward the
+Software is licensed under ELv2. See **Amendment 1** at the bottom
+of this ADR for the full reasoning + cascade.
+
+Phase 5 of the ADR-0044 kernel-positioning roadmap. Originally
+confirmed Apache 2.0 (already in `LICENSE`) as the deliberate
+choice for kernel-shape positioning; the 2026-05-12 amendment
+reframes that decision given the platform-business posture
+Alex committed to during the May 2026 license review.
 
 ## Context
 
@@ -334,12 +342,121 @@ implementation.
 
 - ADR-0044 — Kernel Positioning + SoulUX Flagship Branding
   (the parent ADR; this is its Phase 5 deliverable)
-- `LICENSE` — the canonical license text (Apache 2.0)
+- `LICENSE` — the canonical license text (now ELv2 per
+  Amendment 1; was Apache 2.0 through B244)
+- `LICENSE.history` — operator-facing license-cutover summary
 - ADR-0001 — Audit chain (the immutable governance evidence)
 - Apache License 2.0 specification:
   https://www.apache.org/licenses/LICENSE-2.0
+- Elastic License 2.0 specification:
+  https://www.elastic.co/licensing/elastic-license
 - Linux kernel governance model (BDFL → maintainer hierarchy
   precedent):
   https://www.kernel.org/doc/html/latest/process/index.html
 - Contributor Covenant 2.1:
   https://www.contributor-covenant.org/version/2/1/code_of_conduct/
+
+---
+
+## Amendment 1 — License switch from Apache 2.0 to ELv2 (2026-05-12, B245)
+
+### Why amend
+
+The 2026-05-05 ADR-0046 rationale assumed external integrators
+were the load-bearing v0.6+ milestone (per ADR-0044 Decision 4)
+and that maximizing integrator paths via Apache 2.0 was the right
+posture. The 2026-05-12 license review with Alex revisited this in
+light of three things that changed during the v0.5/v0.6 work:
+
+1. **The business model crystallized as a platform-host product.**
+   Forest Soul Forge runs as a hosted service Alex operates; users
+   download their agents (hardware-bound at birth per ADR-003X K6,
+   cryptographically signed per ADR-0049 — both shipped) to run
+   on their own machines. The hosted service is the commercial
+   offering. This is structurally different from a kernel that's
+   meant to be embedded in third-party distributions — it's an
+   end-user product with infrastructure underneath.
+
+2. **The ADR-0055 marketplace makes commercial defensibility load-
+   bearing.** A marketplace that hosts community + commercial
+   content needs the host (Forge SaaS) to be a viable business;
+   Apache 2.0 lets a competitor stand up an identical Forge SaaS
+   the day after Forest gets traction. ELv2's "no competing managed
+   service" restriction closes that specific attack vector.
+
+3. **Zero forks + zero external production users as of B244.** The
+   relicense window is open. Switching after the first external
+   integrator adoption creates obligation arguments that aren't
+   present today. Switching now is the lowest-friction moment
+   the project will ever have.
+
+### What changes
+
+- `LICENSE` replaced with the canonical ELv2 text per
+  https://www.elastic.co/licensing/elastic-license
+- Commits through B244 (`f799757`) remain irrevocably under Apache
+  2.0 (Apache's §4: a release under Apache 2.0 cannot be revoked
+  for that release). Anyone who pulled those versions retains
+  their Apache 2.0 grants for THOSE versions.
+- Commits from B245 forward are ELv2-only.
+- `LICENSE.history` documents the cutover for operators reading
+  the repo cold.
+- `CONTRIBUTING.md` adds a contributor-licensing grant: future
+  contributions are licensed under ELv2 + contributors grant the
+  Licensor a perpetual right to relicense their contributions
+  for any future Licensor-chosen license. This keeps Alex's
+  flexibility to ever go back to Apache, MPL, or any other
+  license without needing to track every individual contributor
+  down for permission.
+
+### What doesn't change
+
+- Decision 1's *spirit* — Forest's source is still public and
+  inspectable. ELv2 is source-available, not closed-source. The
+  difference is permission to commercially redistribute as a
+  managed service.
+- Decision 2 (Governance — BDFL-style with maintainer hierarchy).
+- The ADR-0044 kernel-ABI commitments. Integrators can still
+  build distributions on top of Forest; they just can't offer a
+  hosted-Forge-SaaS competing with the Licensor's offering.
+- Backwards compatibility for existing Apache 2.0 forks of the
+  pre-B245 codebase. Their rights are preserved by Apache's §4
+  irrevocability.
+
+### Why ELv2 and not BSL / FSL / SSPL / PolyForm
+
+Considered alternatives during the review:
+
+| Alternative | Why not |
+|---|---|
+| BSL 1.1 (HashiCorp pre-2024, Sentry pre-2024) | Time-delayed conversion to Apache. Adds "we'll give it back eventually" promise that the project's platform-business posture doesn't actually want. The 4-year window doesn't help when the business model assumes long-running platform service. |
+| FSL 1.1 (Sentry current) | Same shape as BSL with 2-year delay. Same reason against. |
+| SSPL v1 (MongoDB) | The "open your whole stack" copyleft is harsher than ELv2 and Fortune-500-hostile. Forest doesn't need that aggressive a posture against managed-service attacks; ELv2's three restrictions are sufficient. |
+| PolyForm Noncommercial 1.0 | Blocks ALL commercial use without paid license. Would gate solo-developer commercial experimentation — the lowest-friction adoption path for Forest. Net negative for adoption. |
+| Custom Forest Source License | Forest is small enough this would be feasible, but custom licenses force every prospective integrator's lawyers to do net-new review. ELv2 is well-known and battle-tested with enterprise legal teams (Elastic, Datawire, RedPanda, MongoDB-pre-SSPL). |
+
+ELv2 hit the sweet spot of: clear-message, well-understood by
+enterprise legal, no time-delay (matches platform-business
+posture), three restrictions exactly match the threat model
+(no competing managed service, no key circumvention, no notice
+removal).
+
+### Open question this amendment does NOT resolve
+
+The hardware-binding + "agent passport" architecture Alex floated
+during the license review is a separate ADR. The substrate is
+already shipped (ADR-003X K6 hardware fingerprint, ADR-0049
+ed25519 keypair); the passport itself — a Forge-service-signed
+certificate that authorizes an agent to roam from its birth
+machine — is its own design work. File as ADR-0061 when work
+begins.
+
+### Cascading deliverables
+
+- `LICENSE` — replaced (this burst)
+- `LICENSE.history` — new (this burst)
+- `pyproject.toml` license field — updated (this burst)
+- `README.md` license line — updated (this burst)
+- `CONTRIBUTING.md` — relicense grant added (this burst)
+- `STATE.md` — ADR-0046 entry updated (this burst)
+- GitHub repo topics — `open-source-agents` removed; `source-available` added (this burst, via Chrome MCP)
