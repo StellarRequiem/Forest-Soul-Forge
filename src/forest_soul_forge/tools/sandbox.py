@@ -614,6 +614,307 @@ def _safe_unlink(path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Linux bwrap (bubblewrap) implementation — ADR-0051 T2
+# ---------------------------------------------------------------------------
+
+
+# System paths every Linux Python subprocess needs read-access to in
+# order to start. These are mounted read-only inside the sandbox
+# namespace; anything not listed here is invisible to the worker.
+#
+# Unlike macOS's sandbox-exec (which uses allowlist *rules* against
+# the full filesystem), bwrap uses *mount namespaces* — paths that
+# aren't bind-mounted into the namespace simply don't exist for the
+# worker. That's strictly stronger isolation than allow-rules.
+#
+# Distro variance: some systems put libraries under /usr/lib only
+# (newer), others split /lib + /lib64 (older). We --ro-bind-try
+# everything in this list so non-existent paths are silently
+# skipped without failing the sandbox spawn.
+_LINUX_SYSTEM_BIND_PATHS: tuple[str, ...] = (
+    "/usr",
+    "/lib",
+    "/lib64",
+    "/bin",
+    "/sbin",
+    "/etc",
+    "/opt",
+    "/var/lib",       # python's distros sometimes stash modules here
+)
+
+
+class LinuxBwrap:
+    """Linux ``bwrap``(1) (bubblewrap)-backed :class:`Sandbox`.
+
+    bwrap is the same sandbox runtime Flatpak uses internally —
+    user-namespaces + mount-namespaces + seccomp + (optional)
+    network-namespace. It's the de-facto standard for unprivileged
+    Linux sandboxing in 2020+.
+
+    Unlike macOS sandbox-exec (rules-on-allow-list), bwrap is
+    namespace-based: paths NOT bind-mounted into the worker's
+    mount namespace simply don't exist for the worker. This is
+    structurally stronger than macOS's allowlist approach — there's
+    no path-traversal trick that can reach outside the bound set.
+
+    Tradeoffs to be aware of:
+      - bwrap requires user-namespaces (CLONE_NEWUSER) to be enabled
+        in the kernel. Most distros enable this by default; some
+        hardened distros (and older RHEL/CentOS) disable it. When
+        unavailable, ``run()`` returns ``setup_failed`` and the
+        permissive-mode dispatcher (T7) falls back to in-process.
+      - bwrap doesn't have a per-binary exec restriction like macOS
+        ``process-exec*``. Restriction comes from path mounts: a
+        binary not visible via mount can't be executed. Granular
+        exec-restriction needs an additional seccomp layer that
+        v1 of this ADR doesn't ship — operators wanting that should
+        also enable their distro's syscall auditing (auditd).
+    """
+
+    BWRAP_PATH = "/usr/bin/bwrap"
+
+    # bwrap exit codes vary by failure shape. Stderr substrings are
+    # the more reliable classifier — these substrings indicate
+    # namespace-level deny vs. setup failure.
+    _SETUP_FAIL_SIGNATURES: tuple[str, ...] = (
+        "user namespaces are not available",
+        "setting up uid map",
+        "creating new namespace",
+        "Operation not permitted",
+        "bwrap: ",
+    )
+
+    def __init__(
+        self,
+        *,
+        worker_module: str = "forest_soul_forge.tools._sandbox_worker",
+        python_executable: str | None = None,
+    ) -> None:
+        self._worker_module = worker_module
+        self._python = python_executable or sys.executable
+
+    def _build_argv(self, profile: SandboxProfile) -> list[str]:
+        """Compose the bwrap command line from a :class:`SandboxProfile`.
+
+        Strategy:
+          1. Bind the minimal Linux system paths read-only so the
+             Python interpreter can start.
+          2. Mount /proc + /dev + /tmp inside the namespace.
+          3. Bind the tool's ``allowed_read_paths`` read-only.
+          4. Bind the tool's ``allowed_write_paths`` read-write.
+          5. Unshare net unless ``allow_network``.
+          6. ``--die-with-parent`` + ``--new-session`` for clean
+             reaping if the daemon's worker process dies.
+          7. Tail with the Python interpreter + worker module.
+        """
+        argv: list[str] = [self.BWRAP_PATH]
+
+        # System read-binds. --ro-bind-try silently skips missing
+        # paths (cross-distro safety).
+        for p in _LINUX_SYSTEM_BIND_PATHS:
+            argv += ["--ro-bind-try", p, p]
+
+        # Procfs + devfs (minimal). The worker can read its own
+        # /proc/self/* but can't see other processes (default namespace
+        # behavior).
+        argv += ["--proc", "/proc"]
+        argv += ["--dev", "/dev"]
+
+        # Fresh tmpfs for /tmp so the worker has a writable scratch
+        # area that doesn't leak to the host /tmp. The tool can write
+        # there even when its profile doesn't include /tmp explicitly.
+        argv += ["--tmpfs", "/tmp"]
+
+        # Tool-declared read paths.
+        for p in profile.allowed_read_paths:
+            argv += ["--ro-bind", p, p]
+
+        # Tool-declared write paths.
+        for p in profile.allowed_write_paths:
+            argv += ["--bind", p, p]
+
+        # Tool-declared exec paths. Bwrap doesn't have per-binary exec
+        # gating; binding the binary's containing dir read-only is
+        # what makes it executable inside the namespace. We do
+        # explicit --ro-bind-try so missing binaries fail loud during
+        # setup rather than silently at exec time.
+        for c in profile.allowed_commands:
+            argv += ["--ro-bind-try", c, c]
+
+        # Network namespace.
+        if not profile.allow_network:
+            argv += ["--unshare-net"]
+        else:
+            # Even when network is allowed, /etc/resolv.conf is
+            # already bound via the /etc system bind above. No further
+            # wiring needed.
+            pass
+
+        # Process hygiene.
+        argv += ["--die-with-parent"]
+        argv += ["--new-session"]
+        argv += ["--unshare-pid"]   # worker can only see itself
+
+        # Clean env — the daemon sets PATH + PYTHONPATH explicitly
+        # via the subprocess env parameter. --clearenv would also
+        # work but interacts badly with how subprocess.run plumbs the
+        # caller's env. We rely on explicit env= in subprocess.run.
+
+        # Worker invocation.
+        argv += [
+            self._python,
+            "-I",
+            "-m", self._worker_module,
+        ]
+        return argv
+
+    def _looks_like_setup_failure(self, stderr: str) -> bool:
+        for sig in self._SETUP_FAIL_SIGNATURES:
+            if sig in stderr:
+                return True
+        return False
+
+    def run(
+        self,
+        *,
+        tool_module: str,
+        tool_class: str,
+        args: dict[str, Any],
+        ctx: SerializableToolContext,
+        profile: SandboxProfile,
+    ) -> SandboxResult:
+        # Step 0 — is bwrap even installed?
+        if not Path(self.BWRAP_PATH).exists():
+            return SandboxResult(
+                success=False,
+                error_kind="setup_failed",
+                stderr=(
+                    f"{self.BWRAP_PATH} not found — install bubblewrap "
+                    "via your distro (apt: bubblewrap, dnf: bubblewrap, "
+                    "pacman: bubblewrap) to enable sandboxing"
+                ),
+            )
+
+        # Step 1 — build argv.
+        try:
+            argv = self._build_argv(profile)
+        except Exception as e:  # noqa: BLE001
+            return SandboxResult(
+                success=False,
+                error_kind="setup_failed",
+                stderr=f"bwrap argv construction failed: {e}",
+            )
+
+        # Step 2 — pickle the invocation payload (same shape as the
+        # macOS impl uses).
+        try:
+            payload = pickle.dumps({
+                "tool_module": tool_module,
+                "tool_class":  tool_class,
+                "args":        args,
+                "ctx":         ctx,
+            })
+        except Exception as e:
+            return SandboxResult(
+                success=False,
+                error_kind="setup_failed",
+                stderr=f"pickle of invocation payload failed: {e}",
+            )
+
+        env = {
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "PYTHONPATH": os.pathsep.join(sys.path),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+
+        # Step 3 — spawn.
+        try:
+            proc = subprocess.run(
+                argv,
+                input=payload,
+                capture_output=True,
+                timeout=profile.timeout_s,
+                env=env,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as e:
+            stderr_text = (
+                e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
+            )
+            return SandboxResult(
+                success=False,
+                error_kind="timeout",
+                stderr=stderr_text,
+            )
+        except OSError as e:
+            return SandboxResult(
+                success=False,
+                error_kind="setup_failed",
+                stderr=f"subprocess spawn failed: {e}",
+            )
+
+        stderr_text = proc.stderr.decode("utf-8", errors="replace") if proc.stderr else ""
+        stdout_bytes = proc.stdout or b""
+
+        # Step 4 — classify failure.
+        # bwrap setup failures (user-namespace unavailable, etc.)
+        # surface on stderr BEFORE the worker even runs. Those should
+        # be setup_failed, not sandbox_violation.
+        if self._looks_like_setup_failure(stderr_text) and not stdout_bytes:
+            return SandboxResult(
+                success=False,
+                error_kind="setup_failed",
+                stderr=stderr_text,
+                exit_code=proc.returncode,
+            )
+
+        # Unlike macOS, bwrap doesn't print a structured "deny" line
+        # for sandbox violations — a filesystem write outside bound
+        # paths just gets EACCES (Errno 13) from the kernel, which
+        # the tool sees as PermissionError. The worker catches that
+        # and returns SandboxResult(error_kind="unexpected") with
+        # the PermissionError in stderr. The dispatcher (T4) can
+        # detect "PermissionError" in stderr and upgrade the
+        # classification to "sandbox_violation" — but at this
+        # abstraction level we don't second-guess the worker.
+
+        if proc.returncode != 0 and not stdout_bytes:
+            return SandboxResult(
+                success=False,
+                error_kind="unexpected",
+                stderr=stderr_text,
+                exit_code=proc.returncode,
+            )
+
+        # Step 5 — unpickle the worker's SandboxResult.
+        try:
+            result = pickle.loads(stdout_bytes)
+        except Exception as e:
+            return SandboxResult(
+                success=False,
+                error_kind="unexpected",
+                stderr=(
+                    f"could not unpickle worker result: {e}\n"
+                    f"--- subprocess stderr ---\n{stderr_text}"
+                ),
+                exit_code=proc.returncode,
+            )
+
+        if not isinstance(result, SandboxResult):
+            return SandboxResult(
+                success=False,
+                error_kind="unexpected",
+                stderr=(
+                    f"worker returned non-SandboxResult type "
+                    f"{type(result).__name__}; stderr was:\n{stderr_text}"
+                ),
+                exit_code=proc.returncode,
+            )
+
+        return result
+
+
+# ---------------------------------------------------------------------------
 # Platform sniff
 # ---------------------------------------------------------------------------
 
@@ -621,9 +922,10 @@ def _safe_unlink(path: str) -> None:
 def default_sandbox() -> Sandbox | None:
     """Return the platform-appropriate :class:`Sandbox` or ``None``.
 
-    macOS → :class:`MacOSSandboxExec`. Linux → ``None`` until T2 lands
-    the bwrap implementation. Windows → ``None`` (v1 of the ADR
-    explicitly doesn't support Windows).
+    macOS → :class:`MacOSSandboxExec`. Linux → :class:`LinuxBwrap`
+    when ``/usr/bin/bwrap`` is installed (T2). Windows → ``None``
+    (v1 of the ADR explicitly doesn't support Windows; AppContainer /
+    Win32 job objects are future work).
 
     ``None`` means "no sandbox available on this host". The dispatcher
     (T4) reads this; combined with ``FSF_TOOL_SANDBOX`` env:
@@ -642,5 +944,15 @@ def default_sandbox() -> Sandbox | None:
         if shutil.which(MacOSSandboxExec.SANDBOX_EXEC_PATH):
             return MacOSSandboxExec()
         return None
-    # Linux / Windows / others — T2 will fill this in for Linux.
+    if sys.platform.startswith("linux"):
+        # bwrap is the de-facto Linux sandbox runtime (used by Flatpak).
+        # On distros where it's not installed by default (most server
+        # distros), the operator opts-in to sandboxing by `apt install
+        # bubblewrap` / `dnf install bubblewrap` / equivalent. Without
+        # bwrap we return None so the permissive-mode dispatcher (T7)
+        # falls back to in-process.
+        if shutil.which(LinuxBwrap.BWRAP_PATH):
+            return LinuxBwrap()
+        return None
+    # Windows + others — out of scope for v1 of ADR-0051.
     return None

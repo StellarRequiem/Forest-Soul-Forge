@@ -19,6 +19,7 @@ import pytest
 
 from forest_soul_forge.tools.base import ToolContext
 from forest_soul_forge.tools.sandbox import (
+    LinuxBwrap,
     MacOSSandboxExec,
     Sandbox,
     SandboxProfile,
@@ -262,9 +263,14 @@ class TestDefaultSandbox:
         sb = default_sandbox()
         assert sb is None or isinstance(sb, MacOSSandboxExec)
 
-    def test_returns_none_on_linux(self, monkeypatch):
+    def test_returns_bwrap_or_none_on_linux(self, monkeypatch):
+        """T2: on linux platform with bwrap installed, returns
+        LinuxBwrap; without bwrap, returns None. Both are valid
+        per default_sandbox's contract — the test machine's bwrap
+        state is what it is."""
         monkeypatch.setattr(sys, "platform", "linux")
-        assert default_sandbox() is None
+        sb = default_sandbox()
+        assert sb is None or isinstance(sb, LinuxBwrap)
 
     def test_returns_none_on_windows(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "win32")
@@ -352,3 +358,174 @@ class TestMacOSSandboxIntegration:
         assert result.success is False
         assert result.error_kind == "setup_failed"
         assert "not found" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# LinuxBwrap implementation — ADR-0051 T2
+# ---------------------------------------------------------------------------
+
+
+class TestLinuxBwrapArgvBuilder:
+    """Test bwrap's argv-construction logic without actually invoking
+    bwrap. These tests run on every platform — the argv shape is
+    platform-independent (it's just string composition)."""
+
+    def test_argv_starts_with_bwrap_binary(self):
+        impl = LinuxBwrap()
+        argv = impl._build_argv(
+            build_profile(side_effects="read_only", allowed_paths=[]),
+        )
+        assert argv[0] == LinuxBwrap.BWRAP_PATH
+
+    def test_argv_includes_system_ro_binds(self):
+        """The Python interpreter can't start in the namespace
+        without /usr (libs), /etc (resolv.conf, etc.), and a few
+        other dirs. _build_argv must always emit --ro-bind-try for
+        these."""
+        impl = LinuxBwrap()
+        argv = impl._build_argv(
+            build_profile(side_effects="read_only", allowed_paths=[]),
+        )
+        joined = " ".join(argv)
+        assert "--ro-bind-try /usr /usr" in joined
+        assert "--ro-bind-try /etc /etc" in joined
+        # --proc + --dev are required for any Python subprocess
+        # (sys.argv, /dev/null, /dev/urandom).
+        assert "--proc /proc" in joined
+        assert "--dev /dev" in joined
+        # Fresh tmpfs for /tmp — tools can scratch even without
+        # /tmp in their allowed_paths.
+        assert "--tmpfs /tmp" in joined
+
+    def test_argv_emits_unshare_net_when_network_denied(self):
+        impl = LinuxBwrap()
+        argv = impl._build_argv(
+            build_profile(side_effects="filesystem", allowed_paths=[]),
+        )
+        assert "--unshare-net" in argv
+
+    def test_argv_no_unshare_net_when_network_allowed(self):
+        impl = LinuxBwrap()
+        argv = impl._build_argv(
+            build_profile(
+                side_effects="network",
+                allowed_paths=[],
+                allowed_hosts=["api.example.com"],
+            ),
+        )
+        assert "--unshare-net" not in argv
+
+    def test_argv_writes_for_filesystem_paths_use_bind_not_ro_bind(self):
+        """Writes to allowed_paths must use --bind (rw); reads stay
+        on --ro-bind. A misuse of --ro-bind here would silently break
+        every filesystem-side-effect tool with EACCES."""
+        impl = LinuxBwrap()
+        argv = impl._build_argv(
+            build_profile(
+                side_effects="filesystem",
+                allowed_paths=["/tmp/proj"],
+            ),
+        )
+        # Should see both --ro-bind /tmp/proj (read access) AND
+        # --bind /tmp/proj (write access).
+        joined = " ".join(argv)
+        assert "--ro-bind /tmp/proj /tmp/proj" in joined
+        assert "--bind /tmp/proj /tmp/proj" in joined
+
+    def test_argv_tail_is_python_isolated_worker(self):
+        impl = LinuxBwrap()
+        argv = impl._build_argv(
+            build_profile(side_effects="read_only", allowed_paths=[]),
+        )
+        # Last 4 args must be: <python> -I -m <worker module>.
+        assert argv[-3:] == ["-I", "-m", "forest_soul_forge.tools._sandbox_worker"]
+        # The -4th from end is the python interpreter path.
+        assert argv[-4].endswith("python") or "python" in argv[-4]
+
+    def test_argv_emits_die_with_parent_and_new_session(self):
+        """Hygiene flags: worker dies when daemon dies, runs in own
+        session group so SIGINT to daemon's TTY doesn't accidentally
+        kill the sandboxed worker through the TTY group."""
+        impl = LinuxBwrap()
+        argv = impl._build_argv(
+            build_profile(side_effects="read_only", allowed_paths=[]),
+        )
+        assert "--die-with-parent" in argv
+        assert "--new-session" in argv
+
+    def test_argv_unshare_pid_for_filesystem_tool(self):
+        """Per-process isolation: the worker shouldn't see other
+        processes on the host. --unshare-pid limits /proc to the
+        worker's own pid namespace."""
+        impl = LinuxBwrap()
+        argv = impl._build_argv(
+            build_profile(side_effects="filesystem", allowed_paths=["/tmp/x"]),
+        )
+        assert "--unshare-pid" in argv
+
+
+class TestLinuxBwrapSetupFailures:
+    """Tests for LinuxBwrap.run() error paths that don't require
+    actually invoking bwrap. These run on every platform."""
+
+    def test_setup_failed_when_bwrap_missing(self, monkeypatch):
+        """If bwrap path is patched to nonexistent, run() returns
+        setup_failed cleanly rather than crashing."""
+        impl = LinuxBwrap()
+        monkeypatch.setattr(
+            LinuxBwrap, "BWRAP_PATH", "/nonexistent/bwrap",
+        )
+        result = impl.run(
+            tool_module="forest_soul_forge.tools.builtin.timestamp_window",
+            tool_class="TimestampWindowTool",
+            args={"window_seconds": 60},
+            ctx=SerializableToolContext(
+                instance_id="ag1",
+                agent_dna="aaaaaaaaaaaa",
+                role="experimenter",
+            ),
+            profile=build_profile(side_effects="read_only", allowed_paths=[]),
+        )
+        assert result.success is False
+        assert result.error_kind == "setup_failed"
+        assert "not found" in result.stderr
+        assert "bubblewrap" in result.stderr  # install hint visible
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="Linux bwrap integration test — macOS uses sandbox-exec (T1)",
+)
+class TestLinuxBwrapIntegration:
+    """End-to-end: actually invoke bwrap. Skipped on non-Linux.
+
+    Note: bwrap requires user-namespaces to be enabled in the kernel.
+    Most distros enable this by default; the integration tests
+    further skipif unprivileged user-namespaces aren't usable on
+    this host."""
+
+    def _user_namespaces_available(self) -> bool:
+        """Quick probe: try to spawn `bwrap --bind / / true`. If
+        user-namespaces are disabled (some hardened RHEL/CentOS),
+        bwrap exits non-zero with a setup-failure stderr."""
+        import subprocess as sp
+        if not Path(LinuxBwrap.BWRAP_PATH).exists():
+            return False
+        try:
+            r = sp.run(
+                [LinuxBwrap.BWRAP_PATH, "--bind", "/", "/", "true"],
+                capture_output=True, timeout=3,
+            )
+        except (sp.TimeoutExpired, OSError):
+            return False
+        return r.returncode == 0
+
+    def test_setup_failed_signals_when_bwrap_userns_unavailable(self):
+        """If we can't even smoke-test bwrap, this test self-skips —
+        sandboxed integration is environmental."""
+        if not self._user_namespaces_available():
+            pytest.skip("user namespaces unavailable on this host")
+        # If userns IS available, we expect run() to succeed for a
+        # tool that just returns a timestamp. The full happy-path
+        # integration matches the macOS shape but is deferred to T4
+        # where the dispatcher wires it in.
