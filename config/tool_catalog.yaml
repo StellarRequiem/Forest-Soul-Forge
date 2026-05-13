@@ -344,6 +344,35 @@ tools:
     side_effects: read_only
     archetype_tags: [security_low, guardian, observer]
 
+  verify_claim.v1:
+    name: verify_claim
+    version: "1"
+    description: |
+      ADR-0063 Reality Anchor verifier. Pattern-matches a claim
+      against config/ground_truth.yaml (the operator-asserted
+      ground-truth catalog). Returns verdict ∈ {confirmed,
+      contradicted, unknown, not_in_scope} + per-fact
+      citations (which fact matched, on which canonical or
+      forbidden term, in which domain). Read-only;
+      lightweight (no LLM in v1; ms-scale). The
+      RealityAnchorStep in the governance pipeline (B252)
+      consumes this on every gated dispatch.
+    input_schema:
+      type: object
+      required: [claim]
+      properties:
+        claim:
+          type: string
+        fact_ids:
+          type: array
+          items: {type: string}
+        agent_constitution:
+          type: object
+        catalog_path:
+          type: string
+    side_effects: read_only
+    archetype_tags: [verifier, guardian, observer, security_low]
+
   file_integrity.v1:
     name: file_integrity
     version: "1"

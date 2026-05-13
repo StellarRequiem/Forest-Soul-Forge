@@ -1,0 +1,186 @@
+# ADR-0063 — Operator-asserted ground truth.
+#
+# This file IS the operator's reality. The Reality Anchor
+# (verify_claim.v1 + RealityAnchorStep in the governance
+# pipeline) consults this catalog before letting an agent
+# act on a claim that conflicts with these facts.
+#
+# Edit this file whenever your reality changes (license,
+# email, daemon URL, schema version, etc.). The loader
+# hot-reloads on POST /reality-anchor/reload (T7 — queued).
+# Until that endpoint ships, daemon restart picks up edits.
+#
+# Schema per fact:
+#   id              — short snake_case identifier. Stable; used
+#                     as the citation key in audit events.
+#   statement       — canonical English. Used in operator-
+#                     facing flag messages.
+#   domain_keywords — claim must mention AT LEAST ONE of these
+#                     words to be "in scope" for this fact.
+#                     If the claim's domain doesn't match,
+#                     the fact is skipped (no false positives
+#                     from unrelated claims).
+#   canonical_terms — presence in the claim = CONFIRMS the
+#                     fact. Forbidden terms below are ignored
+#                     when a canonical term is present.
+#   forbidden_terms — presence in the claim WITHOUT a
+#                     canonical term = CONTRADICTS the fact.
+#                     Trigger for refusal at severity ≥ HIGH.
+#   severity        — CRITICAL | HIGH | MEDIUM | LOW | INFO.
+#                     CRITICAL + HIGH refuse the action;
+#                     MEDIUM/LOW warn; INFO is silent.
+#   last_confirmed_at — ISO date. Operator updates this on
+#                     edit. Facts older than 90d emit a
+#                     staleness warning in /reality-anchor
+#                     status (T7).
+#   notes           — optional free-text rationale.
+
+catalog_version: 1
+catalog_updated: "2026-05-12"
+
+facts:
+
+  # ---- Operator identity --------------------------------------------------
+
+  - id: operator_identity
+    statement: "The operator's identifier is 'alex'."
+    domain_keywords: [operator, owner, user, "logged in as"]
+    canonical_terms: [alex]
+    forbidden_terms: []
+    severity: HIGH
+    last_confirmed_at: "2026-05-12"
+
+  - id: operator_email
+    statement: "The operator's email is alexanderprice91@yahoo.com."
+    domain_keywords: ["operator email", "user email", "owner email", "alex's email", "operator's email", "user's email", "alex@"]
+    canonical_terms: ["alexanderprice91@yahoo.com"]
+    forbidden_terms: ["@gmail.com", "@outlook.com", "@anthropic.com", "@hotmail.com", "@icloud.com"]
+    severity: HIGH
+    last_confirmed_at: "2026-05-12"
+    notes: |
+      Forbidden list catches LLMs that 'fill in a plausible' email.
+      Domain keywords include both apostrophe forms because LLM-emitted
+      claims drift between the two.
+
+  # ---- License + project identity -----------------------------------------
+
+  - id: license
+    statement: "Forest Soul Forge is licensed under the Elastic License 2.0 (ELv2), effective 2026-05-12 (commit f799757 onward). Commits at or before f799757 remain under Apache 2.0 per §4 irrevocability."
+    domain_keywords: [license, licensed, licensing, "open source", "open-source"]
+    canonical_terms: [elv2, "elastic license", "elastic license 2.0"]
+    forbidden_terms: [mit, gpl, "mpl", "bsd-2", "bsd-3", "agpl", "lgpl", "proprietary"]
+    severity: HIGH
+    last_confirmed_at: "2026-05-12"
+    notes: |
+      Apache 2.0 is NOT a forbidden term — Apache covers the historical
+      pre-B245 commits. ELv2 is the current license. Both can be true.
+
+  - id: repo_url
+    statement: "The canonical repository URL is https://github.com/StellarRequiem/Forest-Soul-Forge"
+    domain_keywords: [repository, "repo url", "github url", "git remote"]
+    canonical_terms: ["github.com/StellarRequiem/Forest-Soul-Forge"]
+    forbidden_terms: ["gitlab.com", "bitbucket.org", "/anthropic/", "/openai/"]
+    severity: MEDIUM
+    last_confirmed_at: "2026-05-12"
+
+  - id: repo_path
+    statement: "The local repo path is /Users/llm01/Forest-Soul-Forge."
+    domain_keywords: ["repo path", "project path", "working directory", "repo root"]
+    canonical_terms: ["/Users/llm01/Forest-Soul-Forge"]
+    forbidden_terms: ["/home/", "/var/www/", "/opt/forest"]
+    severity: LOW
+    last_confirmed_at: "2026-05-12"
+
+  # ---- Daemon + frontend URLs ---------------------------------------------
+
+  - id: daemon_url
+    statement: "The local daemon URL is http://127.0.0.1:7423."
+    domain_keywords: ["daemon url", "api url", "daemon endpoint", "backend url"]
+    canonical_terms: ["127.0.0.1:7423", "localhost:7423"]
+    forbidden_terms: [":8000", ":3000", ":5000", "api.example.com"]
+    severity: MEDIUM
+    last_confirmed_at: "2026-05-12"
+
+  - id: frontend_url
+    statement: "The local frontend URL is http://127.0.0.1:5173 (Vite default)."
+    domain_keywords: ["frontend url", "ui url", "soulux url", "web url"]
+    canonical_terms: ["127.0.0.1:5173", "localhost:5173"]
+    forbidden_terms: [":3000", ":8080", ":4200"]
+    severity: LOW
+    last_confirmed_at: "2026-05-12"
+
+  # ---- Platform + runtime requirements ------------------------------------
+
+  - id: platform
+    statement: "Forest runs on macOS (Mac mini 2024, M4, 16GB RAM, 250GB SSD)."
+    domain_keywords: ["operating system", "platform", "host os", "running on", "runs on", "deployed on", "deploys to", " os "]
+    canonical_terms: [macos, "mac os", "darwin", "mac mini", "apple silicon"]
+    forbidden_terms: [windows, ubuntu, debian, fedora, "linux server", "centos", "alpine", "amazon linux"]
+    severity: MEDIUM
+    last_confirmed_at: "2026-05-12"
+
+  - id: python_version
+    statement: "Forest requires Python 3.11+; the venv currently runs Python 3.14."
+    domain_keywords: ["python version", "python requirement", "py version"]
+    canonical_terms: ["3.11", "3.12", "3.13", "3.14"]
+    forbidden_terms: ["python 2", "3.7", "3.8", "3.9", "3.10"]
+    severity: HIGH
+    last_confirmed_at: "2026-05-12"
+    notes: "Sandbox runs 3.10 but production REQUIRES 3.11+."
+
+  # ---- Architectural invariants from CLAUDE.md ----------------------------
+
+  - id: schema_version
+    statement: "The current registry schema version is v19 (post-B243; agents table has public_key column for ADR-0049)."
+    domain_keywords: ["schema version", "schema_version", "registry version", "db version"]
+    canonical_terms: ["v19", "schema 19", "schema version 19"]
+    forbidden_terms: ["v15", "v16", "v17", "v18", "v20", "v21"]
+    severity: HIGH
+    last_confirmed_at: "2026-05-12"
+
+  - id: audit_chain_path
+    statement: "The LIVE audit chain is examples/audit_chain.jsonl, NOT data/audit_chain.jsonl (override via FSF_AUDIT_CHAIN_PATH). data/audit_chain.jsonl is a stale dev fixture."
+    domain_keywords: ["audit chain path", "audit_chain.jsonl", "chain location"]
+    canonical_terms: ["examples/audit_chain.jsonl"]
+    forbidden_terms: []
+    severity: HIGH
+    last_confirmed_at: "2026-05-12"
+    notes: "CLAUDE.md §architectural-invariants. Don't repeat the B134 drift."
+
+  - id: write_lock_pattern
+    statement: "All SQLite writes go through app.state.write_lock (threading.RLock). New writers MUST acquire it."
+    domain_keywords: ["write lock", "single writer", "concurrency model", "sqlite writer"]
+    canonical_terms: ["app.state.write_lock", "threading.rlock", "write_lock"]
+    forbidden_terms: ["threading.lock", "multi-writer", "multiprocess writer"]
+    severity: HIGH
+    last_confirmed_at: "2026-05-12"
+    notes: |
+      RLock is reentrant by design — nested skill runs re-acquire.
+      Plain threading.Lock would deadlock; flag explicitly.
+
+  # ---- Identity invariants (ADR-0001) -------------------------------------
+
+  - id: dna_identity
+    statement: "DNA is content-addressed: same trait profile → same DNA. DNA derivation MUST NOT change without a major version bump + migration plan."
+    domain_keywords: [dna, "agent identity", "content-addressed", "agent hash"]
+    canonical_terms: ["content-addressed", "same trait profile", "deterministic dna", "from trait profile"]
+    forbidden_terms: [random, uuid, "timestamp-based", "uuid4", "uuid-based", "random.choice"]
+    severity: CRITICAL
+    last_confirmed_at: "2026-05-12"
+    notes: |
+      ADR-0001 D2 architectural invariant. A claim that DNA is random,
+      uuid-based, or timestamp-based is a hallucination that breaks
+      verification end-to-end. Forbidden terms kept short (single words
+      or phrases that appear regardless of word order in the claim).
+
+  - id: constitution_hash_immutable
+    statement: "A born agent's constitution_hash is immutable. Recomputing invalidates verification."
+    domain_keywords: ["constitution hash", "constitution_hash", "agent constitution"]
+    canonical_terms: [immutable, "bound to identity", "do not recompute", "never changes"]
+    forbidden_terms: [mutable, recomputed, "recompute on", dynamic, regenerate, changeable]
+    severity: CRITICAL
+    last_confirmed_at: "2026-05-12"
+    notes: |
+      Forbidden list is single-word friendly so claims like
+      'constitution hash is mutable' or 'recomputed on edit' match
+      regardless of word order around them.

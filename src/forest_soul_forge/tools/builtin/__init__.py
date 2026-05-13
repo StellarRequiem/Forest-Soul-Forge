@@ -45,6 +45,7 @@ from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
 from forest_soul_forge.tools.builtin.pytest_run import PytestRunTool
 from forest_soul_forge.tools.builtin.ruff_lint import RuffLintTool
 from forest_soul_forge.tools.builtin.security_scan import SecurityScanTool
+from forest_soul_forge.tools.builtin.verify_claim import VerifyClaimTool
 from forest_soul_forge.tools.builtin.semgrep_scan import SemgrepScanTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
 from forest_soul_forge.tools.builtin.tamper_detect import TamperDetectTool
@@ -88,6 +89,7 @@ __all__ = [
     "MypyTypecheckTool",
     "SemgrepScanTool",
     "SecurityScanTool",
+    "VerifyClaimTool",
     "TreeSitterQueryTool",
     "BanditSecurityScanTool",
     "PipInstallIsolatedTool",
@@ -289,6 +291,13 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # Install-time gate (T4) lands in a follow-up burst once
     # false-positive rate is characterized.
     registry.register(SecurityScanTool())
+    # ADR-0063 T2 (Burst 251) — verify_claim.v1 Reality Anchor
+    # verifier. Pattern-matches a claim against config/ground_truth.yaml
+    # (operator-asserted facts). Returns verdict ∈ {confirmed,
+    # contradicted, unknown, not_in_scope} + per-fact citations.
+    # Read-only; lightweight (~ms scale). Substrate-layer gate
+    # (RealityAnchorStep) consumes this in B252.
+    registry.register(VerifyClaimTool())
     # Phase G.1.A — tree_sitter_query.v1 (Burst 60). Read-only AST-
     # level structural queries via tree-sitter S-expressions. Lazy-
     # imports tree_sitter + tree_sitter_languages so daemon boots
