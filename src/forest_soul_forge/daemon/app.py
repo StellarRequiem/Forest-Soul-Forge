@@ -572,6 +572,45 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.providers = providers
         app.state.trait_engine = trait_engine
         app.state.audit_chain = audit_chain
+
+        # ADR-0050 T1 (B266) — resolve the at-rest encryption master
+        # key. The substrate is opt-in by ADR Decision 6 ("mixed legacy
+        # / encrypted chain — no rewrites"); T1 stands up the
+        # key-management surface so downstream tranches (T2 SQLCipher,
+        # T3 audit-chain per-event encryption, T4 memory body
+        # encryption) can consume it. Caches under the OS keychain
+        # on darwin, file-backed elsewhere. Failure here is non-fatal —
+        # the daemon proceeds without master-key-backed encryption and
+        # the operator sees the diagnostic. Strict-mode daemons (a
+        # future ADR-0050 T6) will refuse to boot when the key can't
+        # be obtained.
+        try:
+            from forest_soul_forge.security.master_key import (
+                configured_backend_name as _configured_master_backend,
+                resolve_master_key as _resolve_master_key,
+            )
+            _master_key = _resolve_master_key()
+            app.state.master_key = _master_key
+            startup_diagnostics.append(
+                {"component": "encryption_at_rest",
+                 "status": "ok",
+                 "message": (
+                     f"master key loaded from {_configured_master_backend()} "
+                     "backend; consumers (SQLCipher / audit-chain / "
+                     "memory body) wire up in T2-T4."
+                 )}
+            )
+        except Exception as e:  # noqa: BLE001
+            app.state.master_key = None
+            startup_diagnostics.append(
+                {"component": "encryption_at_rest",
+                 "status": "degraded",
+                 "message": (
+                     f"master key unavailable: {type(e).__name__}: {e}. "
+                     "At-rest encryption disabled; daemon will run "
+                     "with the legacy plaintext posture."
+                 )}
+            )
         # ADR-0049 T5+T6 (B244): wire the sign-on-emit + verify-on-replay
         # closures into the audit chain. The closures resolve agent_dna
         # → instance_id → key (private for signing, public for verify)
