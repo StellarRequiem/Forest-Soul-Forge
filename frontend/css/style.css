@@ -2418,3 +2418,212 @@ body { padding-bottom: 56px; }
   margin-top: 6px;
   font-size: 0.85em;
 }
+
+/* ============================================================ */
+/* ADR-0063 T7 (B256) — Reality Anchor pane                     */
+/* ============================================================ */
+
+.ra-section {
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 0.85em;
+}
+
+.ra-note {
+  font-style: italic;
+  color: var(--fg-faint);
+}
+.ra-note code {
+  color: var(--fg-default);
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-faint, rgba(255,255,255,0.04));
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ---- status card -------------------------------------------- */
+.ra-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  padding: 8px 0;
+}
+.ra-stat {
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.02);
+  text-align: center;
+}
+.ra-stat__value {
+  font-size: 1.6em;
+  font-weight: 600;
+  color: var(--fg-default);
+}
+.ra-stat__label {
+  font-size: 0.75em;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+.ra-errors {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: rgba(220, 60, 60, 0.08);
+  border-left: 3px solid rgba(220, 60, 60, 0.7);
+  color: rgba(255, 200, 200, 0.9);
+  font-size: 0.85em;
+}
+
+/* ---- tables (facts + corrections) --------------------------- */
+.ra-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+.ra-table th,
+.ra-table td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  vertical-align: middle;
+}
+.ra-table th {
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.7em;
+  font-weight: 500;
+}
+.ra-fact-id {
+  font-family: var(--font-mono, monospace);
+  color: rgba(180, 200, 240, 0.9);
+}
+.ra-terms {
+  font-family: var(--font-mono, monospace);
+  color: rgba(150, 200, 150, 0.85);
+  font-size: 0.9em;
+}
+.ra-terms--forbidden {
+  color: rgba(220, 150, 150, 0.85);
+}
+.ra-time {
+  font-family: var(--font-mono, monospace);
+  color: var(--fg-faint);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+.ra-count {
+  font-weight: 600;
+  color: rgba(255, 180, 100, 0.95);
+  font-family: var(--font-mono, monospace);
+}
+.ra-decision-refused {
+  color: rgba(220, 100, 100, 0.95);
+  font-weight: 500;
+}
+
+/* ---- severity chips ----------------------------------------- */
+.chip {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 0.72em;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.chip--sev-critical {
+  background: rgba(220, 60, 60, 0.18);
+  color: rgba(255, 160, 160, 0.95);
+  border: 1px solid rgba(220, 60, 60, 0.35);
+}
+.chip--sev-high {
+  background: rgba(220, 140, 60, 0.15);
+  color: rgba(255, 200, 140, 0.95);
+  border: 1px solid rgba(220, 140, 60, 0.3);
+}
+.chip--sev-medium {
+  background: rgba(220, 200, 80, 0.12);
+  color: rgba(240, 230, 150, 0.9);
+  border: 1px solid rgba(220, 200, 80, 0.25);
+}
+.chip--sev-low {
+  background: rgba(120, 180, 220, 0.12);
+  color: rgba(170, 210, 240, 0.9);
+  border: 1px solid rgba(120, 180, 220, 0.25);
+}
+.chip--sev-info {
+  background: rgba(160, 160, 160, 0.1);
+  color: rgba(200, 200, 200, 0.8);
+  border: 1px solid rgba(160, 160, 160, 0.2);
+}
+
+/* ---- events timeline ---------------------------------------- */
+.ra-events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+.ra-event-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 0.85em;
+}
+.ra-event-row:hover {
+  background: rgba(255,255,255,0.03);
+}
+.ra-event__time {
+  font-family: var(--font-mono, monospace);
+  color: var(--fg-faint);
+  font-size: 0.85em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ra-event__type {
+  font-family: var(--font-mono, monospace);
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 0.78em;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ra-event__type--reality_anchor_refused,
+.ra-event__type--reality_anchor_turn_refused {
+  background: rgba(220, 60, 60, 0.15);
+  color: rgba(255, 160, 160, 0.95);
+}
+.ra-event__type--reality_anchor_flagged,
+.ra-event__type--reality_anchor_turn_flagged {
+  background: rgba(220, 140, 60, 0.12);
+  color: rgba(255, 200, 140, 0.9);
+}
+.ra-event__type--reality_anchor_repeat_offender {
+  background: rgba(180, 100, 220, 0.12);
+  color: rgba(220, 180, 240, 0.95);
+}
+.ra-event__fact {
+  font-family: var(--font-mono, monospace);
+  color: rgba(180, 200, 240, 0.85);
+  font-size: 0.85em;
+}
+.ra-event__claim {
+  color: var(--fg-default);
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ra-event__repeat {
+  font-family: var(--font-mono, monospace);
+  color: rgba(255, 180, 100, 0.95);
+  font-weight: 600;
+  flex-shrink: 0;
+}

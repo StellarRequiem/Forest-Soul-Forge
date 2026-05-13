@@ -1,17 +1,14 @@
 # ADR-0063 — Reality Anchor (persistent ground-truth verification)
 
-- **Status:** Accepted 2026-05-12. **T1 + T2 + T3 + T4 + T5
-  + T6 shipped** across Bursts 251 (ground_truth.yaml +
-  verify_claim.v1) + 252 (`RealityAnchorStep` in the
-  governance pipeline + audit events + per-agent
-  constitutional opt-out) + 253 (`reality_anchor` role in
-  trait_tree / genres / tool_catalog / constitution_templates
-  + singleton-per-forest enforcement at /birth) + 254
-  (conversation runtime pre-turn hook) + 255 (schema v20 +
-  `reality_anchor_corrections` table + recurrence detection
-  in both dispatcher + conversation surfaces +
-  `reality_anchor_repeat_offender` audit event). T7
-  (SoulUX pane) is the final tranche.
+- **Status:** **Closed 2026-05-12.** All seven tranches shipped
+  across Bursts 251 (ground_truth.yaml + verify_claim.v1) +
+  252 (`RealityAnchorStep` in the governance pipeline + audit
+  events + per-agent constitutional opt-out) + 253
+  (`reality_anchor` role + singleton enforcement at /birth) +
+  254 (conversation runtime pre-turn hook) + 255 (schema v20
+  correction memory + recurrence detection + repeat-offender
+  audit event) + 256 (SoulUX Reality Anchor pane +
+  `/reality-anchor/*` operator-facing router).
 - **Date:** 2026-05-12.
 - **Related:** ADR-0033 Security Swarm, ADR-0036 Verifier
   Loop (memory contradiction scanner), ADR-0049 K1 verified-
@@ -224,7 +221,9 @@ get one event per repeat instead of N events to correlate.
 | T4 | `reality_anchor` role | **DONE B253** — role added to `config/trait_tree.yaml` (with full domain_weights) + `config/genres.yaml` (under guardian's roles list) + `config/tool_catalog.yaml` (kit: verify_claim.v1 + memory_recall.v1 + audit_chain_verify.v1 + llm_think.v1 + delegate.v1) + `config/constitution_templates.yaml` (4 policies: forbid_action_taking, forbid_ground_truth_mutation, require_citation, forbid_low_confidence_contradicted; risk_thresholds tighter than verifier_loop). Singleton-per-forest structurally enforced in `daemon/routers/writes/birth.py::_perform_create` — second active reality_anchor returns 409 with the existing agent's instance_id in the detail. Archive-then-rebirth path works. Plus diagnostic helpers (`diagnose-import.command` + `fix-cryptography-dep.command`) shipped after a cryptography-dep diagnosis incident at the start of this burst. | shipped |
 | T5 | Conversation runtime pre-turn hook | **DONE B254** — new helper `daemon/reality_anchor_turn.py::check_turn_against_anchor` consumed by the assistant-turn emit path in `routers/conversations.py`. Runs after `llm_think` produces `response_text` and BEFORE the `registry.conversations.append_turn` call. CRITICAL contradictions refuse: the turn is NOT appended, `any_failed=True` ends the chain, and `reality_anchor_turn_refused` lands in the audit chain. HIGH/MEDIUM/LOW emit `reality_anchor_turn_flagged` but let the turn through. Distinct event-type pair from T3's dispatcher-surface so auditors can separate turn-refused from tool-call-refused without parsing event_data. Same constitutional opt-out (`reality_anchor.enabled=false`) as T3. Failure paths degrade to allow — the anchor is NOT load-bearing for turn flow. 11 unit tests cover every verdict + opt-out + payload-shape branch. | shipped |
 | T6 | Correction memory + recurrence | **DONE B255** — schema v20 adds `reality_anchor_corrections` (PRIMARY KEY claim_hash = sha256 of normalized claim text; columns: canonical_claim, contradicts_fact_id, worst_severity, first_seen_at, last_seen_at, repetition_count, last_agent_dna, last_instance_id, last_decision, last_surface). `RealityAnchorCorrectionsTable` in `registry/tables/` exposes `bump_or_create` (idempotent upsert with ON CONFLICT bump) + `get` + `list_repeat_offenders`. Wired into both surfaces: `RealityAnchorStep` gets a `corrections_bump_fn` closure from the dispatcher; `check_turn_against_anchor` accepts a `corrections_table` param threaded through the conversations router. When the post-bump count > 1, both surfaces fire `reality_anchor_repeat_offender` alongside the per-event refused/flagged emission — distinct event type added to `KNOWN_EVENT_TYPES`. Normalization (lowercase + collapse whitespace + trim) means case/whitespace variants hash to the same row. Worst-severity escalates only (LOW → HIGH overwrites; HIGH → LOW preserves HIGH). All bump failures degrade silently — corrections memory is NOT load-bearing for the gate's primary refuse/flag decision. | shipped |
-| T7 | SoulUX Reality Anchor pane | Ground-truth editor (read + add + edit, no delete without confirmation), recent flags timeline, correction-history table by agent. New tab in the SoulUX frontend. | queued B256 |
+| T7 | SoulUX Reality Anchor pane | **DONE B256** — new tab in the SoulUX frontend (`frontend/index.html` + `frontend/js/reality-anchor.js` + CSS additions in `frontend/css/style.css`) backed by a new `/reality-anchor/*` router (`daemon/routers/reality_anchor.py`). Five endpoints: GET /status (combined card), GET /ground-truth (catalog with all fields), GET /recent-events (last N reality_anchor_* events filtered from the chain), GET /corrections (top repeat offenders), POST /reload (hot-reload catalog from disk). Pane is read-only in v1 — per ADR-0063 D3 the operator owns the truth by editing `config/ground_truth.yaml` on disk; the UI surfaces the live state + a Reload button. In-UI editing is a v2 nice-to-have. 12 endpoint tests cover every surface. **ADR-0063 closed.** | shipped |
+
+Total: 7/7 shipped in 6 bursts (B251-B256).
 
 Total estimate: ~5.5 bursts. B251 lands the foundation; B252
 delivers the substrate-layer enforcement; B253-B255 round out

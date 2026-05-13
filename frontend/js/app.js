@@ -21,6 +21,7 @@ import * as toolRegistryPanel from "./tool-registry.js";
 import * as mcpPluginsPanel from "./mcp-plugins.js";
 import * as memoryPanel from "./memory.js";
 import * as chatPanel from "./chat.js";
+import * as realityAnchorPanel from "./reality-anchor.js";  // B256 / ADR-0063 T7
 import * as welcome from "./welcome.js";
 import * as statusbar from "./statusbar.js";
 import * as tour from "./tour.js";
@@ -79,6 +80,7 @@ async function boot() {
     mcpPluginsPanel.start();
     memoryPanel.start();
     chatPanel.start().catch(() => {});
+    realityAnchorPanel.start();  // B256 / ADR-0063 T7
     return;
   }
 
@@ -129,6 +131,10 @@ async function boot() {
   chatPanel.start().catch((e) => {
     console.warn("[chat] start failed:", e);
   });
+  // ADR-0063 T7 (B256) — Reality Anchor pane. Lazy-loads its data
+  // on first tab click; the start() call just wires the button
+  // handlers. Same non-fatal posture as the other panels.
+  realityAnchorPanel.start();
 }
 
 if (document.readyState === "loading") {
