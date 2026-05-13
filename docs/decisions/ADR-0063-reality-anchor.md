@@ -1,10 +1,11 @@
 # ADR-0063 — Reality Anchor (persistent ground-truth verification)
 
-- **Status:** Accepted 2026-05-12. **T1 + T2 shipping Burst 251**
-  — `config/ground_truth.yaml` schema + loader +
-  `verify_claim.v1` builtin tool (pattern-match-only, no LLM in
-  v1). T3 (governance pipeline `RealityAnchorStep`),
-  T4 (`reality_anchor` role + constitution), T5 (conversation
+- **Status:** Accepted 2026-05-12. **T1 + T2 + T3 shipped**
+  across Bursts 251 (ground_truth.yaml + verify_claim.v1) +
+  252 (`RealityAnchorStep` in the governance pipeline +
+  `reality_anchor_refused` / `reality_anchor_flagged` audit
+  events + per-agent constitutional opt-out). T4
+  (`reality_anchor` role + constitution), T5 (conversation
   runtime pre-turn hook), T6 (correction memory), T7
   (SoulUX pane) queued.
 - **Date:** 2026-05-12.
@@ -215,7 +216,7 @@ get one event per repeat instead of N events to correlate.
 |---|---|---|---|
 | T1 | `ground_truth.yaml` + loader | Operator-global catalog with bootstrap entries (D4). Loader handles operator-global + per-agent ADD layering (D3); rejects per-agent overrides. Pure-Python loader; no daemon dependency so tests don't need a running daemon. | shipping B251 |
 | T2 | `verify_claim.v1` builtin | Pattern-match verifier (D5). Args: claim_text + optional fact_ids filter + agent_dna (for per-agent additions). Output: verdict, per-fact verdicts, citations, severity. side_effects=read_only. Tests cover each branch of the verdict matrix. | shipping B251 |
-| T3 | `RealityAnchorStep` in governance pipeline | New step inserted between `HardwareQuarantineStep` and `TaskUsageCapStep`. Skips for `side_effects=read_only` tools (those can't cause harm). Refuses CRITICAL contradictions; warns on HIGH drift. Emits `reality_anchor_flagged` + `reality_anchor_refused`. Adds entries to `KNOWN_EVENT_TYPES`. | queued B252 |
+| T3 | `RealityAnchorStep` in governance pipeline | **DONE B252** — new step inserted between `HardwareQuarantineStep` and `TaskUsageCapStep` in `dispatcher.py`. Args are flattened to a "claim" via `_flatten_args_to_claim` (one nesting level deep + lists of strings) and run through `_reality_anchor_verify` (a substrate-cost inline of `verify_claim.v1` semantics). CRITICAL contradictions REFUSE with reason `reality_anchor_contradiction`; HIGH/MEDIUM/LOW contradictions WARN via `reality_anchor_flagged` but proceed. Per-agent opt-out via `reality_anchor: {enabled: false}` in the constitution YAML. Catalog load errors + verifier exceptions degrade to GO so a broken Reality Anchor never blocks legitimate work. KNOWN_EVENT_TYPES updated with both new event types. Note on ADR-T3 deviation: original spec said "skip for `side_effects=read_only`"; final implementation runs on ALL tools (read-only emissions are still worth flagging in the chain) — the skip-read-only guidance applies instead to the future T5 conversation-runtime hook. 20+ unit tests cover every branch. | shipped |
 | T4 | `reality_anchor` role | Constitution template + genre tag + spawn helper. Singleton per forest. Operator spawns via `/birth?role=reality_anchor`; subsequent spawn attempts refuse with "already exists." Kit: verify_claim.v1, memory_recall.v1, llm_think.v1. | queued B253 |
 | T5 | Conversation runtime pre-turn hook | ADR-003Y `pre_turn_emit` callback wired so the reality anchor inspects a final assistant turn's content before it lands. Drift detection compares to recent operator turns. Hooks into the same audit event family as T3. | queued B254 |
 | T6 | Correction memory + recurrence | New table + registry accessor + `reality_anchor_repeat_offender` event. Bumps `repetition_count` on claim_hash collision. Operator query: "show me repeat offenders by agent." | queued B255 |

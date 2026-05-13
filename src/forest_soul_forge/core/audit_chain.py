@@ -265,6 +265,20 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # "what's the false-positive rate look like in production?"
     # without re-running the scan.
     "agent_security_scan_completed",
+    # ADR-0063 T3 (Burst 252) — Reality Anchor pre-dispatch gate.
+    # Two distinct events so an auditor can separate refuse paths
+    # (CRITICAL ground-truth contradiction) from warn paths (HIGH
+    # contradiction that didn't refuse + lower-severity flags).
+    #
+    #   - reality_anchor_refused: a CRITICAL contradiction
+    #     refused the tool call. event_data: tool_key, claim,
+    #     fact_id, fact_statement, severity, matched_terms.
+    #
+    #   - reality_anchor_flagged: a HIGH/MEDIUM/LOW contradiction
+    #     was detected but allowed (default posture per
+    #     ADR-0063 D1). Same event_data shape.
+    "reality_anchor_refused",
+    "reality_anchor_flagged",
     # ADR-0061 T6 (Burst 248) — agent passport lifecycle. Two
     # distinct events so an auditor can separate successful
     # operator mints from quarantine-time refusals.

@@ -342,6 +342,203 @@ class GovernancePipeline:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class RealityAnchorStep:
+    """ADR-0063 T3 — pre-dispatch verification against operator-asserted
+    ground truth.
+
+    Runs after HardwareQuarantineStep and before tool lookup so a
+    REFUSAL on a CRITICAL contradiction lands BEFORE any tool-side
+    validation noise. The step:
+
+      1. Reads the constitution YAML once to check the per-agent
+         opt-out (``reality_anchor.enabled: false``). If disabled,
+         returns GO immediately. ADR-0063 D2.
+
+      2. Loads the operator-global ground truth catalog. Cached
+         per-pipeline-instance for cost. Catalog reload happens at
+         daemon lifespan; tests can hot-reload via the loader's
+         cache reset.
+
+      3. Builds a "claim" from the dispatch's tool arguments — every
+         string value (top-level + one level nested) joined into a
+         single space-separated text blob. This is the closest
+         approximation we have to "what the agent is asserting via
+         this action."
+
+      4. Runs ``verify_claim`` (pure-Python pattern match) against
+         the catalog.
+
+      5. Verdict policy (ADR-0063 D1):
+           - CRITICAL contradiction → REFUSE + emit
+             ``reality_anchor_refused``
+           - HIGH/MEDIUM/LOW contradiction → GO + emit
+             ``reality_anchor_flagged`` (warn-only)
+           - Otherwise → GO (silent)
+
+    side_effects=read_only tools are NOT skipped here. A read-only
+    tool can still emit hallucinations the operator would care about;
+    we want them flagged in the audit chain even when we don't refuse.
+    ADR-0063 D6's "skip read-only" guidance applies to the FUTURE T5
+    conversation-runtime hook, not this dispatch-layer gate.
+
+    Two failure modes that fall back to GO:
+      - Catalog load error → step degrades to no-op. The Reality
+        Anchor adds value but is NOT load-bearing; a broken catalog
+        must not block the agent.
+      - Verifier raises → step degrades to no-op + logs the error
+        to audit as ``reality_anchor_flagged`` with reason
+        ``verifier_raised``.
+    """
+
+    audit: AuditChain
+    verify_claim_fn: Any  # Callable[[str, dict | None], dict]  # (claim, agent_constitution) → verdict dict
+    load_constitution_opt_out_fn: Any  # Callable[[Path], bool]  # True iff reality_anchor.enabled is False
+
+    def evaluate(self, dctx: DispatchContext) -> StepResult:
+        # 1. Constitutional opt-out check. False → step is a no-op
+        #    for this agent. Errors → assume opt-in (default on).
+        try:
+            opted_out = self.load_constitution_opt_out_fn(dctx.constitution_path)
+        except Exception:
+            opted_out = False
+        if opted_out:
+            return StepResult.go()
+
+        # 2. Build the claim string from args. We deliberately include
+        #    nested string values one level deep — tools like mcp_call
+        #    take {server, tool, args:{...}} and the inner args are
+        #    where hallucinations show up.
+        claim = _flatten_args_to_claim(dctx.args)
+        if not claim.strip():
+            return StepResult.go()
+
+        # 3. Run the verifier. Any exception → degrade silently to GO
+        #    so a broken Reality Anchor never blocks legitimate work.
+        try:
+            result = self.verify_claim_fn(claim, None)
+        except Exception as e:
+            try:
+                self.audit.append(
+                    "reality_anchor_flagged",
+                    {
+                        "instance_id":  dctx.instance_id,
+                        "tool_key":     dctx.key,
+                        "session_id":   dctx.session_id,
+                        "claim":        claim[:500],
+                        "reason":       "verifier_raised",
+                        "detail":       repr(e),
+                    },
+                    agent_dna=dctx.agent_dna,
+                )
+            except Exception:
+                pass
+            return StepResult.go()
+
+        verdict = result.get("verdict", "not_in_scope")
+        if verdict != "contradicted":
+            return StepResult.go()
+
+        # 4. We have one or more contradicting facts. Pull the
+        #    highest-severity row for the audit event + the refuse
+        #    decision.
+        contradicting = [
+            r for r in (result.get("by_fact") or [])
+            if r.get("verdict") == "contradicted"
+        ]
+        if not contradicting:
+            # Defensive — the verifier said contradicted but the
+            # by_fact list is empty. Treat as a flag, not a refusal.
+            return StepResult.go()
+
+        # Sort by severity rank (CRITICAL > HIGH > ... > INFO) so we
+        # report the worst offender first in the operator's view.
+        severity_rank = {
+            "CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0,
+        }
+        contradicting.sort(
+            key=lambda r: severity_rank.get(r.get("severity", "INFO"), -1),
+            reverse=True,
+        )
+        worst = contradicting[0]
+        worst_severity = worst.get("severity", "INFO")
+
+        event_data = {
+            "instance_id":   dctx.instance_id,
+            "tool_key":      dctx.key,
+            "session_id":    dctx.session_id,
+            "claim":         claim[:500],   # bounded
+            "fact_id":       worst.get("fact_id"),
+            "fact_statement": worst.get("statement"),
+            "severity":      worst_severity,
+            "matched_terms": list(worst.get("matched_terms") or []),
+            "contradicting_fact_count": len(contradicting),
+        }
+
+        if worst_severity == "CRITICAL":
+            try:
+                self.audit.append(
+                    "reality_anchor_refused", event_data,
+                    agent_dna=dctx.agent_dna,
+                )
+            except Exception:
+                pass
+            return StepResult.refuse(
+                "reality_anchor_contradiction",
+                (
+                    f"CRITICAL ground-truth contradiction (ADR-0063): "
+                    f"fact {worst.get('fact_id')!r} — "
+                    f"{worst.get('statement', '')[:200]} "
+                    f"(matched terms: {worst.get('matched_terms')})"
+                ),
+            )
+
+        # HIGH / MEDIUM / LOW → warn but pass through.
+        try:
+            self.audit.append(
+                "reality_anchor_flagged", event_data,
+                agent_dna=dctx.agent_dna,
+            )
+        except Exception:
+            pass
+        return StepResult.go()
+
+
+def _flatten_args_to_claim(args: dict[str, Any], depth: int = 0) -> str:
+    """Recursively extract every string value from ``args`` into a
+    single space-joined claim string.
+
+    Caps depth at 2 levels so a pathological deeply-nested dict
+    doesn't blow up the verifier. Non-string values (ints, bools,
+    Nones, lists of non-strings) are skipped — the Reality Anchor
+    only verifies textual claims.
+
+    Lists of strings ARE included (their entries joined). This catches
+    e.g. ``args["allowed_hosts"] = ["mit.edu", "anthropic.com"]``
+    where the hosts themselves are factual claims about reachability.
+    """
+    if not isinstance(args, dict) or depth > 2:
+        return ""
+    parts: list[str] = []
+    for value in args.values():
+        if isinstance(value, str):
+            if value:
+                parts.append(value)
+        elif isinstance(value, dict):
+            inner = _flatten_args_to_claim(value, depth=depth + 1)
+            if inner:
+                parts.append(inner)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item:
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    inner = _flatten_args_to_claim(item, depth=depth + 1)
+                    if inner:
+                        parts.append(inner)
+    return " ".join(parts)
+
+
+@dataclass
 class HardwareQuarantineStep:
     """K6 hardware-binding quarantine check.
 

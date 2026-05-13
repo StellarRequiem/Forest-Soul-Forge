@@ -65,6 +65,7 @@ from forest_soul_forge.tools.governance_pipeline import (
     PostureGateStep,
     PostureOverrideStep,
     ProceduralShortcutStep,
+    RealityAnchorStep,
     StepResult,
     TaskUsageCapStep,
     ToolLookupStep,
@@ -428,6 +429,18 @@ class ToolDispatcher:
             HardwareQuarantineStep(
                 audit=self.audit,
                 quarantine_reason_fn=_hardware_quarantine_reason,
+            ),
+            # ADR-0063 T3 (Burst 252) — Reality Anchor gate. Verifies
+            # the dispatch's args against operator-asserted ground
+            # truth (config/ground_truth.yaml). CRITICAL contradictions
+            # REFUSE; HIGH/MEDIUM/LOW WARN via audit event but proceed.
+            # Per-agent constitutional opt-out (reality_anchor.enabled:
+            # false) skips the step. Catalog load failures degrade to
+            # no-op so a broken catalog never blocks legitimate work.
+            RealityAnchorStep(
+                audit=self.audit,
+                verify_claim_fn=_reality_anchor_verify,
+                load_constitution_opt_out_fn=_reality_anchor_opt_out,
             ),
             TaskUsageCapStep(
                 audit=self.audit,
@@ -2191,3 +2204,106 @@ def _check_passport_override(
     if valid:
         return True
     return reason
+
+
+# ---------------------------------------------------------------------------
+# ADR-0063 T3 (Burst 252) — Reality Anchor pipeline-step helpers.
+#
+# Two module-level closures injected into RealityAnchorStep at dispatcher
+# construction:
+#
+#   _reality_anchor_verify(claim, agent_constitution)
+#       → dict with 'verdict' + 'by_fact' (matches VerifyClaimTool's
+#         output shape; the step doesn't care about the rest).
+#       Runs the same pattern-match path as the verify_claim.v1
+#       builtin, but invokes load_ground_truth directly to avoid
+#       the cost of constructing a ToolContext per dispatch.
+#
+#   _reality_anchor_opt_out(constitution_path)
+#       → bool. True iff the constitution YAML's reality_anchor
+#         block sets enabled=False. Per ADR-0063 D2 the gate is
+#         on by default.
+# ---------------------------------------------------------------------------
+
+
+def _reality_anchor_verify(
+    claim: str,
+    agent_constitution: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Substrate-layer verify pass. Pure pattern match against the
+    operator-global ground truth catalog (config/ground_truth.yaml).
+
+    Same matching semantics as ``verify_claim.v1`` but inlined to
+    skip the ToolContext / ToolResult dance. Returns the same dict
+    shape (``verdict`` + ``by_fact``) so the step doesn't care
+    which code path produced it.
+    """
+    from forest_soul_forge.core.ground_truth import (
+        load_ground_truth, merge_agent_additions,
+    )
+    from forest_soul_forge.tools.builtin.verify_claim import (
+        _evaluate_fact,
+        VERDICT_CONFIRMED,
+        VERDICT_CONTRADICTED,
+        VERDICT_UNKNOWN,
+        VERDICT_NOT_IN_SCOPE,
+    )
+
+    facts, _errors = load_ground_truth()
+    if agent_constitution:
+        facts, _merge_errors = merge_agent_additions(
+            facts, agent_constitution, agent_instance_id="dispatch",
+        )
+    claim_lower = (claim or "").strip().lower()
+    if not claim_lower or not facts:
+        return {"verdict": VERDICT_NOT_IN_SCOPE, "by_fact": []}
+
+    by_fact: list[dict] = []
+    for fact in facts:
+        verdict, matched, _domain_hits = _evaluate_fact(claim_lower, fact)
+        if verdict is None:
+            continue
+        by_fact.append({
+            "fact_id":       fact.id,
+            "verdict":       verdict,
+            "severity":      fact.severity,
+            "statement":     fact.statement,
+            "matched_terms": matched,
+        })
+
+    contradictions = [r for r in by_fact if r["verdict"] == VERDICT_CONTRADICTED]
+    confirms = [r for r in by_fact if r["verdict"] == VERDICT_CONFIRMED]
+    unknowns = [r for r in by_fact if r["verdict"] == VERDICT_UNKNOWN]
+
+    if contradictions:
+        agg = VERDICT_CONTRADICTED
+    elif confirms:
+        agg = VERDICT_CONFIRMED
+    elif unknowns:
+        agg = VERDICT_UNKNOWN
+    else:
+        agg = VERDICT_NOT_IN_SCOPE
+
+    return {"verdict": agg, "by_fact": by_fact}
+
+
+def _reality_anchor_opt_out(constitution_path: Path) -> bool:
+    """Read the constitution YAML and return True iff the
+    ``reality_anchor`` block sets ``enabled: false``.
+
+    Per ADR-0063 D2 the gate is ON by default — only an explicit
+    ``enabled: false`` opts out. Missing block, malformed YAML,
+    or read errors all default to "opted in" (return False).
+    """
+    try:
+        import yaml as _yaml
+        text = constitution_path.read_text(encoding="utf-8")
+        data = _yaml.safe_load(text) or {}
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    block = data.get("reality_anchor")
+    if not isinstance(block, dict):
+        return False
+    return block.get("enabled") is False
