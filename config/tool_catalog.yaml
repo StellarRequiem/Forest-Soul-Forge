@@ -205,6 +205,11 @@ tools:
             Optional override. When omitted in lineage/consented mode,
             the tool walks agent_ancestry to compute the chain.
     side_effects: read_only
+    # ADR-0051 T3: needs ctx.memory + ctx.agent_registry (live
+    # SQLite handles on the daemon) — can't pickle across a
+    # subprocess boundary, so the runtime keeps this in-process
+    # regardless of FSF_TOOL_SANDBOX mode.
+    sandbox_eligible: false
     archetype_tags: [companion, researcher, investigator, communicator, security_low, security_mid, security_high]
 
   memory_write.v1:
@@ -234,6 +239,10 @@ tools:
           type: array
           items: {type: string}
     side_effects: read_only
+    # ADR-0051 T3: writes go through ctx.memory (live SQLite cursor
+    # + per-agent write_lock on the daemon). Pickling that handle is
+    # impossible; the registry stays single-writer per ADR-0007.
+    sandbox_eligible: false
     archetype_tags: [companion, researcher, investigator, communicator]
 
   memory_disclose.v1:
@@ -258,6 +267,10 @@ tools:
         recipient_instance: {type: string}
         summary:            {type: string}
     side_effects: read_only
+    # ADR-0051 T3: reads + writes via ctx.memory + ctx.agent_registry,
+    # plus emits memory_disclosed via the daemon's audit chain. None
+    # of those handles cross a subprocess boundary.
+    sandbox_eligible: false
     archetype_tags: [investigator, communicator, security_low, security_mid, security_high]
 
   delegate.v1:
@@ -289,6 +302,12 @@ tools:
         session_id:           {type: string}
         allow_out_of_lineage: {type: boolean, default: false}
     side_effects: read_only
+    # ADR-0051 T3: needs ctx.delegate — a closure built per-dispatch
+    # that captures the daemon's registry + audit chain + write_lock.
+    # The closure can't survive pickle; delegation MUST run in-process
+    # so the target agent's skill executes against the same daemon
+    # state machine.
+    sandbox_eligible: false
     archetype_tags: [investigator, communicator, security_low, security_mid, security_high]
 
   # ----- security_low tier (ADR-0033 Phase B1) ----------------------------
@@ -1956,6 +1975,12 @@ tools:
           maximum: 2
           description: "Provider passthrough; default left to provider."
     side_effects: read_only
+    # ADR-0051 T3: needs ctx.provider — the bound LLM provider with
+    # HTTP client + credentials + token accounting. Can't pickle the
+    # provider handle, and the provider owns the rate-limit + cost
+    # accounting that the dispatcher reconciles back into the audit
+    # chain. Stays in-process regardless of FSF_TOOL_SANDBOX mode.
+    sandbox_eligible: false
     archetype_tags: [system_architect, software_engineer, code_reviewer, companion, researcher, investigator, guardian]
 
   code_read.v1:

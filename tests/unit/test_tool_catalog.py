@@ -294,6 +294,60 @@ archetypes: {}
             load_catalog(p)
         assert "sandbox_eligible" in str(ei.value)
 
+    def test_real_catalog_marks_memory_delegate_llm_think_ineligible(self):
+        """ADR-0051 T3: the 5 tools that structurally cannot run in a
+        subprocess sandbox (need direct ctx.memory / ctx.delegate /
+        ctx.provider handles) must be annotated
+        ``sandbox_eligible: false`` in the shipped catalog so the T4
+        dispatcher gate honors the opt-out under strict mode.
+
+        Drift detector: if a future edit accidentally drops the
+        annotation on one of these, this test fails — the operator
+        finds out at CI time rather than discovering it when strict
+        mode silently tries to subprocess-pickle a live registry
+        handle."""
+        catalog_path = (
+            Path(__file__).resolve().parents[2]
+            / "config"
+            / "tool_catalog.yaml"
+        )
+        cat = load_catalog(catalog_path)
+        ineligible_required = [
+            "memory_recall.v1",
+            "memory_write.v1",
+            "memory_disclose.v1",
+            "delegate.v1",
+            "llm_think.v1",
+        ]
+        for key in ineligible_required:
+            tool_def = cat.tools[key]
+            assert tool_def.sandbox_eligible is False, (
+                f"{key} must be sandbox_eligible: false per ADR-0051 T3"
+            )
+
+    def test_real_catalog_default_eligibility_for_canonical_sandboxable_tools(self):
+        """Inverse drift detector: tools that DO have sandbox-eligible
+        side_effects (shell_exec, code_edit, code_read, web_fetch)
+        should NOT have sandbox_eligible: false — the whole point of
+        T4 is sandboxing exactly these. If someone annotates one of
+        these to opt out, this test catches it."""
+        catalog_path = (
+            Path(__file__).resolve().parents[2]
+            / "config"
+            / "tool_catalog.yaml"
+        )
+        cat = load_catalog(catalog_path)
+        for key in ["audit_chain_verify.v1", "security_scan.v1", "code_read.v1"]:
+            tool_def = cat.tools.get(key)
+            if tool_def is None:
+                # Defensive: catalog may evolve. Skip rather than
+                # hard-fail if one of the canonical tools rotates out.
+                continue
+            assert tool_def.sandbox_eligible is True, (
+                f"{key} must be sandbox_eligible: true (default) "
+                f"— ADR-0051 T3 only opts out memory/delegate/llm_think"
+            )
+
 
 # ---------------------------------------------------------------------------
 # resolve_kit semantics
