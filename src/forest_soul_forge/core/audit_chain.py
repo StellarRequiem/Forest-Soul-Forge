@@ -489,6 +489,18 @@ class AuditChain:
         # signatures.
         self._signer: Any = None       # Callable[[bytes, str], bytes | None] | None
         self._verifier: Any = None     # Callable[[bytes, bytes, str], bool] | None
+        # ADR-0050 T3 (B268): optional at-rest encryption config.
+        # When set, ``append()`` wraps the entry's ``event_data`` in
+        # an AES-256-GCM envelope on the on-disk form; the in-memory
+        # ChainEntry always carries plaintext event_data. Read paths
+        # (``_entry_from_dict``) detect the envelope and decrypt
+        # transparently. None = pre-ADR-0050 plaintext chain
+        # (bit-identical historical behavior). Mixed
+        # legacy+encrypted chains are explicitly supported per
+        # ADR-0050 Decision 6 — old entries stay plaintext, new
+        # entries land encrypted, both round-trip through this
+        # class.
+        self._encryption: Any = None  # EncryptionConfig | None
         if not self.path.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.touch()
@@ -528,6 +540,21 @@ class AuditChain:
         """
         self._verifier = verifier
 
+    def set_encryption(self, config: Any) -> None:
+        """Install the at-rest encryption config (ADR-0050 T3 / B268).
+
+        ``config`` is a :class:`forest_soul_forge.core.at_rest_encryption.EncryptionConfig`
+        carrying the 32-byte master key + active ``kid``. When set,
+        :meth:`append` writes the entry's event_data through the
+        AES-256-GCM envelope before persisting; read paths detect
+        the envelope on disk and decrypt transparently.
+
+        Pass ``None`` to disable encryption (revert to plaintext
+        chain behavior — used by tests that don't want to exercise
+        the encryption path).
+        """
+        self._encryption = config
+
     # ---- introspection --------------------------------------------------
     @property
     def head(self) -> ChainEntry | None:
@@ -551,7 +578,7 @@ class AuditChain:
                     raise AuditChainError(
                         f"malformed JSON at line {lineno + 1}: {err}"
                     ) from err
-                entries.append(_entry_from_dict(obj))
+                entries.append(_entry_from_dict(obj, encryption_config=self._encryption))
         return entries
 
     def tail(self, n: int) -> list[ChainEntry]:
@@ -583,7 +610,7 @@ class AuditChain:
                     continue
                 try:
                     obj = json.loads(raw)
-                    keepers.append(_entry_from_dict(obj))
+                    keepers.append(_entry_from_dict(obj, encryption_config=self._encryption))
                 except (json.JSONDecodeError, AuditChainError):
                     # Tolerant — verify() reports structural breaks.
                     continue
@@ -721,7 +748,7 @@ class AuditChain:
                         unknown_event_types=tuple(sorted(set(unknown))),
                     )
                 try:
-                    entry = _entry_from_dict(obj)
+                    entry = _entry_from_dict(obj, encryption_config=self._encryption)
                 except AuditChainError as err:
                     return VerificationResult(
                         ok=False, entries_verified=count,
@@ -901,7 +928,7 @@ class AuditChain:
                     continue
                 try:
                     obj = json.loads(raw)
-                    entry = _entry_from_dict(obj)
+                    entry = _entry_from_dict(obj, encryption_config=self._encryption)
                 except (json.JSONDecodeError, AuditChainError):
                     # Malformed lines aren't fork signatures per se —
                     # verify() already covers structural breakage. The
@@ -964,7 +991,7 @@ class AuditChain:
                     continue
                 try:
                     obj = json.loads(raw)
-                    last = _entry_from_dict(obj)
+                    last = _entry_from_dict(obj, encryption_config=self._encryption)
                 except (json.JSONDecodeError, AuditChainError):
                     # Leave 'last' alone; verify() reports the structural break.
                     continue
@@ -995,8 +1022,44 @@ class AuditChain:
         # leaves the file in a consistent state (every line is either fully
         # present or absent). Not as tight as fsync, but matches the v0.1
         # threat model.
+        #
+        # ADR-0050 T3 (B268): if encryption is configured, the on-disk
+        # form has ``event_data`` replaced by an ``encryption``
+        # envelope (alg/kid/nonce/ct). The in-memory ChainEntry keeps
+        # plaintext ``event_data`` so callers + the hash-chain verify
+        # see the same shape they always did. ``entry_hash`` was
+        # computed in ``append()`` over the PLAINTEXT event_data
+        # before this method is called, so encryption doesn't affect
+        # chain integrity.
+        line = self._encrypted_json_line(entry) if self._encryption else entry.to_json_line()
         with self.path.open("a", encoding="utf-8") as f:
-            f.write(entry.to_json_line())
+            f.write(line)
+
+    def _encrypted_json_line(self, entry: ChainEntry) -> str:
+        """Serialize one entry with the ADR-0050 encryption envelope.
+
+        ``event_data`` field is omitted; ``encryption`` carries the
+        AES-256-GCM ciphertext + nonce + alg + kid. Other envelope
+        fields (seq, timestamp, prev_hash, entry_hash, agent_dna,
+        event_type, signature) stay plaintext so the chain verifier
+        can walk hash links without unlocking the master key.
+        """
+        from forest_soul_forge.core.at_rest_encryption import (
+            encrypt_event_data,
+        )
+        envelope = encrypt_event_data(entry.event_data, self._encryption)
+        payload = {
+            "seq":        entry.seq,
+            "timestamp":  entry.timestamp,
+            "prev_hash":  entry.prev_hash,
+            "entry_hash": entry.entry_hash,
+            "agent_dna":  entry.agent_dna,
+            "event_type": entry.event_type,
+            "encryption": envelope,
+        }
+        if entry.signature is not None:
+            payload["signature"] = entry.signature
+        return json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1007,14 +1070,62 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _entry_from_dict(obj: dict[str, Any]) -> ChainEntry:
+def _entry_from_dict(
+    obj: dict[str, Any],
+    *,
+    encryption_config: Any = None,
+) -> ChainEntry:
+    """Parse one on-disk audit-chain JSON object into a ChainEntry.
+
+    ADR-0050 T3 (B268): if the object carries an ``encryption``
+    envelope (alg/kid/nonce/ct) instead of plaintext ``event_data``,
+    decrypt using the provided ``encryption_config``. Pre-ADR-0050
+    entries (plaintext ``event_data``, no ``encryption`` field)
+    parse the legacy way regardless of whether a config is
+    provided — mixed chains are explicitly supported per ADR-0050
+    Decision 6.
+
+    When ``encryption_config=None`` and the entry IS encrypted,
+    we raise AuditChainError — the caller (typically AuditChain)
+    must thread its config through if it expects to read its own
+    encrypted chain. A None config + plaintext entry is fine.
+    """
     required = ("seq", "timestamp", "prev_hash", "entry_hash", "event_type")
     for k in required:
         if k not in obj:
             raise AuditChainError(f"entry missing required field {k!r}")
-    event_data = obj.get("event_data") or {}
-    if not isinstance(event_data, dict):
-        raise AuditChainError(f"event_data must be an object, got {type(event_data).__name__}")
+
+    # ADR-0050 T3 (B268): detect + decrypt the encryption envelope.
+    # The on-disk form carries EITHER ``event_data`` (plaintext,
+    # pre-ADR or operator opt-out) OR ``encryption`` (post-ADR
+    # encrypted). Reader handles both shapes; mixed legacy +
+    # encrypted chains are explicitly supported.
+    from forest_soul_forge.core.at_rest_encryption import (
+        decrypt_event_data,
+        is_encrypted_entry,
+    )
+    if is_encrypted_entry(obj):
+        if encryption_config is None:
+            raise AuditChainError(
+                "audit entry is encrypted (ADR-0050 envelope present) "
+                "but no encryption_config was provided to decrypt it. "
+                "If you're reading an encrypted chain, ensure the "
+                "AuditChain has its config wired via set_encryption()."
+            )
+        try:
+            event_data = decrypt_event_data(obj["encryption"], encryption_config)
+        except Exception as e:
+            # at_rest_encryption raises DecryptError on tampered/wrong-key
+            # entries; surface as AuditChainError so callers don't need
+            # to import the encryption module to handle integrity failures.
+            raise AuditChainError(
+                f"audit entry seq={obj.get('seq')} decrypt failed: {e}"
+            ) from e
+    else:
+        event_data = obj.get("event_data") or {}
+        if not isinstance(event_data, dict):
+            raise AuditChainError(f"event_data must be an object, got {type(event_data).__name__}")
+
     # ADR-0049 T5 (B244): signature is an OPTIONAL field. Absent on
     # legacy pre-ADR-0049 entries + on operator-emitted events
     # (genesis, births). Present on agent-emitted events when the

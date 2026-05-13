@@ -290,10 +290,35 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                 )
             try:
                 audit_chain = AuditChain(settings.audit_chain_path)
-                startup_diagnostics.append(
-                    {"component": "audit_chain", "status": "ok",
-                     "path": str(settings.audit_chain_path), "error": None}
-                )
+                # ADR-0050 T3 (B268): when FSF_AT_REST_ENCRYPTION=true,
+                # wire the EncryptionConfig into the chain so new
+                # entries get the AES-256-GCM envelope on disk. Mixed
+                # legacy+encrypted chains are explicitly supported —
+                # the existing plaintext genesis + any pre-T3 entries
+                # round-trip through ``_entry_from_dict`` as they
+                # always did; only entries appended AFTER this
+                # wiring carry the envelope. ``_registry_master_key``
+                # is non-None iff the operator opted into encryption
+                # AND the master key resolved cleanly (otherwise the
+                # daemon already raised at the T2 gate above).
+                if _registry_master_key is not None:
+                    from forest_soul_forge.core.at_rest_encryption import (
+                        EncryptionConfig as _EncryptionConfig,
+                    )
+                    audit_chain.set_encryption(
+                        _EncryptionConfig(master_key=_registry_master_key)
+                    )
+                    startup_diagnostics.append(
+                        {"component": "audit_chain", "status": "ok",
+                         "path": str(settings.audit_chain_path),
+                         "error": None,
+                         "at_rest_encryption": "AES-256-GCM (kid=master:default)"}
+                    )
+                else:
+                    startup_diagnostics.append(
+                        {"component": "audit_chain", "status": "ok",
+                         "path": str(settings.audit_chain_path), "error": None}
+                    )
             except Exception as e:
                 audit_chain = None
                 startup_diagnostics.append(
