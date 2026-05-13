@@ -137,6 +137,14 @@ async function boot() {
   // on first tab click; the start() call just wires the button
   // handlers. Same non-fatal posture as the other panels.
   realityAnchorPanel.start();
+  // ADR-0062 T6 (B258) — Security pane. Same lazy-load shape as
+  // Reality Anchor. B260.1 fix: this call was originally added
+  // only in the trait-tree-failure catch branch above, so when
+  // the trait tree loaded successfully (the common case) the
+  // Security tab stayed at "loading…" forever — its module never
+  // ran start(), so no tab-click or refresh-button handler was
+  // ever attached. Symmetric with realityAnchorPanel.start() here.
+  securityPanel.start();
 }
 
 if (document.readyState === "loading") {
