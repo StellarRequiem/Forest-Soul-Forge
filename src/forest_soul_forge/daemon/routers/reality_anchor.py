@@ -88,37 +88,48 @@ def _is_anchor_event(event_type: str) -> bool:
     }
 
 
-def _read_recent_events(
-    chain_path: Path, *, limit: int = 100,
+def _read_recent_anchor_events(
+    chain, *, limit: int = 100, search_window: int = 2000,
 ) -> list[dict[str, Any]]:
-    """Tail the JSONL chain reading the last ``limit`` reality_anchor_*
-    entries.
+    """Get the last ``limit`` reality_anchor_* events from the chain.
 
-    For Forest's current chain sizes (<10K entries) walking the whole
-    file is sub-millisecond. When chain sizes grow into the millions
-    we'll switch to indexed access; for now reading top-to-bottom is
-    simplest + cheapest.
+    B256 originally implemented this by reading the entire JSONL into
+    memory via ``Path.read_text(encoding='utf-8')`` then splitting + JSON
+    parsing every line. For a 6 MB / ~10K-entry chain that's ~100 ms of
+    CPU per call. The live smoke-test (2026-05-13) found the SoulUX
+    Reality pane stuck at "loading…" because four concurrent calls
+    (status + ground-truth + recent-events + corrections) hammered that
+    path in parallel and saturated FastAPI's sync threadpool, leaving
+    fetches pending indefinitely as observed in chrome's network log.
+
+    Fix: use :meth:`AuditChain.tail` (deque-based streaming reader,
+    O(window) memory regardless of chain size — same primitive
+    ``/audit/tail`` already uses), then filter for the reality_anchor_*
+    event family in-memory. ``search_window`` bounds how far back we
+    look; reality-anchor events are sparse and operator-recent, so 2000
+    entries is plenty for the v1 pane.
     """
-    if not chain_path.exists():
+    if limit <= 0 or search_window <= 0:
         return []
-    matches: list[dict[str, Any]] = []
     try:
-        text = chain_path.read_text(encoding="utf-8")
+        entries = chain.tail(search_window)  # newest-first
     except Exception:
         return []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            ev = json.loads(line)
-        except Exception:
-            continue
-        if _is_anchor_event(ev.get("event_type", "")):
-            matches.append(ev)
-    # Most recent last in the file; reverse + truncate.
-    matches.reverse()
-    return matches[:limit]
+    matches: list[dict[str, Any]] = []
+    for e in entries:
+        if _is_anchor_event(getattr(e, "event_type", "")):
+            matches.append({
+                "seq":        getattr(e, "seq", None),
+                "timestamp":  getattr(e, "timestamp", None),
+                "event_type": getattr(e, "event_type", None),
+                "event_data": getattr(e, "event_data", {}),
+                "agent_dna":  getattr(e, "agent_dna", None),
+                "entry_hash": getattr(e, "entry_hash", None),
+                "prev_hash":  getattr(e, "prev_hash", None),
+            })
+            if len(matches) >= limit:
+                break
+    return matches
 
 
 # ---- endpoints ------------------------------------------------------------
@@ -128,15 +139,19 @@ def _read_recent_events(
     "/status",
     dependencies=[Depends(require_api_token)],
 )
-def status_summary(
+async def status_summary(
     request: Request,
     registry = Depends(get_registry),
     audit = Depends(get_audit_chain),
 ) -> dict[str, Any]:
-    """Combined summary card for the pane's hero block."""
+    """Combined summary card for the pane's hero block.
+
+    B260.1: ``async def`` + ``chain.tail()`` per the audit.py pattern.
+    The pre-fix sync handler doing ``Path.read_text`` blocked threadpool
+    workers under concurrent SoulUX load — see ``_read_recent_anchor_events``.
+    """
     facts, errors = load_ground_truth()
-    chain_path = Path(audit.path) if hasattr(audit, "path") else None
-    recent = _read_recent_events(chain_path, limit=500) if chain_path else []
+    recent = _read_recent_anchor_events(audit, limit=500) if audit else []
     one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
 
     def _in_last_day(ev_iso: str | None) -> bool:
@@ -199,7 +214,7 @@ def status_summary(
     "/ground-truth",
     dependencies=[Depends(require_api_token)],
 )
-def list_facts() -> dict[str, Any]:
+async def list_facts() -> dict[str, Any]:
     """Return the loaded ground-truth catalog.
 
     Per ADR-0063 D3 the operator-global catalog is canonical;
@@ -219,7 +234,7 @@ def list_facts() -> dict[str, Any]:
     "/recent-events",
     dependencies=[Depends(require_api_token)],
 )
-def recent_events(
+async def recent_events(
     limit: int = Query(100, ge=1, le=1000),
     audit = Depends(get_audit_chain),
 ) -> dict[str, Any]:
@@ -227,11 +242,12 @@ def recent_events(
 
     All five event types in one timeline — operators care about
     the chronological view, not separate per-type lists.
+
+    B260.1: ``async def`` + ``chain.tail()`` per the audit.py pattern.
     """
-    chain_path = Path(audit.path) if hasattr(audit, "path") else None
-    if chain_path is None:
+    if audit is None:
         return {"events": [], "count": 0}
-    events = _read_recent_events(chain_path, limit=limit)
+    events = _read_recent_anchor_events(audit, limit=limit)
     return {"events": events, "count": len(events)}
 
 
@@ -239,7 +255,7 @@ def recent_events(
     "/corrections",
     dependencies=[Depends(require_api_token)],
 )
-def list_corrections(
+async def list_corrections(
     min_repetitions: int = Query(2, ge=1, le=100),
     limit: int = Query(50, ge=1, le=500),
     registry = Depends(get_registry),
@@ -280,7 +296,7 @@ def list_corrections(
     "/reload",
     dependencies=[Depends(require_api_token)],
 )
-def reload_catalog() -> dict[str, Any]:
+async def reload_catalog() -> dict[str, Any]:
     """Hot-reload the ground-truth catalog from disk.
 
     The catalog is read fresh on every call to ``load_ground_truth``

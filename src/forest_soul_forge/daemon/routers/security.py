@@ -103,29 +103,37 @@ def _load_iocs(path: Path) -> tuple[list[dict[str, Any]], list[str], int]:
 
 
 def _read_security_events(
-    chain_path: Path, *, limit: int = 100,
+    chain, *, limit: int = 100, search_window: int = 2000,
 ) -> list[dict[str, Any]]:
-    """Tail the JSONL chain reading ``agent_security_scan_completed``
-    events. Returns newest-first up to ``limit``."""
-    if not chain_path.exists():
+    """Get last N ``agent_security_scan_completed`` events from the chain.
+
+    B260.1 fix: uses :meth:`AuditChain.tail` (deque-based streaming
+    reader, memory-bounded) and filters in-memory rather than reading
+    the entire 6 MB JSONL via ``Path.read_text`` on every call. The
+    pre-fix sync handler saturated FastAPI's threadpool under
+    concurrent SoulUX load (see reality_anchor router for the same
+    fix + the smoke-test that surfaced it)."""
+    if limit <= 0 or search_window <= 0:
         return []
-    out: list[dict[str, Any]] = []
     try:
-        text = chain_path.read_text(encoding="utf-8")
+        entries = chain.tail(search_window)  # newest-first
     except Exception:
         return []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            ev = json.loads(line)
-        except Exception:
-            continue
-        if ev.get("event_type") == "agent_security_scan_completed":
-            out.append(ev)
-    out.reverse()
-    return out[:limit]
+    out: list[dict[str, Any]] = []
+    for e in entries:
+        if getattr(e, "event_type", None) == "agent_security_scan_completed":
+            out.append({
+                "seq":        getattr(e, "seq", None),
+                "timestamp":  getattr(e, "timestamp", None),
+                "event_type": getattr(e, "event_type", None),
+                "event_data": getattr(e, "event_data", {}),
+                "agent_dna":  getattr(e, "agent_dna", None),
+                "entry_hash": getattr(e, "entry_hash", None),
+                "prev_hash":  getattr(e, "prev_hash", None),
+            })
+            if len(out) >= limit:
+                break
+    return out
 
 
 def _walk_quarantined(staged_roots: tuple[Path, ...]) -> list[dict[str, Any]]:
@@ -172,15 +180,18 @@ def _walk_quarantined(staged_roots: tuple[Path, ...]) -> list[dict[str, Any]]:
     "/status",
     dependencies=[Depends(require_api_token)],
 )
-def status_summary(
+async def status_summary(
     request: Request,
     audit = Depends(get_audit_chain),
 ) -> dict[str, Any]:
-    """Combined summary card for the pane's hero block."""
-    rules, errors, version = _load_iocs(DEFAULT_IOC_CATALOG)
+    """Combined summary card for the pane's hero block.
 
-    chain_path = Path(audit.path) if hasattr(audit, "path") else None
-    recent = _read_security_events(chain_path, limit=500) if chain_path else []
+    B260.1: ``async def`` + ``chain.tail()`` per audit.py pattern —
+    see ``_read_security_events`` for the threadpool-saturation
+    issue this fix addresses.
+    """
+    rules, errors, version = _load_iocs(DEFAULT_IOC_CATALOG)
+    recent = _read_security_events(audit, limit=500) if audit else []
     one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
 
     def _in_last_day(ev_iso: str | None) -> bool:
@@ -237,7 +248,7 @@ def status_summary(
     "/iocs",
     dependencies=[Depends(require_api_token)],
 )
-def list_iocs() -> dict[str, Any]:
+async def list_iocs() -> dict[str, Any]:
     """Return the loaded IoC catalog."""
     rules, errors, version = _load_iocs(DEFAULT_IOC_CATALOG)
     # Sort by severity rank (CRITICAL first) then by id so the
@@ -264,15 +275,17 @@ def list_iocs() -> dict[str, Any]:
     "/recent-scans",
     dependencies=[Depends(require_api_token)],
 )
-def recent_scans(
+async def recent_scans(
     limit: int = Query(100, ge=1, le=1000),
     audit = Depends(get_audit_chain),
 ) -> dict[str, Any]:
-    """Last N agent_security_scan_completed events, newest first."""
-    chain_path = Path(audit.path) if hasattr(audit, "path") else None
-    if chain_path is None:
+    """Last N agent_security_scan_completed events, newest first.
+
+    B260.1: ``async def`` + ``chain.tail()`` per audit.py pattern.
+    """
+    if audit is None:
         return {"events": [], "count": 0}
-    events = _read_security_events(chain_path, limit=limit)
+    events = _read_security_events(audit, limit=limit)
     return {"events": events, "count": len(events)}
 
 
@@ -280,7 +293,7 @@ def recent_scans(
     "/quarantined",
     dependencies=[Depends(require_api_token)],
 )
-def list_quarantined() -> dict[str, Any]:
+async def list_quarantined() -> dict[str, Any]:
     """List staged dirs with REJECTED.md present.
 
     Each entry includes the REJECTED.md excerpt so the operator
@@ -297,7 +310,7 @@ def list_quarantined() -> dict[str, Any]:
     "/reload",
     dependencies=[Depends(require_api_token)],
 )
-def reload_catalog() -> dict[str, Any]:
+async def reload_catalog() -> dict[str, Any]:
     """Hot-reload the IoC catalog.
 
     The security_scan.v1 tool reads the catalog fresh on every
