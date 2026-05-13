@@ -279,6 +279,15 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     #     ADR-0063 D1). Same event_data shape.
     "reality_anchor_refused",
     "reality_anchor_flagged",
+    # ADR-0063 T5 (Burst 254) — Reality Anchor pre-turn gate.
+    # Distinct event-type pair from T3's dispatcher-surface so
+    # auditors can answer "what turns were blocked?" separately
+    # from "what tool calls were blocked?" without parsing the
+    # event_data shape. event_data carries conversation_id +
+    # turn_id_intended (None when refused before the append) +
+    # speaker + body_excerpt + the fact citation.
+    "reality_anchor_turn_refused",
+    "reality_anchor_turn_flagged",
     # ADR-0061 T6 (Burst 248) — agent passport lifecycle. Two
     # distinct events so an auditor can separate successful
     # operator mints from quarantine-time refusals.

@@ -1,14 +1,20 @@
 # ADR-0063 — Reality Anchor (persistent ground-truth verification)
 
-- **Status:** Accepted 2026-05-12. **T1 + T2 + T3 + T4
+- **Status:** Accepted 2026-05-12. **T1 + T2 + T3 + T4 + T5
   shipped** across Bursts 251 (ground_truth.yaml +
   verify_claim.v1) + 252 (`RealityAnchorStep` in the
   governance pipeline + audit events + per-agent
   constitutional opt-out) + 253 (`reality_anchor` role in
   trait_tree / genres / tool_catalog / constitution_templates
-  + singleton-per-forest enforcement at /birth). T5
-  (conversation runtime pre-turn hook), T6 (correction
-  memory), T7 (SoulUX pane) queued.
+  + singleton-per-forest enforcement at /birth) + 254
+  (conversation runtime pre-turn hook —
+  `daemon/reality_anchor_turn.py::check_turn_against_anchor`
+  wired into the assistant-turn path in
+  `routers/conversations.py`; CRITICAL refuses + skips the
+  registry append; `reality_anchor_turn_refused` + 
+  `reality_anchor_turn_flagged` are distinct event types from
+  the T3 dispatcher-surface events). T6 (correction memory),
+  T7 (SoulUX pane) queued.
 - **Date:** 2026-05-12.
 - **Related:** ADR-0033 Security Swarm, ADR-0036 Verifier
   Loop (memory contradiction scanner), ADR-0049 K1 verified-
@@ -219,7 +225,7 @@ get one event per repeat instead of N events to correlate.
 | T2 | `verify_claim.v1` builtin | Pattern-match verifier (D5). Args: claim_text + optional fact_ids filter + agent_dna (for per-agent additions). Output: verdict, per-fact verdicts, citations, severity. side_effects=read_only. Tests cover each branch of the verdict matrix. | shipping B251 |
 | T3 | `RealityAnchorStep` in governance pipeline | **DONE B252** — new step inserted between `HardwareQuarantineStep` and `TaskUsageCapStep` in `dispatcher.py`. Args are flattened to a "claim" via `_flatten_args_to_claim` (one nesting level deep + lists of strings) and run through `_reality_anchor_verify` (a substrate-cost inline of `verify_claim.v1` semantics). CRITICAL contradictions REFUSE with reason `reality_anchor_contradiction`; HIGH/MEDIUM/LOW contradictions WARN via `reality_anchor_flagged` but proceed. Per-agent opt-out via `reality_anchor: {enabled: false}` in the constitution YAML. Catalog load errors + verifier exceptions degrade to GO so a broken Reality Anchor never blocks legitimate work. KNOWN_EVENT_TYPES updated with both new event types. Note on ADR-T3 deviation: original spec said "skip for `side_effects=read_only`"; final implementation runs on ALL tools (read-only emissions are still worth flagging in the chain) — the skip-read-only guidance applies instead to the future T5 conversation-runtime hook. 20+ unit tests cover every branch. | shipped |
 | T4 | `reality_anchor` role | **DONE B253** — role added to `config/trait_tree.yaml` (with full domain_weights) + `config/genres.yaml` (under guardian's roles list) + `config/tool_catalog.yaml` (kit: verify_claim.v1 + memory_recall.v1 + audit_chain_verify.v1 + llm_think.v1 + delegate.v1) + `config/constitution_templates.yaml` (4 policies: forbid_action_taking, forbid_ground_truth_mutation, require_citation, forbid_low_confidence_contradicted; risk_thresholds tighter than verifier_loop). Singleton-per-forest structurally enforced in `daemon/routers/writes/birth.py::_perform_create` — second active reality_anchor returns 409 with the existing agent's instance_id in the detail. Archive-then-rebirth path works. Plus diagnostic helpers (`diagnose-import.command` + `fix-cryptography-dep.command`) shipped after a cryptography-dep diagnosis incident at the start of this burst. | shipped |
-| T5 | Conversation runtime pre-turn hook | ADR-003Y `pre_turn_emit` callback wired so the reality anchor inspects a final assistant turn's content before it lands. Drift detection compares to recent operator turns. Hooks into the same audit event family as T3. | queued B254 |
+| T5 | Conversation runtime pre-turn hook | **DONE B254** — new helper `daemon/reality_anchor_turn.py::check_turn_against_anchor` consumed by the assistant-turn emit path in `routers/conversations.py`. Runs after `llm_think` produces `response_text` and BEFORE the `registry.conversations.append_turn` call. CRITICAL contradictions refuse: the turn is NOT appended, `any_failed=True` ends the chain, and `reality_anchor_turn_refused` lands in the audit chain. HIGH/MEDIUM/LOW emit `reality_anchor_turn_flagged` but let the turn through. Distinct event-type pair from T3's dispatcher-surface so auditors can separate turn-refused from tool-call-refused without parsing event_data. Same constitutional opt-out (`reality_anchor.enabled=false`) as T3. Failure paths degrade to allow — the anchor is NOT load-bearing for turn flow. 11 unit tests cover every verdict + opt-out + payload-shape branch. | shipped |
 | T6 | Correction memory + recurrence | New table + registry accessor + `reality_anchor_repeat_offender` event. Bumps `repetition_count` on claim_hash collision. Operator query: "show me repeat offenders by agent." | queued B255 |
 | T7 | SoulUX Reality Anchor pane | Ground-truth editor (read + add + edit, no delete without confirmation), recent flags timeline, correction-history table by agent. New tab in the SoulUX frontend. | queued B256 |
 

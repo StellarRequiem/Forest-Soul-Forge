@@ -33,6 +33,9 @@ from forest_soul_forge.daemon.deps import (
     require_api_token,
     require_writes_enabled,
 )
+from forest_soul_forge.daemon.reality_anchor_turn import (
+    check_turn_against_anchor,
+)
 from forest_soul_forge.daemon.schemas import (
     AMBIENT_QUOTA_BY_RATE,
     AmbientNudgeRequest,
@@ -611,6 +614,31 @@ async def append_turn(
             result_output = outcome.result.output or {}
             response_text = result_output.get("response", "") or ""
             if not response_text:
+                any_failed = True
+                break
+
+            # ADR-0063 T5 (Burst 254) — pre-turn Reality Anchor gate.
+            # Verifies the agent's planned response against the
+            # operator-asserted ground truth catalog BEFORE the turn
+            # lands. CRITICAL contradictions REFUSE the turn (skip
+            # append + emit reality_anchor_turn_refused); HIGH/
+            # MEDIUM/LOW WARN via reality_anchor_turn_flagged but
+            # let the turn through. Per-agent constitutional opt-out
+            # via reality_anchor.enabled=false. Failures degrade to
+            # allow — the anchor is NOT load-bearing for turn flow.
+            anchor_check = check_turn_against_anchor(
+                response_text=response_text,
+                constitution_path=constitution_path,
+                audit=audit,
+                conversation_id=conversation_id,
+                speaker_instance_id=agent.instance_id,
+                speaker_agent_dna=agent.dna,
+            )
+            if anchor_check.decision == "refuse":
+                # Skip the registry append entirely. Mark this
+                # responder as failed so the operator sees the
+                # turn didn't land + the structured refusal payload
+                # is available via the audit chain.
                 any_failed = True
                 break
 
