@@ -311,6 +311,39 @@ tools:
     side_effects: read_only
     archetype_tags: [security_low, guardian, observer]
 
+  security_scan.v1:
+    name: security_scan
+    version: "1"
+    description: |
+      ADR-0062 supply-chain IoC scanner. Reads
+      config/security_iocs.yaml (the version-controlled pattern
+      catalog drawn from Shai-Hulud / MCP-STDIO-RCE / LiteLLM /
+      Axios incident IOCs) and walks installed plugins, forged
+      tools, forged skills, and pyproject.toml for matches.
+      Returns structured findings tagged by severity + the
+      file:line + an evidence excerpt. Read-only; report-only
+      in v1 (install-time gate lands in B250+).
+    input_schema:
+      type: object
+      required: [scan_kind]
+      properties:
+        scan_kind:
+          type: string
+          enum: [plugins, forged_tools, forged_skills, pyproject, all]
+        scan_paths:
+          type: array
+          items:
+            type: string
+        catalog_path:
+          type: string
+        max_findings:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          default: 1000
+    side_effects: read_only
+    archetype_tags: [security_low, guardian, observer]
+
   file_integrity.v1:
     name: file_integrity
     version: "1"

@@ -44,6 +44,7 @@ from forest_soul_forge.tools.builtin.port_scan_local import PortScanLocalTool
 from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
 from forest_soul_forge.tools.builtin.pytest_run import PytestRunTool
 from forest_soul_forge.tools.builtin.ruff_lint import RuffLintTool
+from forest_soul_forge.tools.builtin.security_scan import SecurityScanTool
 from forest_soul_forge.tools.builtin.semgrep_scan import SemgrepScanTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
 from forest_soul_forge.tools.builtin.tamper_detect import TamperDetectTool
@@ -86,6 +87,7 @@ __all__ = [
     "GitBlameReadTool",
     "MypyTypecheckTool",
     "SemgrepScanTool",
+    "SecurityScanTool",
     "TreeSitterQueryTool",
     "BanditSecurityScanTool",
     "PipInstallIsolatedTool",
@@ -279,6 +281,14 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # secrets, taint-propagation issues. SW-track Reviewer (Guardian
     # genre L3) is the primary consumer.
     registry.register(SemgrepScanTool())
+    # ADR-0062 (Burst 249) — security_scan.v1 IoC scanner over
+    # installed plugins, forged tools/skills, and pyproject. Reads
+    # config/security_iocs.yaml — the version-controlled IoC pattern
+    # catalog drawn from the 2025-26 Shai-Hulud / MCP-STDIO-RCE /
+    # LiteLLM / Axios incident IOCs. Read-only; report-only in v1.
+    # Install-time gate (T4) lands in a follow-up burst once
+    # false-positive rate is characterized.
+    registry.register(SecurityScanTool())
     # Phase G.1.A — tree_sitter_query.v1 (Burst 60). Read-only AST-
     # level structural queries via tree-sitter S-expressions. Lazy-
     # imports tree_sitter + tree_sitter_languages so daemon boots

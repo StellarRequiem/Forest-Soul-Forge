@@ -1,0 +1,240 @@
+# ADR-0062 — Supply-Chain IoC Catalog v1
+#
+# In-repo IoC pattern catalog consumed by security_scan.v1.
+# Every rule is reviewable in `git log`. Edit + commit;
+# scanner picks up changes on next invocation (no daemon
+# restart needed).
+#
+# Schema per rule:
+#   id          — short snake_case identifier (used as the
+#                 finding's pattern_id; stable across edits).
+#   severity    — INFO | LOW | MEDIUM | HIGH | CRITICAL
+#   pattern     — Python re module pattern (MULTILINE
+#                 implicit; use ^ and $ accordingly). Case-
+#                 sensitive unless explicit (?i) inline.
+#   applies_to  — list of glob patterns the rule scopes to.
+#                 Empty list = all text files. Globs match
+#                 the SUFFIX of the path (so '*.py' catches
+#                 'data/forge/tools/installed/foo.py').
+#   rationale   — one-line operator-facing explanation.
+#   references  — list of URLs documenting the underlying
+#                 incident or CVE.
+#
+# Add new rules at the bottom and bump the version comment
+# header so operators can diff catalogs.
+
+catalog_version: 1
+catalog_updated: "2026-05-12"
+
+rules:
+  # ============================================================
+  # CRITICAL — these are direct matches to active 2025-26 attacks
+  # ============================================================
+
+  - id: mcp_stdio_command_injection
+    severity: CRITICAL
+    # Match MCP manifest `command:` or `script:` strings that
+    # contain shell metacharacters — the Anthropic MCP STDIO
+    # config-to-command RCE pattern.
+    # Looks for the YAML key + a value containing $(...), backticks, &&, |, ;, > /
+    pattern: '(?m)^\s*(?:command|script|args)\s*:\s*[''"]?[^''"\n]*(\$\(|`|&&|\|\||;\s*\w|>\s*/)'
+    applies_to:
+      - "*.yaml"
+      - "*.yml"
+      - "*.toml"
+      - "*.json"
+    rationale: "MCP STDIO config-to-command RCE — manifest can run arbitrary shell at install time"
+    references:
+      - "https://thehackernews.com/2026/04/anthropic-mcp-design-vulnerability.html"
+      - "https://www.ox.security/blog/the-mother-of-all-ai-supply-chains-critical-systemic-vulnerability-at-the-core-of-the-mcp/"
+
+  - id: home_dir_wipe_python
+    severity: CRITICAL
+    # Shai-Hulud 2.0 fallback: wipe ~ if exfil fails. Matches
+    # shutil.rmtree against Path.home(), pathlib.Path(...).home(),
+    # os.path.expanduser('~'), or literal '/'. Both forms with
+    # and without an intermediate Path(...) constructor.
+    pattern: 'shutil\.rmtree\s*\(\s*(?:(?:[A-Za-z_]\w*\s*\.\s*)?Path\s*(?:\(\s*[^)]*\))?\s*\.\s*home\s*\(\s*\)|os\.path\.expanduser\s*\(\s*[''"]\s*~[''"]?\s*\)|[''"]\s*/\s*[''"])'
+    applies_to:
+      - "*.py"
+    rationale: "Home-directory wipe primitive — Shai-Hulud 2.0 destructive fallback"
+    references:
+      - "https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/"
+
+  - id: home_dir_wipe_shell
+    severity: CRITICAL
+    pattern: 'rm\s+-rf?\s+(?:~|\$HOME|/(?:\s|$))'
+    applies_to:
+      - "*.sh"
+      - "*.command"
+      - "*.yaml"
+      - "*.yml"
+      - "*.json"
+      - "*.toml"
+    rationale: "Shell rm -rf against home or root — destructive worm fallback pattern"
+    references:
+      - "https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/"
+
+  - id: eval_atob_obfuscation
+    severity: CRITICAL
+    # The Shai-Hulud + axios payloads used this pattern to
+    # smuggle their stage-2 in. eval(atob(...)) /
+    # exec(base64.b64decode(...)) are nearly always malicious
+    # in benign code.
+    pattern: '(?:eval\s*\(\s*atob\s*\(|exec\s*\(\s*base64\s*\.\s*b64decode\s*\(|exec\s*\(\s*__import__\s*\(\s*[''"]\s*base64)'
+    applies_to:
+      - "*.py"
+      - "*.js"
+      - "*.ts"
+      - "*.mjs"
+    rationale: "eval(atob(...)) / exec(b64decode(...)) — stage-2 deobfuscation pattern used in Shai-Hulud + Axios payloads"
+    references:
+      - "https://unit42.paloaltonetworks.com/npm-supply-chain-attack/"
+
+  # ============================================================
+  # HIGH — credential harvest + exfil patterns
+  # ============================================================
+
+  - id: aws_credentials_read
+    severity: HIGH
+    pattern: '~/\.aws/credentials|os\.path\.expanduser\s*\(\s*[''"]\s*~/\.aws|HOME\s*\+?\s*[''"]/?\.aws'
+    applies_to:
+      - "*.py"
+      - "*.js"
+      - "*.ts"
+      - "*.sh"
+    rationale: "Reads ~/.aws/credentials — LiteLLM/Telnyx + Shai-Hulud harvest target"
+    references:
+      - "https://blog.pypi.org/posts/2026-04-02-incident-report-litellm-telnyx-supply-chain-attack/"
+
+  - id: ssh_keys_read
+    severity: HIGH
+    pattern: '~/\.ssh/(?:id_rsa|id_ed25519|id_ecdsa|known_hosts)|os\.path\.expanduser\s*\(\s*[''"]\s*~/\.ssh'
+    applies_to:
+      - "*.py"
+      - "*.js"
+      - "*.ts"
+      - "*.sh"
+    rationale: "Reads SSH private keys — supply-chain credential harvest"
+    references:
+      - "https://blog.pypi.org/posts/2026-04-02-incident-report-litellm-telnyx-supply-chain-attack/"
+
+  - id: github_token_pattern
+    severity: HIGH
+    # Match the live GitHub PAT shape (ghp_ + 36 alnum, etc.)
+    # When this appears HARD-CODED in a manifest or installed
+    # artifact, it's almost always exfilled or leaked.
+    pattern: '\b(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9]{36,}\b'
+    applies_to: []
+    rationale: "Hard-coded GitHub PAT — leaked credential or staging-area exfil token"
+    references:
+      - "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github"
+
+  - id: aws_access_key_pattern
+    severity: HIGH
+    pattern: '\b(?:AKIA|ASIA)[A-Z0-9]{16}\b'
+    applies_to: []
+    rationale: "Hard-coded AWS access key (AKIA/ASIA prefix) — staged exfil credential"
+    references: []
+
+  - id: slack_token_pattern
+    severity: HIGH
+    pattern: '\bxox[abpors]-[A-Za-z0-9-]{10,}\b'
+    applies_to: []
+    rationale: "Hard-coded Slack token — staged exfil credential"
+    references: []
+
+  - id: env_var_enumerate_then_post
+    severity: HIGH
+    # Python: dict(os.environ) co-occurs with a network post
+    # within ~200 chars on the same logical line (no DOTALL —
+    # we don't want to false-positive across unrelated code
+    # separated by many lines). Matches EITHER order so the
+    # `requests.post(json=dict(os.environ))` shape is caught
+    # alongside the `envs = dict(os.environ); post(envs)` shape.
+    pattern: '(?:(?:dict\s*\(\s*os\.environ\s*\)|os\.environ\.copy\s*\(\s*\)).{0,200}(?:requests\.(?:post|put)|urllib\.request\.urlopen|httpx\.post)|(?:requests\.(?:post|put)|urllib\.request\.urlopen|httpx\.post).{0,200}(?:dict\s*\(\s*os\.environ\s*\)|os\.environ\.copy\s*\(\s*\)))'
+    applies_to:
+      - "*.py"
+    rationale: "Enumerates all env vars then ships them to a remote host — supply-chain exfil pattern"
+    references:
+      - "https://blog.pypi.org/posts/2026-04-02-incident-report-litellm-telnyx-supply-chain-attack/"
+
+  - id: network_beacon_short_lived_domain
+    severity: HIGH
+    # Worker.dev / ngrok / trycloudflare / vercel previews —
+    # the classic command-and-control hosts that don't need a
+    # real cert / domain registration. Most attacks 2025-26
+    # used these.
+    pattern: 'https?://[^\s''"]+\.(?:workers\.dev|ngrok\.io|ngrok-free\.app|trycloudflare\.com|loca\.lt|repl\.co|serveo\.net)\b'
+    applies_to: []
+    rationale: "Network beacon to short-lived / disposable domain — common C2 pattern"
+    references:
+      - "https://www.aikido.dev/blog/mini-shai-hulud-is-back-tanstack-compromised"
+
+  # ============================================================
+  # MEDIUM — risky patterns that could be benign
+  # ============================================================
+
+  - id: subprocess_shell_true_with_variable
+    severity: MEDIUM
+    # shell=True with an f-string or % formatting is the
+    # canonical command-injection vector. Plain shell=True
+    # with a literal string is sketchy but not always
+    # exploitable.
+    pattern: 'subprocess\.(?:run|call|Popen|check_output|check_call)\s*\([^)]*(?:f[''"]|%\s*\(|\.format\s*\(|\+\s*\w)[^)]*shell\s*=\s*True'
+    applies_to:
+      - "*.py"
+    rationale: "subprocess shell=True with interpolated input — command-injection vector"
+    references:
+      - "https://docs.python.org/3/library/subprocess.html#security-considerations"
+
+  - id: dangerous_pickle_load
+    severity: MEDIUM
+    pattern: 'pickle\.loads?\s*\('
+    applies_to:
+      - "*.py"
+    rationale: "pickle.load/loads — arbitrary code execution on untrusted input"
+    references:
+      - "https://docs.python.org/3/library/pickle.html#module-pickle"
+
+  - id: insecure_yaml_load
+    severity: MEDIUM
+    pattern: 'yaml\.load\s*\((?![^)]*Loader\s*=\s*yaml\.SafeLoader)'
+    applies_to:
+      - "*.py"
+    rationale: "yaml.load without SafeLoader — arbitrary tag execution on untrusted YAML"
+    references:
+      - "https://pyyaml.org/wiki/PyYAMLDocumentation"
+
+  # ============================================================
+  # LOW — leak surface, not exploitation
+  # ============================================================
+
+  - id: plain_http_url
+    severity: LOW
+    pattern: '(?<![\w/])http://(?!(?:127\.0\.0\.1|localhost|0\.0\.0\.0))[a-zA-Z0-9.-]+'
+    applies_to:
+      - "*.py"
+      - "*.js"
+      - "*.ts"
+      - "*.yaml"
+      - "*.yml"
+    rationale: "Plain HTTP URL (non-localhost) — sniffable in transit, MITM-modifiable"
+    references: []
+
+  # ============================================================
+  # INFO — hygiene, surfaces Shai-Hulud-style risk amplifiers
+  # ============================================================
+
+  - id: unpinned_dependency_pyproject
+    severity: INFO
+    # Match `package = "*"` or `package = ">=X"` in pyproject
+    # — anything that isn't a concrete `==X.Y.Z`.
+    pattern: '(?m)^\s*[a-zA-Z0-9_-]+\s*=\s*[''"]?(?:\*|\^|~|>=|>)\s*[\d.]'
+    applies_to:
+      - "pyproject.toml"
+      - "Pipfile"
+      - "requirements*.txt"
+    rationale: "Unpinned dependency — vulnerable to upstream compromise replaying as a 'fix'"
+    references:
+      - "https://unit42.paloaltonetworks.com/monitoring-npm-supply-chain-attacks/"
