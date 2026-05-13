@@ -270,6 +270,14 @@ def _build_parser() -> argparse.ArgumentParser:
     from forest_soul_forge.cli.secret_cmd import add_subparser as _secret_add_subparser
     _secret_add_subparser(sub)
 
+    # `fsf passport ...` — ADR-0061 T7 mint / inspect agent
+    # passports (operator-facing surface to the cross-machine
+    # roaming substrate).
+    from forest_soul_forge.cli.passport_cmd import (
+        add_subparser as _passport_add_subparser,
+    )
+    _passport_add_subparser(sub)
+
     return parser
 
 

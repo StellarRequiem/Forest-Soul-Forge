@@ -378,13 +378,41 @@ class HardwareQuarantineStep:
         except Exception:
             # Audit-emit failure shouldn't mask the actual refusal.
             pass
+        # ADR-0061 T6 (B248): when the quarantine descriptor carries
+        # passport_reason, the operator TRIED to roam this agent here
+        # but the passport didn't validate. Emit a distinct
+        # agent_passport_refused event so chronicle queries can
+        # separate "operator never minted a passport" from "operator
+        # minted one but it failed at validation" — the first is
+        # expected, the second is actionable.
+        passport_reason = reason.get("passport_reason")
+        if passport_reason:
+            try:
+                self.audit.append(
+                    "agent_passport_refused",
+                    {
+                        "instance_id":   dctx.instance_id,
+                        "tool_key":      dctx.key,
+                        "session_id":    dctx.session_id,
+                        "passport_path": reason.get("passport_path"),
+                        "reason":        passport_reason,
+                    },
+                    agent_dna=dctx.agent_dna,
+                )
+            except Exception:
+                pass
         return StepResult.refuse(
             "hardware_quarantined",
             (
                 f"agent {dctx.instance_id} is hardware-bound to "
                 f"{reason['binding'][:8]}… but this machine is "
                 f"{reason['expected'][:8]}…. "
-                "Operator must POST /agents/{id}/hardware/unbind to release."
+                + (
+                    f"Passport check: {passport_reason}. "
+                    if passport_reason else ""
+                )
+                + "Operator must POST /agents/{id}/hardware/unbind to release "
+                "or POST /agents/{id}/passport to authorize roaming."
             ),
         )
 

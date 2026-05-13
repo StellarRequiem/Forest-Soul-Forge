@@ -256,6 +256,33 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # caps; this event fires when the operator (or the agent itself
     # during a mode transition) sets the active cap.
     "task_caps_set",
+    # ADR-0062 T4 (Burst 250) — install-time scanner gate. Emitted
+    # by daemon/install_scanner.py for every install attempt on
+    # /marketplace/install, /skills/install, /tools/install. One
+    # event per attempt, decision ∈ {allow, refuse}. event_data
+    # carries counts per severity + scan_fingerprint so an
+    # operator can answer "what did we refuse this week?" and
+    # "what's the false-positive rate look like in production?"
+    # without re-running the scan.
+    "agent_security_scan_completed",
+    # ADR-0061 T6 (Burst 248) — agent passport lifecycle. Two
+    # distinct events so an auditor can separate successful
+    # operator mints from quarantine-time refusals.
+    #
+    #   - agent_passport_minted: operator successfully minted a
+    #     passport authorizing the agent to run on N fingerprints.
+    #     event_data: instance_id, issuer_public_key, expires_at,
+    #     authorized_fingerprints (count, not list — list lives in
+    #     passport.json), operator_id, reason. Pairs with the new
+    #     passport.json sitting next to constitution.yaml.
+    #
+    #   - agent_passport_refused: K6 quarantine consulted the
+    #     passport but rejected it (signature/issuer/expiry/
+    #     fingerprint failed). event_data carries the specific
+    #     reason string so the operator can fix without digging
+    #     through dispatcher logs.
+    "agent_passport_minted",
+    "agent_passport_refused",
 })
 
 

@@ -1,12 +1,14 @@
 # ADR-0061 — Agent Passport for Cross-Machine Roaming
 
-- **Status:** Accepted 2026-05-12. **T1 + T2 + T3 + T4 + T5
-  shipped** across Bursts 246 + 247 — passport substrate is
-  operator-usable end-to-end via the K6 quarantine integration.
-  Programmatic mint + verify, trust-list loader,
-  `passport.json`-overrides-K6 wired into the dispatcher's
-  hardware-quarantine reason. T6 (HTTP mint endpoint) + T7
-  (CLI subcommand) queued.
+- **Status:** **Closed 2026-05-12.** All seven tranches shipped
+  across Bursts 246 (T1-T3+T5-partial) + 247 (T4 + K6 integration)
+  + 248 (T6 HTTP endpoint + T7 CLI subcommand + audit events).
+  Passport substrate is operator-usable end-to-end: programmatic
+  mint + verify, trust-list loader, `passport.json`-overrides-K6
+  in the dispatcher, daemon `POST /agents/{id}/passport` endpoint,
+  `fsf passport {mint,show,fingerprint}` CLI. Audit events
+  `agent_passport_minted` + `agent_passport_refused` ship in
+  KNOWN_EVENT_TYPES.
 - **Date:** 2026-05-12 (drafted, accepted same day during the
   ADR-0046 license-pivot conversation).
 - **Related:** ADR-0001 (DNA + content-addressed identity),
@@ -224,10 +226,12 @@ burst.
 | T3 | Passport verify primitive | `security/passport.py::verify_passport(passport_dict, trusted_pubkeys, current_hw_fp) -> tuple[bool, str]`. Returns (valid, reason). Refuses on: malformed, wrong signature, untrusted issuer, expired, current host not in authorized. | 0.5 burst (shipping B246) |
 | T4 | Trust config + quarantine integration | **DONE B247** — `security/trust_list.py::load_trusted_operator_pubkeys()` loads from `FSF_TRUSTED_OPERATOR_KEYS` env var (default `data/trusted_operators.txt`); always includes the local operator master via `resolve_operator_keypair`. Comments + dedupe + missing-file-is-fine semantics. `_hardware_quarantine_reason` in dispatcher.py extended: on binding mismatch, looks for `passport.json` next to constitution; valid passport → bypass quarantine; invalid passport → quarantine descriptor carries `passport_reason` so operator can fix. 11 new tests cover the integration (5 quarantine scenarios + 4 trust-list loader cases). | shipped |
 | T5 | Tests + runbook | **DONE B246+B247** — 19 passport tests + 7 operator-key tests in B246; 11 passport-quarantine + trust-list tests in B247. `docs/runbooks/agent-passport.md` covers operator workflow, recovery scenarios, trust establishment, and the failure-mode → action mapping. | shipped |
-| T6 | Daemon HTTP endpoint | `POST /agents/{id}/passport` — operator mints a passport for the named agent. Output: passport.json. Authenticated with X-FSF-Token. | 0.5 burst (queued) |
-| T7 | CLI subcommand | `fsf passport mint <agent_id> --authorize-fingerprint <fp>` for command-line operators. | 0.5 burst (queued) |
+| T6 | Daemon HTTP endpoint | **DONE B248** — `POST /agents/{id}/passport` in `routers/passport.py`. Body: `authorized_fingerprints` (required, min 1) + optional `expires_at` + `operator_id` + `reason`. Resolves operator master via `resolve_operator_keypair`, agent public_key from registry, mints via `security/passport.py`, persists `passport.json` next to constitution under the write lock, emits `agent_passport_minted` audit event. Gated by `require_writes_enabled` + `require_api_token`. 404 on unknown agent, 409 if agent lacks public_key (pre-ADR-0049 legacy), 422 on empty fingerprint list. | shipped |
+| T7 | CLI subcommand | **DONE B248** — `fsf passport` registered in `cli/main.py` via `cli/passport_cmd.py`. Three subcommands: `mint <instance_id> -f <fp> [-f <fp> ...]` posts to the HTTP endpoint; `show <instance_id> [--souls-dir DIR]` reads passport.json directly off disk + pretty-prints; `fingerprint` prints the local machine's hardware fingerprint (script-friendly: fp on stdout, source on stderr). Uses urllib + X-FSF-Token header matching the daemon's require_api_token contract. | shipped |
 
-Total estimate: 3.5 bursts. T1-T3+T5(partial) in B246; T4 + T6 + T7 + T5-rest in follow-up bursts.
+Audit events added to `core/audit_chain.py::KNOWN_EVENT_TYPES`: `agent_passport_minted` (emitted by the router on success — carries instance_id, issuer_public_key, authorized_fingerprint_count, issued_at, expires_at, operator_id, reason, passport_path) and `agent_passport_refused` (emitted by `HardwareQuarantineStep` in `tools/governance_pipeline.py` when the K6 quarantine descriptor surfaces a `passport_reason` — operator tried to roam but the passport didn't validate). The quarantine refusal message also updates to mention both `/hardware/unbind` AND `/passport` as remediation paths.
+
+Total estimate: 3.5 bursts. **Shipped in 3.0 bursts** — T1-T3+T5(partial) in B246; T4 + K6 integration in B247; T6 + T7 + final T5 + audit events in B248.
 
 ## Consequences
 

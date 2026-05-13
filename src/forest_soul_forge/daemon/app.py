@@ -50,6 +50,7 @@ from forest_soul_forge.daemon.routers import tools as tools_router
 from forest_soul_forge.daemon.routers import conversations as conversations_router
 from forest_soul_forge.daemon.routers import conversations_admin as conversations_admin_router
 from forest_soul_forge.daemon.routers import hardware as hardware_router
+from forest_soul_forge.daemon.routers import passport as passport_router
 from forest_soul_forge.daemon.routers import tools_reload as tools_reload_router
 from forest_soul_forge.daemon.routers import traits as traits_router
 from forest_soul_forge.daemon.routers import triune as triune_router
@@ -894,6 +895,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(writes_router.router)
     app.include_router(triune_router.router)
     app.include_router(hardware_router.router)
+    app.include_router(passport_router.router)  # ADR-0061 T6 (B248)
     app.include_router(conversations_router.router)
     app.include_router(conversations_admin_router.router)
     app.include_router(scheduler_router.router)

@@ -227,3 +227,57 @@ class TriuneBondResponse(BaseModel):
     restrict_delegations: bool
     ceremony_seq: int
     ceremony_timestamp: str
+
+# ADR-0061 T6 (Burst 248) — operator-facing passport mint endpoint.
+# Distinct from the existing hardware/unbind because the passport
+# is the EXPLICIT-roaming escape hatch (issue a cert authorizing
+# the agent on another machine) rather than the broad-strokes
+# release (clear the binding entirely). Operators choose between
+# the two based on whether they want to KEEP the binding-as-
+# protection (passport) or drop it (unbind).
+class PassportMintRequest(BaseModel):
+    authorized_fingerprints: list[str] = Field(
+        ..., min_length=1,
+        description=(
+            "Hardware fingerprints (16-char hex strings) the passport "
+            "authorizes the agent to run on. Must include at least the "
+            "birth-machine fingerprint AND any additional roaming targets."
+        ),
+    )
+    expires_at: str | None = Field(
+        default=None,
+        description=(
+            "Optional RFC 3339 / ISO-8601 UTC expiration timestamp "
+            "(e.g. '2026-08-12T00:00:00Z'). When set, verifier rejects "
+            "the passport after this moment. When null, the passport "
+            "is open-ended (operator can still revoke via re-mint with "
+            "a past expires_at or via deleting passport.json)."
+        ),
+    )
+    operator_id: str | None = Field(
+        default=None, max_length=120,
+        description=(
+            "Operator identifier recorded in the audit event. "
+            "Free-text label; not used cryptographically. Helps "
+            "operators answer 'which of my admins minted this?' "
+            "when running multi-operator deployments."
+        ),
+    )
+    reason: str | None = Field(
+        default=None, max_length=500,
+        description=(
+            "Free-text reason ('moving to laptop for trip'). "
+            "Surfaced in chronicle exports + the audit event. "
+            "Optional but encouraged."
+        ),
+    )
+
+class PassportMintResponse(BaseModel):
+    instance_id: str
+    issuer_public_key: str
+    authorized_fingerprints: list[str]
+    issued_at: str
+    expires_at: str | None
+    passport_path: str
+    seq: int
+    timestamp: str

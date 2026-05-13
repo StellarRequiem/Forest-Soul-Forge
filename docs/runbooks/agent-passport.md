@@ -56,11 +56,47 @@ fingerprints + the issued/expires timestamps.
      → load.
    - Binding mismatch + no/invalid passport → quarantine.
 
-## Operator workflow today (B247)
+## Operator workflow (B248 onward)
 
-The substrate is in place; the operator-facing CLI + HTTP
-endpoints are queued for B248+. For now, mint passports
-programmatically:
+### Option A: CLI (recommended)
+
+```bash
+# 1. On the receiving machine: get its hardware fingerprint
+fsf passport fingerprint
+# → 1a2b3c4d5e6f7890
+
+# 2. On the issuing machine: mint a passport authorizing both
+fsf passport mint operator_companion_abc123abc123 \
+  -f <birth-fp> \
+  -f 1a2b3c4d5e6f7890 \
+  --expires-at 2026-08-12T00:00:00Z \
+  --operator-id alex --reason "trip to laptop"
+
+# 3. Inspect the result
+fsf passport show operator_companion_abc123abc123
+```
+
+`fsf passport mint` posts to `POST /agents/{id}/passport` —
+authenticates via `$FSF_API_TOKEN` (falls back to no token if
+unset). The daemon mints, writes `passport.json` next to the
+agent's constitution, and emits an `agent_passport_minted` audit
+event.
+
+### Option B: HTTP directly
+
+```bash
+curl -X POST http://127.0.0.1:7423/agents/<instance_id>/passport \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "authorized_fingerprints": ["<birth-fp>", "<laptop-fp>"],
+    "expires_at": "2026-08-12T00:00:00Z",
+    "operator_id": "alex",
+    "reason": "trip to laptop"
+  }'
+```
+
+### Option C: Programmatic (for scripted / scheduled mints)
 
 ```python
 from forest_soul_forge.security.operator_key import resolve_operator_keypair
@@ -86,9 +122,10 @@ agent_dir = Path("data/souls/operator_companion_abc123abc123/")
 (agent_dir / "passport.json").write_text(json.dumps(passport, indent=2))
 ```
 
-Then copy the entire agent directory (soul.md, constitution.yaml,
-passport.json) to the target machine + place it under that
-machine's `data/souls/` so the daemon picks it up.
+After minting via any of the three paths, copy the entire agent
+directory (soul.md, constitution.yaml, passport.json) to the
+target machine + place it under that machine's `data/souls/` so
+the daemon picks it up.
 
 Receiving machine prerequisites:
 - Its `data/trusted_operators.txt` must contain the issuing
