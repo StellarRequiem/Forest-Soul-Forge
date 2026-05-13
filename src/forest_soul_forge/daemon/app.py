@@ -127,9 +127,45 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # ADR-0050 T2 (B267): at-rest encryption gate. When
+        # FSF_AT_REST_ENCRYPTION=true the registry bootstrap uses
+        # SQLCipher with the resolved master key. Default off
+        # preserves pre-T2 behavior (plaintext SQLite). Master-key
+        # resolution failure here is fatal under encryption-on (the
+        # daemon would otherwise fall back to plaintext and silently
+        # downgrade the operator's posture); the daemon refuses to
+        # boot and the operator decides whether to fix the keystore
+        # or turn off the env var.
+        import os as _os_lifespan
+        _at_rest_on = (
+            _os_lifespan.environ.get("FSF_AT_REST_ENCRYPTION", "false")
+            .strip().lower() == "true"
+        )
+        _registry_master_key: bytes | None = None
+        if _at_rest_on:
+            try:
+                from forest_soul_forge.security.master_key import (
+                    resolve_master_key as _resolve_master_key_early,
+                )
+                _registry_master_key = _resolve_master_key_early()
+            except Exception as e:  # noqa: BLE001
+                raise RuntimeError(
+                    f"FSF_AT_REST_ENCRYPTION=true but master key could "
+                    f"not be resolved ({type(e).__name__}: {e}). "
+                    "Either fix the keystore or unset the env var to "
+                    "fall back to plaintext SQLite. See "
+                    "docs/runbooks/encryption-at-rest.md (T7)."
+                ) from e
+
         # Bootstrap the registry. If the file doesn't exist, it's created;
         # if it does, schema version is verified (mismatch -> raises).
-        registry = Registry.bootstrap(settings.registry_db_path)
+        # With master_key set (encryption on), every per-thread
+        # connection opens via sqlcipher3 + PRAGMA key. Without, stdlib
+        # sqlite3 + plaintext file — bit-identical pre-T2 behavior.
+        registry = Registry.bootstrap(
+            settings.registry_db_path,
+            master_key=_registry_master_key,
+        )
         providers = _build_provider_registry(settings)
 
         # Write-path objects — loaded here so each request reuses them.
