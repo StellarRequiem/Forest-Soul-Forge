@@ -633,6 +633,13 @@ async def append_turn(
                 conversation_id=conversation_id,
                 speaker_instance_id=agent.instance_id,
                 speaker_agent_dna=agent.dna,
+                # ADR-0063 T6 (B255) — pass the corrections table so
+                # the hook can bump repeat-claim counters + emit
+                # reality_anchor_repeat_offender when the same
+                # hallucinated turn body recurs.
+                corrections_table=getattr(
+                    registry, "reality_anchor_corrections", None,
+                ),
             )
             if anchor_check.decision == "refuse":
                 # Skip the registry append entirely. Mark this

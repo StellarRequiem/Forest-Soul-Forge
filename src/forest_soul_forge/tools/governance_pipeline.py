@@ -393,6 +393,14 @@ class RealityAnchorStep:
     audit: AuditChain
     verify_claim_fn: Any  # Callable[[str, dict | None], dict]  # (claim, agent_constitution) → verdict dict
     load_constitution_opt_out_fn: Any  # Callable[[Path], bool]  # True iff reality_anchor.enabled is False
+    # ADR-0063 T6 (Burst 255): correction-memory bumper. Optional
+    # injection. None = no recurrence detection (legacy contexts /
+    # tests that don't wire the registry). When set, the step
+    # calls this on every contradicted finding and emits
+    # reality_anchor_repeat_offender when the return value > 1.
+    # Signature: (claim, fact_id, severity, agent_dna,
+    # instance_id, decision, surface) → repetition_count.
+    corrections_bump_fn: Any = None
 
     def evaluate(self, dctx: DispatchContext) -> StepResult:
         # 1. Constitutional opt-out check. False → step is a no-op
@@ -474,6 +482,8 @@ class RealityAnchorStep:
             "contradicting_fact_count": len(contradicting),
         }
 
+        decision = "refused" if worst_severity == "CRITICAL" else "warned"
+
         if worst_severity == "CRITICAL":
             try:
                 self.audit.append(
@@ -482,6 +492,9 @@ class RealityAnchorStep:
                 )
             except Exception:
                 pass
+            self._maybe_emit_repeat_offender(
+                claim, worst, decision, dctx, surface="dispatcher",
+            )
             return StepResult.refuse(
                 "reality_anchor_contradiction",
                 (
@@ -500,7 +513,57 @@ class RealityAnchorStep:
             )
         except Exception:
             pass
+        self._maybe_emit_repeat_offender(
+            claim, worst, decision, dctx, surface="dispatcher",
+        )
         return StepResult.go()
+
+    def _maybe_emit_repeat_offender(
+        self, claim: str, worst: dict, decision: str,
+        dctx: DispatchContext, *, surface: str,
+    ) -> None:
+        """ADR-0063 T6 — bump correction memory + fire repeat-offender
+        event when the same hallucinated claim recurs.
+
+        No-op when ``corrections_bump_fn`` isn't wired (test
+        contexts / legacy callers). Any failure in the bumper
+        degrades silently to "no recurrence detection for this
+        call" — the gate's primary refuse/flag decision is the
+        load-bearing safety output.
+        """
+        if self.corrections_bump_fn is None:
+            return
+        try:
+            count = self.corrections_bump_fn(
+                claim=claim,
+                fact_id=worst.get("fact_id") or "unknown",
+                severity=worst.get("severity") or "INFO",
+                agent_dna=dctx.agent_dna,
+                instance_id=dctx.instance_id,
+                decision=decision,
+                surface=surface,
+            )
+        except Exception:
+            return
+        if not isinstance(count, int) or count <= 1:
+            return
+        try:
+            self.audit.append(
+                "reality_anchor_repeat_offender",
+                {
+                    "instance_id":      dctx.instance_id,
+                    "tool_key":         dctx.key,
+                    "session_id":       dctx.session_id,
+                    "fact_id":          worst.get("fact_id"),
+                    "repetition_count": count,
+                    "decision":         decision,
+                    "surface":          surface,
+                    "claim":            claim[:500],
+                },
+                agent_dna=dctx.agent_dna,
+            )
+        except Exception:
+            pass
 
 
 def _flatten_args_to_claim(args: dict[str, Any], depth: int = 0) -> str:

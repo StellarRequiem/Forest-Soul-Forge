@@ -288,6 +288,14 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # speaker + body_excerpt + the fact citation.
     "reality_anchor_turn_refused",
     "reality_anchor_turn_flagged",
+    # ADR-0063 T6 (Burst 255) — repeat-offender detection. Emitted
+    # by the dispatcher gate (T3) + conversation hook (T5) when
+    # the same hallucinated claim (sha256 of normalized text)
+    # reappears for the same agent. event_data: claim_hash,
+    # canonical_claim, fact_id, repetition_count, surface.
+    # Fires ONCE per dispatch — not in addition to the per-event
+    # refused/flagged but ALONGSIDE it.
+    "reality_anchor_repeat_offender",
     # ADR-0061 T6 (Burst 248) — agent passport lifecycle. Two
     # distinct events so an auditor can separate successful
     # operator mints from quarantine-time refusals.

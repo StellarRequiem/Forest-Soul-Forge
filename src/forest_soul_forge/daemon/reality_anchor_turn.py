@@ -78,6 +78,7 @@ def check_turn_against_anchor(
     conversation_id: str,
     speaker_instance_id: str,
     speaker_agent_dna: str,
+    corrections_table: Any = None,  # ADR-0063 T6 — RealityAnchorCorrectionsTable
 ) -> TurnAnchorResult:
     """Verify a planned assistant turn against operator ground truth.
 
@@ -173,6 +174,8 @@ def check_turn_against_anchor(
         "contradicting_fact_count": len(contradictions),
     }
 
+    decision_label = "refused" if worst_severity == "CRITICAL" else "warned"
+
     if worst_severity == "CRITICAL":
         try:
             audit.append(
@@ -182,6 +185,13 @@ def check_turn_against_anchor(
             )
         except Exception:
             pass
+        _maybe_emit_turn_repeat_offender(
+            audit=audit, corrections_table=corrections_table,
+            claim=claim, worst=worst, decision=decision_label,
+            conversation_id=conversation_id,
+            speaker_instance_id=speaker_instance_id,
+            speaker_agent_dna=speaker_agent_dna,
+        )
         return TurnAnchorResult(
             decision="refuse",
             payload={
@@ -205,6 +215,13 @@ def check_turn_against_anchor(
         )
     except Exception:
         pass
+    _maybe_emit_turn_repeat_offender(
+        audit=audit, corrections_table=corrections_table,
+        claim=claim, worst=worst, decision=decision_label,
+        conversation_id=conversation_id,
+        speaker_instance_id=speaker_instance_id,
+        speaker_agent_dna=speaker_agent_dna,
+    )
     return TurnAnchorResult(
         decision="allow",
         payload={
@@ -215,3 +232,61 @@ def check_turn_against_anchor(
         },
         audit_emitted="reality_anchor_turn_flagged",
     )
+
+
+def _maybe_emit_turn_repeat_offender(
+    *,
+    audit: AuditChain,
+    corrections_table: Any,
+    claim: str,
+    worst: dict,
+    decision: str,
+    conversation_id: str,
+    speaker_instance_id: str,
+    speaker_agent_dna: str,
+) -> None:
+    """ADR-0063 T6 conversation-surface hook. Mirrors the
+    dispatcher-surface helper in RealityAnchorStep but emits
+    surface='conversation' so an operator can separate the two
+    surfaces in chain queries.
+
+    No-op when ``corrections_table`` isn't wired (router not
+    yet hooked up in test contexts). Any bumper failure
+    degrades silently — the gate's primary refuse/flag
+    decision is the load-bearing output.
+    """
+    if corrections_table is None:
+        return
+    try:
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        count = corrections_table.bump_or_create(
+            claim=claim,
+            fact_id=worst.get("fact_id") or "unknown",
+            worst_severity=worst.get("severity") or "INFO",
+            now_iso=now_iso,
+            agent_dna=speaker_agent_dna,
+            instance_id=speaker_instance_id,
+            decision=decision,
+            surface="conversation",
+        )
+    except Exception:
+        return
+    if not isinstance(count, int) or count <= 1:
+        return
+    try:
+        audit.append(
+            "reality_anchor_repeat_offender",
+            {
+                "instance_id":      speaker_instance_id,
+                "conversation_id":  conversation_id,
+                "fact_id":          worst.get("fact_id"),
+                "repetition_count": count,
+                "decision":         decision,
+                "surface":          "conversation",
+                "claim":            claim[:500],
+            },
+            agent_dna=speaker_agent_dna,
+        )
+    except Exception:
+        pass

@@ -65,6 +65,9 @@ from forest_soul_forge.registry.tables.plugin_grants import (
 from forest_soul_forge.registry.tables.catalog_grants import (
     CatalogGrantsTable,
 )
+from forest_soul_forge.registry.tables.reality_anchor_corrections import (
+    RealityAnchorCorrectionsTable,
+)
 from forest_soul_forge.registry.tables._helpers import transaction as _transaction
 
 REGISTRY_SCHEMA_VERSION: int = schema.SCHEMA_VERSION
@@ -250,6 +253,12 @@ class Registry:
         # tool list without mutating constitution_hash. The dispatcher
         # (T2, queued) consults this on constitution-check miss.
         self.catalog_grants = CatalogGrantsTable(conn)
+        # ADR-0063 T6 (Burst 255): Reality Anchor correction memory.
+        # One row per unique hallucinated claim ever caught. The
+        # dispatcher gate (T3) + conversation hook (T5) both bump
+        # this on contradicted findings and emit
+        # reality_anchor_repeat_offender once a claim crosses 2.
+        self.reality_anchor_corrections = RealityAnchorCorrectionsTable(conn)
 
     # ============ construction / teardown ===================================
     @classmethod

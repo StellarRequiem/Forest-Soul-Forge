@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 19
+SCHEMA_VERSION: int = 20
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -624,6 +624,39 @@ DDL_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_catalog_grants_active "
         "ON agent_catalog_grants(instance_id) "
         "WHERE revoked_at_seq IS NULL;",
+    # ADR-0063 T6 (Burst 255): reality_anchor_corrections.
+    # One row per unique hallucination ever caught by either the
+    # T3 dispatcher gate or the T5 conversation hook. Keyed on
+    # the sha256 of the normalized claim. ``repetition_count``
+    # bumps on every repeat hit so an operator can answer
+    # "which agents keep making the same wrong claim?" without
+    # walking the audit chain manually.
+    #
+    # ``last_decision`` is the dispatcher's verdict on the most
+    # recent occurrence: "refused" (CRITICAL) or "warned"
+    # (HIGH/MEDIUM/LOW). Surface ∈ {dispatcher, conversation}
+    # tells the operator which integration point caught it.
+    """
+    CREATE TABLE IF NOT EXISTS reality_anchor_corrections (
+        claim_hash          TEXT PRIMARY KEY,
+        canonical_claim     TEXT NOT NULL,
+        contradicts_fact_id TEXT NOT NULL,
+        worst_severity      TEXT NOT NULL,
+        first_seen_at       TEXT NOT NULL,
+        last_seen_at        TEXT NOT NULL,
+        repetition_count    INTEGER NOT NULL DEFAULT 1,
+        last_agent_dna      TEXT,
+        last_instance_id    TEXT,
+        last_decision       TEXT NOT NULL,
+        last_surface        TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_reality_anchor_corrections_fact "
+        "ON reality_anchor_corrections(contradicts_fact_id);",
+    "CREATE INDEX IF NOT EXISTS idx_reality_anchor_corrections_agent "
+        "ON reality_anchor_corrections(last_agent_dna);",
+    "CREATE INDEX IF NOT EXISTS idx_reality_anchor_corrections_count "
+        "ON reality_anchor_corrections(repetition_count DESC);",
 )
 
 # Metadata rows written on bootstrap. ``canonical_contract`` is a tripwire —
@@ -675,6 +708,13 @@ REBUILD_TRUNCATE_ORDER: tuple[str, ...] = (
     "conversation_turns",
     "conversation_participants",
     "conversations",
+    # ADR-0063 T6 (B255): correction memory. Standalone — no FKs
+    # to other tables, so order vs. siblings doesn't matter. Cleared
+    # on rebuild because corrections are runtime governance state,
+    # not artifact state. Operator's ground_truth.yaml is the
+    # canonical truth source; the corrections table is a derived
+    # view that rebuilds naturally from the chain on resumed traffic.
+    "reality_anchor_corrections",
     "tools",
     "agent_capabilities",
     "agents",
@@ -1263,5 +1303,34 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
     # instance_id (primary key) or dna (already indexed).
     19: (
         "ALTER TABLE agents ADD COLUMN public_key TEXT;",
+    ),
+    # v19 → v20: ADR-0063 T6 Reality Anchor correction memory.
+    # Per ADR-0063 D7. One row per unique hallucinated claim ever
+    # caught by either the dispatcher gate (T3) or the
+    # conversation hook (T5). repetition_count bumps on every
+    # repeat hit; emits reality_anchor_repeat_offender once
+    # count crosses 2.
+    20: (
+        """
+        CREATE TABLE IF NOT EXISTS reality_anchor_corrections (
+            claim_hash          TEXT PRIMARY KEY,
+            canonical_claim     TEXT NOT NULL,
+            contradicts_fact_id TEXT NOT NULL,
+            worst_severity      TEXT NOT NULL,
+            first_seen_at       TEXT NOT NULL,
+            last_seen_at        TEXT NOT NULL,
+            repetition_count    INTEGER NOT NULL DEFAULT 1,
+            last_agent_dna      TEXT,
+            last_instance_id    TEXT,
+            last_decision       TEXT NOT NULL,
+            last_surface        TEXT NOT NULL
+        );
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_reality_anchor_corrections_fact "
+            "ON reality_anchor_corrections(contradicts_fact_id);",
+        "CREATE INDEX IF NOT EXISTS idx_reality_anchor_corrections_agent "
+            "ON reality_anchor_corrections(last_agent_dna);",
+        "CREATE INDEX IF NOT EXISTS idx_reality_anchor_corrections_count "
+            "ON reality_anchor_corrections(repetition_count DESC);",
     ),
 }

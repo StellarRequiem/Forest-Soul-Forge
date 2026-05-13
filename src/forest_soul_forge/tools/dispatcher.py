@@ -441,6 +441,12 @@ class ToolDispatcher:
                 audit=self.audit,
                 verify_claim_fn=_reality_anchor_verify,
                 load_constitution_opt_out_fn=_reality_anchor_opt_out,
+                # ADR-0063 T6 (B255): correction-memory bumper.
+                # Closure captures self.agent_registry so the step
+                # never imports the registry module. None when the
+                # registry isn't wired (test contexts) — the step
+                # degrades to no recurrence detection.
+                corrections_bump_fn=self._bump_anchor_correction,
             ),
             TaskUsageCapStep(
                 audit=self.audit,
@@ -1521,6 +1527,50 @@ class ToolDispatcher:
                 ).fetchone()
                 return int(row[0] if not hasattr(row, "keys") else row["total"])
             return int(method(instance_id, session_id))
+        except Exception:
+            return 0
+
+    def _bump_anchor_correction(
+        self,
+        *,
+        claim: str,
+        fact_id: str,
+        severity: str,
+        agent_dna: str,
+        instance_id: str,
+        decision: str,
+        surface: str,
+    ) -> int:
+        """ADR-0063 T6 — bump correction memory + return repetition count.
+
+        Called by ``RealityAnchorStep._maybe_emit_repeat_offender``.
+        Returns 1 on first sighting, 2+ on repeats so the step
+        knows when to fire ``reality_anchor_repeat_offender``.
+
+        Returns 0 when the registry isn't wired (test contexts).
+        Any DB failure also returns 0 so the gate's primary
+        refuse/flag decision is never blocked by a corrections-
+        table hiccup.
+        """
+        registry = self.agent_registry
+        if registry is None:
+            return 0
+        table = getattr(registry, "reality_anchor_corrections", None)
+        if table is None:
+            return 0
+        try:
+            from datetime import datetime, timezone
+            now_iso = datetime.now(timezone.utc).isoformat()
+            return table.bump_or_create(
+                claim=claim,
+                fact_id=fact_id,
+                worst_severity=severity,
+                now_iso=now_iso,
+                agent_dna=agent_dna,
+                instance_id=instance_id,
+                decision=decision,
+                surface=surface,
+            )
         except Exception:
             return 0
 
