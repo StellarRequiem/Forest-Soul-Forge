@@ -606,8 +606,14 @@ roles:
       audit: 2.0
       cognitive: 2.0
       communication: 0.8
-      emotional: 0.3
-      embodiment: 0.3
+      # ADR-0063 — reality_anchor is a cold-logic verifier; emotional +
+      # embodiment surfaces are minimal. Set at the validator floor
+      # (0.4) rather than ideologically zero — going below trips the
+      # trait-tree validator (weights must be in [0.4, 3.0]) and
+      # silently breaks the trait engine at lifespan, returning 503
+      # on every /birth.
+      emotional: 0.4
+      embodiment: 0.4
 
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
