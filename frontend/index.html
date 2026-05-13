@@ -107,6 +107,12 @@
         <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 L8 15 M3 5 L13 5 M2 8 C2 11 5 13 8 13 C11 13 14 11 14 8" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
         Reality
       </button>
+      <!-- ADR-0062 T6 (B258) — Security pane. IoC rule catalog +
+           recent scan events + quarantined proposals. -->
+      <button class="tab" data-tab="security" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 L13 4 L13 9 C13 12 8 15 8 15 C8 15 3 12 3 9 L3 4 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
+        Security
+      </button>
       <!-- ADR-003Y Y6 — Chat tab. Multi-turn conversations with agents. -->
       <button class="tab" data-tab="chat" role="tab" aria-selected="false">
         <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4 H14 V11 H8 L5 14 V11 H2 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
@@ -636,6 +642,60 @@
         </div>
         <div class="panel__body">
           <div id="ra-corrections" class="ra-section">loading…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Security pane — ADR-0062 T6 (B258)                          -->
+    <!-- Read-only operator view of IoC catalog + recent scan events -->
+    <!-- + quarantined proposals. Source of truth is config/         -->
+    <!-- security_iocs.yaml; operator edits the file directly.       -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="security" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Security</h2>
+          <div class="panel__actions">
+            <button class="btn btn--ghost btn--sm" id="sec-reload-btn" type="button">reload catalog</button>
+            <button class="btn btn--ghost btn--sm" id="sec-refresh-btn" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="sec-status" class="ra-section">loading…</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">IoC catalog</h3>
+          <div class="panel__actions">
+            <span class="lbl ra-note">edit <code>config/security_iocs.yaml</code> on disk, then click <em>reload catalog</em></span>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="sec-iocs" class="ra-section">loading…</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Recent scans</h3>
+          <div class="panel__actions">
+            <span class="lbl">last 100 <code>agent_security_scan_completed</code> events</span>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="sec-scans" class="ra-section">loading…</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Quarantined proposals</h3>
+          <div class="panel__actions">
+            <span class="lbl">staged dirs with <code>REJECTED.md</code></span>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="sec-quarantined" class="ra-section">loading…</div>
         </div>
       </div>
     </section>

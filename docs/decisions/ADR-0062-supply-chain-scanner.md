@@ -1,13 +1,12 @@
 # ADR-0062 — Supply-Chain IoC Scanner + Install-Time Gate
 
-- **Status:** Accepted 2026-05-12. **T1 + T2 + T3 + T4 + T5
-  shipped** across Bursts 249 (catalog + builtin + tests) +
-  250 (install-time gate on `/marketplace/install`,
+- **Status:** **Closed 2026-05-12.** All six tranches shipped
+  across Bursts 249 (IoC catalog + `security_scan.v1` builtin
+  + tests) + 250 (install-time gate on `/marketplace/install`,
   `/skills/install`, `/tools/install`) + 257 (forge-stage
-  scanner wired into `/skills/forge` + `/tools/forge`;
-  REJECTED.md marker + structural gate at the matching
-  install endpoints). T6 (frontend Security tab) is the
-  final tranche.
+  scanner wired into `/skills/forge` + `/tools/forge` +
+  REJECTED.md structural quarantine) + 258 (SoulUX Security
+  pane + `/security/*` operator-facing router).
 - **Date:** 2026-05-12 (drafted same session as the
   Shai-Hulud / MCP-STDIO threat survey).
 - **Related:** ADR-0033 (Security Swarm — `security_scan`
@@ -211,7 +210,9 @@ yesterday's scan and today's?" by comparing two events.
 | T3 | Tool catalog registration + tests | Register in `config/tool_catalog.yaml`. Tests cover each pattern category, kind dispatch, no-findings happy path. | shipping B249 |
 | T4 | Install-time gate | **DONE B250** — `daemon/install_scanner.py::scan_install_or_refuse` wraps `security_scan.v1`. Wired into three endpoints: `/marketplace/install`, `/skills/install`, `/tools/install`. Each request body grew a `strict: bool` flag (default False). CRITICAL findings refuse with a 409 carrying the structured findings list; HIGH findings refuse only when `strict=true`, otherwise surface in the success response under `scan_summary`. Every gate decision emits `agent_security_scan_completed` to the audit chain with per-severity counts + scan_fingerprint + decision. KNOWN_EVENT_TYPES updated. | shipped |
 | T5 | Forge-stage scanner | **DONE B257** — new helper `daemon/forge_stage_scanner.py::scan_forge_stage_or_refuse` wraps the install-scanner gate with two differences: (a) `install_kind` is `forge_skill_stage` / `forge_tool_stage` so chain queries separate stage refusals from install refusals, and (b) on CRITICAL refusal it writes a human-readable `REJECTED.md` into the staged dir documenting the findings + the operator's remediation options. Wired into both `/skills/forge` and `/tools/forge` between engine return and audit emit. The install endpoints (`/skills/install`, `/tools/install`) gained a `staged_dir_is_quarantined()` structural check: 409 if `REJECTED.md` is present, forcing operator to consciously delete it to bypass. HIGH/MEDIUM/LOW findings flow through to `ForgedSkillOut.scan_summary` / `ForgedToolOut.scan_summary` so the propose-card UI can surface a warning chip. 12 unit tests cover allow / refuse / REJECTED.md content / quarantine predicate / audit emission across both surfaces. | shipped |
-| T6 | Frontend Security tab | SoulUX gets a Security tab showing the latest scan findings + a Run Scan Now button. | queued B252 |
+| T6 | Frontend Security tab | **DONE B258** — new "Security" tab in SoulUX (`frontend/index.html` + `frontend/js/security.js` + CSS additions) backed by the new `/security/*` operator-facing router. Five endpoints: GET /status (combined card with rule count + 24h refused/allowed/critical counts + quarantined-dir count + per-surface breakdown), GET /iocs (full catalog sorted CRITICAL-first), GET /recent-scans (last N `agent_security_scan_completed` events filtered from the chain), GET /quarantined (staged dirs with REJECTED.md, including the marker excerpt so the operator sees WHY each was quarantined without opening files), POST /reload (hot-reload IoC catalog). Read-only by design — per ADR-0062 D1 the operator owns the catalog by editing `config/security_iocs.yaml` directly. Reuses ADR-0063 T7's severity-chip + table styles. 11 endpoint tests cover every surface. **ADR-0062 closed.** | shipped |
+
+Total: 6/6 shipped across 4 bursts (B249, B250, B257, B258).
 | T7 | Pattern-catalog auto-update | Optional scheduled task that pulls the latest catalog from a Forest-signed feed (ADR-0061 operator master signs the feed) and runs a diff against the in-repo catalog. Operator approves the diff. | future |
 
 ## Consequences
