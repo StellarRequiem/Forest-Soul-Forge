@@ -163,8 +163,9 @@ class TestSingleton:
         assert first.status_code == 201
         first_instance_id = first.json()["instance_id"]
 
-        # Archive the first.
-        arch = client.post("/agents/archive", json={
+        # Archive the first. Endpoint is POST /archive (not
+        # /agents/archive — that's a 405).
+        arch = client.post("/archive", json={
             "instance_id": first_instance_id,
             "reason": "test cleanup",
         })
