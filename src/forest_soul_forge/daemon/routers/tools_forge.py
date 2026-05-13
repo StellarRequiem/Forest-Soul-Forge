@@ -45,6 +45,10 @@ from forest_soul_forge.daemon.deps import (
     require_api_token,
     require_writes_enabled,
 )
+from forest_soul_forge.daemon.install_scanner import (
+    InstallGateRefused,
+    scan_install_or_refuse,
+)
 
 
 router = APIRouter(tags=["tools-forge"])
@@ -81,6 +85,9 @@ class ForgedToolOut(BaseModel):
 class InstallToolIn(BaseModel):
     staged_path: str
     overwrite: bool = False
+    # ADR-0062 T4 install-time scanner gate strictness. When True,
+    # HIGH security findings refuse install alongside CRITICAL.
+    strict: bool = False
 
 
 class InstalledToolOut(BaseModel):
@@ -90,6 +97,9 @@ class InstalledToolOut(BaseModel):
     version: str
     spec_hash: str
     audit_seq: int
+    # ADR-0062 T4 — install-time scan summary so operators see
+    # warnings that didn't block but warrant attention.
+    scan_summary: dict[str, Any] | None = None
 
 
 class StagedToolSummary(BaseModel):
@@ -374,6 +384,33 @@ async def install_tool_endpoint(
                     "detail": e.detail},
         ) from e
 
+    # ADR-0062 T4 (Burst 250) — install-time IoC scanner gate.
+    # Tool Forge proposals are LLM-generated Python; this is the
+    # highest-risk artifact surface in Forest because the staged
+    # spec.yaml carries an `implementation` field that may invoke
+    # arbitrary tool primitives. Scan BEFORE we register the tool
+    # live (which happens in the write_lock block below).
+    try:
+        tool_scan_result = scan_install_or_refuse(
+            staging_dir=staged_dir,
+            install_kind="tool_forge",
+            strict=body.strict,
+            audit_chain=audit_chain,
+            operator_label=_operator_label(request),
+        )
+    except InstallGateRefused as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error":   "security_scan_refused",
+                "message": (
+                    f"tool install refused by ADR-0062 install-time scanner "
+                    f"({e.severity_tier} finding(s); strict={e.strict})"
+                ),
+                "scan":    e.payload,
+            },
+        ) from e
+
     install_dir = _resolve_install_root(settings)
     install_dir.mkdir(parents=True, exist_ok=True)
     target = install_dir / f"{spec.name}.v{spec.version}.yaml"
@@ -434,6 +471,12 @@ async def install_tool_endpoint(
         version=spec.version,
         spec_hash=spec.spec_hash,
         audit_seq=entry.seq,
+        scan_summary={
+            "by_severity":      tool_scan_result["by_severity"],
+            "scan_fingerprint": tool_scan_result["scan_fingerprint"],
+            "findings_count":   len(tool_scan_result["findings"]),
+            "strict":           body.strict,
+        },
     )
 
 

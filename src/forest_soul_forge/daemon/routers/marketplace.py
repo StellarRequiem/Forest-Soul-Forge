@@ -55,6 +55,10 @@ except ImportError:  # pragma: no cover — daemon extra
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from forest_soul_forge.daemon.deps import require_api_token
+from forest_soul_forge.daemon.install_scanner import (
+    InstallGateRefused,
+    scan_install_or_refuse,
+)
 from forest_soul_forge.daemon.schemas import (
     MarketplaceContributes,
     MarketplaceContributesTool,
@@ -490,6 +494,17 @@ class MarketplaceInstallIn(BaseModel):
             "this, install fails 409 when the plugin is already there."
         ),
     )
+    strict: bool = _PydanticField(
+        False,
+        description=(
+            "ADR-0062 T4 install-time scanner gate strictness. When "
+            "True, HIGH security findings (credential harvest, env-var "
+            "exfil, short-lived domain beacons) also refuse the install "
+            "alongside CRITICAL. When False (default), only CRITICAL "
+            "findings refuse — HIGH/MEDIUM/LOW/INFO surface in the "
+            "response body as warnings."
+        ),
+    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -708,6 +723,33 @@ async def install_marketplace_entry(
                 )
             staging = yaml_paths[0].parent
 
+        # ADR-0062 T4 (Burst 250) — install-time IoC scanner gate.
+        # Runs BEFORE persistence so a CRITICAL-tagged plugin never
+        # ends up on disk under installed/. The gate emits
+        # agent_security_scan_completed to the audit chain in
+        # both allow + refuse paths; a refused install bubbles to
+        # the operator as a 409 with structured findings.
+        try:
+            scan_result = scan_install_or_refuse(
+                staging_dir=staging,
+                install_kind="marketplace",
+                strict=body.strict,
+                audit_chain=audit_chain,
+                operator_label=getattr(request.state, "operator_id", None),
+            )
+        except InstallGateRefused as e:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error":   "security_scan_refused",
+                    "message": (
+                        f"install refused by ADR-0062 install-time scanner "
+                        f"({e.severity_tier} finding(s); strict={e.strict})"
+                    ),
+                    "scan":    e.payload,
+                },
+            ) from e
+
         try:
             with write_lock:
                 info = repo.install_from_dir(staging, force=body.force)
@@ -749,4 +791,13 @@ async def install_marketplace_entry(
         "directory": str(info.directory),
         "trusted": False,
         "audit_event": "marketplace_plugin_installed",
+        # ADR-0062 T4: include the install-time scan summary in
+        # the success response so operators see HIGH/MEDIUM/LOW
+        # findings that didn't block but warrant attention.
+        "scan_summary": {
+            "by_severity":      scan_result["by_severity"],
+            "scan_fingerprint": scan_result["scan_fingerprint"],
+            "findings_count":   len(scan_result["findings"]),
+            "strict":           body.strict,
+        },
     }

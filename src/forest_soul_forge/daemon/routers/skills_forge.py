@@ -43,6 +43,10 @@ from forest_soul_forge.daemon.deps import (
     require_api_token,
     require_writes_enabled,
 )
+from forest_soul_forge.daemon.install_scanner import (
+    InstallGateRefused,
+    scan_install_or_refuse,
+)
 
 
 router = APIRouter(tags=["skills-forge"])
@@ -130,6 +134,14 @@ class InstallSkillIn(BaseModel):
             "land a partial skill ahead of installing those tools."
         ),
     )
+    strict: bool = Field(
+        False,
+        description=(
+            "ADR-0062 T4 install-time scanner gate strictness. When "
+            "True, HIGH security findings refuse the install alongside "
+            "CRITICAL. Default False — only CRITICAL findings block."
+        ),
+    )
 
 
 class InstalledSkillOut(BaseModel):
@@ -141,6 +153,10 @@ class InstalledSkillOut(BaseModel):
     version: str
     skill_hash: str
     audit_seq: int
+    # ADR-0062 T4 — install-time scan summary so operators see
+    # warnings that didn't block but warrant attention. None when
+    # the scan was bypassed (catalog missing in test contexts).
+    scan_summary: dict[str, Any] | None = None
 
 
 class StagedManifestSummary(BaseModel):
@@ -455,6 +471,34 @@ async def install_skill_endpoint(
                 },
             )
 
+    # ADR-0062 T4 (Burst 250) — install-time IoC scanner gate.
+    # Scans the staged manifest + sibling files BEFORE we copy
+    # anything to the live install dir. A skill manifest can
+    # only chain other tools' calls — it can't run arbitrary
+    # code — but a forge proposal containing a malicious
+    # `command:` string or env-var exfil tool argument would
+    # still bypass governance once installed.
+    try:
+        skill_scan_result = scan_install_or_refuse(
+            staging_dir=staged_dir,
+            install_kind="skill_forge",
+            strict=body.strict,
+            audit_chain=audit_chain,
+            operator_label=_operator_label(request),
+        )
+    except InstallGateRefused as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error":   "security_scan_refused",
+                "message": (
+                    f"skill install refused by ADR-0062 install-time scanner "
+                    f"({e.severity_tier} finding(s); strict={e.strict})"
+                ),
+                "scan":    e.payload,
+            },
+        ) from e
+
     install_dir = Path(getattr(settings, "skill_install_dir", "data/forge/skills/installed")).resolve()
     install_dir.mkdir(parents=True, exist_ok=True)
     target = install_dir / f"{skill.name}.v{skill.version}.yaml"
@@ -505,6 +549,12 @@ async def install_skill_endpoint(
         version=skill.version,
         skill_hash=skill.skill_hash,
         audit_seq=entry.seq,
+        scan_summary={
+            "by_severity":      skill_scan_result["by_severity"],
+            "scan_fingerprint": skill_scan_result["scan_fingerprint"],
+            "findings_count":   len(skill_scan_result["findings"]),
+            "strict":           body.strict,
+        },
     )
 
 
