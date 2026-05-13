@@ -93,8 +93,12 @@ class TestGateAllows:
         assert result["decision"] == "allow"
         assert result["refused_on_tier"] is None
         assert result["findings"] == []
-        # Audit event landed.
-        events = _audit_events(chain)
+        # Audit event landed. Filter for the specific event type —
+        # the chain also contains the genesis chain_created event.
+        events = [
+            e for e in _audit_events(chain)
+            if e["event_type"] == "agent_security_scan_completed"
+        ]
         assert len(events) == 1
         assert events[0]["event_data"]["decision"] == "allow"
         assert events[0]["event_data"]["install_kind"] == "marketplace"
