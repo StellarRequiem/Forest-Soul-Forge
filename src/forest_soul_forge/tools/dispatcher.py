@@ -2080,12 +2080,21 @@ def _apply_provider_posture_overrides(
 def _hardware_quarantine_reason(constitution_path: Path) -> dict[str, str] | None:
     """Return a quarantine descriptor dict (with 'expected' + 'binding' keys)
     when the agent's constitution is hardware-bound to a different machine,
-    else None (no binding OR binding matches this machine).
+    else None (no binding OR binding matches this machine OR a valid
+    passport overrides).
 
     Reads the constitution YAML each call. The cost is a single yaml.safe_load
     + a 16-char string compare — well under the noise floor of any tool
     dispatch. We deliberately do NOT cache the result because operator
     /hardware/unbind needs the next dispatch to see the cleared file.
+
+    ADR-0061 T4 (B247) extension: when the constitution's hardware
+    binding doesn't match the current host, check for ``passport.json``
+    alongside the constitution. If the passport validates against the
+    trusted-operator list AND its authorized_fingerprints contains the
+    current host, the quarantine is BYPASSED (caller treats it as "no
+    binding mismatch"). This is the operator's explicit "this agent
+    may roam to this machine" authorization per ADR-0061 D5.
 
     Returns None on any read/parse failure — a malformed constitution is a
     bigger problem the dispatcher will catch downstream; we don't want
@@ -2120,4 +2129,65 @@ def _hardware_quarantine_reason(constitution_path: Path) -> dict[str, str] | Non
         return None
     if binding == here:
         return None
+
+    # ADR-0061 T4: mismatch detected. Check for an override
+    # passport before refusing the agent. The passport must be a
+    # sibling of constitution.yaml (same directory) named
+    # ``passport.json``. Absent passport → original quarantine.
+    # Invalid passport → original quarantine (with the passport
+    # failure reason annotated so the operator sees why their
+    # roam attempt failed).
+    passport_path = constitution_path.parent / "passport.json"
+    if passport_path.exists():
+        passport_result = _check_passport_override(passport_path, here)
+        if passport_result is True:
+            # Valid passport authorizes this host. Bypass quarantine.
+            return None
+        # Invalid passport. Fall through to quarantine, but include
+        # the passport-validation reason so the operator can fix it.
+        return {
+            "expected":       here,
+            "binding":        binding,
+            "passport_path":  str(passport_path),
+            "passport_reason": (
+                passport_result
+                if isinstance(passport_result, str)
+                else "passport failed validation"
+            ),
+        }
     return {"expected": here, "binding": binding}
+
+
+def _check_passport_override(
+    passport_path: Path, current_fingerprint: str,
+) -> bool | str:
+    """Try to validate the passport. Returns True on valid;
+    returns a string reason on invalid (passed back up as the
+    quarantine ``passport_reason`` field). Returns False on
+    read/parse failure (no useful reason to surface).
+    """
+    import json as _json
+    from forest_soul_forge.security.passport import verify_passport
+    from forest_soul_forge.security.trust_list import (
+        load_trusted_operator_pubkeys,
+    )
+
+    try:
+        passport_dict = _json.loads(passport_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return f"passport.json parse failed: {e}"
+    try:
+        trusted = load_trusted_operator_pubkeys()
+    except Exception as e:
+        return f"trust-list load failed: {e}"
+    try:
+        valid, reason = verify_passport(
+            passport_dict,
+            trusted_issuer_pubkeys_b64=trusted,
+            current_hardware_fingerprint=current_fingerprint,
+        )
+    except Exception as e:
+        return f"verify_passport raised: {e}"
+    if valid:
+        return True
+    return reason

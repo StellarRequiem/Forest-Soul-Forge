@@ -1,8 +1,12 @@
 # ADR-0061 — Agent Passport for Cross-Machine Roaming
 
-- **Status:** Accepted 2026-05-12. T1 + T2 + T3 + T5 substrate
-  shipping in Burst 246; T4 trust-config + runtime quarantine
-  integration queued for follow-up bursts.
+- **Status:** Accepted 2026-05-12. **T1 + T2 + T3 + T4 + T5
+  shipped** across Bursts 246 + 247 — passport substrate is
+  operator-usable end-to-end via the K6 quarantine integration.
+  Programmatic mint + verify, trust-list loader,
+  `passport.json`-overrides-K6 wired into the dispatcher's
+  hardware-quarantine reason. T6 (HTTP mint endpoint) + T7
+  (CLI subcommand) queued.
 - **Date:** 2026-05-12 (drafted, accepted same day during the
   ADR-0046 license-pivot conversation).
 - **Related:** ADR-0001 (DNA + content-addressed identity),
@@ -218,8 +222,8 @@ burst.
 | T1 | Operator master keypair bootstrap | New module `security/operator_key.py` with `resolve_operator_keypair() -> (priv_bytes, pub_b64)`. AgentKeyStore reserved name `forest_operator_master:default`. Lifespan calls it once at startup. Writes public to `data/operator_pubkey.txt`. Diagnostic line for visibility. | 0.5 burst (shipping B246) |
 | T2 | Passport mint primitive | `security/passport.py::mint_passport(...)` — canonical-form serialize + ed25519 sign. Returns dict ready for json.dump. | 0.5 burst (shipping B246) |
 | T3 | Passport verify primitive | `security/passport.py::verify_passport(passport_dict, trusted_pubkeys, current_hw_fp) -> tuple[bool, str]`. Returns (valid, reason). Refuses on: malformed, wrong signature, untrusted issuer, expired, current host not in authorized. | 0.5 burst (shipping B246) |
-| T4 | Trust config + quarantine integration | `FSF_TRUSTED_OPERATOR_KEYS` env var. Lifespan loads the file. Agent-load path consults verify_passport on K6 quarantine miss. | 1 burst (queued) |
-| T5 | Tests + runbook | passport.py unit tests (mint round-trip, tamper detection, expiry, wrong-fp). `docs/runbooks/agent-passport.md` — operator workflow for cross-machine roaming. | 0.5 burst (partial in B246; full coverage in T4 burst) |
+| T4 | Trust config + quarantine integration | **DONE B247** — `security/trust_list.py::load_trusted_operator_pubkeys()` loads from `FSF_TRUSTED_OPERATOR_KEYS` env var (default `data/trusted_operators.txt`); always includes the local operator master via `resolve_operator_keypair`. Comments + dedupe + missing-file-is-fine semantics. `_hardware_quarantine_reason` in dispatcher.py extended: on binding mismatch, looks for `passport.json` next to constitution; valid passport → bypass quarantine; invalid passport → quarantine descriptor carries `passport_reason` so operator can fix. 11 new tests cover the integration (5 quarantine scenarios + 4 trust-list loader cases). | shipped |
+| T5 | Tests + runbook | **DONE B246+B247** — 19 passport tests + 7 operator-key tests in B246; 11 passport-quarantine + trust-list tests in B247. `docs/runbooks/agent-passport.md` covers operator workflow, recovery scenarios, trust establishment, and the failure-mode → action mapping. | shipped |
 | T6 | Daemon HTTP endpoint | `POST /agents/{id}/passport` — operator mints a passport for the named agent. Output: passport.json. Authenticated with X-FSF-Token. | 0.5 burst (queued) |
 | T7 | CLI subcommand | `fsf passport mint <agent_id> --authorize-fingerprint <fp>` for command-line operators. | 0.5 burst (queued) |
 
