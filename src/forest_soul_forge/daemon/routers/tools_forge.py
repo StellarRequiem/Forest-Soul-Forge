@@ -49,6 +49,11 @@ from forest_soul_forge.daemon.install_scanner import (
     InstallGateRefused,
     scan_install_or_refuse,
 )
+from forest_soul_forge.daemon.forge_stage_scanner import (
+    ForgeStageRefused,
+    scan_forge_stage_or_refuse,
+    staged_dir_is_quarantined,
+)
 
 
 router = APIRouter(tags=["tools-forge"])
@@ -75,6 +80,10 @@ class ForgedToolOut(BaseModel):
     archetype_tags: list[str]
     audit_seq: int | None
     forge_log_excerpt: str
+    # ADR-0062 T5 (B257) — forge-stage scanner result. None when
+    # the scan was bypassed (catalog missing); otherwise carries
+    # by_severity counts + scan_fingerprint + findings_count.
+    scan_summary: dict[str, Any] | None = None
     prompt_template_preview: str = Field(
         ...,
         description="First ~400 chars of the template so the modal can show "
@@ -298,6 +307,41 @@ async def forge_tool_endpoint(
     spec = result.spec
     forge_log_text = result.log_path.read_text(encoding="utf-8") if result.log_path.exists() else ""
 
+    # ADR-0062 T5 (Burst 257) — forge-stage scanner gate. Tool
+    # forge is the HIGHEST-risk surface because the staged
+    # artifact is LLM-generated Python — a prompt-injected or
+    # poisoned model could ship hostile code that the operator
+    # would otherwise install. CRITICAL findings refuse the
+    # propose (REJECTED.md written + 409); HIGH/MEDIUM/LOW
+    # flow through into ForgedToolOut.scan_summary.
+    tool_scan_summary: dict[str, Any] | None = None
+    try:
+        scan_result = scan_forge_stage_or_refuse(
+            staged_dir=Path(result.staged_dir),
+            forge_kind="forge_tool_stage",
+            audit_chain=audit_chain,
+            operator_label=_operator_label(request),
+        )
+        tool_scan_summary = {
+            "by_severity":      scan_result["by_severity"],
+            "scan_fingerprint": scan_result["scan_fingerprint"],
+            "findings_count":   len(scan_result["findings"]),
+        }
+    except ForgeStageRefused as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error":      "forge_stage_quarantined",
+                "message": (
+                    f"forged tool refused by ADR-0062 T5 stage scanner — "
+                    f"{e.severity_tier} security finding(s) in staged dir. "
+                    f"REJECTED.md written for traceability."
+                ),
+                "staged_dir": str(e.staged_dir),
+                "scan":       e.payload,
+            },
+        ) from e
+
     audit_seq: int | None = None
     try:
         with write_lock:
@@ -332,6 +376,7 @@ async def forge_tool_endpoint(
         audit_seq=audit_seq,
         forge_log_excerpt=forge_log_text[-600:] if forge_log_text else "",
         prompt_template_preview=spec.prompt_template[:400],
+        scan_summary=tool_scan_summary,
     )
 
 
@@ -363,6 +408,23 @@ async def install_tool_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"staged dir not found: {staged_dir}",
+        )
+    # ADR-0062 T5 (B257) — refuse to install a quarantined dir.
+    # REJECTED.md is the structural gate from the forge-stage
+    # scanner. Operator must consciously delete it to bypass.
+    if staged_dir_is_quarantined(staged_dir):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error":      "staged_dir_quarantined",
+                "message": (
+                    f"{staged_dir} contains REJECTED.md from the ADR-0062 "
+                    f"T5 forge-stage scanner. Delete REJECTED.md to "
+                    f"explicitly override the gate, or discard the "
+                    f"staged proposal and re-run the forge."
+                ),
+                "staged_dir": str(staged_dir),
+            },
         )
     spec_path = staged_dir / "spec.yaml"
     if not spec_path.exists():
