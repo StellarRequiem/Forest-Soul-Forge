@@ -156,6 +156,7 @@ genres:
       - refusal_arbiter
       - code_reviewer            # SW track — coding swarm Reviewer
       - verifier_loop            # ADR-0036 — memory contradiction auditor
+      - reality_anchor           # ADR-0063 — pre-action ground-truth verifier
 
   researcher:
     description: |

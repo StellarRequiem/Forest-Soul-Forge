@@ -683,6 +683,62 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  reality_anchor:
+    # ADR-0063 T4 — Reality Anchor singleton role. Guardian-genre,
+    # read-only ceiling. The substrate-layer RealityAnchorStep in
+    # the governance pipeline (ADR-0063 T3, shipped B252) handles
+    # the always-on lightweight pass; this agent is the OPTIONAL
+    # deep semantic pass other agents delegate to when the
+    # lightweight pass returns 'unknown' and they want LLM-grade
+    # verification.
+    #
+    # Singleton enforcement: /birth refuses a second reality_anchor
+    # spawn with 409. The role is per-forest, like Forge / Verifier
+    # Loop. Re-birthing requires archiving the existing one first.
+    #
+    # Per ADR-0063 D6: the substrate ALWAYS runs (regardless of
+    # whether this agent exists); the agent is OPT-IN deep verify.
+    policies:
+      - id: forbid_action_taking
+        rule: forbid
+        triggers: [filesystem_write, network_post, subprocess_spawn, dispatch_external_side_effect]
+        rationale: "Reality Anchor is a read-only verifier. It NEVER takes actions — its output is verdicts that other agents (or operators) act on. Refusing to take any action is the load-bearing safety constraint."
+      - id: forbid_ground_truth_mutation
+        rule: forbid
+        triggers: [modify_ground_truth, modify_constitution, modify_other_agent_memory]
+        rationale: "Reality Anchor CONSUMES operator-asserted ground truth; it must NEVER edit the catalog. Operator owns the truth; the anchor reports findings. Per ADR-0063 D3 — a compromised anchor must not be able to rewrite its own reality."
+      - id: require_citation
+        rule: require
+        triggers: [emit_verdict]
+        rationale: "Every CONTRADICTED or CONFIRMED verdict must cite the specific fact_id + statement that triggered it, per ADR-0063 D6 output shape. No bare 'this is wrong' verdicts."
+      - id: forbid_low_confidence_contradicted
+        rule: forbid
+        triggers: [emit_contradicted_below_confidence_floor]
+        rationale: "Pattern-match contradictions are deterministic (confidence=1.0 by definition); LLM-grade contradictions must clear 0.80 confidence to emit. Below that → emit UNKNOWN, not CONTRADICTED. False positives undermine the operator's trust in the gate."
+    risk_thresholds:
+      auto_halt_risk: 0.50  # tighter than verifier_loop (0.70) — the anchor must NEVER misclassify a critical fact
+      escalate_risk: 0.20
+      min_confidence_to_act: 0.80
+    out_of_scope:
+      - modify_ground_truth
+      - modify_constitution
+      - modify_other_agent_memory
+      - emit_action_side_effect
+    operator_duties:
+      - "Keep config/ground_truth.yaml current. The anchor is only as accurate as the catalog. Stale facts produce false contradictions."
+      - "Review reality_anchor_refused audit events weekly. Patterns in WHICH facts get tripped reveal where the agent population is hallucinating."
+      - "Re-birth or archive the anchor if its false-positive rate exceeds 5% on legitimate dispatches — same posture as the verifier_loop."
+      - "Treat the anchor's verdicts as advisory at the operator-review layer; treat them as binding at the substrate (RealityAnchorStep) layer. Substrate refusals on CRITICAL facts are non-negotiable."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+    # ADR-0063 D2 — the substrate gate is on by default for THIS
+    # agent too. Self-reference is fine: the anchor isn't exempt
+    # from being checked against ground truth on its own claims.
+    reality_anchor:
+      enabled: true
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new role_base entries)
   # Wires the previously-aspirational roles in genres.yaml.

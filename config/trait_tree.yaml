@@ -599,6 +599,16 @@ roles:
       emotional: 0.4
       embodiment: 0.4
 
+  reality_anchor:
+    description: "ADR-0063 Reality Anchor. Singleton-per-forest verifier that cross-checks any agent's claims against operator-asserted ground truth (config/ground_truth.yaml) + verified memory + recent conversation context. Sibling to verifier_loop (post-hoc memory contradictions); reality_anchor handles pre-action + pre-final-answer verification. Genre: guardian. Kit: verify_claim.v1 + memory_recall.v1 + llm_think.v1 + delegate.v1."
+    domain_weights:
+      security: 2.0
+      audit: 2.0
+      cognitive: 2.0
+      communication: 0.8
+      emotional: 0.3
+      embodiment: 0.3
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so

@@ -437,6 +437,31 @@ def _perform_create(
     request_hash = compute_request_hash(endpoint, req.model_dump(mode="json"))
     profile = _build_trait_profile(engine, req.profile)
 
+    # ADR-0063 T4 (Burst 253) — reality_anchor is a singleton-per-forest
+    # role. A second active reality_anchor would produce conflicting
+    # verdicts (each could draw different conclusions from the same
+    # ground truth + memory) and dilute the audit trail. Same posture
+    # as Forge / Verifier Loop conceptually, but for reality_anchor
+    # we enforce it structurally rather than by operator convention.
+    #
+    # Refuse with 409 if any active reality_anchor already exists.
+    # The operator must archive the existing one (POST /agents/archive)
+    # before spawning a replacement. Archived agents are not "active"
+    # so they don't trip the check.
+    if profile.role == "reality_anchor":
+        existing = registry.list_agents(role="reality_anchor", status="active")
+        if existing:
+            existing_ids = [a.instance_id for a in existing]
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"reality_anchor is a singleton-per-forest role "
+                    f"(ADR-0063 T4). An active reality_anchor already "
+                    f"exists: {existing_ids}. Archive it first via "
+                    f"POST /agents/archive before spawning a replacement."
+                ),
+            )
+
     dna_hex = dna_full(profile)
     dna_s = dna_short(profile)
 

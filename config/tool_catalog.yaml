@@ -2296,6 +2296,21 @@ archetypes:
       - llm_think.v1            # reasoning over verification candidates
       - delegate.v1             # cross-tier escalation when contradictions surface
 
+  reality_anchor:
+    # ADR-0063 T4 (Burst 253) — singleton-per-forest pre-action
+    # verifier. Substrate-layer gate (RealityAnchorStep) runs
+    # pattern-match verification on every dispatch; this role is
+    # the OPTIONAL deep-pass agent other agents delegate to when
+    # they want an LLM-grade semantic verification beyond what
+    # the regex catalog can catch. Guardian-genre / read-only
+    # ceiling. Singleton enforced at /birth time.
+    standard_tools:
+      - verify_claim.v1         # ADR-0063 T2 pattern-match verifier
+      - memory_recall.v1        # walk verified-tier memory (ADR-0049 K1)
+      - audit_chain_verify.v1   # cross-check the chain itself
+      - llm_think.v1            # deep semantic pass when pattern is unknown
+      - delegate.v1             # escalate to other guardians if needed
+
   # ---- v0.6 role expansion (Burst 124, ADR-0044 §"role inventory") ------
   # 24 roles fleshing out the 8 remaining genre buckets with kits sized
   # to each role's purpose. Tool selection respects each role's genre
