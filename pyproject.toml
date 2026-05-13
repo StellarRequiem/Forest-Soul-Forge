@@ -36,6 +36,15 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
+    # ADR-0054 procedural-shortcut substrate ships numpy-backed
+    # semantic embeddings. The substrate is OFF by default, but
+    # 4 unit-test modules (test_procedural_*, test_memory_tag_outcome)
+    # import the substrate code and need numpy at collection time.
+    # Including it under [dev] keeps the standard test command
+    # (`pytest`) able to collect the whole suite without
+    # ModuleNotFoundError, while [procedural] below is the
+    # opt-in extra for runtime use.
+    "numpy>=1.26",
 ]
 daemon = [
     "fastapi>=0.110",
@@ -61,6 +70,19 @@ daemon = [
 # actually dispatches a browser_action call.
 browser = [
     "playwright>=1.40",
+]
+
+# ADR-0054 — procedural-shortcut substrate. Stores per-tool-call
+# outcome embeddings (small float32 vectors) keyed by canonical
+# claim hash so future calls can shortcut to a known-good answer.
+# Numpy is the only new runtime dep; substrate is OFF by default
+# until ADR-0054 T6 wires the chat-thumbs UI. Operators who want
+# to enable the substrate today install with
+# `pip install forest-soul-forge[procedural]` and flip the
+# substrate flag in daemon config. Numpy is ~30 MB; kept out of
+# the base install since most users won't need it.
+procedural = [
+    "numpy>=1.26",
 ]
 
 # ADR-0044 P4 — kernel API conformance test suite. External integrators
