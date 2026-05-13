@@ -56,6 +56,21 @@ class ToolDef:
     input_schema: dict
     side_effects: str
     archetype_tags: tuple[str, ...]
+    # ADR-0051 T1.1 — opt-out flag for tools that structurally can't run
+    # in a subprocess sandbox (memory_*, delegate, llm_think need direct
+    # daemon-state handles: registry, provider, write_lock). When the
+    # global ``FSF_TOOL_SANDBOX={strict,permissive}`` env var enables
+    # sandboxing, the dispatcher reads this field; tools with
+    # ``sandbox_eligible: false`` continue to run in-process under any
+    # mode and emit a ``sandbox_skipped`` annotation in the audit
+    # event so the gap is operator-visible.
+    #
+    # Default ``True`` is the ADR-mandated additive-schema posture:
+    # existing catalog entries without the field stay eligible. Tools
+    # that need to opt out add ``sandbox_eligible: false`` to their
+    # YAML entry — currently expected for memory_recall/_write/
+    # _disclose, delegate, llm_think (annotated post-T3).
+    sandbox_eligible: bool = True
 
     @property
     def key(self) -> str:
@@ -382,6 +397,16 @@ def _parse_tool_entry(key: str, entry: Any) -> ToolDef:
         )
     archetype_tags = tuple(str(t) for t in archetype_tags_raw)
 
+    # ADR-0051 T1.1 — optional ``sandbox_eligible`` opt-out. Absent means
+    # eligible (default True), matching the ADR's additive-schema rule
+    # (pre-ADR catalog entries keep working without annotation).
+    sandbox_eligible_raw = entry.get("sandbox_eligible", True)
+    if not isinstance(sandbox_eligible_raw, bool):
+        raise ToolCatalogError(
+            f"tool entry {key!r}.sandbox_eligible must be bool; "
+            f"got {type(sandbox_eligible_raw).__name__}"
+        )
+
     return ToolDef(
         name=name,
         version=version,
@@ -389,6 +414,7 @@ def _parse_tool_entry(key: str, entry: Any) -> ToolDef:
         input_schema=dict(input_schema),
         side_effects=side_effects,
         archetype_tags=archetype_tags,
+        sandbox_eligible=sandbox_eligible_raw,
     )
 
 

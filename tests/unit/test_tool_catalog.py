@@ -214,6 +214,88 @@ archetypes:
 
 
 # ---------------------------------------------------------------------------
+# ADR-0051 T1.1 — sandbox_eligible parsing
+# ---------------------------------------------------------------------------
+
+
+class TestSandboxEligible:
+    """ADR-0051 T1.1 added an optional ``sandbox_eligible`` field to
+    ToolDef. Default ``True`` preserves the additive-schema posture —
+    pre-ADR catalog entries keep loading without annotation.
+    """
+
+    def test_default_true_when_field_absent(self, tmp_path: Path):
+        p = _write_yaml(tmp_path, """
+version: "0.1"
+tools:
+  alpha.v1:
+    name: alpha
+    version: "1"
+    description: x
+    input_schema: { type: object }
+    side_effects: read_only
+    archetype_tags: []
+archetypes: {}
+""")
+        cat = load_catalog(p)
+        assert cat.tools["alpha.v1"].sandbox_eligible is True
+
+    def test_explicit_false_parsed(self, tmp_path: Path):
+        p = _write_yaml(tmp_path, """
+version: "0.1"
+tools:
+  llm_think.v1:
+    name: llm_think
+    version: "1"
+    description: x
+    input_schema: { type: object }
+    side_effects: read_only
+    archetype_tags: []
+    sandbox_eligible: false
+archetypes: {}
+""")
+        cat = load_catalog(p)
+        assert cat.tools["llm_think.v1"].sandbox_eligible is False
+
+    def test_explicit_true_parsed(self, tmp_path: Path):
+        p = _write_yaml(tmp_path, """
+version: "0.1"
+tools:
+  shell_exec.v1:
+    name: shell_exec
+    version: "1"
+    description: x
+    input_schema: { type: object }
+    side_effects: external
+    archetype_tags: []
+    sandbox_eligible: true
+archetypes: {}
+""")
+        cat = load_catalog(p)
+        assert cat.tools["shell_exec.v1"].sandbox_eligible is True
+
+    def test_non_bool_value_rejected(self, tmp_path: Path):
+        # YAML coercion is strict here — "yes" or "1" must not silently
+        # become True. The catalog parser refuses with a clear error.
+        p = _write_yaml(tmp_path, """
+version: "0.1"
+tools:
+  bad.v1:
+    name: bad
+    version: "1"
+    description: x
+    input_schema: { type: object }
+    side_effects: read_only
+    archetype_tags: []
+    sandbox_eligible: "yes"
+archetypes: {}
+""")
+        with pytest.raises(ToolCatalogError) as ei:
+            load_catalog(p)
+        assert "sandbox_eligible" in str(ei.value)
+
+
+# ---------------------------------------------------------------------------
 # resolve_kit semantics
 # ---------------------------------------------------------------------------
 def _toy_catalog() -> ToolCatalog:
