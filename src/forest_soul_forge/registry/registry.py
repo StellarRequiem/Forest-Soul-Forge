@@ -31,6 +31,7 @@ R4 architecture (post-split):
 """
 from __future__ import annotations
 
+import binascii as _binascii
 import sqlite3
 import threading
 from pathlib import Path
@@ -48,6 +49,26 @@ from forest_soul_forge.registry._errors import (
     SchemaMismatchError,
     UnknownAgentError,
 )
+
+
+class RegistryEncryptionError(RegistryError):
+    """Raised when SQLCipher setup fails — ADR-0050 T2.
+
+    Possible causes:
+      - ``sqlcipher3-binary`` not installed (operator enabled
+        FSF_AT_REST_ENCRYPTION but didn't install the daemon
+        extras)
+      - SQLCipher build linked against vanilla SQLite (PRAGMA
+        cipher_version returns empty)
+      - Master key doesn't match the one the DB was created with
+        (operator rotated the key without re-keying the DB)
+      - Existing DB is plaintext and operator enabled encryption
+        without running the migration tool (T8)
+
+    The daemon's lifespan catches this and produces a startup_
+    diagnostics entry; the operator decides whether to fall back
+    to plaintext (turn off the env var) or migrate the DB.
+    """
 from forest_soul_forge.registry.tables import (
     AgentRow,
     AgentsTable,
@@ -133,9 +154,20 @@ class _ThreadLocalConn:
     supported and were never used in Forest's design.
     """
 
-    def __init__(self, db_path: str, pragmas: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        pragmas: tuple[str, ...],
+        *,
+        master_key: bytes | None = None,
+    ) -> None:
         self._db_path = db_path
         self._pragmas = pragmas
+        # ADR-0050 T2 (B267): when set, connections open via sqlcipher3
+        # and run ``PRAGMA key`` BEFORE any other statement so the file
+        # decrypts cleanly. None = legacy stdlib sqlite3 path
+        # (bit-identical pre-T2 behavior).
+        self._master_key = master_key
         self._local = threading.local()
         # All-thread tracker for diagnostics + close(). NOT used for
         # serialization — that's the point of this class.
@@ -143,14 +175,79 @@ class _ThreadLocalConn:
         self._all_conns_lock = threading.Lock()
 
     def _get(self) -> sqlite3.Connection:
-        """Return this thread's connection, opening one if needed."""
+        """Return this thread's connection, opening one if needed.
+
+        ADR-0050 T2 (B267): when ``self._master_key`` is set, opens
+        the connection via ``sqlcipher3.dbapi2`` instead of stdlib
+        ``sqlite3``, and runs ``PRAGMA key = "x'<hex>'"`` as the FIRST
+        statement on the connection. SQLCipher requires the key be
+        established before any other statement; PRAGMA key on a
+        non-keyed connection (or on a plaintext DB with the wrong key)
+        leaves the connection unusable, and the first real read
+        raises ``SQLCipherError: file is not a database``. We surface
+        that as ``RegistryEncryptionError`` so the daemon-level
+        lifespan can produce a clean diagnostic.
+        """
         c = getattr(self._local, "conn", None)
         if c is None:
-            c = sqlite3.connect(
-                self._db_path,
-                isolation_level=None,
-                check_same_thread=False,
-            )
+            if self._master_key is not None:
+                # Lazy import — sqlcipher3 is in the ``daemon`` extras,
+                # not the base deps. Test envs and lightweight
+                # operators that don't enable at-rest encryption never
+                # need it installed.
+                try:
+                    import sqlcipher3.dbapi2 as _sqlcipher
+                except ImportError as e:
+                    raise RegistryEncryptionError(
+                        "FSF_AT_REST_ENCRYPTION enabled but sqlcipher3 "
+                        "is not installed. Install via: "
+                        "pip install -e '.[daemon]' (or "
+                        "pip install sqlcipher3-binary directly)."
+                    ) from e
+                c = _sqlcipher.connect(
+                    self._db_path,
+                    isolation_level=None,
+                    check_same_thread=False,
+                )
+                # ``hexlify`` constrains the output to [0-9a-f] so the
+                # quoted-hex literal has zero injection surface despite
+                # the f-string. ``master_key`` is already validated to
+                # be exactly 32 bytes by security.master_key.
+                hex_key = _binascii.hexlify(self._master_key).decode("ascii")
+                try:
+                    c.execute(f'PRAGMA key = "x\'{hex_key}\'"')
+                    # Probe — SQLCipher delays validation until first
+                    # read; querying cipher_version forces the key
+                    # check + surfaces a clean error if the file's
+                    # plaintext or the key's wrong.
+                    cipher_version = c.execute(
+                        "PRAGMA cipher_version;"
+                    ).fetchone()
+                    if not cipher_version or not cipher_version[0]:
+                        raise RegistryEncryptionError(
+                            "sqlcipher3 connected but PRAGMA "
+                            "cipher_version returned empty — likely "
+                            "linked against a non-SQLCipher build of "
+                            "SQLite."
+                        )
+                except Exception as e:
+                    try:
+                        c.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    if isinstance(e, RegistryEncryptionError):
+                        raise
+                    raise RegistryEncryptionError(
+                        "could not key the SQLCipher connection — DB "
+                        "may be plaintext (legacy) or the master key "
+                        "doesn't match the one the DB was created with."
+                    ) from e
+            else:
+                c = sqlite3.connect(
+                    self._db_path,
+                    isolation_level=None,
+                    check_same_thread=False,
+                )
             c.row_factory = sqlite3.Row
             for p in self._pragmas:
                 c.execute(p)
@@ -262,7 +359,12 @@ class Registry:
 
     # ============ construction / teardown ===================================
     @classmethod
-    def bootstrap(cls, db_path: Path) -> "Registry":
+    def bootstrap(
+        cls,
+        db_path: Path,
+        *,
+        master_key: bytes | None = None,
+    ) -> "Registry":
         """Open (or create) a registry DB at ``db_path``.
 
         - If the file is new: apply full schema, insert initial metadata.
@@ -275,6 +377,16 @@ class Registry:
           than silently dropping columns the old code doesn't know about.
         - If a forward migration is missing for the gap we're crossing,
           raise :class:`SchemaMismatchError` rather than skip silently.
+
+        ADR-0050 T2 (B267): when ``master_key`` is set, every per-thread
+        SQLite connection opens via ``sqlcipher3.dbapi2`` and is keyed
+        with the 32-byte master key before any other statement. This
+        encrypts the DB file (including indices, journals, WAL) using
+        SQLCipher's AES-256-CBC page-level cipher. New DBs are
+        encrypted from creation; existing plaintext DBs cannot be
+        opened with a key (T8 ships a migration tool). When
+        ``master_key`` is None (default), behavior is bit-identical
+        to pre-T2 — stdlib ``sqlite3`` + plaintext file.
         """
         db_path.parent.mkdir(parents=True, exist_ok=True)
         is_new = not db_path.exists()
@@ -296,7 +408,11 @@ class Registry:
         # The schema install/verify below runs on THIS (lifespan)
         # thread, using its per-thread connection. FastAPI worker
         # threads each get their own connection on first request.
-        conn = _ThreadLocalConn(str(db_path), schema.CONNECTION_PRAGMAS)
+        conn = _ThreadLocalConn(
+            str(db_path),
+            schema.CONNECTION_PRAGMAS,
+            master_key=master_key,
+        )
 
         if is_new:
             cls._install_schema(conn)
