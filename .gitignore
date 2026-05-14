@@ -65,6 +65,13 @@ coverage.xml
 *.swo
 *~
 .DS_Store
+# Sandbox-side editor backups from Edit-tool operations. Pattern
+# surfaced repeatedly through Bursts 261-269 (security-arc edits
+# left .py.bak files behind that the sandbox couldn't rm because
+# of host-permission boundaries). The `.bak.[0-9]*` rule above
+# only catches timestamped backups; this catches the plain form.
+*.bak
+*.py.bak
 
 # Local agent state — never commit personal agent configs or audit chains
 agents/instances/
