@@ -314,6 +314,24 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     #     through dispatcher logs.
     "agent_passport_minted",
     "agent_passport_refused",
+    # ADR-0067 T3 (Burst 281) — cross-domain orchestrator routing.
+    # Emitted by route_to_domain.v1 BEFORE the delegate call so the
+    # audit chain records the orchestrator's routing decision
+    # independent of the downstream delegate outcome.
+    #
+    # event_data: {
+    #   target_domain: str (domain_id from registry),
+    #   target_capability: str,
+    #   target_instance_id: str (resolved agent),
+    #   intent_hash: str (PII-safe; raw text not stored),
+    #   confidence: float (carried over from decompose_intent),
+    #   decomposition_seq: int | None (seq of the
+    #     decompose_intent tool_call_succeeded that produced this
+    #     routing decision; None when route_to_domain was called
+    #     directly without prior decomposition),
+    #   reason: str (operator-readable routing rationale),
+    # }
+    "domain_routed",
 })
 
 

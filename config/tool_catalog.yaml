@@ -363,6 +363,58 @@ tools:
     side_effects: read_only
     archetype_tags: [security_low, guardian, observer]
 
+  route_to_domain.v1:
+    name: route_to_domain
+    version: "1"
+    description: |
+      ADR-0067 T3 cross-domain routing primitive. Consumes the
+      output of decompose_intent.v1, emits a domain_routed audit
+      event capturing the routing decision, then fires delegate.v1
+      to invoke the target agent's skill.
+
+      Gates: target_domain must be in the registry; domain.status
+      must be partial/live (planned domains refuse unless
+      allow_planned=true, which gets recorded in the audit event).
+
+      Audit shape: emits domain_routed BEFORE the delegate (captures
+      the orchestrator's intent independently of the downstream
+      delegate outcome), then the downstream delegate emits
+      agent_delegated. Audit-chain queries can filter on either
+      event_type to distinguish routing decisions from raw
+      agent-invocation events.
+
+      Required initiative L3 (mirrors delegate.v1) — reactive
+      Companion (L1) can't autonomously route across domains.
+      Audit payload PII-safe: intent_hash, never raw intent text.
+    input_schema:
+      type: object
+      required:
+        - target_domain
+        - target_capability
+        - target_instance_id
+        - skill_name
+        - skill_version
+        - intent
+        - reason
+      properties:
+        target_domain: {type: string}
+        target_capability: {type: string}
+        target_instance_id: {type: string}
+        skill_name: {type: string}
+        skill_version: {type: string}
+        intent: {type: string}
+        reason: {type: string}
+        inputs: {type: object}
+        confidence: {type: number}
+        decomposition_seq: {type: integer}
+        allow_planned: {type: boolean}
+        session_id: {type: string}
+        allow_out_of_lineage: {type: boolean}
+    side_effects: read_only
+    archetype_tags:
+      - companion
+      - assistant
+
   decompose_intent.v1:
     name: decompose_intent
     version: "1"

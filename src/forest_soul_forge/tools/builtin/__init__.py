@@ -47,6 +47,7 @@ from forest_soul_forge.tools.builtin.ruff_lint import RuffLintTool
 from forest_soul_forge.tools.builtin.security_scan import SecurityScanTool
 from forest_soul_forge.tools.builtin.decompose_intent import DecomposeIntentTool
 from forest_soul_forge.tools.builtin.operator_profile_read import OperatorProfileReadTool
+from forest_soul_forge.tools.builtin.route_to_domain import RouteToDomainTool
 from forest_soul_forge.tools.builtin.verify_claim import VerifyClaimTool
 from forest_soul_forge.tools.builtin.semgrep_scan import SemgrepScanTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
@@ -93,6 +94,7 @@ __all__ = [
     "SecurityScanTool",
     "DecomposeIntentTool",
     "OperatorProfileReadTool",
+    "RouteToDomainTool",
     "VerifyClaimTool",
     "TreeSitterQueryTool",
     "BanditSecurityScanTool",
@@ -317,6 +319,13 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # T3 (route_to_domain.v1) consumes the output's 'routable'
     # sub-intents to dispatch via delegate.v1.
     registry.register(DecomposeIntentTool())
+    # ADR-0067 T3 (Burst 281) — route_to_domain.v1. Actuator side
+    # of cross-domain orchestration. Validates target_domain against
+    # registry (refuses planned domains without explicit override),
+    # emits domain_routed audit event BEFORE the delegate so the
+    # orchestrator's intent is captured independent of the
+    # downstream outcome, then fires delegate.v1.
+    registry.register(RouteToDomainTool())
     # Phase G.1.A — tree_sitter_query.v1 (Burst 60). Read-only AST-
     # level structural queries via tree-sitter S-expressions. Lazy-
     # imports tree_sitter + tree_sitter_languages so daemon boots
