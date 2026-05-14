@@ -293,6 +293,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _operator_add_subparser(sub)
 
+    # `fsf plugin-new ...` — ADR-0071 T1 (B289) plugin scaffold
+    # generator. Authoring path: scaffolds plugin.yaml + tools/ +
+    # tests/ + README from a name + tier + tool name.
+    from forest_soul_forge.cli.plugin_author import (
+        add_subparser as _plugin_author_add_subparser,
+    )
+    _plugin_author_add_subparser(sub)
+
     return parser
 
 
