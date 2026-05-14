@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 22
+SCHEMA_VERSION: int = 23
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -272,8 +272,35 @@ DDL_STATEMENTS: tuple[str, ...] = (
         -- Decision 6.
         content_encrypted INTEGER NOT NULL DEFAULT 0
                           CHECK (content_encrypted IN (0, 1)),
+        -- v23 (ADR-0074 T1 / B294) — memory consolidation substrate.
+        -- ``consolidation_state`` drives the rollup lifecycle:
+        --   pending      = default; eligible for next consolidation pass
+        --   consolidated = original folded into a summary
+        --                  (consolidated_into → summary entry_id)
+        --   summary      = this row IS a summary produced BY a pass
+        --   pinned       = operator-pinned; never consolidated
+        --   purged       = forward-compat for GDPR delete path (unused in T1)
+        -- The CHECK constraint locks the enum at the schema level so
+        -- T2-T5 selector / runner logic can trust column values without
+        -- defensive validation.
+        consolidation_state TEXT NOT NULL DEFAULT 'pending'
+                          CHECK (consolidation_state IN (
+                              'pending', 'consolidated', 'summary',
+                              'pinned', 'purged'
+                          )),
+        -- Self-FK to memory_entries.entry_id. When state='consolidated'
+        -- this points at the absorbing summary entry; NULL otherwise.
+        -- FK enforced by SQLite when foreign_keys pragma is on
+        -- (CONNECTION_PRAGMAS keeps it on).
+        consolidated_into  TEXT,
+        -- UUID tagging which consolidation pass produced or processed
+        -- this row. Pairs with the audit-chain bookend events
+        -- (memory_consolidation_run_started + _completed) for
+        -- end-to-end traceability without scanning the chain.
+        consolidation_run  TEXT,
         FOREIGN KEY (instance_id) REFERENCES agents(instance_id),
-        FOREIGN KEY (disclosed_from_entry) REFERENCES memory_entries(entry_id)
+        FOREIGN KEY (disclosed_from_entry) REFERENCES memory_entries(entry_id),
+        FOREIGN KEY (consolidated_into) REFERENCES memory_entries(entry_id)
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_memory_instance ON memory_entries(instance_id);",
@@ -292,6 +319,22 @@ DDL_STATEMENTS: tuple[str, ...] = (
     # surface as stale). Partial index over non-NULL values keeps it small.
     "CREATE INDEX IF NOT EXISTS idx_memory_last_challenged ON memory_entries(last_challenged_at) "
         "WHERE last_challenged_at IS NOT NULL;",
+    # v23 (ADR-0074 T1 / B294) — consolidation selector index. Partial
+    # over consolidation_state='pending' because that's the only value
+    # the T2 selector scans for. Cardinality on the unfiltered column
+    # is small (5 values) but the selector hot path is dominated by
+    # this slice; partial index keeps it cheap as the table grows past
+    # a million rows.
+    "CREATE INDEX IF NOT EXISTS idx_memory_consolidation_pending "
+        "ON memory_entries(consolidation_state, created_at) "
+        "WHERE consolidation_state = 'pending';",
+    # v23 (ADR-0074 T1 / B294) — lineage index. Answers "what got folded
+    # into summary X?" in O(children) — the operator inspection path
+    # for any summary row. Partial over non-NULL values keeps it small;
+    # only ``consolidated`` rows populate the column.
+    "CREATE INDEX IF NOT EXISTS idx_memory_consolidated_into "
+        "ON memory_entries(consolidated_into) "
+        "WHERE consolidated_into IS NOT NULL;",
     # --- memory consents (ADR-0022 v0.2) ---------------------------------
     # Per-(entry, recipient) consent grants. Per-event consent only in
     # v0.2; per-relationship + tiered consent (ADR-0027 §2) are deferred
@@ -1393,5 +1436,40 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "CREATE INDEX IF NOT EXISTS idx_scheduled_task_state_next_run_at "
         "ON scheduled_task_state(next_run_at) "
         "WHERE next_run_at IS NOT NULL;",
+    ),
+    # v22 → v23: ADR-0074 T1 (B294) memory consolidation substrate.
+    # Adds three columns on memory_entries + two partial indexes.
+    # Pure additive:
+    #   * `consolidation_state` defaults to 'pending' so every
+    #     pre-existing row migrates as eligible-for-consolidation
+    #     (its actual state — never consolidated, so pending fits).
+    #   * `consolidated_into` and `consolidation_run` are nullable;
+    #     pre-existing rows pick up NULL, which is exactly right.
+    #   * CHECK constraint pins the five-state enum.
+    #   * Self-FK on consolidated_into enforced when foreign_keys
+    #     pragma is on (CONNECTION_PRAGMAS keeps it on for every
+    #     connection).
+    #   * Index on (consolidation_state, created_at) WHERE
+    #     consolidation_state='pending' powers the T2 selector
+    #     scan; index on consolidated_into WHERE NOT NULL powers
+    #     operator lineage queries.
+    # The runner logic (selector / summarizer / scheduler hook)
+    # ships in T2-T4. T1 is substrate only.
+    23: (
+        "ALTER TABLE memory_entries "
+        "ADD COLUMN consolidation_state TEXT NOT NULL DEFAULT 'pending' "
+        "CHECK (consolidation_state IN ("
+        "'pending','consolidated','summary','pinned','purged'));",
+        "ALTER TABLE memory_entries "
+        "ADD COLUMN consolidated_into TEXT "
+        "REFERENCES memory_entries(entry_id);",
+        "ALTER TABLE memory_entries "
+        "ADD COLUMN consolidation_run TEXT;",
+        "CREATE INDEX IF NOT EXISTS idx_memory_consolidation_pending "
+        "ON memory_entries(consolidation_state, created_at) "
+        "WHERE consolidation_state = 'pending';",
+        "CREATE INDEX IF NOT EXISTS idx_memory_consolidated_into "
+        "ON memory_entries(consolidated_into) "
+        "WHERE consolidated_into IS NOT NULL;",
     ),
 }

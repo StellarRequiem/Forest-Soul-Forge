@@ -148,6 +148,14 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     #   - memory_verification_revoked: verification was withdrawn
     "memory_verified",
     "memory_verification_revoked",
+    # ADR-0074 T1 (B294) — memory consolidation substrate. Bookend
+    # pair (run_started + run_completed) plus per-entry detail
+    # (memory_consolidated). A run_started without a matching
+    # _completed in the chain signals a crashed runner; per-entry
+    # events prove that originals are folded-not-lost.
+    "memory_consolidation_run_started",
+    "memory_consolidated",
+    "memory_consolidation_run_completed",
     # ADR-003X K2 — operator-emitted ceremony events. Distinct from
     # tool-emitted events because the EMITTER is a human, not an
     # agent. Used to mark milestones, identity events, governance
