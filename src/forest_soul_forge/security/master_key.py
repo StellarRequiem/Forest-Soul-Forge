@@ -67,6 +67,7 @@ import base64
 import os
 import secrets
 import threading
+from pathlib import Path
 
 from forest_soul_forge.security.keys import (
     AgentKeyStore,
@@ -102,6 +103,13 @@ MASTER_KEY_LENGTH_BYTES = 32
 # stays in one place.
 FSF_MASTER_KEY_BACKEND_ENV = "FSF_MASTER_KEY_BACKEND"
 
+# Env-var name for the passphrase-mode non-interactive supply.
+# ADR-0050 T6 (B273): when FSF_MASTER_KEY_BACKEND=passphrase and
+# stdin is not a TTY, the daemon looks here for the passphrase
+# rather than hanging on getpass(). Use for launchd / systemd /
+# CI-managed boots. Whitespace-only counts as unset.
+FSF_MASTER_PASSPHRASE_ENV = "FSF_MASTER_PASSPHRASE"
+
 
 # ---- cache ---------------------------------------------------------------
 
@@ -115,6 +123,7 @@ _CACHE_LOCK = threading.RLock()
 def resolve_master_key(
     *,
     key_store: AgentKeyStore | None = None,
+    data_dir: "Path | None" = None,
 ) -> bytes:
     """Get (or generate-and-store) the at-rest encryption master key.
 
@@ -122,16 +131,52 @@ def resolve_master_key(
     an AES-256 key (via cryptography.hazmat.primitives.ciphers.aead.AESGCM)
     or as input to SQLCipher's PRAGMA key.
 
-    On first call after process start, fetches from the configured
-    SecretStore backend via :func:`resolve_agent_key_store`. If
-    absent (first daemon startup ever, or fresh data dir),
-    generates a fresh 32-byte key via :func:`secrets.token_bytes`
-    (cryptographically random per CSPRNG) and persists it. Caches
-    the result for the process lifetime.
+    Backend selection:
+
+      - ``passphrase`` (FSF_MASTER_KEY_BACKEND=passphrase, ADR-0050 T6):
+        derive the key via Scrypt from operator passphrase + a
+        persisted random salt. Passphrase source:
+
+          1. ``FSF_MASTER_PASSPHRASE`` env (non-interactive — CI,
+             launchd, systemd-managed daemons)
+          2. interactive ``getpass.getpass()`` when stdin is a TTY
+          3. otherwise raise — non-interactive without an env-supplied
+             passphrase means the operator forgot to set one, and
+             silently downgrading to a different backend would split
+             the encrypted data store
+
+      - ``keychain`` / ``file`` (default platform-routed):
+        fetch from the configured SecretStore backend. First call
+        ever (no persisted key) generates a fresh 32-byte key
+        and stores it. Subsequent calls return the cached value.
 
     Pass an explicit ``key_store`` to bypass the cache + the
     default resolver. Used by tests with a tmpdir-backed store.
+
+    Pass ``data_dir`` to override the passphrase salt location;
+    defaults to ``~/.forest``. Only consulted when the passphrase
+    backend is active.
     """
+    backend = configured_backend_name()
+
+    if backend == "passphrase":
+        # T6 (B273) — passphrase-derived master key. Bypasses the
+        # SecretStore entirely: the key never touches disk, only
+        # the salt does. Cache is keyed by MASTER_KEY_NAME so the
+        # passphrase-derived key shares the same cache slot.
+        with _CACHE_LOCK:
+            if MASTER_KEY_NAME in _CACHE:
+                return _CACHE[MASTER_KEY_NAME]
+            key = _resolve_via_passphrase(data_dir=data_dir)
+            _CACHE[MASTER_KEY_NAME] = key
+            return key
+
+    if backend == "hsm":
+        raise NotImplementedError(
+            "FSF_MASTER_KEY_BACKEND=hsm is reserved for ADR-0050 T16; "
+            "use keychain (macOS), file (Linux/CI), or passphrase (T6) for now."
+        )
+
     if key_store is not None:
         # Explicit-backend path: don't touch the cache.
         return _generate_or_load(key_store)
@@ -143,6 +188,69 @@ def resolve_master_key(
         key = _generate_or_load(store)
         _CACHE[MASTER_KEY_NAME] = key
         return key
+
+
+def _resolve_via_passphrase(*, data_dir: "Path | None" = None) -> bytes:
+    """T6 (B273) — derive the master key from an operator passphrase.
+
+    Resolution order:
+      1. ``FSF_MASTER_PASSPHRASE`` env (whitespace-stripped; empty
+         after strip counts as absent)
+      2. interactive prompt via ``getpass.getpass`` when stdin is
+         a TTY
+      3. raise RuntimeError — non-interactive + no env means we
+         can't proceed without silently downgrading the operator's
+         posture, which would split the encrypted store
+
+    Salt is persisted via :func:`load_or_create_salt` so the same
+    passphrase derives the same key across restarts. The default
+    salt location is ``<data_dir or ~/.forest>/master_salt``.
+    """
+    from pathlib import Path as _Path
+    from forest_soul_forge.security.passphrase_kdf import (
+        default_salt_path,
+        derive_key_from_passphrase,
+        load_or_create_salt,
+    )
+
+    env_pass = (os.environ.get(FSF_MASTER_PASSPHRASE_ENV) or "").strip()
+    if env_pass:
+        passphrase = env_pass
+    else:
+        # Interactive prompt only when stdin is a real TTY. Avoids
+        # hanging non-interactive daemons (launchd / systemd / CI
+        # runners) waiting on a prompt nobody will answer.
+        import sys
+        if sys.stdin is None or not sys.stdin.isatty():
+            raise RuntimeError(
+                "FSF_MASTER_KEY_BACKEND=passphrase but stdin is not a TTY "
+                f"and {FSF_MASTER_PASSPHRASE_ENV} is not set. Either run "
+                "the daemon interactively to enter the passphrase, or "
+                "supply it via env for non-interactive boots."
+            )
+        import getpass
+        try:
+            passphrase = getpass.getpass(
+                "Forest at-rest encryption passphrase: "
+            )
+        except (EOFError, KeyboardInterrupt) as e:
+            raise RuntimeError(
+                "passphrase prompt cancelled — daemon refused to boot "
+                "rather than silently fall back to plaintext"
+            ) from e
+        if not passphrase.strip():
+            raise RuntimeError(
+                "empty passphrase supplied; refusing to derive a master "
+                "key from an empty string"
+            )
+
+    # Salt path. Default to ~/.forest/master_salt, matching the
+    # SecretStore file-store convention. Operators who put the
+    # daemon's data dir elsewhere pass data_dir explicitly.
+    if data_dir is None:
+        data_dir = _Path.home() / ".forest"
+    salt = load_or_create_salt(default_salt_path(data_dir))
+    return derive_key_from_passphrase(passphrase, salt)
 
 
 def reset_cache() -> None:
