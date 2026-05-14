@@ -363,6 +363,45 @@ tools:
     side_effects: read_only
     archetype_tags: [security_low, guardian, observer]
 
+  decompose_intent.v1:
+    name: decompose_intent
+    version: "1"
+    description: |
+      ADR-0067 T2 cross-domain orchestrator decomposer. Reads the
+      operator utterance, queries the domain registry
+      (config/domains/*.yaml), and uses the local LLM (via
+      ctx.provider) to break the utterance into per-domain
+      sub-intents with confidence scores.
+
+      Output: list of {intent, domain, capability, confidence,
+      status}. status ∈ {routable, ambiguous, no_match,
+      planned_domain}. T3's route_to_domain.v1 gates on status —
+      only 'routable' sub-intents dispatch.
+
+      Read-only side-effect tier. The decomposition itself is pure
+      LLM-call; no state mutation. Audit event records utterance
+      HASH (not raw text) + subintent_count + ambiguity_count +
+      model, so the audit chain is forensic but doesn't store
+      personal utterances verbatim.
+
+      Confidence floor is operator-tunable per call (default 0.6).
+      Below-threshold sub-intents surface as 'ambiguous' rather
+      than routing to a bad guess.
+    input_schema:
+      type: object
+      required: [utterance]
+      properties:
+        utterance:
+          type: string
+        confidence_threshold:
+          type: number
+        task_kind:
+          type: string
+    side_effects: read_only
+    archetype_tags:
+      - companion
+      - assistant
+
   operator_profile_read.v1:
     name: operator_profile_read
     version: "1"

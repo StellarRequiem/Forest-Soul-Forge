@@ -45,6 +45,7 @@ from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
 from forest_soul_forge.tools.builtin.pytest_run import PytestRunTool
 from forest_soul_forge.tools.builtin.ruff_lint import RuffLintTool
 from forest_soul_forge.tools.builtin.security_scan import SecurityScanTool
+from forest_soul_forge.tools.builtin.decompose_intent import DecomposeIntentTool
 from forest_soul_forge.tools.builtin.operator_profile_read import OperatorProfileReadTool
 from forest_soul_forge.tools.builtin.verify_claim import VerifyClaimTool
 from forest_soul_forge.tools.builtin.semgrep_scan import SemgrepScanTool
@@ -90,6 +91,7 @@ __all__ = [
     "MypyTypecheckTool",
     "SemgrepScanTool",
     "SecurityScanTool",
+    "DecomposeIntentTool",
     "OperatorProfileReadTool",
     "VerifyClaimTool",
     "TreeSitterQueryTool",
@@ -307,6 +309,14 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # encryption); audit event captures operator_id + schema_version
     # only, not the full PII payload.
     registry.register(OperatorProfileReadTool())
+    # ADR-0067 T2 (Burst 280) — decompose_intent.v1. LLM-driven
+    # cross-domain orchestrator decomposer. Reads config/domains/*.yaml
+    # at call time, prompts the local model with the live domain
+    # catalog, parses JSON output, classifies each sub-intent's
+    # routability based on registry status + confidence threshold.
+    # T3 (route_to_domain.v1) consumes the output's 'routable'
+    # sub-intents to dispatch via delegate.v1.
+    registry.register(DecomposeIntentTool())
     # Phase G.1.A — tree_sitter_query.v1 (Burst 60). Read-only AST-
     # level structural queries via tree-sitter S-expressions. Lazy-
     # imports tree_sitter + tree_sitter_languages so daemon boots
