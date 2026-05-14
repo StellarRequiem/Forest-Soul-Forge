@@ -314,6 +314,13 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     #     through dispatcher logs.
     "agent_passport_minted",
     "agent_passport_refused",
+    # ADR-0070 T1 (Burst 286) — voice I/O substrate lifecycle.
+    # Three event types covering ASR success, TTS success, and
+    # either-direction failure. Transcripts go in event_data so the
+    # encryption-at-rest envelope (ADR-0050 T3) covers them when on.
+    "voice_transcribed",
+    "voice_synthesized",
+    "voice_failed",
     # ADR-0067 T3 (Burst 281) — cross-domain orchestrator routing.
     # Emitted by route_to_domain.v1 BEFORE the delegate call so the
     # audit chain records the orchestrator's routing decision
