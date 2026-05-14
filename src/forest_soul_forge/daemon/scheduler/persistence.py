@@ -36,6 +36,12 @@ class PersistedState:
     but uses primitives only — datetime → ISO string, bool → int.
     The scheduler runtime is responsible for the typed conversion
     in both directions; the repo only speaks SQLite.
+
+    ADR-0075 T1 (B293): ``budget_per_minute`` mirrors the v22
+    column added to ``scheduled_task_state``. Default 6 matches the
+    column default so callers (tests, hydration paths) that don't
+    specify it pick up the same value the schema would.
+    Enforcement logic arrives in T3 — T1 only persists/reads.
     """
 
     task_id: str
@@ -48,6 +54,7 @@ class PersistedState:
     total_failures: int
     last_failure_reason: str | None
     last_run_outcome: str | None
+    budget_per_minute: int = 6
 
 
 class SchedulerStateRepo:
@@ -77,7 +84,9 @@ class SchedulerStateRepo:
             "SELECT task_id, last_run_at, next_run_at, "
             "consecutive_failures, circuit_breaker_open, "
             "total_runs, total_successes, total_failures, "
-            "last_failure_reason, last_run_outcome "
+            "last_failure_reason, last_run_outcome, "
+            # ADR-0075 T1 (v22, B293) — budget column.
+            "budget_per_minute "
             "FROM scheduled_task_state"
         )
         rows = cur.fetchall()
@@ -94,6 +103,7 @@ class SchedulerStateRepo:
                 total_failures=int(r[7]),
                 last_failure_reason=r[8],
                 last_run_outcome=r[9],
+                budget_per_minute=int(r[10]),
             )
         return out
 
@@ -106,13 +116,22 @@ class SchedulerStateRepo:
         serially.
         """
         now_iso = datetime.now(timezone.utc).isoformat()
+        # ADR-0075 T1 (v22, B293): budget_per_minute round-trips
+        # through upsert so operator-adjusted rate caps survive
+        # restart. The ON CONFLICT clause deliberately does NOT
+        # update budget_per_minute from `excluded` — the operator
+        # is the authority on budget, and a scheduler-driven
+        # outcome upsert shouldn't stomp an out-of-band budget
+        # change. Initial INSERT respects the supplied value; the
+        # `fsf scheduler budget` CLI (T4) edits the column directly.
         self._conn.execute(
             "INSERT INTO scheduled_task_state ("
             "  task_id, last_run_at, next_run_at, "
             "  consecutive_failures, circuit_breaker_open, "
             "  total_runs, total_successes, total_failures, "
-            "  last_failure_reason, last_run_outcome, updated_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "  last_failure_reason, last_run_outcome, updated_at, "
+            "  budget_per_minute"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(task_id) DO UPDATE SET "
             "  last_run_at=excluded.last_run_at, "
             "  next_run_at=excluded.next_run_at, "
@@ -136,6 +155,7 @@ class SchedulerStateRepo:
                 state.last_failure_reason,
                 state.last_run_outcome,
                 now_iso,
+                state.budget_per_minute,
             ),
         )
         self._conn.commit()

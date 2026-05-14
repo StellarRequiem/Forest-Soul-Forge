@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 21
+SCHEMA_VERSION: int = 22
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -535,12 +535,26 @@ DDL_STATEMENTS: tuple[str, ...] = (
         total_failures           INTEGER NOT NULL DEFAULT 0,
         last_failure_reason      TEXT,
         last_run_outcome         TEXT,
-        updated_at               TEXT NOT NULL
+        updated_at               TEXT NOT NULL,
+        -- ADR-0075 T1 (v22, B293): per-task dispatch-rate cap.
+        -- Stored on state (not YAML config) because operators can
+        -- adjust budget for a misbehaving task at runtime without
+        -- editing config + reloading. 0 = indefinite soft-pause.
+        -- Default 6 = ten-second floor between dispatches.
+        budget_per_minute        INTEGER NOT NULL DEFAULT 6
+            CHECK (budget_per_minute >= 0)
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_scheduled_task_state_breaker "
         "ON scheduled_task_state(circuit_breaker_open) "
         "WHERE circuit_breaker_open = 1;",
+    # ADR-0075 T1 (v22, B293): partial index on next_run_at to
+    # support `/scheduler/status` "what's due next" reads and the
+    # future SQL-pull dispatch path. Never-run tasks have
+    # next_run_at IS NULL and don't belong in the due set.
+    "CREATE INDEX IF NOT EXISTS idx_scheduled_task_state_next_run_at "
+        "ON scheduled_task_state(next_run_at) "
+        "WHERE next_run_at IS NOT NULL;",
     # ADR-0043 follow-up #2 (Burst 113): agent_plugin_grants.
     # Post-birth grants of MCP plugin access without rebirthing the
     # agent (constitution_hash is immutable per agent — see CLAUDE.md
@@ -1356,5 +1370,28 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "ALTER TABLE memory_entries "
         "ADD COLUMN content_encrypted INTEGER NOT NULL DEFAULT 0 "
         "CHECK (content_encrypted IN (0, 1));",
+    ),
+    # v21 → v22: ADR-0075 T1 (B293) scheduler scale substrate.
+    # Adds (a) `budget_per_minute` rate-cap column on
+    # `scheduled_task_state` and (b) a partial index on
+    # `next_run_at` for /scheduler/status "what's due" reads and
+    # the future SQL-pull dispatch path. Pure additive:
+    #   * existing rows pick up budget_per_minute=6 at migration
+    #     time (the ten-second floor between dispatches that ADR
+    #     Decision 2 defines as the default).
+    #   * CHECK constraint pinned to >= 0 so 0 (soft-pause) is
+    #     legal and negative values are rejected.
+    #   * Index is partial — never-run tasks have next_run_at
+    #     IS NULL and aren't in the due set.
+    # Enforcement logic for the budget arrives in T3. T1 ships
+    # the schema so the data model is in place ahead of the
+    # enforcement code.
+    22: (
+        "ALTER TABLE scheduled_task_state "
+        "ADD COLUMN budget_per_minute INTEGER NOT NULL DEFAULT 6 "
+        "CHECK (budget_per_minute >= 0);",
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_task_state_next_run_at "
+        "ON scheduled_task_state(next_run_at) "
+        "WHERE next_run_at IS NOT NULL;",
     ),
 }

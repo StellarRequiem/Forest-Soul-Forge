@@ -527,7 +527,15 @@ def test_tool_call_runner_handles_agent_lookup_failure():
 # ---- Persistence (Burst 90) ---------------------------------------------
 
 def _fresh_persistence_db():
-    """Build an in-memory SQLite with the v13 schema for testing."""
+    """Build an in-memory SQLite with the current schema for testing.
+
+    ADR-0075 T1 (v22, B293) bumped this DDL to include
+    `budget_per_minute` and the matching partial index so the
+    persistence module's SELECT/INSERT against the new column
+    succeed under test. Schema kept inline (not loaded from
+    `registry/schema.py`) so the test stays a focused
+    persistence-layer probe rather than a full registry boot.
+    """
     import sqlite3
     conn = sqlite3.connect(":memory:")
     # Apply only the scheduled_task_state DDL — no need for the full
@@ -544,9 +552,16 @@ def _fresh_persistence_db():
             total_failures           INTEGER NOT NULL DEFAULT 0,
             last_failure_reason      TEXT,
             last_run_outcome         TEXT,
-            updated_at               TEXT NOT NULL
+            updated_at               TEXT NOT NULL,
+            budget_per_minute        INTEGER NOT NULL DEFAULT 6
+                CHECK (budget_per_minute >= 0)
         )
     """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scheduled_task_state_next_run_at "
+        "ON scheduled_task_state(next_run_at) "
+        "WHERE next_run_at IS NOT NULL"
+    )
     return conn
 
 

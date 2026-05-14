@@ -220,6 +220,16 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "scheduled_task_failed",
     "scheduled_task_circuit_breaker_tripped",
     "scheduled_task_circuit_breaker_reset",
+    # ADR-0075 T1 (B293) — scheduler scale substrate. Fires when
+    # either (a) a specific task's budget_per_minute gets enforced
+    # (reason="budget_enforced", task_id populated) or (b) the
+    # dispatch loop's wall-clock per tick exceeds the configured
+    # threshold (reason="tick_over_budget", task_id null,
+    # tick_duration_ms populated). Substrate registered in T1; the
+    # emit sites land in T2 (tick-over-budget) and T3 (per-task
+    # enforcement). Operators looking for "is the scheduler keeping
+    # up?" / "which tasks are misbehaving?" pull this from the chain.
+    "scheduler_lag",
     # ADR-0045 — agent posture / trust-light system. Posture transitions
     # are governance state changes, not tool calls; distinct event so the
     # audit trail records *who* changed posture and *when*.
