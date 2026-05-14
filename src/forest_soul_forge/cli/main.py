@@ -285,6 +285,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _encrypt_add_subparser(sub)
 
+    # `fsf operator ...` — ADR-0068 T1 (B277) operator profile
+    # show / verify / init. The substrate every domain reads to
+    # know who the operator is.
+    from forest_soul_forge.cli.operator_cmd import (
+        add_subparser as _operator_add_subparser,
+    )
+    _operator_add_subparser(sub)
+
     return parser
 
 

@@ -1,0 +1,51 @@
+# Example operator profile (ADR-0068 T1).
+#
+# Copy this to data/operator/profile.yaml and edit before first
+# daemon boot under the personal-context-store substrate, or run
+# `fsf operator profile init --operator-id ... --name ... --email ...`
+# to generate from CLI flags.
+#
+# The real profile lives at data/operator/profile.yaml and is
+# gitignored (per data/* in .gitignore) — operator-personal facts
+# don't belong in source control. This file is the schema reference
+# only.
+#
+# Encryption-at-rest (ADR-0050 T5) covers this file transparently
+# when FSF_AT_REST_ENCRYPTION=true. The on-disk filename becomes
+# profile.yaml.enc; loader detects + decrypts.
+schema_version: 1
+operator:
+  # Stable, human-readable identifier. Shows up in audit chain
+  # event data and cross-domain handoffs. Not a UUID.
+  operator_id: example-deployment-01
+
+  # Full legal/given name. Used in formal contexts + audit attribution.
+  name: Example Operator
+
+  # How agents address you in conversation. Defaults to `name` when
+  # omitted; explicit different value supported.
+  preferred_name: Example
+
+  # Primary contact email. Reality Anchor seeds a ground-truth fact
+  # from this so agents can't hallucinate a different address.
+  email: example@example.com
+
+  # IANA timezone name. Validate with `python3 -c
+  # "from zoneinfo import ZoneInfo; ZoneInfo('<name>')"`.
+  timezone: America/New_York
+
+  # BCP-47 locale. Drives LLM prompt language + date/currency
+  # formatting in domains that surface user-facing text.
+  locale: en-US
+
+  # Standard work hours in local time. Daily Life OS Morning
+  # Coordinator (queued domain D2) schedules the briefing before
+  # `start`; time_steward protects this block against meeting
+  # bloat.
+  work_hours:
+    start: "09:00"
+    end: "17:00"
+
+# Stamped at creation; loader preserves on subsequent writes.
+created_at: "2026-05-14T08:30:00Z"
+updated_at: "2026-05-14T08:30:00Z"
