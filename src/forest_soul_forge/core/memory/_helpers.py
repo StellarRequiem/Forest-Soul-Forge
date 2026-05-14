@@ -215,7 +215,7 @@ def _tokenize_for_overlap(content: str) -> frozenset[str]:
     )
 
 
-def _row_to_entry(row) -> MemoryEntry:
+def _row_to_entry(row, *, encryption_config=None) -> MemoryEntry:
     # The v7 disclosed_* columns and v11 claim_type/confidence/
     # last_challenged_at columns may be absent on a row from an older
     # in-memory test fixture or a registry that hasn't been migrated
@@ -223,13 +223,39 @@ def _row_to_entry(row) -> MemoryEntry:
     # every shape — important for Memory unit tests that build their
     # own SQLite without going through Registry.bootstrap.
     keys = row.keys() if hasattr(row, "keys") else ()
+
+    # ADR-0050 T4 (B269): at-rest encryption flag. When set to 1,
+    # the ``content`` column holds a base64-encoded envelope produced
+    # by at_rest_encryption.encrypt_text; decrypt transparently so
+    # callers always see plaintext. Pre-T4 rows have flag=0 (or the
+    # column is absent on rows from very old in-memory test fixtures)
+    # and pass through unmodified. Defensive on column presence so
+    # tests that build their own SQLite without running the v21
+    # migration still work.
+    content_raw = row["content"]
+    content_encrypted = (
+        int(row["content_encrypted"]) if "content_encrypted" in keys else 0
+    )
+    if content_encrypted == 1:
+        if encryption_config is None:
+            raise RuntimeError(
+                f"memory entry {row['entry_id']} is encrypted "
+                "(content_encrypted=1) but no encryption_config was "
+                "wired into the Memory instance. Set FSF_AT_REST_ENCRYPTION "
+                "and ensure the master key is loaded."
+            )
+        from forest_soul_forge.core.at_rest_encryption import decrypt_text
+        content_plaintext = decrypt_text(content_raw, encryption_config)
+    else:
+        content_plaintext = content_raw
+
     return MemoryEntry(
         entry_id=row["entry_id"],
         instance_id=row["instance_id"],
         agent_dna=row["agent_dna"],
         layer=row["layer"],
         scope=row["scope"],
-        content=row["content"],
+        content=content_plaintext,
         content_digest=row["content_digest"],
         tags=tuple(json.loads(row["tags_json"] or "[]")),
         consented_to=tuple(json.loads(row["consented_to_json"] or "[]")),

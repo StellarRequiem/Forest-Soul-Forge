@@ -11,7 +11,7 @@ because the canonical source of truth is on disk.
 """
 from __future__ import annotations
 
-SCHEMA_VERSION: int = 20
+SCHEMA_VERSION: int = 21
 
 # PRAGMA settings applied on every connection open. WAL mode lets readers not
 # block writers; foreign_keys=ON is off by default in SQLite for historical
@@ -262,6 +262,16 @@ DDL_STATEMENTS: tuple[str, ...] = (
         confidence      TEXT NOT NULL DEFAULT 'medium'
                           CHECK (confidence IN ('low', 'medium', 'high')),
         last_challenged_at TEXT,
+        -- v21 (ADR-0050 T4 / B269) — at-rest encryption flag.
+        -- When 1, the ``content`` column holds an AES-256-GCM
+        -- envelope (base64-encoded JSON of alg/kid/nonce/ct from
+        -- core.at_rest_encryption.encrypt_text). When 0
+        -- (default), content is plaintext exactly as pre-T4.
+        -- The flag is read at recall time; mixed plaintext +
+        -- encrypted entries coexist on the same table per ADR
+        -- Decision 6.
+        content_encrypted INTEGER NOT NULL DEFAULT 0
+                          CHECK (content_encrypted IN (0, 1)),
         FOREIGN KEY (instance_id) REFERENCES agents(instance_id),
         FOREIGN KEY (disclosed_from_entry) REFERENCES memory_entries(entry_id)
     );
@@ -1332,5 +1342,19 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
             "ON reality_anchor_corrections(last_agent_dna);",
         "CREATE INDEX IF NOT EXISTS idx_reality_anchor_corrections_count "
             "ON reality_anchor_corrections(repetition_count DESC);",
+    ),
+    # v20 → v21: ADR-0050 T4 (B269) at-rest encryption flag on
+    # memory_entries. content_encrypted=0 (default) → plaintext
+    # (legacy + opt-out path); 1 → AES-256-GCM envelope stored
+    # in the content column. Mixed plaintext+encrypted entries
+    # coexist per ADR Decision 6. SQLite ALTER TABLE ADD COLUMN
+    # supports NOT NULL only when a DEFAULT is supplied — the
+    # default populates existing rows at migration time, so
+    # every pre-T4 entry comes through tagged as plaintext (its
+    # actual state).
+    21: (
+        "ALTER TABLE memory_entries "
+        "ADD COLUMN content_encrypted INTEGER NOT NULL DEFAULT 0 "
+        "CHECK (content_encrypted IN (0, 1));",
     ),
 }

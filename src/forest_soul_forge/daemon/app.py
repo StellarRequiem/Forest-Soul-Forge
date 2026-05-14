@@ -645,31 +645,60 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         # the operator sees the diagnostic. Strict-mode daemons (a
         # future ADR-0050 T6) will refuse to boot when the key can't
         # be obtained.
-        try:
-            from forest_soul_forge.security.master_key import (
-                configured_backend_name as _configured_master_backend,
-                resolve_master_key as _resolve_master_key,
-            )
-            _master_key = _resolve_master_key()
-            app.state.master_key = _master_key
-            startup_diagnostics.append(
-                {"component": "encryption_at_rest",
-                 "status": "ok",
-                 "message": (
-                     f"master key loaded from {_configured_master_backend()} "
-                     "backend; consumers (SQLCipher / audit-chain / "
-                     "memory body) wire up in T2-T4."
-                 )}
-            )
-        except Exception as e:  # noqa: BLE001
+        # ADR-0050 T4 (B269) gate refinement: only stash the master
+        # key on app.state when FSF_AT_REST_ENCRYPTION is on. Pre-T4
+        # B266 set it unconditionally on any successful resolution,
+        # which would have caused deps.py's Memory + T3's audit chain
+        # wiring to silently start encrypting even when the operator
+        # didn't opt in. Now the env-var gate is authoritative: env
+        # var off = master_key never reaches app.state, and every
+        # downstream consumer's ``getattr(app.state, "master_key",
+        # None)`` returns None.
+        if _at_rest_on:
+            try:
+                from forest_soul_forge.security.master_key import (
+                    configured_backend_name as _configured_master_backend,
+                    resolve_master_key as _resolve_master_key,
+                )
+                # ``_registry_master_key`` was already resolved above as
+                # part of the T2 gate; reuse it so we don't double-load.
+                # If the env var is on but the T2 path skipped key
+                # resolution (e.g. tests inject a daemon without the
+                # T2 block), resolve here as a safety net.
+                _master_key = (
+                    _registry_master_key
+                    if _registry_master_key is not None
+                    else _resolve_master_key()
+                )
+                app.state.master_key = _master_key
+                startup_diagnostics.append(
+                    {"component": "encryption_at_rest",
+                     "status": "ok",
+                     "message": (
+                         f"master key loaded from {_configured_master_backend()} "
+                         "backend; consumers (registry SQLCipher / audit-chain / "
+                         "memory body) wire up via the same env var."
+                     )}
+                )
+            except Exception as e:  # noqa: BLE001
+                app.state.master_key = None
+                startup_diagnostics.append(
+                    {"component": "encryption_at_rest",
+                     "status": "degraded",
+                     "message": (
+                         f"FSF_AT_REST_ENCRYPTION=true but master key "
+                         f"unavailable: {type(e).__name__}: {e}. Daemon "
+                         "will run with the legacy plaintext posture."
+                     )}
+                )
+        else:
             app.state.master_key = None
             startup_diagnostics.append(
                 {"component": "encryption_at_rest",
-                 "status": "degraded",
+                 "status": "off",
                  "message": (
-                     f"master key unavailable: {type(e).__name__}: {e}. "
-                     "At-rest encryption disabled; daemon will run "
-                     "with the legacy plaintext posture."
+                     "FSF_AT_REST_ENCRYPTION not set; legacy plaintext "
+                     "posture (registry, audit chain, memory bodies)."
                  )}
             )
         # ADR-0049 T5+T6 (B244): wire the sign-on-emit + verify-on-replay

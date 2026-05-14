@@ -106,9 +106,23 @@ class Memory(
     class declaration that assembles the mixins. That residual
     surface is the 'core memory' trust surface per ADR-0040 §1
     and is intentionally not extracted — it IS the cohesive core.
+
+    ADR-0050 T4 (B269): optional at-rest encryption. When
+    ``encryption_config`` is set, :meth:`append` encrypts the
+    ``content`` string before INSERT and stores
+    ``content_encrypted=1``; :meth:`recall` (and ``get``)
+    detect the flag and decrypt transparently. Mixed plaintext +
+    encrypted entries on the same table are explicitly supported
+    per ADR Decision 6 — operators turn on encryption mid-
+    lifecycle, old entries stay plaintext (their flag is 0),
+    new entries land encrypted (flag 1).
     """
 
     conn: sqlite3.Connection
+    # ADR-0050 T4 (B269). None = pre-T4 plaintext path. When set,
+    # all NEW memory writes encrypt content + tag the row with
+    # content_encrypted=1; reads transparently decrypt flagged rows.
+    encryption_config: Any = None
 
     # ---- write path ----------------------------------------------------
     def append(
@@ -168,22 +182,41 @@ class Memory(
                 )
 
         entry_id = str(uuid.uuid4())
+        # ADR-0050 T4 (B269): content_digest is computed over the
+        # PLAINTEXT content, NOT the encrypted form. This preserves
+        # the property that the digest is a stable identity over the
+        # plaintext payload across key rotations and across the
+        # plaintext-vs-encrypted opt-in. Verifiers and any callers
+        # that compute their own digest on retrieved content see the
+        # same value regardless of the row's at-rest encryption flag.
         digest = _sha256(content)
         created_at = _now_iso()
+        # ADR-0050 T4 (B269): encrypt the content under the master
+        # key + tag the row when ``encryption_config`` is set. Old
+        # rows stay plaintext (flag=0); new rows tag flag=1 so reads
+        # know which payload column to interpret.
+        content_for_storage: str = content
+        content_encrypted_flag: int = 0
+        if self.encryption_config is not None:
+            from forest_soul_forge.core.at_rest_encryption import (
+                encrypt_text,
+            )
+            content_for_storage = encrypt_text(content, self.encryption_config)
+            content_encrypted_flag = 1
         self.conn.execute(
             """
             INSERT INTO memory_entries (
                 entry_id, instance_id, agent_dna, layer, scope,
                 content, content_digest, tags_json, consented_to_json,
-                created_at, claim_type, confidence
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                created_at, claim_type, confidence, content_encrypted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 entry_id, instance_id, agent_dna, layer, scope,
-                content, digest,
+                content_for_storage, digest,
                 json.dumps(list(tags), separators=(",", ":")),
                 json.dumps(list(consented_to), separators=(",", ":")),
-                created_at, claim_type, confidence,
+                created_at, claim_type, confidence, content_encrypted_flag,
             ),
         )
         return MemoryEntry(
@@ -251,7 +284,7 @@ class Memory(
         )
         params.append(int(limit))
         rows = self.conn.execute(sql, params).fetchall()
-        return [_row_to_entry(r) for r in rows]
+        return [_row_to_entry(r, encryption_config=self.encryption_config) for r in rows]
 
     def recall_visible_to(
         self,
@@ -385,7 +418,7 @@ class Memory(
         )
         params.append(int(limit))
         rows = self.conn.execute(sql, params).fetchall()
-        return [_row_to_entry(r) for r in rows]
+        return [_row_to_entry(r, encryption_config=self.encryption_config) for r in rows]
 
     # ---- consent path (ADR-0022 v0.2) ----------------------------------
     # Methods extracted to _consents_mixin.py per ADR-0040 §7 (Burst 73).
@@ -407,7 +440,7 @@ class Memory(
             "SELECT * FROM memory_entries WHERE entry_id=?;",
             (entry_id,),
         ).fetchone()
-        return _row_to_entry(row) if row is not None else None
+        return _row_to_entry(row, encryption_config=self.encryption_config) if row is not None else None
 
     # ---- v11 epistemic helpers (ADR-0027-amendment §7.3 + §7.4) -----------
     # flag_contradiction / set_contradiction_state /

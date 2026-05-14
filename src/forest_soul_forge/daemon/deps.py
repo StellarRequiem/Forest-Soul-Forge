@@ -181,8 +181,24 @@ def build_or_get_tool_dispatcher(app):
     # ADR-0022 v0.1: build a Memory bound to the registry's connection.
     # Single-writer SQLite discipline is preserved by the daemon's
     # write lock — the dispatcher only touches Memory while holding it.
+    # ADR-0050 T4 (B269): when at-rest encryption is on (master key
+    # available), wire the EncryptionConfig so memory writes encrypt
+    # content + reads decrypt transparently. ``master_key`` is
+    # populated by the lifespan only when FSF_AT_REST_ENCRYPTION=true
+    # AND the master key resolved cleanly (otherwise the daemon
+    # already raised at startup). None = pre-T4 plaintext path.
     from forest_soul_forge.core.memory import Memory
-    memory = Memory(conn=fsf_registry._conn)  # noqa: SLF001 — internal access by design
+    _master_key = getattr(app.state, "master_key", None)
+    _enc_config = None
+    if _master_key is not None:
+        from forest_soul_forge.core.at_rest_encryption import (
+            EncryptionConfig as _EncryptionConfig,
+        )
+        _enc_config = _EncryptionConfig(master_key=_master_key)
+    memory = Memory(
+        conn=fsf_registry._conn,  # noqa: SLF001 — internal access by design
+        encryption_config=_enc_config,
+    )
     # ADR-0033 A6 + B3: PrivClient (or None) flows from app.state into
     # the dispatcher and is threaded into every ToolContext. The
     # privileged tools (isolate_process.v1, dynamic_policy.v1,

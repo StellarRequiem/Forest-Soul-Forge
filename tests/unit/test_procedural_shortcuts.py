@@ -38,7 +38,7 @@ from forest_soul_forge.registry.tables.procedural_shortcuts import (
 # Schema version + table presence
 # ---------------------------------------------------------------------------
 
-def test_schema_version_is_20():
+def test_schema_version_is_21():
     """v16 was introduced by ADR-0054 T1. Subsequent migrations:
     v17 (ADR-0060 T1, B219, agent_catalog_grants), v18 (ADR-0053
     T1, B235, agent_plugin_grants.tool_name), v19 (ADR-0049 T4,
@@ -46,7 +46,7 @@ def test_schema_version_is_20():
     reality_anchor_corrections). Each migration bump should add a
     clear MIGRATIONS[N] entry + update DDL_STATEMENTS — the test
     itself bumps to track."""
-    assert SCHEMA_VERSION == 20
+    assert SCHEMA_VERSION == 21
 
 
 def test_fresh_install_creates_procedural_shortcuts_table(tmp_path: Path):

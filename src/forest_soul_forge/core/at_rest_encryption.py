@@ -306,6 +306,94 @@ def decrypt_event_data(
     return data
 
 
+def encrypt_text(plaintext: str, config: EncryptionConfig) -> str:
+    """Encrypt a single string under the master key.
+
+    ADR-0050 T4 (B269): used for the application-layer memory body
+    encryption that lives BENEATH the SQLCipher layer (T2). The
+    defense-in-depth posture: a hypothetical SQLCipher break still
+    leaves the operator's memory bodies sealed by this layer, and
+    vice versa.
+
+    Output is a single base64 string carrying the canonical-JSON
+    of an envelope dict (alg/kid/nonce/ct). One string round-trips
+    cleanly through the SQLite TEXT column without escaping
+    surprises — caller stores this exact string in the ``content``
+    column and sets ``content_encrypted=1``.
+
+    Plaintext can be any unicode string; encoded as UTF-8 before
+    encrypting.
+    """
+    if not isinstance(plaintext, str):
+        raise EncryptionError(
+            f"encrypt_text requires str; got {type(plaintext).__name__}"
+        )
+    aesgcm = _aesgcm(config.master_key)
+    nonce = os.urandom(NONCE_LENGTH_BYTES)
+    ct = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+    envelope = {
+        "alg":   ALG_AES_256_GCM,
+        "kid":   config.kid,
+        "nonce": base64.b64encode(nonce).decode("ascii"),
+        "ct":    base64.b64encode(ct).decode("ascii"),
+    }
+    return base64.b64encode(
+        json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+    ).decode("ascii")
+
+
+def decrypt_text(ciphertext_b64: str, config: EncryptionConfig) -> str:
+    """Recover plaintext string from an ``encrypt_text`` output.
+
+    Same failure taxonomy as :func:`decrypt_event_data` —
+    :class:`DecryptError` on tampered ciphertext, wrong key,
+    unknown kid, or malformed envelope.
+    """
+    if not isinstance(ciphertext_b64, str):
+        raise DecryptError(
+            f"decrypt_text requires str input; got {type(ciphertext_b64).__name__}"
+        )
+    try:
+        envelope_json = base64.b64decode(
+            ciphertext_b64.encode("ascii"), validate=True,
+        )
+        envelope = json.loads(envelope_json.decode("utf-8"))
+    except Exception as e:
+        raise DecryptError(
+            f"encrypt_text output is malformed: {e}"
+        ) from e
+    if not isinstance(envelope, dict):
+        raise DecryptError(
+            f"decrypted envelope must be a JSON object; got {type(envelope).__name__}"
+        )
+    if envelope.get("alg") != ALG_AES_256_GCM:
+        raise DecryptError(
+            f"unsupported encryption alg {envelope.get('alg')!r}"
+        )
+    if envelope.get("kid") != config.kid:
+        raise DecryptError(
+            f"entry encrypted under kid={envelope.get('kid')!r}, "
+            f"but only kid={config.kid!r} is loaded"
+        )
+    try:
+        nonce = base64.b64decode(envelope["nonce"].encode("ascii"), validate=True)
+        ct = base64.b64decode(envelope["ct"].encode("ascii"), validate=True)
+    except Exception as e:
+        raise DecryptError(f"envelope nonce/ct not valid base64: {e}") from e
+    if len(nonce) != NONCE_LENGTH_BYTES:
+        raise DecryptError(
+            f"nonce must be {NONCE_LENGTH_BYTES} bytes; got {len(nonce)}"
+        )
+    aesgcm = _aesgcm(config.master_key)
+    try:
+        plaintext = aesgcm.decrypt(nonce, ct, None)
+    except Exception as e:
+        raise DecryptError(
+            f"AES-GCM decrypt failed (tampering or wrong key): {e}"
+        ) from e
+    return plaintext.decode("utf-8")
+
+
 def is_encrypted_entry(obj: dict[str, Any]) -> bool:
     """True if the on-disk audit-chain object has the encryption
     envelope.

@@ -61,12 +61,12 @@ def reg(tmp_path: Path):
 
 # ---- schema layer ----------------------------------------------------------
 
-def test_schema_version_is_20():
+def test_schema_version_is_21():
     """Locked at v20 post-Burst 255 (ADR-0063 T6, reality_anchor_corrections).
     Function name moved through v14 → v15 → v16 → v17 → v18 →
     v19 (Burst 243, agents.public_key) → v20 (Burst 255). Renamed
     each time for honesty."""
-    assert REGISTRY_SCHEMA_VERSION == 20
+    assert REGISTRY_SCHEMA_VERSION == 21
 
 
 def test_agent_plugin_grants_table_exists(reg: Registry):
