@@ -367,6 +367,171 @@ class LocalWhisperBackend:
         )
 
 
+class LocalPiperBackend:
+    """Reference TTS backend wrapping Piper TTS.
+
+    Lazy-imports the `piper-tts` Python binding at first
+    synthesize() call. Module load doesn't pull the dependency —
+    operators not enabling TTS pay nothing.
+
+    Per ADR-0070 D2, this is the canonical sovereign default for
+    TTS. CPU-only inference (~150-300ms for short utterances on
+    M-series). Piper voices are .onnx model files (~20-60MB each)
+    operator-supplied; setup script (T7) downloads a default
+    en_US voice. Multi-voice support: each .onnx file in the
+    plugin's voices/ dir is a selectable voice_id.
+
+    Audio output format: WAV 22kHz mono PCM (Piper's native).
+    """
+
+    backend_id: str = "forest-voice-piper"
+    supported_methods: tuple[str, ...] = ("synthesize",)
+    # Synthesize doesn't accept input formats — TTS is text-in,
+    # audio-out — so this stays empty for TTS-only backends.
+    supported_input_formats: tuple[str, ...] = ()
+    # Output formats Piper natively produces.
+    supported_output_formats: tuple[str, ...] = ("wav",)
+
+    def __init__(
+        self,
+        voices_dir: Optional[Path] = None,
+        *,
+        default_voice_id: str = "en_US-amy-medium",
+    ):
+        """Args:
+          voices_dir: filesystem dir containing .onnx voice model
+            files + their .onnx.json configs. Default
+            ~/.forest/voice-models/piper/. Each .onnx file's stem
+            is a selectable voice_id.
+          default_voice_id: voice_id to use when caller passes
+            voice_id=None.
+        """
+        if voices_dir is None:
+            voices_dir = (
+                Path.home() / ".forest" / "voice-models" / "piper"
+            )
+        self.voices_dir = voices_dir
+        self.default_voice_id = default_voice_id
+        # Per-voice cached PiperVoice instances. Loading a voice
+        # is ~150ms; cache keeps subsequent synthesize calls fast.
+        self._voices_cache: dict[str, Any] = {}
+
+    def transcribe(
+        self,
+        audio_bytes: bytes,
+        *,
+        audio_format: str,
+        language_hint: Optional[str] = None,
+        timeout_s: float = 60.0,
+    ) -> "VoiceTranscript":
+        """LocalPiperBackend is TTS-only. ASR lives in
+        forest-voice-whisper-cpp."""
+        raise VoiceBackendUnavailable(
+            f"{self.backend_id} is TTS-only; transcribe() "
+            f"not supported. Use forest-voice-whisper-cpp or "
+            f"another ASR backend."
+        )
+
+    def synthesize(
+        self,
+        text: str,
+        *,
+        voice_id: Optional[str] = None,
+        output_format: str = "wav",
+        timeout_s: float = 60.0,
+    ) -> bytes:
+        """Generate WAV audio from text using a Piper voice.
+
+        Args:
+          text: input text. 1-5000 chars.
+          voice_id: selects which .onnx voice file. None →
+            self.default_voice_id.
+          output_format: only "wav" supported in T5; convert
+            elsewhere if needed.
+        """
+        if not isinstance(text, str) or not text.strip():
+            raise VoiceDecodeError("text must be a non-empty string")
+        if len(text) > 5000:
+            raise VoiceDecodeError(
+                f"text too long ({len(text)} chars > 5000); split into "
+                "multiple synthesize calls or summarize first"
+            )
+        if output_format not in self.supported_output_formats:
+            raise VoiceFormatUnsupported(
+                f"{self.backend_id} doesn't produce format "
+                f"{output_format!r}; supported: "
+                f"{sorted(self.supported_output_formats)}"
+            )
+
+        voice_id = voice_id or self.default_voice_id
+        voice_path = self.voices_dir / f"{voice_id}.onnx"
+        if not voice_path.exists():
+            raise VoiceBackendUnavailable(
+                f"piper voice file not found: {voice_path}. "
+                f"Run ./setup-voice.command to download the canonical "
+                f"en_US voice, or supply your own .onnx + .onnx.json "
+                f"under {self.voices_dir}"
+            )
+
+        # Lazy-import piper-tts. The Python piper-tts package
+        # bundles its own .onnx inference; no system dep on
+        # libonnxruntime needed.
+        voice = self._voices_cache.get(voice_id)
+        if voice is None:
+            try:
+                from piper.voice import PiperVoice  # type: ignore[import-not-found]
+                voice = PiperVoice.load(str(voice_path))
+                self._voices_cache[voice_id] = voice
+            except ImportError as e:
+                raise VoiceBackendUnavailable(
+                    f"piper-tts not installed. Install via "
+                    f"`pip install piper-tts`. Original error: {e}"
+                ) from e
+            except Exception as e:
+                raise VoiceBackendUnavailable(
+                    f"piper voice load failed for {voice_id}: "
+                    f"{type(e).__name__}: {e}"
+                ) from e
+
+        # Synthesize to in-memory bytes via a BytesIO file-like.
+        # Piper writes a WAV header + PCM payload.
+        import io
+        import wave
+        t0 = time.perf_counter()
+        try:
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wav_file:
+                # PiperVoice.synthesize streams audio chunks into a
+                # writable WAV file object. Sample rate + width come
+                # from the voice's config.
+                voice.synthesize(text, wav_file)
+            audio_bytes = buf.getvalue()
+        except Exception as e:
+            raise VoiceDecodeError(
+                f"piper synthesize failed: {type(e).__name__}: {e}"
+            ) from e
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+
+        if elapsed_ms > timeout_s * 1000:
+            # Inference completed but slowly — still return.
+            pass
+
+        return audio_bytes
+
+    def available_voices(self) -> list[str]:
+        """List voice_ids available in voices_dir.
+
+        Used by /voice/status to surface the operator-installed
+        voice catalog. A voice is "available" if its .onnx file
+        exists; the .onnx.json config is checked at load time.
+        """
+        if not self.voices_dir.exists():
+            return []
+        return sorted(
+            p.stem for p in self.voices_dir.glob("*.onnx")
+        )
+
+
 def _normalize_pywhispercpp_segments(raw: Any) -> list[dict]:
     """Normalize pywhispercpp Segment objects (or list thereof)
     into the unified {text, start, end, avg_logprob, lang} dict

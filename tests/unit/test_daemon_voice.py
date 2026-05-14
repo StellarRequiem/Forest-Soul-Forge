@@ -134,23 +134,27 @@ def _entry(seq: int, event_type: str, ts: str = None):
 
 
 def test_count_voice_events_window_filtering():
+    """B288 extended the tuple to include synthesized."""
     now = datetime.now(timezone.utc)
     recent_ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     old_ts = (now - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
     chain = _FakeChain([
         _entry(1, "voice_transcribed", recent_ts),
         _entry(2, "voice_transcribed", recent_ts),
-        _entry(3, "voice_failed", recent_ts),
-        _entry(4, "voice_transcribed", old_ts),  # outside window
-        _entry(5, "tool_call_succeeded", recent_ts),  # ignored
+        _entry(3, "voice_synthesized", recent_ts),
+        _entry(4, "voice_failed", recent_ts),
+        _entry(5, "voice_transcribed", old_ts),  # outside window
+        _entry(6, "tool_call_succeeded", recent_ts),  # ignored
     ])
-    transcribed, failed = _count_voice_events_24h(chain)
+    transcribed, synthesized, failed = _count_voice_events_24h(chain)
     assert transcribed == 2
+    assert synthesized == 1
     assert failed == 1
 
 
 def test_count_voice_events_empty_chain():
     chain = _FakeChain([])
-    transcribed, failed = _count_voice_events_24h(chain)
+    transcribed, synthesized, failed = _count_voice_events_24h(chain)
     assert transcribed == 0
+    assert synthesized == 0
     assert failed == 0
