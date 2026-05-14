@@ -314,6 +314,19 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     #     through dispatcher logs.
     "agent_passport_minted",
     "agent_passport_refused",
+    # ADR-0072 T1 (Burst 290) — behavior provenance layer changes.
+    # Fires whenever any of the four rule layers mutates:
+    # hardcoded_handoff (engineer commit) / constitutional
+    # (operator at birth) / preference (operator-edited) /
+    # learned (agent auto-edit). event_data carries:
+    #   layer, source (commit_sha | operator_id | agent_dna),
+    #   change (delta JSON with added/modified/removed), reason
+    "behavior_change",
+    # Reality-Anchor-gated activation outcome for learned rules.
+    # Fires once per pending_activation rule per RA verification
+    # pass. status ∈ {activated, refused}.
+    "learned_rule_activated",
+    "learned_rule_refused",
     # ADR-0070 T1 (Burst 286) — voice I/O substrate lifecycle.
     # Three event types covering ASR success, TTS success, and
     # either-direction failure. Transcripts go in event_data so the
