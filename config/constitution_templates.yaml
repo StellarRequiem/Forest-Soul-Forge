@@ -739,6 +739,66 @@ role_base:
     reality_anchor:
       enabled: true
 
+  domain_orchestrator:
+    # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
+    # Companion genre, read_only ceiling. Sits behind the
+    # Persistent Assistant Chat (ADR-0047) as the router that
+    # decomposes operator utterances and dispatches per-domain
+    # work via route_to_domain.v1.
+    #
+    # Singleton enforcement: /birth refuses a second
+    # domain_orchestrator spawn with 409 (same pattern as
+    # reality_anchor and verifier_loop).
+    #
+    # The orchestrator NEVER takes direct actions — it routes.
+    # All side-effects happen downstream via the delegated agent's
+    # own constitution. Forbidding direct action keeps the
+    # orchestrator's audit trail clean: every state mutation is
+    # attributable to a downstream agent, not the router.
+    policies:
+      - id: forbid_direct_action
+        rule: forbid
+        triggers:
+          - filesystem_write
+          - network_post
+          - subprocess_spawn
+          - dispatch_external_side_effect
+        rationale: |
+          The orchestrator is a routing layer. Its job is to
+          decompose intents and hand off to the right domain swarm.
+          Direct action would short-circuit the cross-domain audit
+          discipline (every domain_routed event must pair with an
+          agent_delegated event downstream — never with a direct
+          state mutation from the orchestrator itself).
+      - id: forbid_self_delegate
+        rule: forbid
+        triggers: [self_invocation, recursive_delegation]
+        rationale: |
+          Routing must terminate. The orchestrator MUST NOT route a
+          sub-intent to itself or to another domain that then
+          cascades back to the orchestrator. ADR-0067 cascade rules
+          are explicitly one-step; recursion is operator-authored
+          if needed.
+    allowed_tools:
+      - decompose_intent.v1
+      - route_to_domain.v1
+      - operator_profile_read.v1
+      - llm_think.v1
+      - delegate.v1
+      - verify_claim.v1
+      - memory_recall.v1
+    # ADR-0067 D5 — the orchestrator reads operator_profile to
+    # inform routing (e.g., timezone-aware reminders), reads
+    # ground_truth via Reality Anchor for sanity-checking
+    # decomposed sub-intents, and walks memory for context. No
+    # writes beyond audit-chain events emitted by its tools.
+    confidence_floor: 0.6
+    # ADR-0067 D2 — default confidence threshold operator can tune.
+    # Sub-intents with confidence below this surface as 'ambiguous'
+    # to the operator rather than auto-routing to a bad guess.
+    reality_anchor:
+      enabled: true
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new role_base entries)
   # Wires the previously-aspirational roles in genres.yaml.

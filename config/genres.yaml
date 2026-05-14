@@ -234,6 +234,15 @@ genres:
       # providers + private memory ceiling) by claim. Computer-control
       # capabilities ride on top via ADR-0048 per-(agent, plugin) grants.
       - assistant
+      # ADR-0067 T5 (B283) — Cross-Domain Orchestrator singleton.
+      # The router behind the Persistent Assistant Chat that
+      # decomposes operator utterances and dispatches per-domain
+      # work via route_to_domain.v1. Singleton-per-forest like
+      # reality_anchor: /birth refuses a second instance with 409.
+      # Inherits the same Companion-genre floor (local providers,
+      # private memory ceiling); decompose + route are read_only
+      # so they don't trip the max_side_effects ceiling.
+      - domain_orchestrator
 
   # ─────────────────────────────────────────────────────────────────────
   # Security Swarm (ADR-0033) — three new genres for the defensive plane.

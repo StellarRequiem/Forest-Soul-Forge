@@ -615,6 +615,23 @@ roles:
       emotional: 0.4
       embodiment: 0.4
 
+  domain_orchestrator:
+    description: "ADR-0067 T5 Cross-Domain Orchestrator. Singleton-per-forest router that decomposes operator utterances (via decompose_intent.v1) and routes each sub-intent to the right domain swarm (via route_to_domain.v1 + the resolve_route() engine). Sits behind the Persistent Assistant Chat (ADR-0047) so the operator talks to one front door while the orchestrator dispatches across ten domains. Genre: companion. Kit: decompose_intent.v1 + route_to_domain.v1 + operator_profile_read.v1 + llm_think.v1 + delegate.v1 + verify_claim.v1."
+    domain_weights:
+      # Communication-heavy: the orchestrator's job is intent
+      # understanding + cross-domain handoff orchestration. Cognitive
+      # high for the LLM decomposition reasoning. Security elevated
+      # because routing decisions must be tamper-evident (every
+      # delegate is audit-chained). Emotional moderate — the
+      # orchestrator surfaces back to the operator on ambiguity,
+      # so warmth + ability to ask clarifying questions matters.
+      communication: 2.5
+      cognitive: 2.0
+      security: 1.8
+      audit: 1.6
+      emotional: 1.3
+      embodiment: 0.4
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so
