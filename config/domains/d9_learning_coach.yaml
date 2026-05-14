@@ -1,0 +1,71 @@
+# Domain D9 — Learning & Skill Mastery Coach
+# ADR-0067 T1 manifest. Status: planned. Depends on D1 Knowledge
+# Forge for source material + topic graph; depends on D10 Research
+# Lab for deep dives when curiosity drives further.
+domain_id: d9_learning_coach
+name: Learning & Skill Mastery Coach
+status: planned
+
+description: |
+  Backward design from operator goals. "I want to read papers on
+  diffusion models comfortably in 3 months." curriculum_designer
+  reverse-engineers prereqs from D1 Knowledge Forge state. Adaptive
+  difficulty — assessor knows when operator plateaus and adjusts.
+  Misconception ledger: every time operator misstates something,
+  assessor records it; next session targets the gap. Multi-modal:
+  practice problems / Socratic dialogue / spaced repetition /
+  project-based. Mastery-gated progression — operator doesn't
+  advance until assessor signs off. Reality Anchor cross-references
+  operator's claimed understanding against ground truth.
+
+entry_agents:
+  - role: mentor
+    capability: coaching
+  - role: curriculum_designer
+    capability: curriculum_design
+  - role: assessor
+    capability: knowledge_assessment
+  - role: spaced_repetition_pilot
+    capability: spaced_repetition
+  - role: socratic_partner
+    capability: socratic_dialogue
+
+capabilities:
+  - coaching
+  - curriculum_design
+  - knowledge_assessment
+  - spaced_repetition
+  - socratic_dialogue
+  - skill_certification
+  - misconception_tracking
+
+example_intents:
+  - "build me a 3-month learning path for diffusion models"
+  - "quiz me on graph neural networks"
+  - "let's do Socratic dialogue on category theory"
+  - "what am I getting wrong about transformers?"
+  - "schedule today's review session"
+
+depends_on_substrate:
+  - ADR-0041  # scheduler (for spaced repetition cadence)
+  - ADR-0063  # reality anchor (verifies operator understanding)
+  - ADR-0067  # cross-domain orchestrator
+  - ADR-0068  # operator profile (current expertise, goals)
+
+depends_on_connectors:
+  - forest-notes
+  - forest-files
+  - forest-calendar  # study block scheduling
+
+handoff_targets:
+  - d1_knowledge_forge  # source material + topic graph
+  - d10_research_lab    # deep dives when curiosity drives further
+  - d7_content_studio   # drafts operator can refine
+  - d2_daily_life_os    # scheduled study blocks
+
+notes: |
+  Reality Anchor for learned material is the differentiator. No
+  other system verifies operator UNDERSTANDING against ground
+  truth — most "learning AI" just delivers content. Forest can
+  actually mastery-gate based on cryptographically-signed
+  assessment events.

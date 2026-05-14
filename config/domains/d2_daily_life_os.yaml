@@ -1,0 +1,72 @@
+# Domain D2 — Daily Life OS
+# ADR-0067 T1 manifest. Status: planned.
+# The single artifact every morning + reflection cycle every evening.
+# Top of the orchestrator stack — uses every domain below it.
+domain_id: d2_daily_life_os
+name: Daily Life OS
+status: planned
+
+description: |
+  The everyday operating system. Coordinates morning briefings,
+  inbox triage, calendar protection, task prioritization, evening
+  reflection, weekly review. Context-aware: reads operator profile
+  for timezone + work_hours, surfaces relevant knowledge from D1,
+  hands off to D6 for finance reminders, D7 for content seeds, D5
+  for home routines. Energy + focus modeling tracks when good work
+  actually happens; auto-decline templates protect calendar.
+
+entry_agents:
+  - role: coordinator
+    capability: daily_orchestration
+  - role: inbox_triager
+    capability: inbox_triage
+  - role: time_steward
+    capability: calendar_management
+  - role: task_prioritizer
+    capability: task_prioritization
+  - role: reflector
+    capability: daily_reflection
+
+capabilities:
+  - daily_orchestration
+  - inbox_triage
+  - calendar_management
+  - task_prioritization
+  - daily_reflection
+  - morning_briefing
+  - reminder
+  - decision_journal
+
+example_intents:
+  - "what's on my plate today?"
+  - "remind me to call Mom at 6pm"
+  - "decline the 3pm meeting and propose async"
+  - "summarize this week's wins"
+  - "block 9-12 for deep work tomorrow"
+  - "is the rent due this week?"
+
+depends_on_substrate:
+  - ADR-0041  # set-and-forget scheduler
+  - ADR-0068  # operator profile (timezone, work_hours)
+  - ADR-0067  # cross-domain orchestrator (this ADR)
+  - ADR-0075  # scheduler scale + indexing (queued Phase α)
+
+depends_on_connectors:
+  - forest-calendar
+  - forest-mail
+  - forest-slack
+  - forest-notes
+
+handoff_targets:
+  - d1_knowledge_forge  # surface relevant knowledge in briefings
+  - d3_local_soc        # behavior-change anomalies flag here
+  - d5_smart_home       # routines (vacation mode, etc.)
+  - d6_finance          # bill due-date reminders
+  - d7_content_studio   # weekly retro → content seeds
+
+notes: |
+  This is the OPERATOR-LEVERAGE-HEAVIEST domain. If only one
+  domain ships per quarter, this is the one with the biggest
+  user-visible impact. Substrate prerequisites (orchestrator
+  + connectors + scheduler scale) make it the natural last-of-
+  foundation domain.

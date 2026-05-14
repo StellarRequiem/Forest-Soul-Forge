@@ -1,0 +1,70 @@
+# Domain D7 — Content Creation Studio
+# ADR-0067 T1 manifest. Status: planned.
+# Depends on D1 Knowledge Forge for source material; depends on
+# operator profile (T5) extension for voice samples (queued).
+domain_id: d7_content_studio
+name: Content Creation Studio
+status: planned
+
+description: |
+  End-to-end content pipeline: idea → researched → drafted →
+  edited → fact-checked → ready-to-publish. NEVER auto-publishes
+  — distribution is always operator-gated. Style steward learns
+  operator voice from their archive (with consent), maintains a
+  voice profile, flags drift. Reality Anchor verifies every
+  factual assertion in a draft before publish-ready. Multi-format
+  pipeline: one idea → blog draft + Twitter thread + newsletter
+  + LinkedIn post, each its own pass. A/B test memory tracks
+  what performs.
+
+entry_agents:
+  - role: writer
+    capability: draft_writing
+  - role: researcher
+    capability: content_research
+  - role: editor
+    capability: editing
+  - role: style_steward
+    capability: voice_matching
+  - role: distribution_pilot
+    capability: scheduled_publishing
+
+capabilities:
+  - draft_writing
+  - content_research
+  - editing
+  - voice_matching
+  - scheduled_publishing
+  - fact_checking
+  - format_adaptation
+  - performance_tracking
+
+example_intents:
+  - "draft a blog post on multi-agent governance"
+  - "rewrite this in my voice"
+  - "fact-check this draft"
+  - "make a Twitter thread from this article"
+  - "schedule this for Tuesday at 9am EST"
+
+depends_on_substrate:
+  - ADR-0063  # reality anchor (claims verification before publish)
+  - ADR-0067  # cross-domain orchestrator
+  - ADR-0068  # operator profile (T5 voice samples — queued)
+  - ADR-0076  # vector index (style + content matching)
+
+depends_on_connectors:
+  - forest-files
+  - forest-notes
+  - forest-github      # for technical-content publish targets
+  - forest-slack       # for team-shared drafts
+
+handoff_targets:
+  - d1_knowledge_forge  # source material
+  - d2_daily_life_os    # weekly retro → content seeds
+  - d4_code_review      # PR → changelog → public release notes
+  - d9_learning_coach   # drafts → curriculum
+
+notes: |
+  Distribution always operator-gated per action-types policy:
+  never publishes / posts / sends without explicit operator
+  approval. Drafts ready, schedules set, publish button is yours.

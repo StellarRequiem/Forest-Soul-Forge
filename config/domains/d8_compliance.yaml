@@ -1,0 +1,69 @@
+# Domain D8 — Automated Compliance Auditor
+# ADR-0067 T1 manifest. Status: planned. Framework-agnostic: operator
+# picks which standards apply (SOC2 / ISO27001 / HIPAA / GDPR / CCPA
+# / personal-policy). Continuous compliance — runs per Code Review
+# PR + daily/weekly schedule, not annual audits.
+domain_id: d8_compliance
+name: Automated Compliance Auditor
+status: planned
+
+description: |
+  Continuous compliance, not annual audits. License/security/policy
+  scans on every Code Review PR + scheduled sweeps. The hash-chained
+  audit log IS the evidence trail — audit packet generation takes
+  30 seconds, not 30 hours. Framework-agnostic: detection rules per
+  framework; operator picks which apply. Self-audits Forest itself
+  (license compliance, signature verification, IoC scan of plugins).
+  Monthly report cards: "you are compliant against X; here are 3
+  gaps with remediation steps."
+
+entry_agents:
+  - role: compliance_scanner
+    capability: compliance_scan
+  - role: policy_enforcer
+    capability: policy_enforcement
+  - role: report_generator
+    capability: compliance_reporting
+  - role: evidence_collector
+    capability: evidence_collection
+  - role: audit_archivist
+    capability: long_term_archival
+
+capabilities:
+  - compliance_scan
+  - policy_enforcement
+  - compliance_reporting
+  - evidence_collection
+  - long_term_archival
+  - framework_check
+  - audit_packet_generation
+
+example_intents:
+  - "are we SOC2-compliant?"
+  - "generate the audit packet for last quarter"
+  - "what compliance gaps did this PR introduce?"
+  - "run a GDPR scan on the new feature"
+  - "monthly compliance report card"
+
+depends_on_substrate:
+  - ADR-0049  # per-event signatures (audit trail integrity)
+  - ADR-0050  # encryption-at-rest (covered evidence)
+  - ADR-0062  # supply-chain IoC scanner (shipped)
+  - ADR-0067  # cross-domain orchestrator
+  - ADR-0033  # security swarm verifier_loop role
+
+depends_on_connectors:
+  - forest-files
+  - forest-github
+
+handoff_targets:
+  - d3_local_soc        # incident events as compliance evidence
+  - d4_code_review      # every PR triggers a compliance pass
+  - d1_knowledge_forge  # regulation updates auto-indexed
+  - d2_daily_life_os    # surfaces critical compliance deadlines
+
+notes: |
+  Most reusable cross-organizational value of the ten domains —
+  every operator who deploys Forest professionally hits compliance
+  somewhere. Substrate is already mostly in place: ADR-0049 +
+  ADR-0050 + ADR-0062 + verifier_loop role.

@@ -1,0 +1,73 @@
+# Domain D4 — Autonomous Code Review Team
+# ADR-0067 T1 manifest. Status: partial — the SW-track triune
+# (system_architect, software_engineer, code_reviewer) is alive
+# in the registry and has proven the multi-agent chain end-to-end
+# via the canonical SW-track scenario (ADR-0034). Three new agents
+# (test_author, migration_pilot, release_gatekeeper) ship in the
+# advanced D4 rollout.
+domain_id: d4_code_review
+name: Autonomous Code Review Team
+status: partial
+
+description: |
+  The triune that turns rough ideas into shipping commits without
+  the operator typing every line. system_architect drafts ADRs +
+  design proposals, software_engineer implements, code_reviewer
+  signs off with audit trail. PR-driven workflow takes a draft to
+  ready-to-merge autonomously. Self-improvement loop: Forest can
+  ship Forest commits — the foundation under every other domain.
+  Advanced rollout adds test_author (pre-implementation test
+  cases), migration_pilot (schema/data migrations under write
+  lock), release_gatekeeper (pre-release conformance + drift
+  sentinel + signed artifacts).
+
+entry_agents:
+  - role: system_architect
+    capability: architectural_design
+  - role: software_engineer
+    capability: implementation
+  - role: code_reviewer
+    capability: review_signoff
+
+capabilities:
+  - architectural_design
+  - implementation
+  - review_signoff
+  - adr_authoring
+  - test_proposal
+  - migration_safety
+  - release_gating
+  - skill_self_forge
+  - tool_self_forge
+
+example_intents:
+  - "draft an ADR for the new caching layer"
+  - "implement this feature from the spec"
+  - "review PR #42"
+  - "propose tests before implementing"
+  - "this PR needs a migration — write it safely"
+  - "is this branch ready to release?"
+
+depends_on_substrate:
+  - ADR-0034  # SW-track triune (shipped)
+  - ADR-0057  # Skill Forge UI (shipped)
+  - ADR-0058  # Tool Forge UI (shipped)
+  - ADR-0059  # catalog-aware propose (shipped)
+  - ADR-0044  # kernel/SoulUX positioning (for conformance suite)
+
+depends_on_connectors:
+  - forest-files
+  - forest-github
+  - forest-shell  # already exists as shell_exec.v1
+
+handoff_targets:
+  - d8_compliance       # every PR triggers compliance pass
+  - d3_local_soc        # detection rules contributed back
+  - d1_knowledge_forge  # ADRs auto-indexed as knowledge artifacts
+  - d7_content_studio   # PR descriptions seed changelog entries
+
+notes: |
+  Already the most-proven domain in the registry. The SW-track
+  scenario (2026-04-30) demonstrated a 21-event audit chain of
+  the triune doing software work on itself. Advanced version is
+  productizing what's already substrate-proven.

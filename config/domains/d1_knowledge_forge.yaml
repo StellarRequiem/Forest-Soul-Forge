@@ -1,0 +1,61 @@
+# Domain D1 — Personal Knowledge Forge
+# ADR-0067 T1 manifest. Status: planned (no entry agents alive yet).
+# Tranche schedule: ships in Phase γ of the ten-domain rollout
+# after Phase α substrate (orchestrator + voice + plugins + scale).
+domain_id: d1_knowledge_forge
+name: Personal Knowledge Forge
+status: planned
+
+description: |
+  Active personal knowledge curation. Not a passive note-store —
+  a research → summarize → categorize → store loop with provenance
+  per fact, daily delta reports, topic genealogy, and contradiction
+  flagging via the verifier_loop. Compounds with D9 Learning Coach
+  and D10 Research Lab; feeds D7 Content Studio source material.
+
+entry_agents:
+  - role: librarian
+    capability: knowledge_curation
+  - role: prospector
+    capability: research_gathering
+  - role: synthesizer
+    capability: knowledge_summarize
+  - role: verifier
+    capability: knowledge_contradiction_flag
+
+capabilities:
+  - knowledge_curation
+  - research_gathering
+  - knowledge_summarize
+  - knowledge_contradiction_flag
+  - topic_genealogy
+  - daily_knowledge_delta
+
+example_intents:
+  - "what have I learned about diffusion models?"
+  - "summarize this paper into my notes"
+  - "find contradictions across my notes on multi-agent governance"
+  - "build a topic page for prompt injection defenses"
+  - "give me yesterday's knowledge delta"
+
+depends_on_substrate:
+  - ADR-0036  # cross-agent contradiction scan (deferred to v0.4)
+  - ADR-0063  # reality anchor (claims verification)
+  - ADR-0076  # vector index for personal context (queued Phase α)
+  - ADR-0068  # operator profile (shipped T1+T1.1)
+
+depends_on_connectors:
+  - forest-files       # local note files
+  - forest-notes       # Obsidian / Apple Notes
+  - forest-browser-history  # source provenance
+
+handoff_targets:
+  - d9_learning_coach   # gaps → curriculum
+  - d10_research_lab    # deep dives
+  - d7_content_studio   # source material for drafts
+  - d2_daily_life_os    # surfaces into morning briefing
+
+notes: |
+  Reality Anchor integration is load-bearing — claims about the
+  knowledge base get verified against operator-asserted ground
+  truth before they propagate.

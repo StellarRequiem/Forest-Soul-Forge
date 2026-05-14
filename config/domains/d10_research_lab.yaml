@@ -1,0 +1,75 @@
+# Domain D10 — Multi-Agent Research Lab
+# ADR-0067 T1 manifest. Status: planned. Builds on experimenter
+# substrate (ADR-0056 shipped). The most structured-debate-heavy
+# domain.
+domain_id: d10_research_lab
+name: Multi-Agent Research Lab
+status: planned
+
+description: |
+  Structured multi-agent debate on any topic. analyst vs. critic
+  vs. synthesizer in formal turn-based exchange — operator reads
+  the transcript. Adversarial collaboration mode: "make the
+  strongest case for X" then "make the strongest case for not-X" —
+  outputs aren't averaged, both stand. Citation-graph reasoning:
+  every claim has provenance back to a source; synthesizer reports
+  include the citation graph as a deliverable. Experimenter-driven
+  hypothesis testing — when the lab forms a hypothesis, the
+  experimenter agent (ADR-0056) runs a short-horizon test if
+  testable. Confidence scoring: every conclusion with explicit
+  uncertainty + the sources that would move the needle.
+
+entry_agents:
+  - role: gatherer
+    capability: source_gathering
+  - role: analyst
+    capability: deep_analysis
+  - role: critic
+    capability: adversarial_critique
+  - role: synthesizer
+    capability: research_synthesis
+  - role: experimenter
+    capability: hypothesis_testing
+  - role: debate_moderator
+    capability: debate_moderation
+
+capabilities:
+  - source_gathering
+  - deep_analysis
+  - adversarial_critique
+  - research_synthesis
+  - hypothesis_testing
+  - debate_moderation
+  - citation_graph
+  - confidence_scoring
+
+example_intents:
+  - "deep-dive on the latest agent governance research"
+  - "make the strongest case for centralized RL vs. multi-agent"
+  - "let the lab debate the diffusion-models-are-RL question"
+  - "test the hypothesis that ADR-0050 adds <10% overhead"
+  - "synthesize what we know about LLM hallucination defenses"
+
+depends_on_substrate:
+  - ADR-0056  # experimenter agent (shipped)
+  - ADR-0063  # reality anchor (claims verification)
+  - ADR-0067  # cross-domain orchestrator
+  - ADR-0076  # vector index (citation graph)
+
+depends_on_connectors:
+  - forest-files
+  - forest-browser-history
+  - forest-github       # for technical research
+
+handoff_targets:
+  - d1_knowledge_forge  # archives the report
+  - d9_learning_coach   # research → curriculum
+  - d7_content_studio   # research → publishable content
+  - d4_code_review      # research as input to ADR proposals
+
+notes: |
+  Structured-debate format makes the OUTPUT auditable in a way
+  most research-AI isn't. Every "the lab concluded X" event in
+  the audit chain has a citation graph + a confidence score +
+  the dissenting arguments. Forensic-replay of research is a
+  first-class property here.

@@ -1,0 +1,69 @@
+# Domain D6 — Personal Finance Guardian
+# ADR-0067 T1 manifest. Status: planned. HARD RULE per Forest's
+# action-types policy: this domain never executes transactions or
+# makes investment decisions. Analysis + drafts only.
+domain_id: d6_finance
+name: Personal Finance Guardian
+status: planned
+
+description: |
+  Budgeting + expense categorization + bill stewardship + investment
+  research (info-only, never advice). Burn-rate modeling against
+  historical patterns flags drift early. Anti-recommendation engine:
+  actively flags when YOU'RE about to do something out-of-pattern
+  ($400 expense in a $50 category) — agent reports, operator
+  decides. Receipt OCR via plugin (Apple Vision wrapper on macOS).
+  Compliance-grade audit trail for self-employed/business operators.
+  Cross-currency support driven by operator profile + locale.
+
+entry_agents:
+  - role: budget_analyst
+    capability: budget_analysis
+  - role: transaction_tracker
+    capability: transaction_monitoring
+  - role: investment_researcher
+    capability: investment_research
+  - role: risk_advisor
+    capability: risk_analysis
+  - role: bill_steward
+    capability: bill_management
+
+capabilities:
+  - budget_analysis
+  - transaction_monitoring
+  - investment_research
+  - risk_analysis
+  - bill_management
+  - burn_rate_forecast
+  - receipt_ocr
+  - tax_season_summary
+
+example_intents:
+  - "what's my burn rate this quarter?"
+  - "is the rent paid?"
+  - "categorize last month's transactions"
+  - "research index fund options"
+  - "show me my tax-season summary"
+  - "what's out of pattern this month?"
+
+depends_on_substrate:
+  - ADR-0067  # cross-domain orchestrator
+  - ADR-0068  # operator profile (currency, tax jurisdiction, fiscal year)
+  - ADR-0050  # encryption-at-rest (transactions = sensitive)
+  - ADR-0076  # vector index (pattern recognition)
+
+depends_on_connectors:
+  - forest-finance  # CSV importer + receipt OCR
+  - forest-files    # bank statement files
+
+handoff_targets:
+  - d2_daily_life_os  # bill due-date reminders
+  - d8_compliance     # tax season summaries
+  - d1_knowledge_forge  # "you asked about X 3x" curation
+  - d3_local_soc       # power-bill anomalies (cross-domain)
+
+notes: |
+  Hard rule encoded in action-types policy: never executes trades,
+  places orders, sends money, initiates transfers. Always
+  operator-only on the actual transaction. This domain produces
+  analyses + drafts, never executes.

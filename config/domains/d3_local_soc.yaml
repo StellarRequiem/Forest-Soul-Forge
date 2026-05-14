@@ -1,0 +1,83 @@
+# Domain D3 — Local SOC (Security Operations Center)
+# ADR-0067 T1 manifest. Status: partial — the 9-agent blue team
+# alive in the registry (log_lurker, anomaly_ace, response_rogue,
+# vault_warden, patch_patrol, gatekeeper, net_ninja, zero_zero,
+# deception_duke) handles baseline monitoring + triage. Full SOC
+# capabilities (telemetry streaming, detection-as-code, SOAR
+# playbooks) ship in ADR-0064 / 0065 / 0066.
+domain_id: d3_local_soc
+name: Local Security Operations Center
+status: partial
+
+description: |
+  Single-host, audit-grade, sovereign SOC. Continuous monitoring +
+  detection engineering + threat hunting + incident response +
+  vulnerability management + active deception. Built on existing
+  9-agent blue team (Security Swarm, ADR-0033). Advanced version
+  ships telemetry pipeline (ADR-0064), detection-as-code with
+  Sigma rules + MITRE ATT&CK tagging (ADR-0065), and SOAR playbook
+  DSL (ADR-0066). 6 new agents in advanced rollout: telemetry_steward,
+  detection_engineer, playbook_pilot, threat_intel_curator,
+  forensic_archivist, purple_pete.
+
+entry_agents:
+  - role: response_rogue
+    capability: incident_response
+  - role: log_lurker
+    capability: log_monitoring
+  - role: anomaly_ace
+    capability: anomaly_detection
+  - role: vault_warden
+    capability: forensic_cleanup
+  - role: patch_patrol
+    capability: vulnerability_check
+  - role: gatekeeper
+    capability: access_audit
+  - role: deception_duke
+    capability: deception_management
+
+capabilities:
+  - incident_response
+  - log_monitoring
+  - anomaly_detection
+  - forensic_cleanup
+  - vulnerability_check
+  - access_audit
+  - deception_management
+  - threat_hunting
+  - incident_summary
+  - canary_status
+
+example_intents:
+  - "is there anything weird happening on my machine?"
+  - "what did the SOC see overnight?"
+  - "are my patches up to date?"
+  - "show me canary status"
+  - "investigate this suspicious log entry"
+  - "run a threat hunt for lateral movement"
+
+depends_on_substrate:
+  - ADR-0033  # Security Swarm (shipped)
+  - ADR-0049  # per-event signatures (shipped — tamper-PROOF chain)
+  - ADR-0050  # encryption-at-rest (shipped 8/8 — telemetry encrypted)
+  - ADR-0051  # per-tool subprocess sandbox (shipped)
+  - ADR-0062  # supply-chain scanner (shipped)
+  - ADR-0064  # telemetry pipeline (queued)
+  - ADR-0065  # detection-as-code (queued)
+  - ADR-0066  # SOAR playbooks (queued)
+
+depends_on_connectors:
+  - forest-files            # for file integrity + log access
+  - forest-home-assistant   # for IoT anomaly correlation
+
+handoff_targets:
+  - d8_compliance       # SOC events → compliance evidence
+  - d4_code_review      # detection rules contributed back as code
+  - d2_daily_life_os    # behavior-change anomalies flag through here
+
+notes: |
+  This is the domain Forest is MOST architecturally suited for —
+  audit chain + signatures + encryption + sandbox + IoC catalog
+  + Reality Anchor are ALL load-bearing for production SOC work.
+  Three-ADR arc 0064/0065/0066 ships across ~23 bursts to take
+  this from partial → live.

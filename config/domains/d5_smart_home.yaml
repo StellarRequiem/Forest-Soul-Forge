@@ -1,0 +1,63 @@
+# Domain D5 — Smart Home Brain
+# ADR-0067 T1 manifest. Status: planned. Depends on Home Assistant
+# (or equivalent IoT broker) being available on the operator's
+# network + forest-home-assistant plugin shipping.
+domain_id: d5_smart_home
+name: Smart Home Brain
+status: planned
+
+description: |
+  Local-first IoT orchestration. NOT "Alexa-but-local" — causal
+  scheduling (warm coffee maker earlier when rain forecast extends
+  warm-up time), counterfactual diagnostics (power bill higher
+  than usual → which device + which window + suggested action),
+  cross-domain awareness (calendar [Travel] event activates
+  vacation mode; SOC sees you're not home → tightens posture).
+  Single MQTT plugin pulls in Home Assistant entities and exposes
+  them as Forest tools.
+
+entry_agents:
+  - role: home_steward
+    capability: home_orchestration
+  - role: energy_warden
+    capability: energy_optimization
+  - role: comfort_optimizer
+    capability: comfort_tuning
+  - role: home_sentinel
+    capability: home_security
+
+capabilities:
+  - home_orchestration
+  - energy_optimization
+  - comfort_tuning
+  - home_security
+  - device_control
+  - routine_management
+  - vacation_mode
+
+example_intents:
+  - "set the house to vacation mode"
+  - "why is my power bill higher this month?"
+  - "warm the coffee earlier when it rains"
+  - "is anyone at the front door?"
+  - "set lights to focus mode"
+
+depends_on_substrate:
+  - ADR-0067  # cross-domain orchestrator
+  - ADR-0068  # operator profile (home address, routines)
+  - ADR-0043  # MCP plugin protocol (shipped)
+
+depends_on_connectors:
+  - forest-home-assistant  # MQTT bridge
+  - forest-calendar        # travel detection
+
+handoff_targets:
+  - d2_daily_life_os    # routines triggered by schedule
+  - d3_local_soc        # posture changes based on home state
+  - d1_knowledge_forge  # routines indexed for "when did I last ..." queries
+  - d6_finance          # power-bill anomaly hand-off
+
+notes: |
+  Lowest-priority for Alex's first deployment per his read — Home
+  Assistant isn't set up yet. Substrate is ready; the domain ships
+  when operator turns on HA + the forest-home-assistant plugin.
