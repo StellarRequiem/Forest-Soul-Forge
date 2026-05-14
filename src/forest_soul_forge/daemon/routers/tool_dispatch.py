@@ -49,7 +49,10 @@ from forest_soul_forge.tools.dispatcher import (
 router = APIRouter(tags=["tools"])
 
 
-def _load_agent_default_provider(constitution_path: Path) -> str | None:
+def _load_agent_default_provider(
+    constitution_path: Path,
+    encryption_config=None,
+) -> str | None:
     """ADR-0056 D4 / B193 — read the per-agent provider override
     from the constitution YAML. Returns the provider name (e.g.
     'frontier' or 'local') or None when unset / file missing /
@@ -65,11 +68,16 @@ def _load_agent_default_provider(constitution_path: Path) -> str | None:
     frontier per ADR-0056 D4 — every other agent stays on the
     daemon-wide default unless explicitly opted in.
     """
-    if not constitution_path.exists():
+    # ADR-0050 T5b (B272) — encryption-aware constitution read.
+    # Lazy import to keep this router module independent of the
+    # cryptography lib at import time.
+    from forest_soul_forge.tools.dispatcher import _read_constitution_text
+    text = _read_constitution_text(constitution_path, encryption_config)
+    if text is None:
         return None
     try:
         import yaml
-        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(text) or {}
     except Exception:
         return None
     if not isinstance(data, dict):
@@ -102,7 +110,18 @@ def _resolve_active_provider(request: Request, *, constitution_path: Path | None
         return None
     # Per-agent override.
     if constitution_path is not None:
-        override_name = _load_agent_default_provider(constitution_path)
+        # ADR-0050 T5b (B272): thread the daemon's master_key so the
+        # provider-override read decrypts .enc constitutions transparently.
+        _master_key = getattr(request.app.state, "master_key", None)
+        _enc_cfg = None
+        if _master_key is not None:
+            from forest_soul_forge.core.at_rest_encryption import (
+                EncryptionConfig as _EncryptionConfig,
+            )
+            _enc_cfg = _EncryptionConfig(master_key=_master_key)
+        override_name = _load_agent_default_provider(
+            constitution_path, encryption_config=_enc_cfg,
+        )
         if override_name is not None:
             try:
                 return pr.get(override_name)

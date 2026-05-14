@@ -39,8 +39,9 @@ import os
 import pickle
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 
@@ -200,7 +201,49 @@ class _ResolvedToolConstraints:
     applied_rules: tuple[str, ...] = ()
 
 
-def _load_initiative_level(constitution_path: Path) -> str:
+def _read_constitution_text(
+    constitution_path: Path,
+    encryption_config: Optional[Any] = None,
+) -> Optional[str]:
+    """ADR-0050 T5b (B272) — encryption-aware text read for the
+    dispatcher hot path.
+
+    Returns the constitution YAML text, transparently decrypting the
+    ``<constitution_path>.enc`` variant when present. Returns ``None``
+    on any failure shape (file missing, encrypted-with-no-config,
+    decrypt failure, malformed envelope) so callers can fall through
+    to their defensive defaults (``"L5"``, empty allowlist, refuse).
+
+    The hot path stat()s the .enc sibling each call. That's one extra
+    syscall per dispatch — negligible against the ~10-50ms minimum
+    per dispatch already incurred by the governance pipeline. Caching
+    is queued for v0.3 (catalog_grants caching already proved out the
+    pattern in ADR-0060 T5).
+    """
+    enc_path = constitution_path.with_name(constitution_path.name + ".enc")
+    if enc_path.exists():
+        if encryption_config is None:
+            return None
+        try:
+            from forest_soul_forge.core.at_rest_encryption import decrypt_text
+            return decrypt_text(
+                enc_path.read_text(encoding="utf-8"),
+                encryption_config,
+            )
+        except Exception:
+            return None
+    if constitution_path.exists():
+        try:
+            return constitution_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+    return None
+
+
+def _load_initiative_level(
+    constitution_path: Path,
+    encryption_config: Optional[Any] = None,
+) -> str:
     """ADR-0021-amendment §2: read the agent's ``initiative_level`` from
     its constitution.yaml.
 
@@ -214,11 +257,17 @@ def _load_initiative_level(constitution_path: Path) -> str:
     Called per-dispatch by InitiativeFloorStep. Reading the YAML twice
     per dispatch (once for constraints, once for initiative) is
     acceptable at v0.2; v0.3 may cache.
+
+    ADR-0050 T5b (B272) — ``encryption_config`` threads from
+    ``ToolDispatcher.master_key`` via :func:`partial` at pipeline-wire
+    time. When set, ``_read_constitution_text`` decrypts the .enc
+    variant on disk transparently.
     """
-    if not constitution_path.exists():
+    text = _read_constitution_text(constitution_path, encryption_config)
+    if text is None:
         return "L5"
     try:
-        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(text) or {}
     except yaml.YAMLError:
         return "L5"
     agent_block = data.get("agent") or {}
@@ -228,7 +277,10 @@ def _load_initiative_level(constitution_path: Path) -> str:
     return level.strip()
 
 
-def _load_constitution_mcp_allowlist(constitution_path: Path) -> tuple[str, ...]:
+def _load_constitution_mcp_allowlist(
+    constitution_path: Path,
+    encryption_config: Optional[Any] = None,
+) -> tuple[str, ...]:
     """ADR-0043 follow-up #2 (Burst 113): read top-level
     ``allowed_mcp_servers`` from the agent's constitution.yaml.
 
@@ -242,11 +294,15 @@ def _load_constitution_mcp_allowlist(constitution_path: Path) -> tuple[str, ...]
     ``agent_plugin_grants`` table to produce the effective allowlist
     that mcp_call.v1 sees. Pure function, defensive against any read
     failure — same posture as :func:`_load_initiative_level`.
+
+    ADR-0050 T5b (B272) — encryption-aware. ``encryption_config``
+    threads from the dispatcher's master_key when set.
     """
-    if not constitution_path.exists():
+    text = _read_constitution_text(constitution_path, encryption_config)
+    if text is None:
         return ()
     try:
-        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(text) or {}
     except yaml.YAMLError:
         return ()
     raw = data.get("allowed_mcp_servers")
@@ -256,7 +312,8 @@ def _load_constitution_mcp_allowlist(constitution_path: Path) -> tuple[str, ...]
 
 
 def _load_resolved_constraints(
-    constitution_path: Path, tool_name: str, tool_version: str
+    constitution_path: Path, tool_name: str, tool_version: str,
+    encryption_config: Optional[Any] = None,
 ) -> _ResolvedToolConstraints | None:
     """Pull the constitution.yaml ``tools:`` entry for this tool, or None.
 
@@ -264,11 +321,16 @@ def _load_resolved_constraints(
     constitution. Callers translate "None" into a refusal — an agent
     cannot dispatch a tool that isn't in its rulebook (different from
     "the tool exists but we say no" which is a constraint outcome).
+
+    ADR-0050 T5b (B272) — encryption-aware. ``encryption_config``
+    threads from the dispatcher's master_key when set; absent =
+    plaintext-only operation (default trusted-host posture).
     """
-    if not constitution_path.exists():
+    text = _read_constitution_text(constitution_path, encryption_config)
+    if text is None:
         return None
     try:
-        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(text) or {}
     except yaml.YAMLError:
         return None
     for entry in data.get("tools") or []:
@@ -530,6 +592,17 @@ class ToolDispatcher:
     # the mode under test.
     sandbox_mode_fn: Any = None  # callable() -> str
 
+    # ADR-0050 T5b (B272): master encryption key for the at-rest
+    # constitution.yaml reads. When set (FSF_AT_REST_ENCRYPTION=true
+    # and lifespan resolved the key), the dispatcher's hot-path
+    # constitution reads decrypt the .enc variant transparently.
+    # When None (default trusted-host posture), constitution reads
+    # use the plaintext path bit-identically to pre-T5b behavior.
+    # The key is the same one threaded into Memory (B269) + audit
+    # chain (B268) + SQLCipher registry (B267); single env-var
+    # gates all four substrate consumers per ADR Decision 5.
+    master_key: Optional[bytes] = None
+
     # R3 (2026-04-30): the pipeline of pre-execute checks. Built
     # once per dispatcher in __post_init__ from the dispatcher's
     # injected dependencies. Walked once per dispatch(). Adding a
@@ -537,16 +610,34 @@ class ToolDispatcher:
     # appending a step here in the right position; dispatch() doesn't
     # change.
     _pipeline: GovernancePipeline = field(init=False)
+    _enc_config: Any = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         # Lazy import to avoid a circular when genre_engine itself
         # imports from the tools package.
         from forest_soul_forge.core.genre_engine import genre_requires_approval
 
+        # ADR-0050 T5b (B272): construct the EncryptionConfig once at
+        # __post_init__ so the hot-path constitution helpers can use
+        # functools.partial-bound closures. Building per-dispatch
+        # would add allocation overhead to the hottest dispatch path.
+        if self.master_key is not None:
+            from forest_soul_forge.core.at_rest_encryption import (
+                EncryptionConfig as _EncryptionConfig,
+            )
+            self._enc_config = _EncryptionConfig(master_key=self.master_key)
+        else:
+            self._enc_config = None
+
         self._pipeline = GovernancePipeline(steps=[
             HardwareQuarantineStep(
                 audit=self.audit,
-                quarantine_reason_fn=_hardware_quarantine_reason,
+                # ADR-0050 T5b (B272): bind encryption_config so the
+                # hardware-quarantine read decrypts .enc constitutions.
+                quarantine_reason_fn=partial(
+                    _hardware_quarantine_reason,
+                    encryption_config=self._enc_config,
+                ),
             ),
             # ADR-0063 T3 (Burst 252) — Reality Anchor gate. Verifies
             # the dispatch's args against operator-asserted ground
@@ -558,7 +649,12 @@ class ToolDispatcher:
             RealityAnchorStep(
                 audit=self.audit,
                 verify_claim_fn=_reality_anchor_verify,
-                load_constitution_opt_out_fn=_reality_anchor_opt_out,
+                # ADR-0050 T5b (B272): bind encryption_config so the
+                # reality_anchor opt-out check decrypts .enc constitutions.
+                load_constitution_opt_out_fn=partial(
+                    _reality_anchor_opt_out,
+                    encryption_config=self._enc_config,
+                ),
                 # ADR-0063 T6 (B255): correction-memory bumper.
                 # Closure captures self.agent_registry so the step
                 # never imports the registry module. None when the
@@ -574,7 +670,15 @@ class ToolDispatcher:
             ToolLookupStep(registry=self.registry),
             ArgsValidationStep(),
             ConstraintResolutionStep(
-                load_resolved_constraints_fn=_load_resolved_constraints,
+                # ADR-0050 T5b (B272): bind encryption_config so the
+                # hot-path constitution read decrypts .enc variants
+                # for agents born under encryption. functools.partial
+                # forwards (constitution_path, tool_name, tool_version)
+                # positionally; the kwarg stays pinned to self._enc_config.
+                load_resolved_constraints_fn=partial(
+                    _load_resolved_constraints,
+                    encryption_config=self._enc_config,
+                ),
                 # ADR-0060 T2 (B220): wire the optional grant lookup.
                 # Closure captures self.catalog_grants + self.tool_catalog
                 # so the step can resolve catalog defaults when a grant
@@ -585,7 +689,13 @@ class ToolDispatcher:
             PostureOverrideStep(
                 audit=self.audit,
                 resolve_active_model_fn=_resolve_active_model_name,
-                apply_overrides_fn=_apply_provider_posture_overrides,
+                # ADR-0050 T5b (B272): bind encryption_config so the
+                # posture-overrides constitution read decrypts .enc
+                # variants transparently.
+                apply_overrides_fn=partial(
+                    _apply_provider_posture_overrides,
+                    encryption_config=self._enc_config,
+                ),
             ),
             GenreFloorStep(
                 # Closure over self so a test (or the daemon's lifespan
@@ -605,7 +715,12 @@ class ToolDispatcher:
             # operators see the load-bearing ADR-0021 T5 violation
             # rather than the secondary initiative one.
             InitiativeFloorStep(
-                initiative_loader_fn=_load_initiative_level,
+                # ADR-0050 T5b (B272): bind encryption_config so the
+                # initiative read decrypts .enc constitutions transparently.
+                initiative_loader_fn=partial(
+                    _load_initiative_level,
+                    encryption_config=self._enc_config,
+                ),
             ),
             CallCounterStep(counter_get_fn=self.counter_get),
             # Burst 111 (ADR-0043 follow-up): per-tool
@@ -859,7 +974,9 @@ class ToolDispatcher:
         # nothing populated this key — the constitution-side allowlist
         # was documented but never wired into dispatch. Burst 113
         # closes that gap AND adds post-birth augmentation via grants.
-        constitution_servers = _load_constitution_mcp_allowlist(constitution_path)
+        constitution_servers = _load_constitution_mcp_allowlist(
+            constitution_path, encryption_config=self._enc_config,
+        )
         granted_servers: set[str] = set()
         if self.plugin_grants is not None:
             try:
@@ -2088,7 +2205,8 @@ class ToolDispatcher:
         # higher-priority policy that applies at the runtime layer.
         # Symmetric with the dispatch() path.
         resolved_for_genre = _load_resolved_constraints(
-            constitution_path, tool_name, tool_version
+            constitution_path, tool_name, tool_version,
+            encryption_config=self._enc_config,
         )
         side_effects_for_genre = (
             (resolved_for_genre.side_effects if resolved_for_genre else "")
@@ -2110,7 +2228,8 @@ class ToolDispatcher:
         # Counter pre-check — same rule as fast path. An approval that
         # arrives after the session burned its budget is refused.
         resolved = _load_resolved_constraints(
-            constitution_path, tool_name, tool_version
+            constitution_path, tool_name, tool_version,
+            encryption_config=self._enc_config,
         )
         if resolved is not None:
             max_calls = int(resolved.constraints.get("max_calls_per_session", 0) or 0)
@@ -2485,6 +2604,7 @@ def _apply_provider_posture_overrides(
     resolved: _ResolvedToolConstraints,
     constitution_path: Path,
     active_model: str | None,
+    encryption_config: Optional[Any] = None,
 ) -> tuple[_ResolvedToolConstraints, list[str]]:
     """Layer per-model posture overrides on top of resolved constraints.
 
@@ -2515,11 +2635,14 @@ def _apply_provider_posture_overrides(
     Returns (modified_resolved, list of human-readable tightening notes).
     Empty notes list = no-op.
     """
-    if not active_model or not constitution_path.exists():
+    if not active_model:
+        return resolved, []
+    text = _read_constitution_text(constitution_path, encryption_config)
+    if text is None:
         return resolved, []
     try:
         import yaml
-        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(text) or {}
     except Exception:
         return resolved, []
     block = data.get("provider_posture_overrides") if isinstance(data, dict) else None
@@ -2578,7 +2701,10 @@ def _apply_provider_posture_overrides(
     ), notes
 
 
-def _hardware_quarantine_reason(constitution_path: Path) -> dict[str, str] | None:
+def _hardware_quarantine_reason(
+    constitution_path: Path,
+    encryption_config: Optional[Any] = None,
+) -> dict[str, str] | None:
     """Return a quarantine descriptor dict (with 'expected' + 'binding' keys)
     when the agent's constitution is hardware-bound to a different machine,
     else None (no binding OR binding matches this machine OR a valid
@@ -2601,9 +2727,11 @@ def _hardware_quarantine_reason(constitution_path: Path) -> dict[str, str] | Non
     bigger problem the dispatcher will catch downstream; we don't want
     quarantine to mask the underlying error.
     """
+    text = _read_constitution_text(constitution_path, encryption_config)
+    if text is None:
+        return None
     try:
         import yaml
-        text = constitution_path.read_text(encoding="utf-8")
         data = yaml.safe_load(text) or {}
     except Exception:
         return None
@@ -2775,17 +2903,25 @@ def _reality_anchor_verify(
     return {"verdict": agg, "by_fact": by_fact}
 
 
-def _reality_anchor_opt_out(constitution_path: Path) -> bool:
+def _reality_anchor_opt_out(
+    constitution_path: Path,
+    encryption_config: Optional[Any] = None,
+) -> bool:
     """Read the constitution YAML and return True iff the
     ``reality_anchor`` block sets ``enabled: false``.
 
     Per ADR-0063 D2 the gate is ON by default — only an explicit
     ``enabled: false`` opts out. Missing block, malformed YAML,
     or read errors all default to "opted in" (return False).
+
+    ADR-0050 T5b (B272) — encryption-aware. ``encryption_config``
+    threads from the dispatcher's master_key when set.
     """
+    text = _read_constitution_text(constitution_path, encryption_config)
+    if text is None:
+        return False
     try:
         import yaml as _yaml
-        text = constitution_path.read_text(encoding="utf-8")
         data = _yaml.safe_load(text) or {}
     except Exception:
         return False

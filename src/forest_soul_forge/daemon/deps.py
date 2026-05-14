@@ -266,6 +266,13 @@ def build_or_get_tool_dispatcher(app):
             if fsf_registry is not None else None
         ),
         tool_catalog=getattr(app.state, "tool_catalog", None),
+        # ADR-0050 T5b (B272): master encryption key for at-rest
+        # constitution.yaml reads. When the daemon lifespan resolved
+        # the key (FSF_AT_REST_ENCRYPTION=true), constitution_path.enc
+        # variants decrypt transparently on every dispatch. None
+        # (default trusted-host posture) → plaintext reads, bit-
+        # identical pre-T5b behavior.
+        master_key=getattr(app.state, "master_key", None),
     )
     # ADR-0054 T6 (B194) — procedural-shortcut substrate wiring.
     # Master switch is ``settings.procedural_shortcut_enabled`` (default

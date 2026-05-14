@@ -775,7 +775,16 @@ async def ambient_nudge(
 
     # 2. Constitution opt-in.
     constitution_path = Path(agent.constitution_path)
-    if not _read_ambient_opt_in(constitution_path):
+    # ADR-0050 T5b (B272): thread master_key so the ambient-opt-in
+    # gate reads the .enc variant when present.
+    _master_key = getattr(request.app.state, "master_key", None)
+    _enc_cfg = None
+    if _master_key is not None:
+        from forest_soul_forge.core.at_rest_encryption import (
+            EncryptionConfig as _EncryptionConfig,
+        )
+        _enc_cfg = _EncryptionConfig(master_key=_master_key)
+    if not _read_ambient_opt_in(constitution_path, encryption_config=_enc_cfg):
         raise HTTPException(
             status_code=403,
             detail=(

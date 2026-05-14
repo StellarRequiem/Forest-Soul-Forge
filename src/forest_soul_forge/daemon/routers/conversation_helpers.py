@@ -194,19 +194,27 @@ def build_ambient_prompt(
 # ---------------------------------------------------------------------------
 # Ambient-mode gate readers.
 # ---------------------------------------------------------------------------
-def read_ambient_opt_in(constitution_path: Path) -> bool:
+def read_ambient_opt_in(constitution_path: Path, encryption_config=None) -> bool:
     """Read ``interaction_modes.ambient_opt_in`` from the agent's
     constitution.yaml. Default False — Y5 is structurally opt-in
     even when the genre would permit it.
 
     Errors (missing file, malformed YAML, unexpected shape) all
     return False — the safer default for an opt-in gate.
+
+    ADR-0050 T5b (B272) — encryption-aware. ``encryption_config``
+    threads from the caller (typically request.app.state.master_key);
+    when set, the .enc constitution variant is decrypted transparently.
     """
     import yaml
-    if not constitution_path.exists():
+    # Lazy import — keep this helper independent of dispatcher's
+    # cryptography dep until called.
+    from forest_soul_forge.tools.dispatcher import _read_constitution_text
+    text = _read_constitution_text(constitution_path, encryption_config)
+    if text is None:
         return False
     try:
-        data = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(text) or {}
     except yaml.YAMLError:
         return False
     block = data.get("interaction_modes") or {}
