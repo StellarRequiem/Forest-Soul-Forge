@@ -45,6 +45,7 @@ from forest_soul_forge.tools.builtin.posture_check import PostureCheckTool
 from forest_soul_forge.tools.builtin.pytest_run import PytestRunTool
 from forest_soul_forge.tools.builtin.ruff_lint import RuffLintTool
 from forest_soul_forge.tools.builtin.security_scan import SecurityScanTool
+from forest_soul_forge.tools.builtin.operator_profile_read import OperatorProfileReadTool
 from forest_soul_forge.tools.builtin.verify_claim import VerifyClaimTool
 from forest_soul_forge.tools.builtin.semgrep_scan import SemgrepScanTool
 from forest_soul_forge.tools.builtin.software_inventory import SoftwareInventoryTool
@@ -89,6 +90,7 @@ __all__ = [
     "MypyTypecheckTool",
     "SemgrepScanTool",
     "SecurityScanTool",
+    "OperatorProfileReadTool",
     "VerifyClaimTool",
     "TreeSitterQueryTool",
     "BanditSecurityScanTool",
@@ -298,6 +300,13 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # Read-only; lightweight (~ms scale). Substrate-layer gate
     # (RealityAnchorStep) consumes this in B252.
     registry.register(VerifyClaimTool())
+    # ADR-0068 T1 (Burst 277) wired (B278) — operator_profile_read.v1.
+    # Returns the parsed OperatorProfile so any agent in the ten-domain
+    # platform arc can ask "who is the operator?" once. Reads from
+    # data/operator/profile.yaml (or .enc variant under at-rest
+    # encryption); audit event captures operator_id + schema_version
+    # only, not the full PII payload.
+    registry.register(OperatorProfileReadTool())
     # Phase G.1.A — tree_sitter_query.v1 (Burst 60). Read-only AST-
     # level structural queries via tree-sitter S-expressions. Lazy-
     # imports tree_sitter + tree_sitter_languages so daemon boots

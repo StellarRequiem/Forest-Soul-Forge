@@ -363,6 +363,40 @@ tools:
     side_effects: read_only
     archetype_tags: [security_low, guardian, observer]
 
+  operator_profile_read.v1:
+    name: operator_profile_read
+    version: "1"
+    description: |
+      ADR-0068 T1 operator profile primitive. Returns the parsed
+      OperatorProfile (operator_id, name, preferred_name, email,
+      timezone, locale, work_hours) as a dict so any agent with the
+      constitution permission can ask "who is the operator?" without
+      re-prompting the human every conversation. Reads from
+      data/operator/profile.yaml (or its .enc variant under
+      ADR-0050 T5 encryption-at-rest); the dispatcher threads its
+      master_key into the tool context so decryption is transparent.
+
+      Audit event captures operator_id + schema_version only (not
+      the full PII payload) — the result goes to the agent's
+      reasoning but the chain entry stays minimal.
+
+      Every domain agent in the ten-domain platform arc reads this:
+      Knowledge Forge needs preferred_name for attribution; Daily
+      Life OS needs timezone + work_hours for scheduling; Content
+      Studio needs locale for prompt language; Smart Home needs
+      operator_id for routing.
+    input_schema:
+      type: object
+      properties: {}
+    side_effects: read_only
+    archetype_tags:
+      - companion
+      - researcher
+      - communicator
+      - guardian
+      - observer
+      - assistant
+
   verify_claim.v1:
     name: verify_claim
     version: "1"

@@ -126,7 +126,75 @@ def load_ground_truth(
             continue
         seen_ids.add(fact.id)
         facts.append(fact)
+
+    # ADR-0068 T1.1 (B278) — merge operator profile-derived facts.
+    # The operator profile at data/operator/profile.yaml is the
+    # operator's personal truth (name/email/timezone/work_hours).
+    # Conceptually identical to the operator-global catalog above:
+    # operator-asserted, tamper-evident, single source of truth. The
+    # merge gives every Reality Anchor consumer (dispatcher gate,
+    # conversation gate, /reality-anchor router, verify_claim.v1)
+    # transparent access to personal facts.
+    #
+    # Silent skip on any failure (profile missing, malformed) — the
+    # operator-global catalog still loads, and the merge is purely
+    # additive. errors get the non-fatal note so /reality-anchor/status
+    # (T7) surfaces the gap without crashing dispatch.
+    try:
+        from forest_soul_forge.core.operator_profile import (
+            OperatorProfileError,
+            load_operator_profile,
+            profile_to_ground_truth_seeds,
+        )
+        try:
+            profile = load_operator_profile()
+        except OperatorProfileError as e:
+            errors.append(
+                f"operator profile not loaded for ground-truth merge: {e}"
+            )
+        else:
+            seeds = profile_to_ground_truth_seeds(profile)
+            for seed in seeds:
+                if seed["id"] in seen_ids:
+                    # operator-global catalog wins on id collision —
+                    # same discipline as merge_agent_additions: the
+                    # explicit catalog is more authoritative than the
+                    # derived profile seed.
+                    errors.append(
+                        f"operator profile seed {seed['id']!r} collides "
+                        f"with operator-global catalog id; keeping catalog"
+                    )
+                    continue
+                seen_ids.add(seed["id"])
+                facts.append(_fact_from_profile_seed(seed))
+    except Exception as e:  # noqa: BLE001 — non-fatal merge
+        errors.append(
+            f"operator profile ground-truth merge failed: "
+            f"{type(e).__name__}: {e}"
+        )
+
     return facts, errors
+
+
+def _fact_from_profile_seed(seed: dict) -> Fact:
+    """Translate an operator-profile-derived seed dict to a frozen Fact.
+
+    The seed dicts come from
+    :func:`operator_profile.profile_to_ground_truth_seeds`. The
+    conversion is mechanical — same field names, just tuple-coerce
+    the list-valued ones to match Fact's frozen dataclass shape.
+    """
+    return Fact(
+        id=str(seed["id"]),
+        statement=str(seed["statement"]),
+        domain_keywords=tuple(seed.get("domain_keywords") or []),
+        canonical_terms=tuple(seed.get("canonical_terms") or []),
+        forbidden_terms=tuple(seed.get("forbidden_terms") or []),
+        severity=str(seed.get("severity", "MEDIUM")),
+        last_confirmed_at=seed.get("last_confirmed_at"),
+        notes=str(seed.get("notes", "derived from operator_profile.yaml")),
+        source="operator_profile",
+    )
 
 
 def merge_agent_additions(
