@@ -278,6 +278,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _passport_add_subparser(sub)
 
+    # `fsf encrypt ...` — ADR-0050 T8 (B275) at-rest encryption
+    # status, decrypt-event debug, and master-key rotation.
+    from forest_soul_forge.cli.encrypt_cmd import (
+        add_subparser as _encrypt_add_subparser,
+    )
+    _encrypt_add_subparser(sub)
+
     return parser
 
 
