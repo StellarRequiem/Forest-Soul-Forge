@@ -314,6 +314,13 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     #     through dispatcher logs.
     "agent_passport_minted",
     "agent_passport_refused",
+    # ADR-0073 T1 (Burst 291) — audit chain segment seal anchor.
+    # First entry of every new monthly segment. event_data carries
+    # AnchorPayload (prior_segment_file + prior_seq_end +
+    # prior_merkle_root + prior_segment_entry_count). prev_hash on
+    # the entry itself references the prior segment's last
+    # entry_hash, so the linked-list invariant holds across segments.
+    "audit_chain_anchor",
     # ADR-0072 T1 (Burst 290) — behavior provenance layer changes.
     # Fires whenever any of the four rule layers mutates:
     # hardcoded_handoff (engineer commit) / constitutional
