@@ -298,16 +298,57 @@ class LocalWhisperBackend:
         {text, start, end, avg_logprob, lang}.
 
         Different bindings emit slightly different shapes; this
-        adapter normalizes. Stubbed-out body: real binding wiring
-        ships in T2 once the HTTP surface needs it. For now, raise
-        VoiceBackendUnavailable so the test surface is clean and
-        the wiring is deferred.
+        adapter normalizes. Bindings supported:
+          - pywhispercpp.model.Model — preferred binding. Has a
+            .transcribe(audio) returning a list of Segment objects
+            with .text + .start + .end attributes (timestamps in
+            10ms units in older versions, seconds in newer).
+          - whispercpp.Whisper — alternative binding. Has a
+            .transcribe(audio) returning a string + .segments()
+            generator.
+
+        Audio handling: bindings expect WAV PCM 16kHz mono. For T2
+        we pass through what the operator uploaded; ffmpeg-based
+        format normalization is queued for T3 (push-to-talk) when
+        browser-recorded webm/opus shows up.
         """
-        raise VoiceBackendUnavailable(
-            "LocalWhisperBackend._invoke_transcribe is stubbed in T1. "
-            "Real binding wiring lands in T2 with the /voice/transcribe "
-            "HTTP endpoint."
-        )
+        # Persist audio_bytes to a temp file. Most bindings prefer
+        # a path over an in-memory buffer because they shell out
+        # to whisper.cpp's CLI which expects a filesystem path.
+        import tempfile
+        suffix = f".{audio_format}" if audio_format else ".wav"
+        with tempfile.NamedTemporaryFile(
+            mode="wb", suffix=suffix, delete=False,
+        ) as tf:
+            tf.write(audio_bytes)
+            audio_path = tf.name
+
+        try:
+            # pywhispercpp binding shape
+            if hasattr(self._whisper, "transcribe"):
+                try:
+                    raw_segments = self._whisper.transcribe(
+                        audio_path,
+                        language=language_hint or "en",
+                    )
+                    return _normalize_pywhispercpp_segments(raw_segments)
+                except TypeError:
+                    # Older pywhispercpp signature; retry without
+                    # the language kwarg.
+                    raw_segments = self._whisper.transcribe(audio_path)
+                    return _normalize_pywhispercpp_segments(raw_segments)
+            raise VoiceBackendUnavailable(
+                "loaded whisper binding has no .transcribe() method"
+            )
+        finally:
+            # Best-effort cleanup. tempfile is in /tmp; OS will
+            # clean it eventually but explicit unlink keeps the
+            # session disk usage low.
+            try:
+                import os as _os
+                _os.unlink(audio_path)
+            except OSError:
+                pass
 
     def synthesize(
         self,
@@ -324,3 +365,62 @@ class LocalWhisperBackend:
             f"synthesize() not supported. Use forest-voice-piper (T5) "
             f"or another TTS backend."
         )
+
+
+def _normalize_pywhispercpp_segments(raw: Any) -> list[dict]:
+    """Normalize pywhispercpp Segment objects (or list thereof)
+    into the unified {text, start, end, avg_logprob, lang} dict
+    shape.
+
+    Older pywhispercpp returns a list of Segment dataclasses with
+    .text + .start + .end (timestamps in 10ms units). Newer
+    versions return seconds. We detect via magnitude — if a
+    segment's end > 10_000 we assume 10ms units.
+    """
+    if raw is None:
+        return []
+    segments: list[dict] = []
+    # Detect 10ms units by peeking at the first non-empty segment.
+    use_ms_units = False
+    for seg in raw:
+        end_val = getattr(seg, "end", None) or (
+            seg.get("end") if isinstance(seg, dict) else 0
+        )
+        if isinstance(end_val, (int, float)) and end_val > 10000:
+            use_ms_units = True
+            break
+
+    for seg in raw:
+        if isinstance(seg, dict):
+            text = seg.get("text", "")
+            start = seg.get("start", 0.0)
+            end = seg.get("end", 0.0)
+            avg_logprob = seg.get("avg_logprob")
+            lang = seg.get("lang") or seg.get("language")
+        else:
+            text = getattr(seg, "text", "")
+            start = getattr(seg, "start", 0.0)
+            end = getattr(seg, "end", 0.0)
+            avg_logprob = getattr(seg, "avg_logprob", None)
+            lang = getattr(seg, "lang", None) or getattr(seg, "language", None)
+
+        # Convert 10ms units → seconds when needed.
+        if use_ms_units:
+            start = float(start) / 100.0
+            end = float(end) / 100.0
+        else:
+            start = float(start)
+            end = float(end)
+
+        segments.append({
+            "text": str(text).strip(),
+            "start": start,
+            "end": end,
+            "avg_logprob": (
+                float(avg_logprob)
+                if isinstance(avg_logprob, (int, float)) else None
+            ),
+            "lang": lang,
+        })
+
+    return segments
