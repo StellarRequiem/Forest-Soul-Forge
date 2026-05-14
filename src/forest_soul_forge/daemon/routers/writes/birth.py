@@ -658,7 +658,26 @@ def _perform_create(
                 f"  bound_at: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
             )
 
-        _write_artifacts(soul_path, soul_doc.markdown, const_path, constitution_yaml)
+        # ADR-0050 T5 (B271) — file-encryption pass-through. When the
+        # daemon lifespan resolved a master key (FSF_AT_REST_ENCRYPTION
+        # was true and the resolver succeeded), build an EncryptionConfig
+        # and hand it to write_artifacts; the writer encrypts both
+        # payloads and lands them at .soul.md.enc / .constitution.yaml.enc.
+        # When the master key is absent (default trusted-host posture),
+        # encryption_config stays None and the writer falls back to its
+        # pre-T5 plaintext behavior bit-identically.
+        _master_key = getattr(request.app.state, "master_key", None)
+        _enc_config = None
+        if _master_key is not None:
+            from forest_soul_forge.core.at_rest_encryption import (
+                EncryptionConfig as _EncryptionConfig,
+            )
+            _enc_config = _EncryptionConfig(master_key=_master_key)
+        _write_artifacts(
+            soul_path, soul_doc.markdown,
+            const_path, constitution_yaml,
+            encryption_config=_enc_config,
+        )
 
         # ADR-003X K6 — emit hardware_bound event when binding was set.
         if hardware_binding_value:

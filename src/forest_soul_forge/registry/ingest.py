@@ -98,13 +98,50 @@ _FRONTMATTER_RE = re.compile(
 )
 
 
-def parse_soul_file(path: Path) -> ParsedSoul:
+def parse_soul_file(path: Path, encryption_config=None) -> ParsedSoul:
     """Parse a single soul.md and return its ParsedSoul.
 
     Raises :class:`IngestError` if the file is missing frontmatter or
     required fields.
+
+    ADR-0050 T5 (B271) — encryption-aware. When called with a path
+    that's the encrypted variant (``.soul.md.enc``), the function
+    strips the ``.enc`` suffix from the returned :attr:`ParsedSoul.soul_path`
+    so the registry keeps recording the canonical (plaintext-named)
+    path. Re-encrypt-after-read happens at write time only — readers
+    don't change the on-disk shape.
     """
-    text = path.read_text(encoding="utf-8")
+    # Detect on-disk variant. If caller passed the plaintext name but
+    # only the encrypted variant exists, the helper switches in.
+    actual_path = path
+    if not path.exists() and path.name.endswith(".enc") is False:
+        enc = path.with_name(path.name + ".enc")
+        if enc.exists():
+            actual_path = enc
+
+    if actual_path.suffix == ".enc":
+        # Read+decrypt; record the plaintext-named canonical path on
+        # the registry row so callers can construct the .enc path back
+        # via with_name(name + ".enc") without re-discovering it.
+        from forest_soul_forge.core.at_rest_encryption import decrypt_text
+        if encryption_config is None:
+            raise IngestError(
+                f"{actual_path}: soul artifact is encrypted but no "
+                f"encryption_config was provided; rebuild requires the "
+                f"daemon's master key (set FSF_AT_REST_ENCRYPTION=true)"
+            )
+        text = decrypt_text(
+            actual_path.read_text(encoding="utf-8"),
+            encryption_config,
+        )
+        # Canonical path strips the trailing ``.enc`` so the registry
+        # records the same value it did pre-encryption — that's what
+        # write_artifacts treats as input and what character_sheet
+        # row.soul_path expects.
+        canonical_path = actual_path.with_name(actual_path.name[:-len(".enc")])
+        path = canonical_path
+    else:
+        text = path.read_text(encoding="utf-8")
     m = _FRONTMATTER_RE.match(text)
     if not m:
         raise IngestError(f"{path}: missing YAML frontmatter")
@@ -195,12 +232,27 @@ def parse_soul_file(path: Path) -> ParsedSoul:
 
 
 def iter_soul_files(root: Path) -> Iterator[Path]:
-    """Yield every ``*.soul.md`` under ``root`` in sorted order.
+    """Yield every ``*.soul.md`` (and ``.soul.md.enc``) under ``root``.
+
+    ADR-0050 T5 (B271) — encryption-aware glob. Picks up both the
+    plaintext and the encrypted variant. The yielded ``.enc`` paths
+    are recognized by :func:`parse_soul_file` which decrypts on read
+    and returns the canonical (plaintext-named) path on the
+    :class:`ParsedSoul`.
+
+    Mixed directories (some plaintext, some encrypted) are supported
+    — operators who flipped encryption on at some agent boundary see
+    both eras of artifacts surface here.
 
     Sorted so rebuild is deterministic — critical when legacy-minting
     instance_ids is involved.
     """
-    yield from sorted(root.rglob("*.soul.md"))
+    plain = root.rglob("*.soul.md")
+    encrypted = root.rglob("*.soul.md.enc")
+    # rglob yields both shapes; sort together so the rebuild order is
+    # alphabetical-by-name regardless of which variant each agent
+    # happens to be in.
+    yield from sorted(list(plain) + list(encrypted))
 
 
 def synthesize_legacy_instance_id(

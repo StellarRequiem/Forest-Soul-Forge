@@ -340,7 +340,11 @@ _NARRATIVE_LINE_RE = re.compile(
 )
 
 
-def update_soul_voice(soul_path, voice: VoiceText) -> None:
+def update_soul_voice(
+    soul_path,
+    voice: VoiceText,
+    encryption_config=None,
+) -> None:
     """Rewrite soul.md with a new ``## Voice`` section + narrative_* fields.
 
     Used by the regenerate-voice endpoint. Preserves all other content
@@ -351,14 +355,49 @@ def update_soul_voice(soul_path, voice: VoiceText) -> None:
 
     If the soul was birthed without enrichment (no Voice section, no
     narrative_* fields), this function inserts both for the first time.
+
+    ADR-0050 T5 (B271) — file-encryption pass-through. If the soul is
+    on disk in the encrypted variant (``<soul_path>.enc`` exists), the
+    rewrite decrypts in, modifies in memory, and re-encrypts out under
+    the same key. The on-disk variant is sticky: an encrypted soul
+    stays encrypted after the rewrite. Passing ``encryption_config=None``
+    when the encrypted variant exists raises rather than downgrading to
+    plaintext (the rewrite must preserve confidentiality posture).
     """
     from pathlib import Path
     p = Path(soul_path)
-    text = p.read_text(encoding="utf-8")
+    enc_path = p.with_name(p.name + ".enc")
 
+    if enc_path.exists():
+        if encryption_config is None:
+            raise RuntimeError(
+                f"cannot rewrite encrypted soul at {enc_path} without "
+                f"encryption_config; voice rewrite refused to downgrade "
+                f"to plaintext"
+            )
+        # Lazy import — at_rest_encryption pulls in cryptography lib,
+        # which the daemon extras own. soul.voice_renderer is otherwise
+        # cryptography-free, and import-time errors here would surface
+        # at module load even for plaintext-mode operators. Lazy import
+        # keeps the optional-extras posture from ADR-0050 Decision 5.
+        from forest_soul_forge.core.at_rest_encryption import (
+            decrypt_text, encrypt_text,
+        )
+        text = decrypt_text(
+            enc_path.read_text(encoding="utf-8"),
+            encryption_config,
+        )
+        text = _replace_or_insert_narrative_fields(text, voice)
+        text = _replace_or_insert_voice_section(text, voice.markdown)
+        enc_path.write_text(
+            encrypt_text(text, encryption_config),
+            encoding="utf-8",
+        )
+        return
+
+    text = p.read_text(encoding="utf-8")
     text = _replace_or_insert_narrative_fields(text, voice)
     text = _replace_or_insert_voice_section(text, voice.markdown)
-
     p.write_text(text, encoding="utf-8")
 
 

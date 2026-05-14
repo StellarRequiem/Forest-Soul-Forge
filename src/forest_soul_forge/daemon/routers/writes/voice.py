@@ -110,9 +110,25 @@ def regenerate_voice(
         raise HTTPException(status_code=404, detail=f"unknown agent: {e}") from e
 
     soul_path = Path(row.soul_path)
-    if not soul_path.exists():
-        # Disk drift — registry has the row but the file is gone. Refuse
-        # to regenerate; rebuild-from-artifacts is the right repair path.
+
+    # ADR-0050 T5 (B271) — file-encryption pass-through. The registry
+    # records the canonical plaintext path; the on-disk file may be
+    # at <soul_path>.enc if the agent was birthed under encryption.
+    # Build the encryption config once for both the read here and the
+    # update_soul_voice rewrite at the bottom of the function.
+    _master_key = getattr(request.app.state, "master_key", None)
+    _enc_config = None
+    if _master_key is not None:
+        from forest_soul_forge.core.at_rest_encryption import (
+            EncryptionConfig as _EncryptionConfig,
+        )
+        _enc_config = _EncryptionConfig(master_key=_master_key)
+
+    soul_enc_path = soul_path.with_name(soul_path.name + ".enc")
+    if not soul_path.exists() and not soul_enc_path.exists():
+        # Disk drift — registry has the row but neither variant of
+        # the file is present. Refuse to regenerate; rebuild-from-
+        # artifacts is the right repair path.
         raise HTTPException(
             status_code=409,
             detail=f"soul file missing on disk: {soul_path}",
@@ -121,7 +137,8 @@ def regenerate_voice(
     # Reconstruct the trait profile from the existing soul.md frontmatter.
     # Pulls trait_values + role + domain_weight_overrides directly so we
     # don't need them on the registry row.
-    parsed_text = soul_path.read_text(encoding="utf-8")
+    from forest_soul_forge.daemon.routers.birth_pipeline import read_soul_md
+    parsed_text = read_soul_md(soul_path, encryption_config=_enc_config)
     fm_match = _ingest._FRONTMATTER_RE.match(parsed_text)
     if fm_match is None:
         raise HTTPException(
@@ -198,7 +215,7 @@ def regenerate_voice(
         prev_provider = frontmatter.get("narrative_provider")
         prev_model = frontmatter.get("narrative_model")
         try:
-            update_soul_voice(soul_path, new_voice)
+            update_soul_voice(soul_path, new_voice, encryption_config=_enc_config)
         except Exception as e:
             raise HTTPException(
                 status_code=500,

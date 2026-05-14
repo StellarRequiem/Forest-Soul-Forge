@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from forest_soul_forge.core.audit_chain import AuditChain
 from forest_soul_forge.core.genre_engine import GenreEngine, GenreEngineError
@@ -57,16 +57,23 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _read_soul_frontmatter(path: Path) -> dict[str, Any]:
+def _read_soul_frontmatter(path: Path, encryption_config=None) -> dict[str, Any]:
     """Return the parsed frontmatter dict, or 409 if the file is missing
     or malformed. The error shape matches /agents/{id}/regenerate-voice
-    for consistency."""
-    if not path.exists():
+    for consistency.
+
+    ADR-0050 T5 (B271) — encryption-aware. The path on disk may be at
+    ``<path>.enc`` for agents birthed under encryption; the read helper
+    detects and decrypts transparently.
+    """
+    from forest_soul_forge.daemon.routers.birth_pipeline import read_soul_md
+    enc_path = path.with_name(path.name + ".enc")
+    if not path.exists() and not enc_path.exists():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"soul file missing on disk: {path}",
         )
-    text = path.read_text(encoding="utf-8")
+    text = read_soul_md(path, encryption_config=encryption_config)
     m = _FRONTMATTER_RE.match(text)
     if not m:
         raise HTTPException(
@@ -99,15 +106,28 @@ def _read_voice_section(text: str) -> str | None:
     return "\n".join(body).strip() or None
 
 
-def _read_constitution(path: Path) -> dict[str, Any]:
+def _read_constitution(path: Path, encryption_config=None) -> dict[str, Any]:
     """Read the constitution.yaml; return parsed dict or empty dict if
     the file is missing. Missing constitution doesn't 409 — the registry
-    row could still hold a hash (older artifact format)."""
-    if not path.exists():
+    row could still hold a hash (older artifact format).
+
+    ADR-0050 T5 (B271) — encryption-aware. The path on disk may be at
+    ``<path>.enc`` for agents birthed under encryption; the read helper
+    detects and decrypts transparently. Decrypt failures (wrong key,
+    tampered envelope) bubble up as exceptions and the caller falls
+    back to empty dict per the original semantics — better to show an
+    empty sheet than to 500 the operator out of /character-sheet.
+    """
+    from forest_soul_forge.daemon.routers.birth_pipeline import (
+        read_constitution_yaml,
+    )
+    enc_path = path.with_name(path.name + ".enc")
+    if not path.exists() and not enc_path.exists():
         return {}
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
+        text = read_constitution_yaml(path, encryption_config=encryption_config)
+        return yaml.safe_load(text) or {}
+    except (yaml.YAMLError, RuntimeError, Exception):
         return {}
 
 
@@ -299,6 +319,7 @@ def _build_stats(registry: Registry, instance_id: str) -> CharacterStats:
 )
 async def get_character_sheet(
     instance_id: str,
+    request: Request,
     registry: Registry = Depends(get_registry),
     genre_engine: GenreEngine = Depends(get_genre_engine),
     tool_catalog: ToolCatalog = Depends(get_tool_catalog),
@@ -312,10 +333,24 @@ async def get_character_sheet(
     soul_path = Path(row.soul_path)
     constitution_path = Path(row.constitution_path)
 
-    fm = _read_soul_frontmatter(soul_path)
-    soul_text = soul_path.read_text(encoding="utf-8")
+    # ADR-0050 T5 (B271) — file-encryption pass-through. When the daemon
+    # lifespan resolved a master key, build an EncryptionConfig and
+    # thread it to the read helpers so agents birthed under encryption
+    # surface their soul + constitution through the operator-facing
+    # character sheet correctly.
+    _master_key = getattr(request.app.state, "master_key", None)
+    _enc_config = None
+    if _master_key is not None:
+        from forest_soul_forge.core.at_rest_encryption import (
+            EncryptionConfig as _EncryptionConfig,
+        )
+        _enc_config = _EncryptionConfig(master_key=_master_key)
+
+    from forest_soul_forge.daemon.routers.birth_pipeline import read_soul_md
+    fm = _read_soul_frontmatter(soul_path, encryption_config=_enc_config)
+    soul_text = read_soul_md(soul_path, encryption_config=_enc_config)
     voice_text = _read_voice_section(soul_text)
-    constitution = _read_constitution(constitution_path)
+    constitution = _read_constitution(constitution_path, encryption_config=_enc_config)
 
     # Genre name comes from soul.md frontmatter when present; falls back
     # to the constitution.yaml `agent.genre` field (T3 emits both).
