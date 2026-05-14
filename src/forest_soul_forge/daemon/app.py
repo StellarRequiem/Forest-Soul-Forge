@@ -863,6 +863,15 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         )
         scheduler_enabled = (_os.environ.get("FSF_SCHEDULER_ENABLED") or "true").lower() == "true"
         scheduler_poll_interval = float(_os.environ.get("FSF_SCHEDULER_POLL_INTERVAL_SECONDS") or "30")
+        # ADR-0075 T2 (B295): wall-clock budget per tick. When a
+        # tick that dispatched at least one task exceeds this
+        # threshold the scheduler emits ``scheduler_lag(reason=
+        # "tick_over_budget")`` so operators see "scheduler can't
+        # keep up." Default 500ms per ADR-0075 Decision 3.
+        # ``inf`` disables the check entirely.
+        scheduler_tick_budget_ms = float(
+            _os.environ.get("FSF_SCHEDULER_TICK_BUDGET_MS") or "500"
+        )
         # ADR-0041 T5 (Burst 90): persistence over the registry's
         # connection. Scheduler.start() reads to hydrate in-memory
         # state; _dispatch upserts after every outcome under the
@@ -870,6 +879,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         scheduler_state_repo = SchedulerStateRepo(registry._conn)  # noqa: SLF001
         scheduler = Scheduler(
             poll_interval_seconds=scheduler_poll_interval,
+            tick_budget_ms=scheduler_tick_budget_ms,
             context={
                 # ``app`` is in the context so runners can reach
                 # lazily-built subsystems (notably the tool dispatcher

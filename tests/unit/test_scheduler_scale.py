@@ -289,3 +289,133 @@ def test_scheduler_lag_event_registered():
     """`scheduler_lag` is in KNOWN_EVENT_TYPES so T2/T3 emits won't trip
     the audit verifier's unknown-event-type check."""
     assert "scheduler_lag" in KNOWN_EVENT_TYPES
+
+
+# ---------------------------------------------------------------------------
+# ADR-0075 T2 (B295) — tick_over_budget detection
+# ---------------------------------------------------------------------------
+#
+# Substrate-level enforcement: Scheduler._tick() measures wall-clock
+# duration; if a tick that dispatched >0 tasks exceeds the budget,
+# emits scheduler_lag(reason="tick_over_budget"). Idle over-budget
+# ticks DON'T emit — those are GC / OS scheduler hiccups, not
+# scheduler problems, and emitting would spam the chain.
+
+import asyncio
+from datetime import datetime, timezone
+
+from forest_soul_forge.daemon.scheduler.runtime import Scheduler
+from forest_soul_forge.daemon.scheduler.schedule import parse_schedule
+from forest_soul_forge.daemon.scheduler.runtime import ScheduledTask
+
+
+class _RecordingChain:
+    """Captures audit.append calls so assertions can target them."""
+
+    def __init__(self):
+        self.events: list[tuple[str, dict]] = []
+
+    def append(self, event_type, payload, *, agent_dna=None):
+        self.events.append((event_type, dict(payload)))
+
+
+def _slow_task(task_id: str, sleep_ms: float) -> ScheduledTask:
+    """Build a task whose runner deliberately sleeps `sleep_ms` ms."""
+    return ScheduledTask(
+        id=task_id,
+        description=f"slow task ({sleep_ms}ms)",
+        schedule=parse_schedule("every 1h"),
+        task_type="slow",
+        config={"sleep_ms": sleep_ms},
+        enabled=True,
+        max_consecutive_failures=3,
+    )
+
+
+def test_tick_under_budget_does_not_emit_scheduler_lag():
+    """A tick that finishes under budget MUST NOT emit. Pin the
+    no-false-positive case so future refactors can't silently start
+    spamming."""
+    async def run():
+        async def fast_runner(config, ctx):
+            return {"ok": True}
+
+        chain = _RecordingChain()
+        # Generous 500ms budget; fast_runner takes microseconds.
+        sched = Scheduler(
+            context={"audit_chain": chain},
+            tick_budget_ms=500.0,
+        )
+        sched.register_task_type("slow", fast_runner)
+        sched.add_task(_slow_task("t1", 0))
+        await sched._tick()
+        lag_events = [e for e in chain.events if e[0] == "scheduler_lag"]
+        assert lag_events == []
+
+    asyncio.run(run())
+
+
+def test_tick_over_budget_emits_scheduler_lag():
+    """When a dispatching tick exceeds the budget, exactly one
+    scheduler_lag(reason="tick_over_budget") event lands with the
+    expected payload shape."""
+    async def run():
+        async def slow_runner(config, ctx):
+            sleep_ms = float(config.get("sleep_ms", 50))
+            await asyncio.sleep(sleep_ms / 1000.0)
+            return {"ok": True}
+
+        chain = _RecordingChain()
+        # 10ms budget; runner sleeps 80ms — guaranteed over-budget.
+        sched = Scheduler(
+            context={"audit_chain": chain},
+            tick_budget_ms=10.0,
+        )
+        sched.register_task_type("slow", slow_runner)
+        sched.add_task(_slow_task("t1", 80))
+        await sched._tick()
+
+        lag_events = [e for e in chain.events if e[0] == "scheduler_lag"]
+        assert len(lag_events) == 1, (
+            f"expected exactly one scheduler_lag emit, got {chain.events!r}"
+        )
+        payload = lag_events[0][1]
+        assert payload["reason"] == "tick_over_budget"
+        assert payload["task_id"] is None
+        assert payload["tick_budget_ms"] == 10.0
+        assert payload["tick_duration_ms"] > 10.0
+        assert payload["dispatches_in_tick"] == 1
+        # T3-only fields are present and null in T2 payloads — payload
+        # shape is locked across T2/T3 per ADR.
+        assert payload["budget_per_minute"] is None
+        assert payload["dispatches_in_window"] is None
+        assert payload["details"] is None
+
+    asyncio.run(run())
+
+
+def test_tick_over_budget_with_zero_dispatches_does_not_emit():
+    """An idle tick that happens to blow the budget (e.g., a GC pause)
+    MUST NOT emit. ADR-0075 T2 explicit: only emit when at least one
+    task fired AND the tick exceeded the budget."""
+    async def run():
+        chain = _RecordingChain()
+        # Zero budget — every tick exceeds.
+        sched = Scheduler(
+            context={"audit_chain": chain},
+            tick_budget_ms=0.0,
+        )
+        # No tasks registered — _tick has nothing to dispatch.
+        await sched._tick()
+        lag_events = [e for e in chain.events if e[0] == "scheduler_lag"]
+        assert lag_events == []
+
+    asyncio.run(run())
+
+
+def test_tick_budget_default_is_500ms():
+    """ADR Decision 3 pins the default at 500ms. Pin it at the
+    constructor-default level so a refactor that changes the default
+    becomes a visible test diff."""
+    s = Scheduler()
+    assert s._tick_budget_ms == 500.0

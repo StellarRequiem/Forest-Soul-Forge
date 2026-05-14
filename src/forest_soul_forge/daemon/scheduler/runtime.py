@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
@@ -172,6 +173,7 @@ class Scheduler:
         poll_interval_seconds: float = 30.0,
         context: dict[str, Any] | None = None,
         state_repo: Any = None,
+        tick_budget_ms: float = 500.0,
     ) -> None:
         """Construct the scheduler.
 
@@ -182,6 +184,17 @@ class Scheduler:
         every outcome. When None (the default — used by tests that
         don't care about restart-survival), state lives in-memory
         only and is lost on stop.
+
+        ``tick_budget_ms`` (ADR-0075 T2, B295) is the wall-clock
+        threshold above which a single tick triggers a
+        ``scheduler_lag(reason="tick_over_budget")`` audit event.
+        Default 500ms per ADR-0075 Decision 3. The check fires once
+        per tick that exceeds the budget AND dispatched at least
+        one task — an idle over-budget tick is almost certainly an
+        environment hiccup (GC pause, OS scheduling) rather than a
+        scheduler problem, so we don't spam the chain. Set to
+        ``float('inf')`` to disable the check (operators who want
+        the substrate latent until T3 lands).
         """
         self._poll_interval = poll_interval_seconds
         self._context: dict[str, Any] = dict(context or {})
@@ -192,6 +205,7 @@ class Scheduler:
         self._started = False
         self._lock = asyncio.Lock()
         self._state_repo = state_repo
+        self._tick_budget_ms = float(tick_budget_ms)
 
     # ---- task type registration -------------------------------------------
     def register_task_type(self, name: str, runner: TaskRunner) -> None:
@@ -359,14 +373,40 @@ class Scheduler:
         write_lock is RLock-based and would serialize them anyway,
         and serial is easier to reason about for the audit chain.
         Future tranches may parallelize read-only tasks.
+
+        ADR-0075 T2 (B295): wraps the dispatch loop with
+        ``time.monotonic()`` measurement so an over-budget tick
+        emits ``scheduler_lag(reason="tick_over_budget")``.
+        Monotonic clock (not wall clock) so a system-time jump
+        mid-tick can't make the duration go negative or vault
+        artificially over budget.
         """
+        tick_started = time.monotonic()
         now = datetime.now(timezone.utc)
+        dispatches = 0
         async with self._lock:
             tasks_snapshot = list(self._tasks.values())
         for task in tasks_snapshot:
             if not task.due(now):
                 continue
             await self._dispatch(task, now)
+            dispatches += 1
+        tick_duration_ms = (time.monotonic() - tick_started) * 1000.0
+        if dispatches > 0 and tick_duration_ms > self._tick_budget_ms:
+            # Idle over-budget ticks (dispatches=0) are almost
+            # certainly environment hiccups (GC, OS scheduler) and
+            # would spam the chain — only emit when at least one
+            # task fired AND the tick blew the budget.
+            self._emit_audit("scheduler_lag", {
+                "reason":               "tick_over_budget",
+                "task_id":              None,
+                "tick_duration_ms":     round(tick_duration_ms, 2),
+                "tick_budget_ms":       self._tick_budget_ms,
+                "dispatches_in_tick":   dispatches,
+                "budget_per_minute":    None,
+                "dispatches_in_window": None,
+                "details":              None,
+            })
 
     async def _dispatch(self, task: ScheduledTask, now: datetime) -> None:
         """Dispatch one task. Records outcome; updates schedule;
