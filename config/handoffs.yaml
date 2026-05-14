@@ -1,0 +1,87 @@
+# ADR-0067 T4 — Hardcoded handoff registry.
+#
+# This file IS the operator's load-bearing cross-domain handoff
+# discipline. Engineer-edited via PR; code-reviewed before merge.
+# Learned routes (operator-preference adaptation) live elsewhere
+# and never override entries here.
+#
+# Two sections:
+#
+# 1. default_skill_per_capability — map (domain_id, capability) →
+#    (skill_name, skill_version). When the orchestrator routes a
+#    sub-intent to (domain, capability), the resolver uses this
+#    table to fill in the skill_name + skill_version that
+#    route_to_domain.v1 needs.
+#
+# 2. cascade_rules — hardcoded follow-on routes. A rule like
+#    "every successful d4_code_review route also fires a
+#    d8_compliance route" goes here. Cascades fire after the
+#    initial route succeeds; the audit chain captures the
+#    provenance via cascade_source_* fields.
+
+schema_version: 1
+
+default_skill_per_capability:
+  # D2 Daily Life OS
+  - domain: d2_daily_life_os
+    capability: reminder
+    skill_name: schedule_reminder
+    skill_version: "1"
+  - domain: d2_daily_life_os
+    capability: morning_briefing
+    skill_name: generate_briefing
+    skill_version: "1"
+
+  # D3 Local SOC
+  - domain: d3_local_soc
+    capability: incident_summary
+    skill_name: summarize_recent_incidents
+    skill_version: "1"
+  - domain: d3_local_soc
+    capability: incident_response
+    skill_name: respond_to_incident
+    skill_version: "1"
+
+  # D4 Code Review
+  - domain: d4_code_review
+    capability: review_signoff
+    skill_name: review_pr
+    skill_version: "1"
+  - domain: d4_code_review
+    capability: implementation
+    skill_name: implement_feature
+    skill_version: "1"
+
+  # D8 Compliance Auditor
+  - domain: d8_compliance
+    capability: compliance_scan
+    skill_name: scan_for_compliance
+    skill_version: "1"
+
+# Cascade rules — engineer-defined, code-reviewed via PR.
+#
+# Each rule: when a route to (source_domain, source_capability)
+# succeeds, a follow-on route fires to (target_domain,
+# target_capability). The follow-on inherits the original intent
+# + confidence; the audit chain joins them via cascade_source_*
+# fields on the ResolvedRoute.
+#
+# Cascades don't recurse: A→B fires, but B→C doesn't auto-chain.
+# Operators who want recursive cascades write them explicitly.
+cascade_rules:
+  - source_domain: d4_code_review
+    source_capability: review_signoff
+    target_domain: d8_compliance
+    target_capability: compliance_scan
+    reason: |
+      Every PR review fires a compliance scan. Continuous
+      compliance discipline — drift caught at minute zero, not at
+      audit time. ADR-0067 T4 hardcoded rail.
+
+  - source_domain: d3_local_soc
+    source_capability: incident_response
+    target_domain: d8_compliance
+    target_capability: compliance_scan
+    reason: |
+      Every incident response triggers a compliance evidence
+      capture — the SOC event becomes part of the audit packet.
