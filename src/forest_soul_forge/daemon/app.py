@@ -52,6 +52,9 @@ from forest_soul_forge.daemon.routers import conversations_admin as conversation
 from forest_soul_forge.daemon.routers import hardware as hardware_router
 from forest_soul_forge.daemon.routers import passport as passport_router
 from forest_soul_forge.daemon.routers import (
+    orchestrator as orchestrator_router,
+)
+from forest_soul_forge.daemon.routers import (
     reality_anchor as reality_anchor_router,
 )
 from forest_soul_forge.daemon.routers import security as security_router
@@ -1030,6 +1033,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(hardware_router.router)
     app.include_router(passport_router.router)  # ADR-0061 T6 (B248)
     app.include_router(reality_anchor_router.router)  # ADR-0063 T7 (B256)
+    app.include_router(orchestrator_router.router)    # ADR-0067 T8 (B285)
     app.include_router(security_router.router)  # ADR-0062 T6 (B258)
     app.include_router(conversations_router.router)
     app.include_router(conversations_admin_router.router)
