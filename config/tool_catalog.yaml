@@ -488,6 +488,63 @@ tools:
       - observer
       - assistant
 
+  operator_profile_write.v1:
+    name: operator_profile_write
+    version: "1"
+    description: |
+      ADR-0068 T2 operator profile mutator. Takes a dotted
+      field_path + new_value + reason; atomically updates
+      data/operator/profile.yaml (encryption-aware) and emits
+      the canonical operator_profile_changed audit event with
+      before/after diff + operator-supplied reason.
+
+      side_effects=filesystem + requires_human_approval=True:
+      operator-truth changes ALWAYS gate through per-call
+      approval. An LLM emitting this without operator presence
+      lands in tool_call_pending_approvals; only an operator
+      OK promotes it to a real write.
+
+      Supported field_paths at T2: name, preferred_name, email,
+      timezone, locale, work_hours.start, work_hours.end.
+      Future tranches (T4-T6) extend under the OperatorProfile
+      extra slot for trust_circle / voice_samples /
+      financial_jurisdiction.
+
+      Re-runs profile_to_ground_truth_seeds after the write and
+      surfaces the new seed list in the tool result's metadata
+      so the operator can manually trigger Reality Anchor
+      reload via POST /reality-anchor/reload.
+
+      No-op semantics: if new_value equals current value, no
+      file write and no audit emit — surfaces output.no_op=True.
+    input_schema:
+      type: object
+      properties:
+        field_path:
+          type: string
+          enum:
+            - name
+            - preferred_name
+            - email
+            - timezone
+            - locale
+            - work_hours.start
+            - work_hours.end
+        new_value:
+          type: string
+        reason:
+          type: string
+          minLength: 1
+      required:
+        - field_path
+        - new_value
+        - reason
+    side_effects: filesystem
+    requires_human_approval: true
+    archetype_tags:
+      - assistant
+      - operator_steward
+
   verify_claim.v1:
     name: verify_claim
     version: "1"

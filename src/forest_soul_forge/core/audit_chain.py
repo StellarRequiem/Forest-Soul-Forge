@@ -156,6 +156,12 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "memory_consolidation_run_started",
     "memory_consolidated",
     "memory_consolidation_run_completed",
+    # ADR-0068 T2 (B312) — operator profile mutations. Emitted when
+    # operator_profile_write.v1 lands a change. payload carries the
+    # field_path that changed + before/after values + the operator-
+    # supplied reason. The audit chain becomes the canonical
+    # before-vs-after diff history for operator identity.
+    "operator_profile_changed",
     # ADR-003X K2 — operator-emitted ceremony events. Distinct from
     # tool-emitted events because the EMITTER is a human, not an
     # agent. Used to mark milestones, identity events, governance
