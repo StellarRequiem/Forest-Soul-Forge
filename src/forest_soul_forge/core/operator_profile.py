@@ -105,6 +105,29 @@ class WorkHours:
 
 
 @dataclass(frozen=True)
+class TrustCirclePerson:
+    """One person in the operator's trust circle (ADR-0068 T4, B314).
+
+    The operator declares relationships their agents should know about:
+    a spouse, manager, accountant, doctor — anyone whose name an agent
+    might encounter in operator messages or whose context a domain
+    agent might need to reference.
+
+    The Reality Anchor seeds these so an agent claiming "your manager
+    is X" gets cross-referenced against the operator's actual entry.
+
+    ``email`` and ``notes`` are optional; only ``name`` + ``relationship``
+    are required. The relationship string is operator-defined free-form
+    (e.g. "spouse", "engineering manager", "primary care physician")
+    — Forest doesn't enforce a taxonomy.
+    """
+    name: str
+    relationship: str
+    email: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class OperatorProfile:
     """The single source of truth for who the operator is.
 
@@ -122,8 +145,12 @@ class OperatorProfile:
     work_hours: WorkHours
     created_at: str
     updated_at: str
-    # Forward-compat slot for tranches T4-T6 (trust circle, voice
-    # samples, financial jurisdiction, etc.). Stays empty in T1.
+    # ADR-0068 T4 (B314): operator's declared trust circle. Default
+    # empty tuple — backward-compat with v1 yamls authored before T4.
+    # Each person becomes a Reality Anchor ground-truth seed at boot.
+    trust_circle: tuple[TrustCirclePerson, ...] = ()
+    # Forward-compat slot for tranches T5-T6 (voice samples,
+    # financial jurisdiction). Stays empty before those tranches.
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -236,6 +263,11 @@ def save_operator_profile(
         work_hours=profile.work_hours,
         created_at=profile.created_at,
         updated_at=_now_iso(),
+        # ADR-0068 T4 (B314): preserve trust_circle through the
+        # save path. Pre-T4 save dropped any field added in later
+        # tranches; the explicit forward of trust_circle here is
+        # the same pattern T5-T6 will follow.
+        trust_circle=profile.trust_circle,
         extra=profile.extra,
     )
 
@@ -350,6 +382,36 @@ def profile_to_ground_truth_seeds(profile: OperatorProfile) -> list[dict]:
         "source": "operator_profile.yaml",
     })
 
+    # ADR-0068 T4 (B314): seed one fact per trust-circle person.
+    # The seed's canonical_terms include the person's name; the
+    # Reality Anchor surfaces a contradiction when an agent claims
+    # a wrong relationship (e.g. "your accountant is X" when X is
+    # actually labeled "spouse" in the operator's profile). Severity
+    # HIGH because mis-identifying someone in the operator's trust
+    # circle is a higher-stakes mistake than mis-quoting a locale.
+    for person in profile.trust_circle:
+        seed_id = (
+            "operator_trust_"
+            + person.relationship.lower().replace(" ", "_")
+        )
+        statement = (
+            f"{person.name} is the operator's "
+            f"{person.relationship}."
+        )
+        if person.email:
+            statement += f" Email: {person.email}."
+        seeds.append({
+            "id": seed_id,
+            "severity": "HIGH",
+            "statement": statement,
+            "domain_keywords": [
+                "operator", "trust circle", person.relationship,
+            ],
+            "canonical_terms": [person.name, person.relationship],
+            "forbidden_terms": [],
+            "source": "operator_profile.yaml",
+        })
+
     return seeds
 
 
@@ -457,6 +519,14 @@ def _validate_and_construct(
     if isinstance(operator_extra, dict):
         extra.update(operator_extra)
 
+    # ADR-0068 T4 (B314): trust_circle is optional + defaults to ().
+    # Each entry must be a mapping with at minimum {name, relationship};
+    # email + notes are optional. Malformed entries raise rather than
+    # silently drop — the operator should see the error and fix the
+    # YAML rather than have agents miss a person they expected to be
+    # in scope.
+    trust_circle = _parse_trust_circle(op.get("trust_circle"), source_path)
+
     return OperatorProfile(
         schema_version=int(sv),
         operator_id=str(op["operator_id"]),
@@ -468,8 +538,48 @@ def _validate_and_construct(
         work_hours=work_hours,
         created_at=str(created_at),
         updated_at=str(updated_at),
+        trust_circle=trust_circle,
         extra=extra,
     )
+
+
+def _parse_trust_circle(
+    raw: Any,
+    source_path: Path,
+) -> tuple[TrustCirclePerson, ...]:
+    """Parse the trust_circle list. Returns empty tuple when absent."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise OperatorProfileError(
+            f"operator.trust_circle at {source_path} must be a list "
+            f"of person mappings; got {type(raw).__name__}"
+        )
+    people: list[TrustCirclePerson] = []
+    for idx, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise OperatorProfileError(
+                f"operator.trust_circle[{idx}] at {source_path} must "
+                f"be a mapping; got {type(entry).__name__}"
+            )
+        for required in ("name", "relationship"):
+            if required not in entry:
+                raise OperatorProfileError(
+                    f"operator.trust_circle[{idx}] at {source_path} "
+                    f"missing required field {required!r}"
+                )
+            if not isinstance(entry[required], str) or not entry[required].strip():
+                raise OperatorProfileError(
+                    f"operator.trust_circle[{idx}].{required} at "
+                    f"{source_path} must be a non-empty string"
+                )
+        people.append(TrustCirclePerson(
+            name=entry["name"],
+            relationship=entry["relationship"],
+            email=entry.get("email") if entry.get("email") else None,
+            notes=entry.get("notes") if entry.get("notes") else None,
+        ))
+    return tuple(people)
 
 
 def _to_yaml(profile: OperatorProfile) -> str:
@@ -495,6 +605,13 @@ def _to_yaml(profile: OperatorProfile) -> str:
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }
+    # ADR-0068 T4 (B314): emit trust_circle as a list of person
+    # dicts. Optional fields stay omitted when None so the YAML
+    # diff stays minimal across writes.
+    if profile.trust_circle:
+        payload["operator"]["trust_circle"] = [
+            _person_to_dict(p) for p in profile.trust_circle
+        ]
     if profile.extra:
         payload["operator"]["extra"] = dict(profile.extra)
 
@@ -504,6 +621,20 @@ def _to_yaml(profile: OperatorProfile) -> str:
         default_flow_style=False,
         allow_unicode=True,
     )
+
+
+def _person_to_dict(p: TrustCirclePerson) -> dict[str, Any]:
+    """Serialize one TrustCirclePerson to a dict. Optional fields
+    are omitted when None so the on-disk YAML stays minimal."""
+    out: dict[str, Any] = {
+        "name": p.name,
+        "relationship": p.relationship,
+    }
+    if p.email is not None:
+        out["email"] = p.email
+    if p.notes is not None:
+        out["notes"] = p.notes
+    return out
 
 
 def _now_iso() -> str:
