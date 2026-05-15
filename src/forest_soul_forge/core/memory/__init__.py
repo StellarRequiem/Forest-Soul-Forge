@@ -123,6 +123,20 @@ class Memory(
     # all NEW memory writes encrypt content + tag the row with
     # content_encrypted=1; reads transparently decrypt flagged rows.
     encryption_config: Any = None
+    # ADR-0076 T2 (B320). Optional indexer hook — when set, every
+    # successful append() of a `scope='personal'` row enqueues an
+    # embed task on the indexer's async queue, which lands the
+    # entry's content into PersonalIndex so personal_recall.v1
+    # (T4) sees it within ms-to-seconds. None = pre-T2 path: no
+    # vector indexing, recall falls back to SQL LIKE alone.
+    #
+    # Restricted to scope='personal' on purpose: only operator-
+    # context entries should leak into the operator's PersonalIndex.
+    # Agent-private journal entries stay out of the cross-instance
+    # vector surface. The recall tool (T4) is the one place that
+    # decides "is this query asking for operator context?"; the
+    # write-side gate keeps the index small + privacy-preserving.
+    indexer: Any = None
 
     # ---- write path ----------------------------------------------------
     def append(
@@ -237,6 +251,30 @@ class Memory(
                 created_at, claim_type, confidence, content_encrypted_flag,
             ),
         )
+        # ADR-0076 T2 (B320). Scope-filtered indexer hook. Only
+        # `personal` entries land in the PersonalIndex; the rest
+        # stay out so an agent's private memory doesn't leak into
+        # cross-instance semantic recall. The indexer's enqueue is
+        # non-blocking — if the embed worker is unhealthy, writes
+        # still land in SQL + the audit chain; recall just misses
+        # this entry until the next `fsf index rebuild` (T5).
+        if self.indexer is not None and scope == "personal":
+            try:
+                self.indexer.enqueue(
+                    doc_id=entry_id,
+                    text=content,
+                    source=f"memory:{layer}:{scope}",
+                    tags=tuple(tags) if tags else None,
+                )
+            except Exception:
+                # Indexer enqueue must NEVER fail a memory write.
+                # The chain is the source of truth; the index is
+                # a derivative. Worst case: this entry isn't
+                # searchable via semantic recall until rebuild.
+                # We swallow the exception here rather than logging
+                # because the indexer itself logs internally + the
+                # status() snapshot surfaces the failure.
+                pass
         return MemoryEntry(
             entry_id=entry_id,
             instance_id=instance_id,

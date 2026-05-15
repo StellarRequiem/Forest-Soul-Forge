@@ -946,6 +946,57 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
             await scheduler.start()
         app.state.scheduler = scheduler
 
+        # ADR-0076 T2 (B320). Personal-context vector index +
+        # background indexer hook. Off by default; the operator
+        # opts in via FSF_PERSONAL_INDEX_ENABLED=true after they
+        # accept the ~80MB sentence-transformers model download
+        # on first index call. When off, Memory.append's
+        # indexer-enqueue path is a no-op (indexer=None on app.state).
+        #
+        # The PersonalIndex itself defers the embedder cold-load
+        # until first add()/search(), so daemon startup stays fast
+        # even when the substrate is on.
+        personal_index_enabled = (
+            _os.environ.get("FSF_PERSONAL_INDEX_ENABLED") or "false"
+        ).strip().lower() == "true"
+        app.state.personal_index = None
+        app.state.memory_indexer = None
+        if personal_index_enabled:
+            try:
+                from forest_soul_forge.core.personal_index import PersonalIndex
+                from forest_soul_forge.core.memory_indexer import MemoryIndexer
+                personal_index = PersonalIndex()
+                memory_indexer = MemoryIndexer(index=personal_index)
+                await memory_indexer.start()
+                app.state.personal_index = personal_index
+                app.state.memory_indexer = memory_indexer
+                startup_diagnostics.append({
+                    "component": "personal_index",
+                    "status": "ok",
+                    "message": (
+                        "PersonalIndex + MemoryIndexer started; "
+                        "scope='personal' memory writes will be "
+                        "indexed in the background. First add() "
+                        "lazy-loads sentence-transformers (~3-5s)."
+                    ),
+                })
+            except Exception as e:
+                startup_diagnostics.append({
+                    "component": "personal_index",
+                    "status": "failed",
+                    "error": f"{type(e).__name__}: {e}",
+                })
+        else:
+            startup_diagnostics.append({
+                "component": "personal_index",
+                "status": "disabled",
+                "message": (
+                    "FSF_PERSONAL_INDEX_ENABLED!=true; personal-scope "
+                    "memory writes are NOT indexed. Set the env var "
+                    "and restart to enable semantic recall."
+                ),
+            })
+
         # ADR-0043 T3 (Burst 105): plugin runtime. Walks
         # ~/.forest/plugins/installed/ on startup and exposes the
         # /plugins HTTP surface. Daemon-internal mutations grab
@@ -1002,6 +1053,18 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                 await scheduler.stop()
             except Exception:
                 pass
+            # ADR-0076 T2 (B320). Drain the indexer worker before
+            # closing the registry so the in-flight embed lands
+            # (best-effort, 5s timeout inside stop()). Items still
+            # queued at shutdown are abandoned; the audit chain +
+            # SQL truth is intact and the next `fsf index rebuild`
+            # picks them up.
+            _mi = getattr(app.state, "memory_indexer", None)
+            if _mi is not None:
+                try:
+                    await _mi.stop()
+                except Exception:
+                    pass
             registry.close()
 
     app = FastAPI(

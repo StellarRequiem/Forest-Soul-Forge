@@ -195,9 +195,16 @@ def build_or_get_tool_dispatcher(app):
             EncryptionConfig as _EncryptionConfig,
         )
         _enc_config = _EncryptionConfig(master_key=_master_key)
+    # ADR-0076 T2 (B320). Optional indexer reference. lifespan
+    # stashes the MemoryIndexer on app.state when PersonalIndex
+    # is wired up; deps.py passes it through so personal-scope
+    # writes land in the index. None when the operator hasn't
+    # enabled semantic recall (the lifespan logs the diagnostic).
+    _memory_indexer = getattr(app.state, "memory_indexer", None)
     memory = Memory(
         conn=fsf_registry._conn,  # noqa: SLF001 — internal access by design
         encryption_config=_enc_config,
+        indexer=_memory_indexer,
     )
     # ADR-0033 A6 + B3: PrivClient (or None) flows from app.state into
     # the dispatcher and is threaded into every ToolContext. The
