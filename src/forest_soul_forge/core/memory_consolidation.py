@@ -92,6 +92,157 @@ def _cutoff_iso(now: datetime, min_age_days: int) -> str:
     return (now - timedelta(days=min_age_days)).isoformat()
 
 
+@dataclass(frozen=True)
+class SourceEntry:
+    """One memory_entry that's about to be rolled into a summary.
+
+    The summarizer (T3) takes a list of these. Carries enough for
+    the LLM prompt + the lineage record the runner (T4) will write
+    when it flips state from pending to consolidated.
+    """
+    entry_id: str
+    content: str
+    layer: str
+    claim_type: str
+    created_at: str  # ISO 8601
+
+
+@dataclass(frozen=True)
+class SummaryDraft:
+    """The output of one summarization pass.
+
+    The runner (T4) consumes this draft + does the SQL writes
+    atomically: insert a new `summary`-state memory_entry with
+    ``content``, mark every ``source_entry_id`` as
+    ``consolidated`` with ``consolidated_into`` pointing at the
+    new summary, set ``consolidation_run`` on all touched rows.
+
+    ``layer`` is forwarded from the sources — summaries inherit
+    the layer of the entries they absorb (a batch of `episodic`
+    entries produces an `episodic` summary). ``claim_type`` on a
+    summary is always `agent_inference` because the summary IS
+    an inference over the source observations — per ADR-0027
+    amendment's epistemic-metadata rules.
+    """
+    content: str
+    source_entry_ids: tuple[str, ...]
+    layer: str
+    claim_type: str = "agent_inference"
+    # The prompt the LLM saw — kept so the audit chain emit can
+    # carry a digest of the input for tamper-evidence.
+    prompt: str = ""
+
+
+class ConsolidationSummarizerError(RuntimeError):
+    """Raised when the summarizer can't produce a usable draft.
+
+    The runner (T4) treats this as a soft-fail: the batch stays
+    pending for the next pass, no state mutation, no audit emit.
+    A persistent failure surfaces via the scheduled-task circuit
+    breaker (ADR-0041 max_consecutive_failures)."""
+
+
+def _render_summary_prompt(sources: list[SourceEntry]) -> str:
+    """Build the LLM prompt for consolidating a batch.
+
+    Format is deliberately minimal: numbered observations, then a
+    one-paragraph ask. The summarizer wants a faithful rollup —
+    "what's the operator's pattern here?" — NOT analysis or
+    advice. The runner doesn't post-process the output; whatever
+    the LLM emits becomes the summary content verbatim.
+    """
+    lines = [
+        "You are summarizing memory entries from a personal agent's"
+        " history. Produce a single short paragraph (max 80 words)"
+        " that captures the durable signal across these observations."
+        " Preserve specifics that matter (people, times, decisions),"
+        " drop incidentals. Do NOT add advice or analysis — just the"
+        " summary.",
+        "",
+        f"Layer: {sources[0].layer}",
+        "",
+        "Observations:",
+    ]
+    for i, s in enumerate(sources, start=1):
+        lines.append(f"  {i}. [{s.created_at}] {s.content}")
+    lines.append("")
+    lines.append("Summary:")
+    return "\n".join(lines)
+
+
+async def summarize_consolidation_batch(
+    sources: list[SourceEntry],
+    *,
+    provider: Any,
+    max_tokens: int = 200,
+) -> SummaryDraft:
+    """ADR-0074 T3: produce a SummaryDraft from a batch of sources.
+
+    Pure with respect to the database — does not read or write
+    memory_entries. The runner (T4) handles the SQL transactions.
+    Calls ``provider.complete`` with TaskKind.GENERATE so the
+    provider routes to its generation-sized model.
+
+    Refuses if:
+      - sources is empty (no batch to summarize)
+      - any source has empty content (the LLM would hallucinate)
+      - sources span multiple layers (the runner enforces single-
+        layer batches; surfacing it here as a defensive guard
+        catches a bug in selector composition)
+
+    Returns a frozen SummaryDraft. The runner inspects
+    ``source_entry_ids`` to know which rows to mark consolidated,
+    and ``content`` to write into the new summary entry.
+    """
+    if not sources:
+        raise ConsolidationSummarizerError("empty source batch")
+    if any(not s.content.strip() for s in sources):
+        raise ConsolidationSummarizerError(
+            "one or more source entries has empty content"
+        )
+    layers = {s.layer for s in sources}
+    if len(layers) > 1:
+        raise ConsolidationSummarizerError(
+            f"batch spans multiple layers: {sorted(layers)}"
+        )
+
+    prompt = _render_summary_prompt(sources)
+
+    try:
+        # Lazy import so the daemon-side TaskKind doesn't get
+        # pulled into core. Test code uses a mock provider that
+        # doesn't import TaskKind at all.
+        from forest_soul_forge.daemon.providers.base import TaskKind
+        task_kind = TaskKind.GENERATE
+    except ImportError:
+        task_kind = "generate"  # mock-friendly fallback
+
+    try:
+        summary_text = await provider.complete(
+            prompt,
+            task_kind=task_kind,
+            max_tokens=max_tokens,
+        )
+    except Exception as e:
+        raise ConsolidationSummarizerError(
+            f"provider.complete failed: {type(e).__name__}: {e}"
+        ) from e
+
+    summary_text = (summary_text or "").strip()
+    if not summary_text:
+        raise ConsolidationSummarizerError(
+            "provider returned an empty summary"
+        )
+
+    return SummaryDraft(
+        content=summary_text,
+        source_entry_ids=tuple(s.entry_id for s in sources),
+        layer=sources[0].layer,
+        claim_type="agent_inference",
+        prompt=prompt,
+    )
+
+
 def select_consolidation_candidates(
     conn: sqlite3.Connection,
     *,

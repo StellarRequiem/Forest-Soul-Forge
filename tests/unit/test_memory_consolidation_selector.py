@@ -255,3 +255,172 @@ def test_policy_defaults_match_adr_specification():
     assert p.max_batch_size == 200
     assert p.eligible_layers == ("episodic",)
     assert p.eligible_claim_types == ("observation", "user_statement")
+
+
+# ---------------------------------------------------------------------------
+# ADR-0074 T3 (B306) — ConsolidationSummarizer
+# ---------------------------------------------------------------------------
+
+import asyncio
+
+from forest_soul_forge.core.memory_consolidation import (
+    ConsolidationSummarizerError,
+    SourceEntry,
+    SummaryDraft,
+    _render_summary_prompt,
+    summarize_consolidation_batch,
+)
+
+
+class _MockProvider:
+    """Deterministic mock provider — records the prompt + kwargs it
+    sees, returns a fixed string."""
+
+    def __init__(self, response: str = "mock summary"):
+        self.response = response
+        self.last_prompt: str | None = None
+        self.last_kwargs: dict | None = None
+
+    async def complete(self, prompt, *, task_kind=None, max_tokens=None, **kw):
+        self.last_prompt = prompt
+        self.last_kwargs = {"task_kind": task_kind, "max_tokens": max_tokens}
+        return self.response
+
+
+def _sources() -> list[SourceEntry]:
+    return [
+        SourceEntry(
+            entry_id="e1", content="Met with Mira about Q3 plan.",
+            layer="episodic", claim_type="observation",
+            created_at="2026-04-10T09:00:00Z",
+        ),
+        SourceEntry(
+            entry_id="e2", content="Mira pushed for the engineering hire.",
+            layer="episodic", claim_type="observation",
+            created_at="2026-04-15T14:00:00Z",
+        ),
+    ]
+
+
+# Happy path
+
+def test_summarize_returns_summary_draft_with_lineage():
+    """Successful summarization produces a SummaryDraft whose
+    source_entry_ids matches the input batch."""
+    p = _MockProvider("Mira drove the eng-hire decision.")
+    out = asyncio.run(
+        summarize_consolidation_batch(_sources(), provider=p),
+    )
+    assert isinstance(out, SummaryDraft)
+    assert out.content == "Mira drove the eng-hire decision."
+    assert out.source_entry_ids == ("e1", "e2")
+    assert out.layer == "episodic"
+    assert out.claim_type == "agent_inference"
+
+
+def test_summarize_prompt_carries_observations_and_layer():
+    """The prompt the provider receives includes each observation
+    + its timestamp + the layer header. Pin so a prompt refactor
+    can't silently drop fields."""
+    p = _MockProvider("summary")
+    asyncio.run(summarize_consolidation_batch(_sources(), provider=p))
+    assert p.last_prompt is not None
+    assert "Layer: episodic" in p.last_prompt
+    assert "[2026-04-10T09:00:00Z]" in p.last_prompt
+    assert "Met with Mira" in p.last_prompt
+    assert "Mira pushed" in p.last_prompt
+    assert "Summary:" in p.last_prompt
+
+
+def test_summarize_forwards_max_tokens_and_task_kind():
+    """The provider sees the operator-tunable max_tokens and the
+    canonical TaskKind.GENERATE (or the 'generate' fallback when
+    daemon providers aren't importable)."""
+    p = _MockProvider("summary")
+    asyncio.run(
+        summarize_consolidation_batch(
+            _sources(), provider=p, max_tokens=150,
+        ),
+    )
+    assert p.last_kwargs["max_tokens"] == 150
+    tk = p.last_kwargs["task_kind"]
+    # Either the enum value (when import works) or the string
+    # fallback (when it doesn't).
+    assert str(getattr(tk, "value", tk)) == "generate"
+
+
+# Error paths
+
+def test_summarize_refuses_empty_batch():
+    p = _MockProvider()
+    with pytest.raises(ConsolidationSummarizerError, match="empty source"):
+        asyncio.run(summarize_consolidation_batch([], provider=p))
+
+
+def test_summarize_refuses_empty_content():
+    p = _MockProvider()
+    src = [SourceEntry(
+        entry_id="e_bad", content="",
+        layer="episodic", claim_type="observation",
+        created_at="2026-04-10T00:00:00Z",
+    )]
+    with pytest.raises(ConsolidationSummarizerError, match="empty content"):
+        asyncio.run(summarize_consolidation_batch(src, provider=p))
+
+
+def test_summarize_refuses_multi_layer_batch():
+    """The runner enforces single-layer batches; the summarizer
+    catches a multi-layer batch as a composition bug."""
+    p = _MockProvider()
+    src = [
+        SourceEntry("e1", "a", "episodic", "observation", "2026-04-10T00:00:00Z"),
+        SourceEntry("e2", "b", "working", "observation", "2026-04-11T00:00:00Z"),
+    ]
+    with pytest.raises(
+        ConsolidationSummarizerError, match="multiple layers",
+    ):
+        asyncio.run(summarize_consolidation_batch(src, provider=p))
+
+
+def test_summarize_wraps_provider_error():
+    """A raised exception from provider.complete becomes a
+    ConsolidationSummarizerError so the runner's circuit-breaker
+    counts toward max_consecutive_failures correctly."""
+    class Broken:
+        async def complete(self, *a, **kw):
+            raise RuntimeError("boom")
+    with pytest.raises(
+        ConsolidationSummarizerError, match="provider.complete failed",
+    ):
+        asyncio.run(summarize_consolidation_batch(
+            _sources(), provider=Broken(),
+        ))
+
+
+def test_summarize_refuses_empty_provider_response():
+    """A whitespace-only response is functionally empty and would
+    produce a junk summary row. Refuse."""
+    p = _MockProvider("   ")
+    with pytest.raises(
+        ConsolidationSummarizerError, match="empty summary",
+    ):
+        asyncio.run(summarize_consolidation_batch(_sources(), provider=p))
+
+
+def test_summarize_strips_whitespace_from_response():
+    """Provider responses get leading/trailing whitespace stripped
+    so audit-chain digests are stable across whitespace drift."""
+    p = _MockProvider("  Mira drove the decision.\n\n")
+    out = asyncio.run(
+        summarize_consolidation_batch(_sources(), provider=p),
+    )
+    assert out.content == "Mira drove the decision."
+
+
+def test_summary_draft_is_frozen():
+    """SummaryDraft mutations should raise so the runner can't
+    accidentally corrupt the lineage record between summarize +
+    insert."""
+    d = SummaryDraft(content="x", source_entry_ids=("e1",), layer="episodic")
+    with pytest.raises(Exception):
+        d.content = "y"  # noqa
