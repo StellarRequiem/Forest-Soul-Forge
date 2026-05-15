@@ -37,6 +37,7 @@ from forest_soul_forge.daemon.routers import health as health_router
 from forest_soul_forge.daemon.routers import character_sheet as character_sheet_router
 from forest_soul_forge.daemon.routers import genres as genres_router
 from forest_soul_forge.daemon.routers import memory_consents as memory_consents_router
+from forest_soul_forge.daemon.routers import memory_consolidation as memory_consolidation_router
 from forest_soul_forge.daemon.routers import pending_calls as pending_calls_router
 from forest_soul_forge.daemon.routers import preview as preview_router
 from forest_soul_forge.daemon.routers import runtime as runtime_router
@@ -1036,6 +1037,10 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(tools_forge_router.router)  # ADR-0058 B202
     app.include_router(genres_router.router)
     app.include_router(memory_consents_router.router)
+    # ADR-0074 T5 (B308): /memory/consolidation/* — status,
+    # recent-summaries, pin/unpin. Operator inspection + protection
+    # surface on the B294-B307 consolidation substrate.
+    app.include_router(memory_consolidation_router.router)
     app.include_router(verifier_router.router)
     app.include_router(character_sheet_router.router)
     app.include_router(preview_router.router)

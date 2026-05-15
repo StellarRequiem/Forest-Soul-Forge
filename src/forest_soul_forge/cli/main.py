@@ -309,6 +309,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _provenance_add_subparser(sub)
 
+    # `fsf memory ...` — ADR-0074 T5 (B308) consolidation operator
+    # controls. pin/unpin entries against the consolidation runner.
+    # Operates directly on data/registry.sqlite for offline use.
+    from forest_soul_forge.cli.memory_cmd import (
+        add_subparser as _memory_add_subparser,
+    )
+    _memory_add_subparser(sub)
+
     return parser
 
 
