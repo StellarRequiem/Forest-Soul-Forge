@@ -1054,9 +1054,101 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
             })
             app.state.plugin_runtime = None
 
+        # ADR-0070 T4 (B327). Wake-word detector. Off by default;
+        # operators opt in via FSF_WAKE_WORD_ENABLED=true + a real
+        # backend (FSF_WAKE_WORD_BACKEND=openwakeword) + restart.
+        # Construction is non-fatal — if the backend's native deps
+        # aren't installed the daemon stays up with the null
+        # detector wired and a diagnostic in /healthz.
+        app.state.wake_word_backend = None
+        from forest_soul_forge.core.voice_wake_word import (
+            WakeWordError,
+            resolve_wake_word_backend,
+            wake_word_enabled,
+        )
+        if wake_word_enabled():
+            backend = resolve_wake_word_backend()
+            def _on_wake_word(detection):
+                # Best-effort audit emit; detector loop swallows
+                # callback exceptions so a chain hiccup never
+                # takes down the listener.
+                if audit_chain is None:
+                    return
+                try:
+                    audit_chain.append(
+                        "voice_wake_word_detected",
+                        {
+                            "phrase":     detection.phrase,
+                            "confidence": detection.confidence,
+                            "backend_id": detection.backend_id,
+                        },
+                        agent_dna=None,
+                    )
+                except Exception:
+                    pass
+            try:
+                backend.start(_on_wake_word)
+                app.state.wake_word_backend = backend
+                if audit_chain is not None:
+                    try:
+                        audit_chain.append(
+                            "voice_wake_word_armed",
+                            {
+                                "backend_id": backend.backend_id,
+                                "phrase":     backend.current_phrase(),
+                            },
+                            agent_dna=None,
+                        )
+                    except Exception:
+                        pass
+                startup_diagnostics.append({
+                    "component": "wake_word",
+                    "status":    "ok",
+                    "message": (
+                        f"wake-word detector armed: "
+                        f"backend={backend.backend_id} "
+                        f"phrase={backend.current_phrase()!r}"
+                    ),
+                })
+            except WakeWordError as e:
+                startup_diagnostics.append({
+                    "component": "wake_word",
+                    "status":    "failed",
+                    "error":     str(e),
+                })
+        else:
+            startup_diagnostics.append({
+                "component": "wake_word",
+                "status":    "disabled",
+                "message": (
+                    "FSF_WAKE_WORD_ENABLED!=true; continuous mic "
+                    "capture is OFF (the privacy-preserving default). "
+                    "Set the env var + install the backend + restart "
+                    "to enable."
+                ),
+            })
+
         try:
             yield
         finally:
+            # ADR-0070 T4 (B327). Stop the wake-word detector
+            # cleanly so the mic capture thread joins before the
+            # process exits.
+            _wwb = getattr(app.state, "wake_word_backend", None)
+            if _wwb is not None:
+                try:
+                    _wwb.stop()
+                    if audit_chain is not None:
+                        try:
+                            audit_chain.append(
+                                "voice_wake_word_disarmed",
+                                {"backend_id": _wwb.backend_id},
+                                agent_dna=None,
+                            )
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             try:
                 await scheduler.stop()
             except Exception:

@@ -379,6 +379,16 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     "voice_transcribed",
     "voice_synthesized",
     "voice_failed",
+    # ADR-0070 T4 (B327) — wake-word substrate.
+    # voice_wake_word_armed: detector started listening (operator
+    #   opted in via FSF_WAKE_WORD_ENABLED + daemon restart).
+    # voice_wake_word_detected: detector matched the configured
+    #   phrase; subsequent /voice/transcribe call may follow.
+    # voice_wake_word_disarmed: detector stopped (env-var flip
+    #   or lifespan shutdown).
+    "voice_wake_word_armed",
+    "voice_wake_word_detected",
+    "voice_wake_word_disarmed",
     # ADR-0067 T3 (Burst 281) — cross-domain orchestrator routing.
     # Emitted by route_to_domain.v1 BEFORE the delegate call so the
     # audit chain records the orchestrator's routing decision
