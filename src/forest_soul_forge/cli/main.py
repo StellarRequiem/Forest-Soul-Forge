@@ -323,6 +323,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _memory_add_subparser(sub)
 
+    # `fsf index ...` — ADR-0076 T5 (B323) PersonalIndex admin.
+    # rebuild and status subcommands. Operator-driven; daemon
+    # should be stopped before rebuild to avoid racing concurrent
+    # writes against the wipe-and-rebuild loop.
+    from forest_soul_forge.cli.index_cmd import (
+        add_subparser as _index_add_subparser,
+    )
+    _index_add_subparser(sub)
+
     return parser
 
 
