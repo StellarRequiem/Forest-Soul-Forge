@@ -419,3 +419,161 @@ def test_tick_budget_default_is_500ms():
     becomes a visible test diff."""
     s = Scheduler()
     assert s._tick_budget_ms == 500.0
+
+
+# ---------------------------------------------------------------------------
+# ADR-0075 T3 (B296) — per-task budget enforcement
+# ---------------------------------------------------------------------------
+#
+# Sliding 60s window of monotonic-clock dispatch timestamps per task.
+# When the window fills to `budget_per_minute`, the next "would-fire"
+# decision gets rate-limited: scheduler_lag(reason="budget_enforced")
+# emits and next_run_at pushes forward to oldest_entry + 60s. Budget=0
+# is soft-pause and does NOT emit (deliberate operator action).
+
+import time
+from collections import deque
+from datetime import datetime, timezone
+
+
+def _budget_task(task_id: str, budget: int) -> ScheduledTask:
+    return ScheduledTask(
+        id=task_id,
+        description=f"budget={budget}",
+        schedule=parse_schedule("every 1h"),
+        task_type="dummy",
+        config={},
+        enabled=True,
+        max_consecutive_failures=3,
+        budget_per_minute=budget,
+    )
+
+
+def test_consume_budget_allows_until_window_fills():
+    """budget=3 → first 3 calls return True; 4th returns False."""
+    chain = _RecordingChain()
+    s = Scheduler(context={"audit_chain": chain})
+    t = _budget_task("t1", 3)
+    now = datetime.now(timezone.utc)
+    now_m = time.monotonic()
+    for i in range(3):
+        assert s._consume_budget(t, now, now_m + i * 0.001) is True
+    assert s._consume_budget(t, now, now_m + 0.004) is False
+    # Window should still hold 3 (the rejected call doesn't add).
+    assert len(s._dispatch_windows["t1"]) == 3
+
+
+def test_consume_budget_emits_scheduler_lag_on_enforcement():
+    """The rate-limited call emits exactly one scheduler_lag with
+    the budget_enforced reason + full payload shape."""
+    chain = _RecordingChain()
+    s = Scheduler(context={"audit_chain": chain})
+    t = _budget_task("t_block", 2)
+    now = datetime.now(timezone.utc)
+    now_m = time.monotonic()
+    # Fill window to capacity.
+    s._consume_budget(t, now, now_m)
+    s._consume_budget(t, now, now_m + 0.001)
+    # Third call gets enforced.
+    s._consume_budget(t, now, now_m + 0.002)
+    lag = [e for e in chain.events if e[0] == "scheduler_lag"]
+    assert len(lag) == 1
+    payload = lag[0][1]
+    assert payload["reason"] == "budget_enforced"
+    assert payload["task_id"] == "t_block"
+    assert payload["budget_per_minute"] == 2
+    assert payload["dispatches_in_window"] == 2
+    # T2-only fields explicitly null in T3 emit.
+    assert payload["tick_duration_ms"] is None
+    assert payload["tick_budget_ms"] is None
+    assert payload["dispatches_in_tick"] is None
+    assert payload["details"] is None
+
+
+def test_consume_budget_pushes_next_run_at_forward_on_enforcement():
+    """When rate-limited, next_run_at moves to oldest_entry + 60s so
+    the dispatch loop won't re-evaluate the task until budget returns."""
+    chain = _RecordingChain()
+    s = Scheduler(context={"audit_chain": chain})
+    t = _budget_task("t_push", 1)
+    now = datetime.now(timezone.utc)
+    now_m = time.monotonic()
+    # First call consumes the only slot.
+    s._consume_budget(t, now, now_m)
+    # Second call is rate-limited.
+    s._consume_budget(t, now, now_m + 0.001)
+    # next_run_at should be ~60 seconds after `now` (roughly — the
+    # window's oldest entry is at now_m; pushed to now_m + 60s).
+    assert t.state.next_run_at is not None
+    delta = (t.state.next_run_at - now).total_seconds()
+    assert 59.0 < delta < 61.0, f"expected ~60s push, got {delta}"
+
+
+def test_consume_budget_purges_stale_entries():
+    """Entries older than 60s are dropped before counting. A task
+    with budget=2 and an 8-second-old + a 70-second-old entry sees
+    only one in-window slot and is allowed."""
+    chain = _RecordingChain()
+    s = Scheduler(context={"audit_chain": chain})
+    t = _budget_task("t_purge", 2)
+    now = datetime.now(timezone.utc)
+    now_m = time.monotonic()
+    s._dispatch_windows["t_purge"] = deque([now_m - 70.0, now_m - 8.0])
+    assert s._consume_budget(t, now, now_m) is True
+    # Stale entry got purged; current call appended.
+    assert len(s._dispatch_windows["t_purge"]) == 2
+
+
+def test_consume_budget_zero_is_soft_pause_no_emit():
+    """budget=0 returns False (skip) WITHOUT emitting scheduler_lag —
+    soft-pause is deliberate operator action, not an anomaly."""
+    chain = _RecordingChain()
+    s = Scheduler(context={"audit_chain": chain})
+    t = _budget_task("t_paused", 0)
+    now = datetime.now(timezone.utc)
+    now_m = time.monotonic()
+    assert s._consume_budget(t, now, now_m) is False
+    # No scheduler_lag emit for soft-pause.
+    assert not any(e[0] == "scheduler_lag" for e in chain.events)
+    # next_run_at still advances so the loop doesn't busy-spin.
+    assert t.state.next_run_at is not None
+
+
+def test_consume_budget_negative_treated_as_zero():
+    """Defensive: a negative budget (shouldn't happen — CHECK refuses
+    on disk — but cheap to guard against in-memory) behaves like 0."""
+    chain = _RecordingChain()
+    s = Scheduler(context={"audit_chain": chain})
+    t = _budget_task("t_neg", -3)
+    now = datetime.now(timezone.utc)
+    assert s._consume_budget(t, now, time.monotonic()) is False
+    assert not any(e[0] == "scheduler_lag" for e in chain.events)
+
+
+def test_scheduledtask_budget_default_is_six():
+    """Pin ADR Decision 2 default at the dataclass level."""
+    t = ScheduledTask(
+        id="t",
+        description="x",
+        schedule=parse_schedule("every 1h"),
+        task_type="dummy",
+        config={},
+    )
+    assert t.budget_per_minute == 6
+
+
+def test_build_task_from_config_honors_budget_field():
+    """Operators may declare an initial budget in scheduled_tasks.yaml."""
+    from forest_soul_forge.daemon.scheduler.runtime import (
+        build_task_from_config,
+    )
+    spec = {
+        "id": "t_yaml",
+        "description": "x",
+        "schedule": "every 1h",
+        "type": "dummy",
+        "config": {},
+        "budget_per_minute": 12,
+    }
+    t = build_task_from_config(spec)
+    assert t.budget_per_minute == 12

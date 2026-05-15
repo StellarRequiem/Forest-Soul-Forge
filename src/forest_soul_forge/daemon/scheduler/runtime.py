@@ -32,9 +32,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from datetime import datetime, timedelta, timezone
+from typing import Any, Awaitable, Callable, Deque
 
 from forest_soul_forge.daemon.scheduler.schedule import (
     Schedule,
@@ -118,6 +119,12 @@ class TaskState:
 class ScheduledTask:
     """One configured task. Dataclass over Pydantic because the
     scheduler holds these in a hot loop; mutation has to be cheap.
+
+    ``budget_per_minute`` (ADR-0075 T3, B296) caps the task's
+    dispatch rate. 0 = indefinitely paused (soft-pause); >0 = max
+    dispatches in any rolling 60-second window. Default 6 matches
+    the schema column DEFAULT (B293, v22). Hydrated from
+    ``scheduled_task_state.budget_per_minute`` at scheduler start.
     """
 
     id: str
@@ -127,6 +134,7 @@ class ScheduledTask:
     config: dict[str, Any]
     enabled: bool = True
     max_consecutive_failures: int = 3
+    budget_per_minute: int = 6
     state: TaskState = field(default_factory=TaskState)
 
     def due(self, now: datetime) -> bool:
@@ -206,6 +214,13 @@ class Scheduler:
         self._lock = asyncio.Lock()
         self._state_repo = state_repo
         self._tick_budget_ms = float(tick_budget_ms)
+        # ADR-0075 T3 (B296) — per-task sliding-window dispatch
+        # counter. Keyed by task_id, holds time.monotonic() floats
+        # of each dispatch in the last 60 seconds. Purged
+        # in-place on every budget check. Holding monotonic
+        # timestamps (not datetimes) so a system-clock jump can't
+        # corrupt the window.
+        self._dispatch_windows: dict[str, Deque[float]] = {}
 
     # ---- task type registration -------------------------------------------
     def register_task_type(self, name: str, runner: TaskRunner) -> None:
@@ -291,6 +306,10 @@ class Scheduler:
                 last_failure_reason=row.last_failure_reason,
                 last_run_outcome=row.last_run_outcome,
             )
+            # ADR-0075 T3 (B296): pick up the operator-owned budget
+            # from the persisted row. The PersistedState dataclass
+            # carries the column value (B293 wired the round-trip).
+            task.budget_per_minute = row.budget_per_minute
         logger.info(
             "scheduler hydrated state for %d/%d tasks from persistence",
             sum(1 for t in self._tasks.values() if t.state.last_run_at is not None),
@@ -389,6 +408,12 @@ class Scheduler:
         for task in tasks_snapshot:
             if not task.due(now):
                 continue
+            # ADR-0075 T3 (B296): budget enforcement BEFORE dispatch.
+            # Returns False when the task is rate-limited (in which
+            # case _consume_budget has already pushed next_run_at
+            # forward + emitted scheduler_lag).
+            if not self._consume_budget(task, now, time.monotonic()):
+                continue
             await self._dispatch(task, now)
             dispatches += 1
         tick_duration_ms = (time.monotonic() - tick_started) * 1000.0
@@ -407,6 +432,83 @@ class Scheduler:
                 "dispatches_in_window": None,
                 "details":              None,
             })
+
+    def _consume_budget(
+        self,
+        task: ScheduledTask,
+        now_dt: datetime,
+        now_mono: float,
+    ) -> bool:
+        """ADR-0075 T3 (B296) — per-task budget enforcement.
+
+        Returns True when the task may dispatch; False when the
+        budget cap kicks in (in which case next_run_at has already
+        been pushed forward and scheduler_lag has been emitted).
+
+        Semantics:
+
+        * ``budget_per_minute == 0`` → soft-pause. The task stays
+          enabled, the breaker stays closed, but no dispatch fires.
+          ``next_run_at`` advances to the schedule's next tick so
+          the task isn't permanently stuck "due NOW". No
+          ``scheduler_lag`` emit — a deliberate operator pause
+          isn't an anomaly worth flagging.
+
+        * ``budget_per_minute > 0`` → sliding 60-second window. We
+          purge stale entries, count what remains, and:
+            - If ``count < budget`` → record this dispatch +
+              return True.
+            - If ``count >= budget`` → push ``next_run_at`` to
+              ``oldest_entry + 60s`` (when the window will have
+              room again), emit ``scheduler_lag(reason=
+              "budget_enforced")`` with the count + budget, and
+              return False.
+
+        The monotonic clock is the substrate: ``time.monotonic()``
+        timestamps in the deque, not datetime. A system-time jump
+        mid-tick can't fold or invert the window.
+        """
+        budget = max(0, int(task.budget_per_minute))
+
+        if budget == 0:
+            # Soft-pause: skip without emitting.
+            # Push next_run_at forward so the loop won't immediately
+            # re-evaluate this task on the next tick.
+            task.state.next_run_at = task.schedule.next_after(
+                now_dt, now_dt
+            )
+            return False
+
+        window = self._dispatch_windows.setdefault(task.id, deque())
+        cutoff = now_mono - 60.0
+        while window and window[0] < cutoff:
+            window.popleft()
+
+        if len(window) >= budget:
+            # Rate-limited. Compute when the oldest entry exits
+            # the 60s window — that's when budget headroom returns.
+            oldest = window[0]
+            secs_until_room = max(0.1, (oldest + 60.0) - now_mono)
+            task.state.next_run_at = now_dt + timedelta(
+                seconds=secs_until_room,
+            )
+            self._emit_audit("scheduler_lag", {
+                "reason":               "budget_enforced",
+                "task_id":              task.id,
+                "tick_duration_ms":     None,
+                "tick_budget_ms":       None,
+                "dispatches_in_tick":   None,
+                "budget_per_minute":    budget,
+                "dispatches_in_window": len(window),
+                "details":              None,
+            })
+            return False
+
+        # Record this dispatch in the window. _dispatch will fire
+        # next; if it raises we still leave the entry in — the
+        # budget caps invocation rate, not success rate.
+        window.append(now_mono)
+        return True
 
     async def _dispatch(self, task: ScheduledTask, now: datetime) -> None:
         """Dispatch one task. Records outcome; updates schedule;
@@ -695,4 +797,8 @@ def build_task_from_config(spec: dict[str, Any]) -> ScheduledTask:
         config=dict(spec["config"]),
         enabled=bool(spec.get("enabled", True)),
         max_consecutive_failures=int(spec.get("max_consecutive_failures", 3)),
+        # ADR-0075 T3 (B296): operators may declare an initial
+        # budget in YAML. The persisted column wins on hydrate
+        # if present (operator-set override survives restart).
+        budget_per_minute=int(spec.get("budget_per_minute", 6)),
     )
