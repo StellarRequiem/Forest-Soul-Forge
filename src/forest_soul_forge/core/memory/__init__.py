@@ -174,12 +174,30 @@ class Memory(
                 f"confidence must be one of {list(CONFIDENCE_LEVELS)}; got {confidence!r}"
             )
         if genre is not None:
-            ceiling = GENRE_CEILINGS.get(genre.lower(), "consented")
-            if _SCOPE_RANK[scope] > _SCOPE_RANK[ceiling]:
-                raise MemoryScopeViolation(
-                    f"genre {genre!r} ceiling is {ceiling!r}; cannot "
-                    f"write scope {scope!r}. Operator override required."
+            # ADR-0068 T3 (B313) — `personal` is off the ceiling ladder.
+            # Genre must be in the explicit allow-list; the rank check
+            # would otherwise refuse personal writes from companion
+            # (companion's ceiling=private=0, but personal_rank=4 is
+            # arithmetically "wider"). The allow-list is the right
+            # semantics: personal-scope is operator-bound context,
+            # eligible only for the specific genres in
+            # PERSONAL_SCOPE_ALLOWED_GENRES.
+            if scope == "personal":
+                from forest_soul_forge.core.memory._helpers import (
+                    PERSONAL_SCOPE_ALLOWED_GENRES,
                 )
+                if genre.lower() not in PERSONAL_SCOPE_ALLOWED_GENRES:
+                    raise MemoryScopeViolation(
+                        f"genre {genre!r} cannot write scope 'personal'; "
+                        f"allowed: {sorted(PERSONAL_SCOPE_ALLOWED_GENRES)}"
+                    )
+            else:
+                ceiling = GENRE_CEILINGS.get(genre.lower(), "consented")
+                if _SCOPE_RANK[scope] > _SCOPE_RANK[ceiling]:
+                    raise MemoryScopeViolation(
+                        f"genre {genre!r} ceiling is {ceiling!r}; cannot "
+                        f"write scope {scope!r}. Operator override required."
+                    )
 
         entry_id = str(uuid.uuid4())
         # ADR-0050 T4 (B269): content_digest is computed over the
@@ -347,11 +365,22 @@ class Memory(
         visibility_clauses: list[str] = []
         params: list[Any] = []
 
-        # Always: reader's own private entries (every mode).
-        visibility_clauses.append(
-            "(instance_id = ? AND scope = 'private')"
-        )
-        params.append(reader_instance_id)
+        # ADR-0068 T3 (B313) — `personal` mode is a NON-additive
+        # lookup: it returns ONLY personal-scope rows, not the
+        # reader's private+lineage+consented layers. The other modes
+        # (private/lineage/consented) build a wider-and-wider OR
+        # surface over the reader's own visibility tree; personal
+        # is orthogonal (it crosses instance boundaries to surface
+        # the operator's context, regardless of who wrote the row).
+        # Skip the always-on private clause when personal mode is
+        # active so we don't leak the reader's private surface into
+        # the operator-context view.
+        if mode != "personal":
+            # Always: reader's own private entries (every other mode).
+            visibility_clauses.append(
+                "(instance_id = ? AND scope = 'private')"
+            )
+            params.append(reader_instance_id)
 
         # `lineage` and `consented` modes also see lineage entries.
         if mode in ("lineage", "consented"):
@@ -370,6 +399,25 @@ class Memory(
                     f"(instance_id IN ({placeholders}) AND scope = 'lineage')"
                 )
                 params.extend(chain)
+
+        # ADR-0068 T3 (B313) — `personal` mode returns ONLY personal-
+        # scope entries across all instance_ids. The operator owns
+        # all personal-scope rows; the lineage-additive layering of
+        # the other modes doesn't apply here. The TOOL layer
+        # (memory_recall.v1) gates this mode by genre via
+        # PERSONAL_SCOPE_ALLOWED_GENRES BEFORE calling recall_visible_to
+        # — the Memory class does not know about genres on the read
+        # path, matching the existing layering.
+        #
+        # Returning all personal-scope rows means a reader-instance
+        # constraint isn't applied: any companion / assistant /
+        # operator_steward / domain_orchestrator can read any
+        # personal-scope row regardless of which agent wrote it.
+        # That's the desired semantic — personal-scope memory belongs
+        # to the operator, not to the writing agent.
+        if mode == "personal":
+            visibility_clauses.append("(scope = 'personal')")
+            # No params; the clause has no parameters.
 
         # `consented` also sees consented rows the reader has a grant for.
         if mode == "consented":

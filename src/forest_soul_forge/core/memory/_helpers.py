@@ -27,7 +27,14 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 LAYERS = ("episodic", "semantic", "procedural")
-SCOPES = ("private", "lineage", "realm", "consented")
+# ADR-0068 T3 (B313) — `personal` joins the scope enum as a fifth
+# value. Orthogonal to the four-scope ceiling ladder
+# (private/lineage/realm/consented are about who-in-the-agent-graph
+# can see a memory; personal is about *whose operator-context* the
+# memory belongs to). Only genres in PERSONAL_SCOPE_ALLOWED_GENRES
+# may write OR read personal-scope entries — see the allow-list
+# below.
+SCOPES = ("private", "lineage", "realm", "consented", "personal")
 
 # v0.2 (ADR-0033 / ADR-0022 v0.2) recall modes — control how widely
 # the reader can see across other agents' memory stores.
@@ -38,11 +45,19 @@ SCOPES = ("private", "lineage", "realm", "consented")
 #               (security_low → security_mid → security_high).
 #   consented — lineage + scope='consented' entries the reader has an
 #               active grant for in memory_consents.
+#   personal  — (ADR-0068 T3, B313) operator-bound entries. Returns
+#               scope='personal' rows across instance boundaries,
+#               restricted to readers whose genre is in
+#               PERSONAL_SCOPE_ALLOWED_GENRES. The recall semantics
+#               are NOT lineage-additive — a personal-mode recall
+#               returns ONLY personal-scope entries, not the
+#               reader's private+lineage entries on top. Callers
+#               compose modes if they want both surfaces.
 #
 # `realm` is unreachable until federation lands (Horizon 3); deliberately
 # omitted from RECALL_MODES so an attempt to use it raises a clear error
 # instead of silently returning empty results.
-RECALL_MODES = ("private", "lineage", "consented")
+RECALL_MODES = ("private", "lineage", "consented", "personal")
 
 # Genre privacy floors per ADR-0027 §5. The mapping is keyed by genre
 # name and gives the **widest scope the genre is allowed to write**.
@@ -58,7 +73,38 @@ GENRE_CEILINGS: dict[str, str] = {
     # default to "consented" until explicitly tightened.
 }
 
-_SCOPE_RANK = {"private": 0, "lineage": 1, "realm": 2, "consented": 3}
+# ADR-0068 T3 (B313) — genres that may interact with personal-scope
+# memory. The list is intentionally tight: personal-scope is operator-
+# bound context (preferences, schedule signals, relationship notes
+# from T4+ trust circle, financial fields from T6, etc.). A swarm
+# observer or researcher MUST NOT see this surface — it's the
+# operator's own assistant context, not a cross-agent collaboration
+# substrate.
+#
+# Domain entry agents (T7 cross-domain consent wizard adds them to
+# their domain's manifest) are added per-deployment via
+# config/domains/*.yaml; the static defaults here cover the
+# baseline genres shipping with v1.
+PERSONAL_SCOPE_ALLOWED_GENRES: frozenset[str] = frozenset({
+    "companion",            # ADR-0021 default companion genre
+    "assistant",            # ADR-0047 persistent assistant
+    "operator_steward",     # ADR-0068 dedicated steward role
+    "domain_orchestrator",  # ADR-0067 cross-domain router
+})
+
+_SCOPE_RANK = {
+    "private":   0,
+    "lineage":   1,
+    "realm":     2,
+    "consented": 3,
+    # ADR-0068 T3: 'personal' sits off the ceiling-ranking ladder.
+    # The genre allow-list above governs access, not the rank.
+    # The literal value here keeps the ceiling check from raising
+    # KeyError on personal-scope writes when an agent's genre is in
+    # the allow-list (the check falls through to allow-list lookup
+    # in the write path).
+    "personal":  4,
+}
 
 # ADR-0027-amendment §7.1 — six-class enum for ``claim_type``. Schema-level
 # CHECK constraint enforces these values; this Python tuple is the source
