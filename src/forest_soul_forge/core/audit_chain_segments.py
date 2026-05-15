@@ -295,3 +295,162 @@ def append_segment_entry(
         f.write(entry_json)
         if not entry_json.endswith("\n"):
             f.write("\n")
+
+
+# ---------------------------------------------------------------------------
+# ADR-0073 T2 (B300) — sealing flow
+# ---------------------------------------------------------------------------
+
+
+class SealError(RuntimeError):
+    """Raised when the sealing flow can't proceed (no tail segment,
+    tail file missing, malformed entry hashes). The audit chain stays
+    untouched on SealError — sealing is best-effort observability,
+    not a correctness substrate."""
+
+
+def _read_segment_hashes_and_seqs(
+    segment_path: Path,
+) -> tuple[list[str], list[int]]:
+    """Scan a segment file; return (entry_hashes, seqs) in order.
+
+    Each line is one JSON entry. We extract ``entry_hash`` and
+    ``seq`` only — full parse isn't needed for the Merkle pass.
+    Lines that don't parse or are missing either field raise
+    SealError; a malformed sealed segment would corrupt the anchor
+    semantics so we refuse to seal on any error rather than
+    silently dropping rows.
+    """
+    if not segment_path.exists():
+        raise SealError(f"segment file missing: {segment_path}")
+    hashes: list[str] = []
+    seqs: list[int] = []
+    with segment_path.open("r", encoding="utf-8") as f:
+        for lineno, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as e:
+                raise SealError(
+                    f"{segment_path}:{lineno}: malformed JSON: {e}"
+                ) from e
+            h = obj.get("entry_hash")
+            s = obj.get("seq")
+            if not isinstance(h, str) or not isinstance(s, int):
+                raise SealError(
+                    f"{segment_path}:{lineno}: missing entry_hash/seq"
+                )
+            hashes.append(h)
+            seqs.append(s)
+    if not hashes:
+        raise SealError(f"segment file empty: {segment_path}")
+    return hashes, seqs
+
+
+@dataclass(frozen=True)
+class SealOutcome:
+    """Result of one seal pass. The caller (the runner) takes the
+    new_index and writes it to disk, then appends the anchor entry
+    to the new tail segment's file via the normal audit chain
+    surface.
+
+    Splitting the side-effects out of seal_segment() keeps the
+    function testable without a live audit chain — the test builds
+    a fake segment file + index, calls seal_segment, and inspects
+    the returned outcome.
+    """
+    new_index: SegmentIndex
+    anchor: AnchorPayload
+    next_segment_path: Path  # caller writes the anchor entry here
+
+
+def seal_segment(
+    *,
+    index: SegmentIndex,
+    segment_dir: Path,
+    next_month: Optional[str] = None,
+) -> SealOutcome:
+    """Seal the current tail segment and return the new index + anchor.
+
+    Steps:
+
+    1. Identify the current tail segment from ``index.current()``.
+       SealError if there isn't one (chain not yet bootstrapped to
+       segments — that's the T4 migration helper's job).
+    2. Read the tail's file, extract per-entry (entry_hash, seq).
+    3. Compute merkle_root over the hashes.
+    4. Build the sealed SegmentMeta (seq_end = last seq).
+    5. Build the new tail SegmentMeta for ``next_month``
+       (defaults to current UTC year-month if not supplied;
+       caller-overridable for tests).
+    6. Build the AnchorPayload.
+    7. Return SealOutcome with the new index (sealed + new tail
+       both present), the anchor payload, and the path the caller
+       should write the anchor entry to (the NEW tail segment —
+       the anchor entry belongs in the post-seal segment because
+       it documents what happened before).
+
+    Pure function: doesn't write anything to disk. The runner
+    consumes SealOutcome to drive the disk side-effects. That
+    keeps T2 testable without a live chain.
+    """
+    tail = index.current()
+    if tail is None:
+        raise SealError(
+            "no current (unsealed) segment to seal; "
+            "run the T4 migration helper first"
+        )
+
+    segment_path = segment_dir / tail.file
+    hashes, seqs = _read_segment_hashes_and_seqs(segment_path)
+
+    root = merkle_root(hashes)
+    seq_end = seqs[-1]
+    entry_count = len(hashes)
+
+    sealed_meta = SegmentMeta(
+        seq_start=tail.seq_start,
+        seq_end=seq_end,
+        file=tail.file,
+        month=tail.month,
+        sealed=True,
+        merkle_root=root,
+    )
+
+    chosen_month = next_month or current_segment_month()
+    new_tail_meta = SegmentMeta(
+        seq_start=seq_end + 1,
+        seq_end=None,
+        file=segment_filename_for_month(chosen_month),
+        month=chosen_month,
+        sealed=False,
+        merkle_root=None,
+    )
+
+    # Replace the tail in-place; preserve every other (already-sealed)
+    # segment in original order. Then append the new tail.
+    new_segments = tuple(
+        sealed_meta if s.file == tail.file and not s.sealed else s
+        for s in index.segments
+    ) + (new_tail_meta,)
+
+    new_index = SegmentIndex(
+        schema_version=index.schema_version,
+        segments=new_segments,
+    )
+
+    anchor = AnchorPayload(
+        prior_segment_file=tail.file,
+        prior_seq_end=seq_end,
+        prior_merkle_root=root,
+        prior_segment_entry_count=entry_count,
+    )
+
+    next_segment_path = segment_dir / new_tail_meta.file
+    return SealOutcome(
+        new_index=new_index,
+        anchor=anchor,
+        next_segment_path=next_segment_path,
+    )
