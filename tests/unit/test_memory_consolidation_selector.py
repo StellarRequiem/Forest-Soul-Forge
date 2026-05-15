@@ -424,3 +424,285 @@ def test_summary_draft_is_frozen():
     d = SummaryDraft(content="x", source_entry_ids=("e1",), layer="episodic")
     with pytest.raises(Exception):
         d.content = "y"  # noqa
+
+
+# ---------------------------------------------------------------------------
+# ADR-0074 T4 (B307) — run_consolidation_pass
+# ---------------------------------------------------------------------------
+
+from forest_soul_forge.core.memory_consolidation import (
+    ConsolidationRunResult,
+    run_consolidation_pass,
+)
+
+
+class _MockChain:
+    """Captures audit.append calls so assertions can target them."""
+
+    def __init__(self):
+        self.events: list[tuple[str, dict]] = []
+
+    def append(self, event_type, payload, *, agent_dna=None):
+        self.events.append((event_type, dict(payload)))
+
+
+def _seed_extra(
+    conn: sqlite3.Connection,
+    entry_id: str,
+    *,
+    instance_id: str = "a1",
+    age_days: int = 30,
+    layer: str = "episodic",
+    claim_type: str = "observation",
+    state: str = "pending",
+    encrypted: int = 0,
+    content: str | None = None,
+) -> None:
+    """Seed a memory row with the runner-relevant fields."""
+    created = (NOW - timedelta(days=age_days)).isoformat()
+    conn.execute(
+        "INSERT INTO memory_entries ("
+        "  entry_id, instance_id, agent_dna, layer, content, "
+        "  content_digest, created_at, claim_type, "
+        "  consolidation_state, content_encrypted"
+        ") VALUES (?, ?, 'dna', ?, ?, 'd', ?, ?, ?, ?)",
+        (
+            entry_id, instance_id, layer,
+            content or f"content_{entry_id}",
+            created, claim_type, state, encrypted,
+        ),
+    )
+
+
+def _two_agents_db() -> sqlite3.Connection:
+    """Build a v23 DB with two agents pre-seeded."""
+    conn = _fresh_db()
+    conn.execute("INSERT INTO agents (instance_id) VALUES ('agent_b')")
+    return conn
+
+
+def test_runner_end_to_end_two_agents():
+    """Happy path: two agents, two groups, two summaries, all
+    sources flipped to consolidated, audit events emitted."""
+    conn = _two_agents_db()
+    # 3 episodic memories for agent a1, 2 for agent_b.
+    for i in range(3):
+        _seed_extra(conn, f"a_{i}", instance_id="a1", age_days=30 + i)
+    for i in range(2):
+        _seed_extra(conn, f"b_{i}", instance_id="agent_b", age_days=30 + i)
+
+    chain = _MockChain()
+    result = asyncio.run(run_consolidation_pass(
+        conn, policy=ConsolidationPolicy(),
+        provider=_MockProvider("summary"),
+        audit_chain=chain, now=NOW,
+    ))
+
+    assert isinstance(result, ConsolidationRunResult)
+    assert result.batches_processed == 2
+    assert result.summaries_created == 2
+    assert result.sources_consolidated == 5
+    assert result.errors == ()
+
+    # DB state — sources flipped, summaries inserted.
+    states = [
+        r[0] for r in conn.execute(
+            "SELECT consolidation_state FROM memory_entries"
+        ).fetchall()
+    ]
+    assert states.count("consolidated") == 5
+    assert states.count("summary") == 2
+
+
+def test_runner_lineage_links_consolidated_to_summary():
+    """Every consolidated row has consolidated_into pointing at
+    its summary, and the summary row's instance_id matches its
+    sources' instance_id."""
+    conn = _fresh_db()
+    for i in range(3):
+        _seed_extra(conn, f"a_{i}", instance_id="a1", age_days=30 + i)
+    chain = _MockChain()
+    asyncio.run(run_consolidation_pass(
+        conn, policy=ConsolidationPolicy(),
+        provider=_MockProvider("summary"),
+        audit_chain=chain, now=NOW,
+    ))
+    rows = conn.execute(
+        "SELECT entry_id, consolidation_state, consolidated_into, "
+        "instance_id FROM memory_entries"
+    ).fetchall()
+    by_state = {r[0]: r for r in rows}
+    summary_row = [r for r in rows if r[1] == "summary"][0]
+    summary_id = summary_row[0]
+    for r in rows:
+        if r[1] == "consolidated":
+            assert r[2] == summary_id
+            assert r[3] == summary_row[3]  # same instance_id
+
+
+def test_runner_emits_bookend_audit_events():
+    """Run emits exactly one run_started + one run_completed
+    bracketing per-entry memory_consolidated events. All three
+    event types share the same run_id."""
+    conn = _fresh_db()
+    for i in range(2):
+        _seed_extra(conn, f"a_{i}", instance_id="a1", age_days=30 + i)
+    chain = _MockChain()
+    asyncio.run(run_consolidation_pass(
+        conn, policy=ConsolidationPolicy(),
+        provider=_MockProvider(),
+        audit_chain=chain, now=NOW,
+    ))
+    types = [e[0] for e in chain.events]
+    assert types[0] == "memory_consolidation_run_started"
+    assert types[-1] == "memory_consolidation_run_completed"
+    per_entry = [e for e in chain.events if e[0] == "memory_consolidated"]
+    assert len(per_entry) == 2
+    run_id = chain.events[0][1]["run_id"]
+    assert all(e[1]["run_id"] == run_id for e in chain.events)
+
+
+def test_runner_empty_pass_still_emits_bookends():
+    """When no candidates match the policy, the run still emits
+    run_started + run_completed — operator sees the pass actually
+    happened (and saw nothing to do) instead of a chain gap."""
+    conn = _fresh_db()
+    chain = _MockChain()
+    result = asyncio.run(run_consolidation_pass(
+        conn, policy=ConsolidationPolicy(),
+        provider=_MockProvider(),
+        audit_chain=chain, now=NOW,
+    ))
+    assert result.batches_processed == 0
+    assert result.summaries_created == 0
+    assert [e[0] for e in chain.events] == [
+        "memory_consolidation_run_started",
+        "memory_consolidation_run_completed",
+    ]
+
+
+def test_runner_skips_encrypted_sources():
+    """Encrypted sources (content_encrypted=1) stay pending — the
+    runner has no decryption key. This is a forward-compat skip
+    until a tranche wires key access."""
+    conn = _fresh_db()
+    _seed_extra(conn, "e_plain", age_days=30)
+    _seed_extra(conn, "e_encrypted", age_days=30, encrypted=1)
+    chain = _MockChain()
+    result = asyncio.run(run_consolidation_pass(
+        conn, policy=ConsolidationPolicy(),
+        provider=_MockProvider(),
+        audit_chain=chain, now=NOW,
+    ))
+    assert result.sources_consolidated == 1
+    enc_state = conn.execute(
+        "SELECT consolidation_state FROM memory_entries "
+        "WHERE entry_id='e_encrypted'"
+    ).fetchone()[0]
+    assert enc_state == "pending"
+
+
+def test_runner_provider_failure_leaves_sources_pending():
+    """A provider exception accumulates as a soft error and the
+    group's sources stay pending (the with-conn rollback
+    guarantees no half-applied state)."""
+    class _Broken:
+        async def complete(self, *a, **kw):
+            raise RuntimeError("provider down")
+    conn = _fresh_db()
+    for i in range(2):
+        _seed_extra(conn, f"a_{i}", age_days=30 + i)
+    chain = _MockChain()
+    result = asyncio.run(run_consolidation_pass(
+        conn, policy=ConsolidationPolicy(),
+        provider=_Broken(),
+        audit_chain=chain, now=NOW,
+    ))
+    assert result.summaries_created == 0
+    assert len(result.errors) == 1
+    assert "provider" in result.errors[0][2]
+    states = [
+        r[0] for r in conn.execute(
+            "SELECT consolidation_state FROM memory_entries"
+        ).fetchall()
+    ]
+    assert set(states) == {"pending"}
+
+
+def test_runner_partial_success_one_group_succeeds_one_errors():
+    """A flaky provider can succeed for one group and fail for
+    another. The successful group's writes commit; the failed
+    group's writes don't."""
+    class _Flaky:
+        def __init__(self):
+            self.calls = 0
+
+        async def complete(self, *a, **kw):
+            self.calls += 1
+            if self.calls == 1:
+                return "summary"
+            raise RuntimeError("flaky on call 2")
+
+    conn = _two_agents_db()
+    for i in range(2):
+        _seed_extra(conn, f"a_{i}", instance_id="a1", age_days=30 + i)
+    for i in range(2):
+        _seed_extra(conn, f"b_{i}", instance_id="agent_b", age_days=30 + i)
+
+    chain = _MockChain()
+    result = asyncio.run(run_consolidation_pass(
+        conn, policy=ConsolidationPolicy(),
+        provider=_Flaky(),
+        audit_chain=chain, now=NOW,
+    ))
+    assert result.summaries_created == 1
+    assert len(result.errors) == 1
+    # 2 sources consolidated from the successful group + 2 still
+    # pending from the failed group.
+    states = [
+        r[0] for r in conn.execute(
+            "SELECT consolidation_state FROM memory_entries"
+        ).fetchall()
+    ]
+    assert states.count("consolidated") == 2
+    assert states.count("pending") == 2
+    assert states.count("summary") == 1
+
+
+def test_runner_summary_row_has_agent_inference_claim_type():
+    """ADR-0027 amendment alignment: summary rows are inferences,
+    not observations. Stays agent_inference no matter what the
+    source claim_types were."""
+    conn = _fresh_db()
+    _seed_extra(conn, "a_1", claim_type="observation", age_days=30)
+    _seed_extra(conn, "a_2", claim_type="user_statement", age_days=31)
+    asyncio.run(run_consolidation_pass(
+        conn, policy=ConsolidationPolicy(),
+        provider=_MockProvider(), audit_chain=_MockChain(), now=NOW,
+    ))
+    summary_claim = conn.execute(
+        "SELECT claim_type FROM memory_entries "
+        "WHERE consolidation_state='summary'"
+    ).fetchone()[0]
+    assert summary_claim == "agent_inference"
+
+
+def test_runner_summary_row_tagged_with_run_id():
+    """Every row touched by the pass — source + summary alike —
+    carries the same consolidation_run UUID. Operator pulls
+    'show me what run X did' via this column."""
+    conn = _fresh_db()
+    for i in range(2):
+        _seed_extra(conn, f"a_{i}", age_days=30 + i)
+    chain = _MockChain()
+    result = asyncio.run(run_consolidation_pass(
+        conn, policy=ConsolidationPolicy(),
+        provider=_MockProvider(), audit_chain=chain, now=NOW,
+    ))
+    run_ids = {
+        r[0] for r in conn.execute(
+            "SELECT consolidation_run FROM memory_entries "
+            "WHERE consolidation_run IS NOT NULL"
+        ).fetchall()
+    }
+    assert run_ids == {result.run_id}
