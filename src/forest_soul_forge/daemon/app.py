@@ -39,6 +39,9 @@ from forest_soul_forge.daemon.routers import genres as genres_router
 from forest_soul_forge.daemon.routers import memory_consents as memory_consents_router
 from forest_soul_forge.daemon.routers import memory_consolidation as memory_consolidation_router
 from forest_soul_forge.daemon.routers import operator as operator_router
+from forest_soul_forge.daemon.routers import (
+    provenance as provenance_router,
+)
 from forest_soul_forge.daemon.routers import pending_calls as pending_calls_router
 from forest_soul_forge.daemon.routers import preview as preview_router
 from forest_soul_forge.daemon.routers import runtime as runtime_router
@@ -1210,6 +1213,10 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     # Operator-driven connector consent substrate; first-boot
     # wizard (T7b) drives it.
     app.include_router(operator_router.router)
+    # ADR-0072 T5 (B330) — /provenance/active + /provenance/handoffs.
+    # Read-only surface that powers the frontend Provenance pane.
+    # Closes Phase α 10/10.
+    app.include_router(provenance_router.router)
     app.include_router(verifier_router.router)
     app.include_router(character_sheet_router.router)
     app.include_router(preview_router.router)

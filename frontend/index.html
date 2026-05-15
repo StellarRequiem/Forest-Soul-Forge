@@ -141,6 +141,13 @@
         <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 C6.5 1 5.5 2 5.5 3.5 V8.5 C5.5 10 6.5 11 8 11 C9.5 11 10.5 10 10.5 8.5 V3.5 C10.5 2 9.5 1 8 1 Z M3 7 V8.5 C3 11 5 13 8 13 C11 13 13 11 13 8.5 V7 M8 13 V15" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
         Voice
       </button>
+      <!-- ADR-0072 T5 (B330) — Provenance pane. Shows the four-layer
+           precedence ladder + active/pending learned rules + preferences.
+           Closes Phase α 10/10. -->
+      <button class="tab" data-tab="provenance" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2 H13 V14 H3 Z M5 5 H11 M5 8 H11 M5 11 H9" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+        Provenance
+      </button>
     </nav>
 
     <!-- ========================================================== -->
@@ -1326,6 +1333,58 @@
             🔊 speak
           </button>
           <audio id="voice-tts-audio" controls style="margin-top: 10px; width: 100%; display: none;"></audio>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Provenance tab — ADR-0072 T5 (B330) closes Phase α 10/10  -->
+    <!-- Renders the four-layer precedence ladder + the operator's -->
+    <!-- active preferences + learned rules (active/pending/refused) -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="provenance" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Behavior Provenance</h2>
+          <div class="panel__actions">
+            <button class="btn btn--ghost btn--sm" id="prov-refresh-btn" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="prov-precedence" class="ra-section">loading precedence ladder…</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Operator preferences (tier 400)</h3>
+          <div class="panel__actions">
+            <span class="lbl ra-note">edited via fsf operator preference set</span>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="prov-preferences" class="ra-section">loading preferences…</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Learned rules (tier 100)</h3>
+          <div class="panel__actions">
+            <span class="lbl ra-note">agent-emitted; RA-gated per ADR-0072</span>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="prov-rules" class="ra-section">loading learned rules…</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Hardcoded handoffs (tier 1000)</h3>
+          <div class="panel__actions">
+            <span class="lbl ra-note">engineer-edited via PR — always wins</span>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="prov-handoffs" class="ra-section">loading handoffs…</div>
         </div>
       </div>
     </section>

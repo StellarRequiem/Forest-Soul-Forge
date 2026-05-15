@@ -19,6 +19,7 @@ import * as marketplacePanel from "./marketplace.js";            // B228 / ADR-0
 import * as orchestratorPanel from "./orchestrator.js";          // B299 / ADR-0067 T7
 import * as operatorWizardPanel from "./operator-wizard.js";     // B318 / ADR-0068 T7b
 import * as voicePane from "./voice.js";                          // B326 / ADR-0070 T3
+import * as provenancePane from "./provenance.js";                // B330 / ADR-0072 T5
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
 import * as mcpPluginsPanel from "./mcp-plugins.js";
@@ -82,6 +83,7 @@ async function boot() {
     orchestratorPanel.start();     // B299 / ADR-0067 T7
     operatorWizardPanel.start();   // B318 / ADR-0068 T7b
     voicePane.initVoicePane();     // B326 / ADR-0070 T3
+    provenancePane.initProvenancePane();  // B330 / ADR-0072 T5 — Phase α 10/10
     skillsPanel.start();
     toolRegistryPanel.start();
     mcpPluginsPanel.start();
@@ -178,6 +180,10 @@ async function boot() {
   // Lazy-loads MediaRecorder on first tab activation; degrades
   // cleanly when /voice/* aren't registered.
   voicePane.initVoicePane();
+  // ADR-0072 T5 (B330) — Behavior Provenance pane. Closes
+  // Phase α 10/10. Shows operator preferences + active /
+  // pending / refused learned rules + hardcoded handoffs.
+  provenancePane.initProvenancePane();
 }
 
 if (document.readyState === "loading") {
