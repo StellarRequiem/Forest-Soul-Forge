@@ -145,6 +145,17 @@ async function boot() {
   // ran start(), so no tab-click or refresh-button handler was
   // ever attached. Symmetric with realityAnchorPanel.start() here.
   securityPanel.start();
+  // B276 (B298) — same boot-asymmetry bug as B260.1/B260.2. The
+  // Forged Proposals, Catalog Grants, and Marketplace panels each
+  // only had a start() call in the trait-tree-failure catch branch
+  // above. On the common-case success path their tab handlers
+  // never wired up, so clicking any of these tabs left them stuck
+  // on the placeholder "loading…" markup their HTML ships with.
+  // Adding them here is the symmetric fix — the catch branch
+  // continues to wire them as a degraded-mode fallback.
+  forgedProposalsPanel.start();   // B205 / ADR-0030 + ADR-0031
+  catalogGrantsPanel.start();     // B223 / ADR-0060 T6
+  marketplacePanel.start();       // B228 / ADR-0055 M4
 }
 
 if (document.readyState === "loading") {
