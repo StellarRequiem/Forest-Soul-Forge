@@ -169,6 +169,13 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # The first-boot wizard (T7b) emits one of these per choice;
     # subsequent changes (revoke, re-grant) emit additional entries.
     "operator_connector_consent_changed",
+    # ADR-0068 T8 (B319) — profile-schema migrations. Emitted when
+    # the loader detects a profile file at an older schema_version
+    # and runs PROFILE_MIGRATIONS to bring it forward. payload
+    # carries (from_version, to_version, applied_steps, backup_path,
+    # operator_id). The migrated form gets written back to disk;
+    # the original is preserved at backup_path for rollback.
+    "operator_profile_migrated",
     # ADR-003X K2 — operator-emitted ceremony events. Distinct from
     # tool-emitted events because the EMITTER is a human, not an
     # agent. Used to mark milestones, identity events, governance

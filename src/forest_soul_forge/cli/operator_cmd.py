@@ -97,6 +97,36 @@ def add_subparser(parent_subparsers: argparse._SubParsersAction) -> None:
     )
     p_init.set_defaults(_run=_run_init)
 
+    # `fsf operator migrate` — ADR-0068 T8 (B319).
+    p_mig = op_sub.add_parser(
+        "migrate",
+        help=(
+            "Migrate the operator profile to the current SCHEMA_VERSION. "
+            "Auto-runs on load too; this CLI is the explicit operator "
+            "path with --dry-run + --restore-from-backup."
+        ),
+    )
+    p_mig.add_argument(
+        "--profile-path", default=None,
+        help="Override profile path. Default: data/operator/profile.yaml.",
+    )
+    p_mig.add_argument(
+        "--dry-run", action="store_true",
+        help=(
+            "Compute the migrated YAML in memory + print it; do NOT "
+            "touch disk. Use to inspect a migration before letting it "
+            "run."
+        ),
+    )
+    p_mig.add_argument(
+        "--restore-from-backup", action="store_true",
+        help=(
+            "Roll back: read the latest profile.yaml.bak.v<N> backup, "
+            "restore it as profile.yaml. Refuses if no backup exists."
+        ),
+    )
+    p_mig.set_defaults(_run=_run_migrate)
+
 
 def _run_show(args: argparse.Namespace) -> int:
     path = Path(args.profile_path) if args.profile_path else None
@@ -176,4 +206,106 @@ def _run_init(args: argparse.Namespace) -> int:
         print(f"INVALID: {e}", file=sys.stderr)
         return 1
     print(f"wrote {written}")
+    return 0
+
+
+def _run_migrate(args: argparse.Namespace) -> int:
+    """ADR-0068 T8 (B319) — migrate the profile to the current
+    SCHEMA_VERSION explicitly. Auto-migration runs on every load
+    too; this CLI is the operator-explicit path with --dry-run +
+    --restore-from-backup escape hatches.
+    """
+    import yaml as _yaml
+    from forest_soul_forge.core.operator_profile import (
+        SCHEMA_VERSION,
+        _backup_path,
+        default_operator_profile_path,
+        migrate_raw_profile,
+    )
+
+    path = Path(args.profile_path) if args.profile_path else (
+        default_operator_profile_path()
+    )
+
+    if args.restore_from_backup:
+        return _restore_from_backup(path)
+
+    if not path.exists():
+        print(f"profile not found at {path}", file=sys.stderr)
+        return 2
+
+    try:
+        text = path.read_text(encoding="utf-8")
+        raw = _yaml.safe_load(text) or {}
+    except Exception as e:
+        print(f"could not read profile: {e}", file=sys.stderr)
+        return 2
+
+    sv = raw.get("schema_version")
+    if not isinstance(sv, int):
+        print(
+            f"profile schema_version must be an integer; got {sv!r}",
+            file=sys.stderr,
+        )
+        return 2
+
+    if sv == SCHEMA_VERSION:
+        print(f"profile already at SCHEMA_VERSION={SCHEMA_VERSION}; nothing to do")
+        return 0
+
+    try:
+        migrated, applied = migrate_raw_profile(
+            raw, from_version=sv, to_version=SCHEMA_VERSION,
+        )
+    except OperatorProfileError as e:
+        print(f"migration failed: {e}", file=sys.stderr)
+        return 2
+
+    if args.dry_run:
+        print(
+            f"# Migration from v{sv} -> v{SCHEMA_VERSION} "
+            f"(would apply: {applied})"
+        )
+        print(_yaml.safe_dump(migrated, sort_keys=False, allow_unicode=True))
+        return 0
+
+    # Real migration: write backup + replace target.
+    bp = _backup_path(path, sv)
+    if bp.exists():
+        seq = 1
+        while True:
+            alt = bp.with_name(bp.name + f".{seq}")
+            if not alt.exists():
+                bp = alt
+                break
+            seq += 1
+    bp.write_text(text, encoding="utf-8")
+    path.write_text(
+        _yaml.safe_dump(migrated, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    print(f"migrated v{sv} -> v{SCHEMA_VERSION}; backup at {bp}")
+    return 0
+
+
+def _restore_from_backup(path: Path) -> int:
+    """Walk profile.yaml.bak.v* siblings; restore the newest one.
+
+    'Newest' here is highest schema_version + highest numeric
+    suffix among ties. Refuses if no backup exists.
+    """
+    backups = sorted(
+        path.parent.glob(path.name + ".bak.v*"),
+        key=lambda p: p.name,
+    )
+    if not backups:
+        print(
+            f"no backups found at {path.parent} matching "
+            f"{path.name}.bak.v*",
+            file=sys.stderr,
+        )
+        return 2
+    src = backups[-1]
+    path.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"restored {path} from {src.name}")
     return 0

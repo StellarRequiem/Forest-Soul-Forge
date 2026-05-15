@@ -54,6 +54,105 @@ import yaml
 
 SCHEMA_VERSION = 1
 
+
+# ---------------------------------------------------------------------------
+# ADR-0068 T8 (B319) — migration framework
+# ---------------------------------------------------------------------------
+#
+# OperatorProfile YAML evolves over time. T4-T7 added optional
+# fields (trust_circle, voice_samples, writing_samples, financial,
+# connectors), each with a default that kept SCHEMA_VERSION at 1
+# — every pre-T4 yaml still loads cleanly because new fields are
+# optional. That's the cheap path. T8 ships the substrate for the
+# first BREAKING change (renamed field, removed field, restructured
+# nesting, narrowed enum) so the framework is in place ahead of
+# need.
+#
+# Shape: PROFILE_MIGRATIONS is a dict keyed by source-version.
+# PROFILE_MIGRATIONS[N] is a function (raw_dict) -> raw_dict that
+# transforms the YAML-loaded dict from v<N> to v<N+1>. The loader
+# composes them in order: a v1 file loaded by a v3 daemon runs
+# through PROFILE_MIGRATIONS[1] then PROFILE_MIGRATIONS[2].
+#
+# Today PROFILE_MIGRATIONS is empty — schema_version is still 1
+# and no migrations exist. Tests inject a fake migration to prove
+# the plumbing.
+#
+# Audit emit: a successful migration on load emits
+# operator_profile_migrated with from_version + to_version + a
+# notes blob. The on-disk file gets re-saved at the new version;
+# the original is preserved as profile.yaml.bak.v<N> so the
+# operator can roll back via the restore-from-backup CLI path.
+PROFILE_MIGRATIONS: dict[int, Any] = {}
+
+
+def register_profile_migration(from_version: int):
+    """Decorator that registers a v<N> -> v<N+1> migration.
+
+    Usage::
+
+        @register_profile_migration(from_version=1)
+        def _v1_to_v2(raw: dict) -> dict:
+            # Rename work_hours.start -> office_hours.start, etc.
+            ...
+            return raw
+
+    The first real migration registers under from_version=1 when
+    SCHEMA_VERSION bumps to 2. T8 ships the registry empty.
+    """
+    def decorator(fn):
+        if from_version in PROFILE_MIGRATIONS:
+            raise RuntimeError(
+                f"profile migration v{from_version}->v{from_version + 1} "
+                f"already registered"
+            )
+        PROFILE_MIGRATIONS[from_version] = fn
+        return fn
+    return decorator
+
+
+def migrate_raw_profile(
+    raw: dict, *, from_version: int, to_version: int = SCHEMA_VERSION,
+) -> tuple[dict, list[int]]:
+    """Walk PROFILE_MIGRATIONS from from_version to to_version.
+
+    Returns (migrated_dict, applied_steps) where applied_steps is
+    the list of source versions whose migration was executed.
+    Raises OperatorProfileError when a required step is missing
+    OR when from_version > to_version (operator's daemon is older
+    than the file).
+    """
+    if from_version == to_version:
+        return raw, []
+    if from_version > to_version:
+        raise OperatorProfileError(
+            f"profile schema_version {from_version} is newer than "
+            f"daemon's current SCHEMA_VERSION {to_version}. Operator's "
+            f"daemon is out of date — upgrade Forest before loading "
+            f"this profile."
+        )
+    applied: list[int] = []
+    current = dict(raw)  # work on a copy
+    for v in range(from_version, to_version):
+        if v not in PROFILE_MIGRATIONS:
+            raise OperatorProfileError(
+                f"no profile migration registered for v{v} -> v{v + 1}; "
+                f"cannot bring v{from_version} profile to v{to_version}"
+            )
+        try:
+            current = PROFILE_MIGRATIONS[v](current)
+        except Exception as e:
+            raise OperatorProfileError(
+                f"profile migration v{v} -> v{v + 1} raised: "
+                f"{type(e).__name__}: {e}"
+            ) from e
+        applied.append(v)
+        # Stamp the new version into the migrated dict so the next
+        # step sees the right schema_version.
+        current["schema_version"] = v + 1
+    return current, applied
+
+
 # Required fields under operator.*. Validation refuses any profile
 # missing these. Future tranches add optional fields; the required
 # set stays minimal so a fresh operator can supply the bare essentials
@@ -359,7 +458,71 @@ def load_operator_profile(
             f"operator profile at {p} is malformed YAML: {e}"
         ) from e
 
-    return _validate_and_construct(raw, source_path=p)
+    # ADR-0068 T8 (B319): if the raw dict is at an older schema
+    # version AND a migration chain exists, capture the original
+    # version before _validate_and_construct mutates the dict so
+    # we can write the migrated form back + emit the audit event.
+    pre_migration_version = raw.get("schema_version")
+
+    profile = _validate_and_construct(raw, source_path=p)
+
+    if (
+        isinstance(pre_migration_version, int)
+        and pre_migration_version < SCHEMA_VERSION
+    ):
+        # Save migrated form back to disk + write a backup of the
+        # original. The audit emit is best-effort (no chain handle
+        # at this layer); the actual on-chain audit lives at the
+        # CLI / HTTP layer that drove the load.
+        try:
+            _write_migration_backup(p, text, pre_migration_version)
+            save_operator_profile(
+                profile, p, encryption_config=encryption_config,
+            )
+        except Exception as e:
+            # Persistence failed but the in-memory profile is
+            # valid. Surface a clear error rather than silently
+            # leaving the operator with an inconsistent disk state.
+            raise OperatorProfileError(
+                f"loaded operator profile from v{pre_migration_version} "
+                f"to v{SCHEMA_VERSION} in memory but the write-back to "
+                f"disk failed: {type(e).__name__}: {e}. "
+                f"Original file unchanged; backup at "
+                f"{_backup_path(p, pre_migration_version)}"
+            ) from e
+
+    return profile
+
+
+def _backup_path(target: Path, version: int) -> Path:
+    """Where the pre-migration backup lands.
+
+    Convention: ``<profile.yaml>.bak.v<N>``. Operators roll back
+    via ``fsf operator migrate --restore-from-backup``.
+    """
+    return target.with_name(target.name + f".bak.v{version}")
+
+
+def _write_migration_backup(
+    target: Path, original_text: str, version: int,
+) -> Path:
+    """Persist the pre-migration YAML text under the canonical
+    backup name. Returns the backup path. Refuses to overwrite an
+    existing backup at the same version — that would be losing
+    older history."""
+    bp = _backup_path(target, version)
+    if bp.exists():
+        # Pick the next available numbered backup so we never
+        # overwrite. <name>.bak.v<N>.<seq>
+        seq = 1
+        while True:
+            alt = bp.with_name(bp.name + f".{seq}")
+            if not alt.exists():
+                bp = alt
+                break
+            seq += 1
+    bp.write_text(original_text, encoding="utf-8")
+    return bp
 
 
 def save_operator_profile(
@@ -621,12 +784,27 @@ def _validate_and_construct(
         )
 
     sv = raw.get("schema_version")
-    if sv != SCHEMA_VERSION:
+    if not isinstance(sv, int):
         raise OperatorProfileError(
-            f"operator profile at {source_path} schema_version "
-            f"{sv} does not match expected {SCHEMA_VERSION}. "
-            f"Migration helpers will ship in T8."
+            f"operator profile at {source_path} schema_version must "
+            f"be an integer; got {sv!r}"
         )
+    if sv != SCHEMA_VERSION:
+        # ADR-0068 T8 (B319): version-aware load. Walk
+        # PROFILE_MIGRATIONS to bring the raw dict up to the
+        # current SCHEMA_VERSION. If no migration is registered
+        # for an intermediate step, migrate_raw_profile raises a
+        # clear OperatorProfileError.
+        raw, _applied = migrate_raw_profile(
+            raw, from_version=sv, to_version=SCHEMA_VERSION,
+        )
+        sv = SCHEMA_VERSION
+        op = raw.get("operator")  # re-pull in case migration restructured
+        if not isinstance(op, dict):
+            raise OperatorProfileError(
+                f"operator profile at {source_path}: migration v{sv} "
+                f"left top-level 'operator' missing"
+            )
 
     op = raw.get("operator")
     if not isinstance(op, dict):
