@@ -158,3 +158,75 @@ def test_add_subparser_registers(tmp_path):
     assert args.name == "my-plugin"
     assert args.tier == "read_only"
     assert args.tool == "do_thing"
+
+
+# ---------------------------------------------------------------------------
+# ADR-0071 T2 (B305) — tier-specific tool exemplars
+# ---------------------------------------------------------------------------
+
+import ast as _ast
+
+
+def test_network_tier_exemplar_uses_urllib(tmp_path):
+    """The network-tier scaffold imports urllib.request + emits a
+    fetch-with-timeout body so authors don't reinvent the HTTP shape."""
+    target = tmp_path / "test-plugin"
+    _run_new(_args(target=str(target), tier="network", tool="fetch_thing"))
+    src = (target / "tools" / "fetch_thing.py").read_text()
+    _ast.parse(src)
+    assert "import urllib.request" in src
+    assert "urlopen" in src
+    assert "timeout=" in src
+    # validate body checks the URL scheme.
+    assert "http://" in src
+    assert "https://" in src
+
+
+def test_filesystem_tier_exemplar_validates_against_allowed_paths(tmp_path):
+    """The filesystem-tier scaffold demonstrates ctx.allowed_paths
+    validation — every path must be checked before any open()."""
+    target = tmp_path / "test-plugin"
+    _run_new(_args(target=str(target), tier="filesystem", tool="read_file"))
+    src = (target / "tools" / "read_file.py").read_text()
+    _ast.parse(src)
+    assert "_is_within" in src
+    assert "ctx" in src and "allowed_paths" in src
+    assert "def _is_within(" in src
+
+
+def test_external_tier_exemplar_uses_subprocess_with_timeout(tmp_path):
+    """The external-tier scaffold uses subprocess.run with a
+    timeout + capture_output + a TimeoutExpired branch."""
+    target = tmp_path / "test-plugin"
+    _run_new(_args(target=str(target), tier="external", tool="run_cmd"))
+    src = (target / "tools" / "run_cmd.py").read_text()
+    _ast.parse(src)
+    assert "import subprocess" in src
+    assert "subprocess.run(" in src
+    assert "timeout=" in src
+    assert "TimeoutExpired" in src
+    # Inline guidance flags shell=True as dangerous.
+    assert "NEVER use shell=True" in src
+
+
+def test_read_only_tier_keeps_echo_exemplar(tmp_path):
+    """The read_only-tier scaffold keeps the original echo exemplar
+    — no extra imports, no network/filesystem patterns. Backward
+    compat for the pre-T2 default."""
+    target = tmp_path / "test-plugin"
+    _run_new(_args(target=str(target), tier="read_only", tool="echo_args"))
+    src = (target / "tools" / "echo_args.py").read_text()
+    _ast.parse(src)
+    assert "echo" in src
+    assert "urllib" not in src
+    assert "subprocess" not in src
+    assert "_is_within" not in src
+
+
+def test_tier_rubric_present_in_docstring(tmp_path):
+    """The module docstring on a scaffolded tool quotes the tier
+    rubric so the author sees the tier semantics inline."""
+    target = tmp_path / "test-plugin"
+    _run_new(_args(target=str(target), tier="network", tool="x"))
+    src = (target / "tools" / "x.py").read_text()
+    assert "outbound HTTP" in src

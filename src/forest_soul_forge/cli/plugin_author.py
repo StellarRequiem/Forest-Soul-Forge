@@ -253,17 +253,30 @@ See `plugin.yaml` `license` field.
 
 
 def _render_tool_module(tool: str, tier: str) -> str:
-    """Render tools/<tool>.py — Tool Protocol stub."""
+    """Render tools/<tool>.py — Tool Protocol stub.
+
+    ADR-0071 T2 (B305): the tool body is tier-specific. Each tier
+    gets a representative exemplar pattern so new plugin authors
+    see "how a network tool actually fetches" / "how a filesystem
+    tool actually respects allowed_paths" / "how an external tool
+    actually shells out" instead of a generic echo for everything.
+    Tier dictates side-effects which dictates how the tool calls
+    the outside world; the exemplar reflects that.
+    """
     class_name = "".join(p.capitalize() for p in tool.split("_")) + "Tool"
+    validate_body, execute_body, extra_imports = _tier_exemplar(tier)
     return f'''"""{tool}.v1 — scaffolded by `fsf plugin new`.
 
 TODO: Replace this docstring with what this tool does + when an
 operator should grant access.
+
+Tier: {tier}
+{_TIER_RUBRIC[tier]}
 """
 from __future__ import annotations
 
 from typing import Any
-
+{extra_imports}
 # Forest's tool base classes. Plugins import these from the
 # host process's installed forest_soul_forge package.
 from forest_soul_forge.tools.base import (
@@ -286,11 +299,7 @@ class {class_name}:
         Forest gates this before execute; downstream code can
         assume args are well-shaped.
         """
-        # TODO: validate args here. Example:
-        # query = args.get("query")
-        # if not isinstance(query, str) or not query.strip():
-        #     raise ToolValidationError("query must be a non-empty string")
-        pass
+{validate_body}
 
     async def execute(
         self, args: dict[str, Any], ctx: ToolContext,
@@ -301,18 +310,197 @@ class {class_name}:
         references, etc. Use ctx.audit to emit additional events
         if your tool produces noteworthy side observations.
         """
-        # TODO: implement.
-        return ToolResult(
-            success=True,
-            output={{"echo": args}},
-            audit_payload={{"args_keys": sorted(args.keys())}},
-        )
+{execute_body}
 
 
 # Module-level instance — plugin loader instantiates and registers
 # this with the host's tool registry at install time.
 {tool}_tool = {class_name}()
 '''
+
+
+# ADR-0071 T2 (B305): per-tier exemplar bodies for fsf plugin-new.
+# Plugin authors see the canonical shape for their chosen tier
+# instead of having to read three other plugins to figure out
+# "what does a filesystem tool look like?"
+
+_TIER_RUBRIC: dict[str, str] = {
+    "read_only": (
+        "This tier is for tools that compute purely from their\n"
+        "args + Forest's internal state — no network, no disk\n"
+        "writes, no subprocesses. Examples: text summarization\n"
+        "against in-memory content, hash computation, validation\n"
+        "checks against a static catalog."
+    ),
+    "network": (
+        "This tier is for tools that hit outbound HTTP. Examples:\n"
+        "REST API clients, RSS fetchers, GraphQL queries against\n"
+        "external services. Forest gates the granted hostnames\n"
+        "via plugin manifest's allowed_hosts (out of scope here\n"
+        "but worth knowing for production plugins)."
+    ),
+    "filesystem": (
+        "This tier is for tools that read or write files in\n"
+        "operator-allowed paths. ctx.allowed_paths carries the\n"
+        "approved roots; the tool MUST validate every path against\n"
+        "that list before any open(). Forest does not enforce path\n"
+        "scoping at the OS level — the tool is responsible."
+    ),
+    "external": (
+        "This tier is for tools that invoke subprocesses (system\n"
+        "commands, CLI binaries). Examples: ffmpeg, git, native\n"
+        "scripts. Operator-trust required at install time. Always\n"
+        "pass a timeout and capture stderr separately so failures\n"
+        "are diagnosable."
+    ),
+}
+
+
+def _tier_exemplar(tier: str) -> tuple[str, str, str]:
+    """Return (validate_body, execute_body, extra_imports) for `tier`.
+
+    Bodies are pre-indented to slot directly under their respective
+    method signatures (8-space indent — two levels into the class).
+    """
+    if tier == "network":
+        return (
+            (
+                "        url = args.get(\"url\")\n"
+                "        if not isinstance(url, str) or not url.startswith(\n"
+                "            (\"http://\", \"https://\")\n"
+                "        ):\n"
+                "            raise ToolValidationError(\n"
+                "                \"url must be a str starting with http(s)://\",\n"
+                "            )"
+            ),
+            (
+                "        # Example: fetch a URL with a hard timeout. Real plugins\n"
+                "        # use the host's configured http client; this stub uses\n"
+                "        # urllib so it has zero deps.\n"
+                "        url = args[\"url\"]\n"
+                "        try:\n"
+                "            with urllib.request.urlopen(url, timeout=10) as resp:\n"
+                "                body = resp.read().decode(\"utf-8\", errors=\"replace\")\n"
+                "                status = resp.status\n"
+                "        except urllib.error.URLError as e:\n"
+                "            return ToolResult(\n"
+                "                success=False, output={\"error\": str(e)},\n"
+                "                audit_payload={\"url\": url, \"error\": str(e)},\n"
+                "            )\n"
+                "        return ToolResult(\n"
+                "            success=True,\n"
+                "            output={\"status\": status, \"body\": body[:1024]},\n"
+                "            audit_payload={\"url\": url, \"status\": status},\n"
+                "        )"
+            ),
+            "import urllib.error\nimport urllib.request\n",
+        )
+
+    if tier == "filesystem":
+        return (
+            (
+                "        path = args.get(\"path\")\n"
+                "        if not isinstance(path, str) or not path:\n"
+                "            raise ToolValidationError(\n"
+                "                \"path must be a non-empty string\",\n"
+                "            )"
+            ),
+            (
+                "        # ctx.allowed_paths is the operator-approved list of\n"
+                "        # root directories. EVERY read/write MUST validate\n"
+                "        # the requested path lives under one of them.\n"
+                "        target = pathlib.Path(args[\"path\"]).expanduser().resolve()\n"
+                "        allowed = [pathlib.Path(p).resolve() for p in getattr(ctx, \"allowed_paths\", [])]\n"
+                "        if not any(_is_within(target, root) for root in allowed):\n"
+                "            return ToolResult(\n"
+                "                success=False,\n"
+                "                output={\"error\": f\"{target} is outside allowed_paths\"},\n"
+                "                audit_payload={\"path\": str(target), \"refused\": True},\n"
+                "            )\n"
+                "        # TODO: do the read/write here.\n"
+                "        return ToolResult(\n"
+                "            success=True,\n"
+                "            output={\"resolved\": str(target)},\n"
+                "            audit_payload={\"path\": str(target)},\n"
+                "        )"
+            ),
+            (
+                "import pathlib\n"
+                "\n"
+                "\n"
+                "def _is_within(target: pathlib.Path, root: pathlib.Path) -> bool:\n"
+                "    \"\"\"True iff target == root or target is under root.\"\"\"\n"
+                "    try:\n"
+                "        target.relative_to(root)\n"
+                "        return True\n"
+                "    except ValueError:\n"
+                "        return False\n"
+            ),
+        )
+
+    if tier == "external":
+        return (
+            (
+                "        cmd = args.get(\"cmd\")\n"
+                "        if not isinstance(cmd, list) or not cmd:\n"
+                "            raise ToolValidationError(\n"
+                "                \"cmd must be a non-empty list of strings\",\n"
+                "            )\n"
+                "        if any(not isinstance(p, str) for p in cmd):\n"
+                "            raise ToolValidationError(\n"
+                "                \"every cmd element must be a string\",\n"
+                "            )"
+            ),
+            (
+                "        # Pass timeout + capture stderr separately so failures\n"
+                "        # are diagnosable. NEVER use shell=True with operator-\n"
+                "        # supplied args — that's a shell-injection vector.\n"
+                "        try:\n"
+                "            proc = subprocess.run(\n"
+                "                args[\"cmd\"], capture_output=True, text=True,\n"
+                "                timeout=30, check=False,\n"
+                "            )\n"
+                "        except subprocess.TimeoutExpired:\n"
+                "            return ToolResult(\n"
+                "                success=False,\n"
+                "                output={\"error\": \"timeout\"},\n"
+                "                audit_payload={\"cmd\": args[\"cmd\"], \"timeout\": True},\n"
+                "            )\n"
+                "        return ToolResult(\n"
+                "            success=proc.returncode == 0,\n"
+                "            output={\n"
+                "                \"returncode\": proc.returncode,\n"
+                "                \"stdout\": proc.stdout,\n"
+                "                \"stderr\": proc.stderr,\n"
+                "            },\n"
+                "            audit_payload={\n"
+                "                \"cmd\": args[\"cmd\"],\n"
+                "                \"returncode\": proc.returncode,\n"
+                "            },\n"
+                "        )"
+            ),
+            "import subprocess\n",
+        )
+
+    # read_only — the default echo exemplar.
+    return (
+        (
+            "        # TODO: validate args here. Example:\n"
+            "        # query = args.get(\"query\")\n"
+            "        # if not isinstance(query, str) or not query.strip():\n"
+            "        #     raise ToolValidationError(\"query must be a non-empty string\")\n"
+            "        pass"
+        ),
+        (
+            "        # TODO: implement.\n"
+            "        return ToolResult(\n"
+            "            success=True,\n"
+            "            output={\"echo\": args},\n"
+            "            audit_payload={\"args_keys\": sorted(args.keys())},\n"
+            "        )"
+        ),
+        "",
+    )
 
 
 def _render_test_module(tool: str) -> str:
