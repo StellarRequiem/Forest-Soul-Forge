@@ -860,6 +860,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
             SchedulerStateRepo,
         )
         from forest_soul_forge.daemon.scheduler.task_types import (
+            learned_rule_ra_pass_runner,
             scenario_runner,
             tool_call_runner,
         )
@@ -905,6 +906,13 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         # multi-step workflows. Step types in v0.4: dispatch_tool,
         # read_file, write_file, iterate.
         scheduler.register_task_type("scenario", scenario_runner)
+        # ADR-0072 T3 (B325): Reality-Anchor pass over pending
+        # learned rules. Operators configure a nightly schedule
+        # (default: every 24h) so newly proposed rules surface
+        # to the operator with the RA verdict pre-attached.
+        scheduler.register_task_type(
+            "learned_rule_ra_pass", learned_rule_ra_pass_runner,
+        )
         # Optional config file load — silent skip if absent.
         scheduler_config_path = settings.scheduled_tasks_path
         if scheduler_config_path.exists():

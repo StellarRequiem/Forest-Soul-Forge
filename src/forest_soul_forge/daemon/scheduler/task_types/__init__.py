@@ -32,5 +32,12 @@ from forest_soul_forge.daemon.scheduler.task_types.scenario import (
 from forest_soul_forge.daemon.scheduler.task_types.tool_call import (
     tool_call_runner,
 )
+from forest_soul_forge.daemon.scheduler.task_types.learned_rule_ra_pass import (
+    learned_rule_ra_pass_runner,
+)
 
-__all__ = ["scenario_runner", "tool_call_runner"]
+__all__ = [
+    "scenario_runner",
+    "tool_call_runner",
+    "learned_rule_ra_pass_runner",
+]
