@@ -301,6 +301,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _plugin_author_add_subparser(sub)
 
+    # `fsf provenance ...` — ADR-0072 T2 (B303) behavior-provenance
+    # inspection. precedence / resolve / list subcommands. Read-only;
+    # writes (preference edits, learned-rule pruning) land in T3-T5.
+    from forest_soul_forge.cli.provenance_cmd import (
+        add_subparser as _provenance_add_subparser,
+    )
+    _provenance_add_subparser(sub)
+
     return parser
 
 
