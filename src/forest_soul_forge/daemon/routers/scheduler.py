@@ -40,11 +40,23 @@ def _scheduler(request: Request) -> Scheduler:
     return sched
 
 
-def _serialize_task(task) -> dict[str, Any]:
+def _serialize_task(task, scheduler: Scheduler | None = None) -> dict[str, Any]:
     """Render a ScheduledTask as a JSON-friendly dict. Includes
     runtime state so the operator can see last_run / next_run /
     failure counters at a glance.
+
+    ADR-0075 T4 (B297) extension: when a scheduler is supplied,
+    pulls the live dispatch-window count for this task so the
+    operator sees "how close to budget" alongside the configured
+    budget itself. Window count is best-effort — a task that's
+    never dispatched has no window deque.
     """
+    in_window = 0
+    if scheduler is not None:
+        # noqa: SLF001 — accessing the private dict is the documented
+        # interface for /scheduler/status; treating it as a typed
+        # accessor surface would require a separate ADR.
+        in_window = len(scheduler._dispatch_windows.get(task.id, ()))
     return {
         "id": task.id,
         "description": task.description,
@@ -56,6 +68,9 @@ def _serialize_task(task) -> dict[str, Any]:
         "config": task.config,
         "enabled": task.enabled,
         "max_consecutive_failures": task.max_consecutive_failures,
+        # ADR-0075 T4 (B297): budget + window snapshot.
+        "budget_per_minute": task.budget_per_minute,
+        "dispatches_in_window": in_window,
         "state": {
             "last_run_at": (
                 task.state.last_run_at.isoformat()
@@ -92,7 +107,7 @@ def scheduler_status(request: Request) -> dict[str, Any]:
 def list_scheduled_tasks(request: Request) -> dict[str, Any]:
     """List every registered scheduled task with full per-task state."""
     sched = _scheduler(request)
-    tasks = [_serialize_task(t) for t in sched.list_tasks()]
+    tasks = [_serialize_task(t, sched) for t in sched.list_tasks()]
     return {"count": len(tasks), "tasks": tasks}
 
 
@@ -106,7 +121,7 @@ def get_scheduled_task(task_id: str, request: Request) -> dict[str, Any]:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"no scheduled task with id {task_id!r}",
         )
-    return _serialize_task(task)
+    return _serialize_task(task, sched)
 
 
 # ---- Operator control (Burst 91, ADR-0041 T6) ---------------------------

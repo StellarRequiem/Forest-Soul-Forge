@@ -577,3 +577,67 @@ def test_build_task_from_config_honors_budget_field():
     }
     t = build_task_from_config(spec)
     assert t.budget_per_minute == 12
+
+
+# ---------------------------------------------------------------------------
+# ADR-0075 T4 (B297) — /scheduler/status payload extension
+# ---------------------------------------------------------------------------
+
+def test_status_includes_tick_budget_ms():
+    """status() surfaces tick_budget_ms so operators see the
+    configured ceiling at the top level."""
+    s = Scheduler(tick_budget_ms=750.0)
+    st = s.status()
+    assert st["tick_budget_ms"] == 750.0
+
+
+def test_status_includes_dispatch_window_summary():
+    """status() reports the per-task dispatch window count + total."""
+    s = Scheduler()
+    t1 = _budget_task("t1", 6)
+    t2 = _budget_task("t2", 6)
+    s.add_task(t1)
+    s.add_task(t2)
+    # Seed a window for t1 only.
+    now_m = time.monotonic()
+    s._dispatch_windows["t1"] = deque([now_m - 5.0, now_m - 1.0])
+    st = s.status()
+    assert st["dispatch_windows"]["total_in_window"] == 2
+    assert st["dispatch_windows"]["per_task"]["t1"] == 2
+    assert st["dispatch_windows"]["per_task"]["t2"] == 0
+
+
+def test_status_counts_paused_tasks():
+    """tasks_paused counts budget=0 tasks separately from
+    tasks_enabled / tasks_breaker_open."""
+    s = Scheduler()
+    s.add_task(_budget_task("t_paused", 0))
+    s.add_task(_budget_task("t_running", 6))
+    st = s.status()
+    assert st["tasks_paused"] == 1
+    assert st["task_count"] == 2
+
+
+def test_router_serialize_task_includes_budget_and_window():
+    """The HTTP router's _serialize_task surfaces budget +
+    dispatches_in_window when a scheduler is passed."""
+    from forest_soul_forge.daemon.routers.scheduler import _serialize_task
+    s = Scheduler()
+    t = _budget_task("t_ser", 4)
+    s.add_task(t)
+    s._dispatch_windows["t_ser"] = deque(
+        [time.monotonic() - 3.0, time.monotonic() - 1.0]
+    )
+    out = _serialize_task(t, s)
+    assert out["budget_per_minute"] == 4
+    assert out["dispatches_in_window"] == 2
+
+
+def test_router_serialize_task_no_scheduler_defaults_window_zero():
+    """Backward-compat: callers that don't supply a scheduler still
+    get a valid dict (window=0)."""
+    from forest_soul_forge.daemon.routers.scheduler import _serialize_task
+    t = _budget_task("t_alone", 6)
+    out = _serialize_task(t)
+    assert out["budget_per_minute"] == 6
+    assert out["dispatches_in_window"] == 0

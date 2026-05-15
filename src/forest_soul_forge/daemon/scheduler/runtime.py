@@ -761,15 +761,37 @@ class Scheduler:
 
     # ---- introspection (for /scheduler/status) ----------------------------
     def status(self) -> dict[str, Any]:
+        """Top-level scheduler health summary.
+
+        ADR-0075 T4 (B297) extension: surfaces tick_budget_ms, the
+        per-task budget summary, and aggregate dispatch-window state
+        so the operator can answer "is the scheduler keeping up?" /
+        "which tasks are at their cap?" from one endpoint.
+        """
+        # Per-task window snapshot. Skip windows for tasks that have
+        # been GC'd from _tasks (defensive — shouldn't happen but the
+        # dict is keyed by task_id and could outlive an unregister).
+        windows = {
+            tid: len(self._dispatch_windows.get(tid, ()))
+            for tid in self._tasks.keys()
+        }
+        # Bucket budgets: paused (0) vs default (6) vs operator-set.
+        budgets = [t.budget_per_minute for t in self._tasks.values()]
         return {
             "running": self._started,
             "poll_interval_seconds": self._poll_interval,
+            "tick_budget_ms": self._tick_budget_ms,
             "registered_runners": sorted(self._runners.keys()),
             "task_count": len(self._tasks),
             "tasks_enabled": sum(1 for t in self._tasks.values() if t.enabled),
             "tasks_breaker_open": sum(
                 1 for t in self._tasks.values() if t.state.circuit_breaker_open
             ),
+            "tasks_paused": sum(1 for b in budgets if b == 0),
+            "dispatch_windows": {
+                "total_in_window": sum(windows.values()),
+                "per_task": windows,
+            },
         }
 
 
