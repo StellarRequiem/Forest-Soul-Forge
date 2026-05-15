@@ -383,3 +383,166 @@ def test_verify_sealed_segments_issue_shape():
     )
     with pytest.raises(Exception):
         issue.kind = "other"  # noqa
+
+
+# ---------------------------------------------------------------------------
+# ADR-0073 T4 (B304) — migrate_monolithic_chain
+# ---------------------------------------------------------------------------
+
+from forest_soul_forge.core.audit_chain_segments import (
+    MigrationError,
+    MigrationOutcome,
+    migrate_monolithic_chain,
+)
+
+
+def _write_monolithic_chain(path: Path, entries: list[dict]) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        for e in entries:
+            f.write(json.dumps(e) + "\n")
+
+
+def _entry(seq: int, month: str, day: int = 15) -> dict:
+    return {
+        "seq": seq,
+        "agent_dna": None,
+        "event_type": "test",
+        "event_data": {"n": seq},
+        "prev_hash": "GENESIS" if seq == 0 else f"{seq - 1:064d}",
+        "entry_hash": f"{seq:064d}",
+        "timestamp": f"{month}-{day:02}T12:00:00Z",
+    }
+
+
+def test_migration_splits_monolithic_chain_into_monthly_segments(tmp_path):
+    src = tmp_path / "audit_chain.jsonl"
+    seg = tmp_path / "segments"
+    seg.mkdir()
+    entries = (
+        [_entry(i, "2026-03") for i in range(3)]
+        + [_entry(i, "2026-04") for i in range(3, 6)]
+        + [_entry(i, "2026-05") for i in range(6, 9)]
+    )
+    _write_monolithic_chain(src, entries)
+
+    outcome = migrate_monolithic_chain(source_path=src, segment_dir=seg)
+    assert isinstance(outcome, MigrationOutcome)
+    assert outcome.segments_created == 3
+    assert outcome.entries_written == {"2026-03": 3, "2026-04": 3, "2026-05": 3}
+    for fname in outcome.files:
+        assert (seg / fname).exists()
+
+
+def test_migration_marks_last_segment_as_tail(tmp_path):
+    """The most recent month's segment is sealed=False (the tail).
+    All prior months are sealed=True with merkle_root populated."""
+    src = tmp_path / "audit_chain.jsonl"
+    seg = tmp_path / "segments"
+    seg.mkdir()
+    entries = [_entry(i, "2026-03") for i in range(2)]
+    entries += [_entry(i, "2026-04") for i in range(2, 4)]
+    _write_monolithic_chain(src, entries)
+
+    outcome = migrate_monolithic_chain(source_path=src, segment_dir=seg)
+    segs = outcome.new_index.segments
+    assert segs[0].month == "2026-03"
+    assert segs[0].sealed is True
+    assert segs[0].merkle_root is not None
+    assert segs[1].month == "2026-04"
+    assert segs[1].sealed is False
+    assert segs[1].merkle_root is None
+
+
+def test_migration_does_not_modify_source(tmp_path):
+    """The pre-migration audit_chain.jsonl stays byte-identical so
+    operators can roll back."""
+    src = tmp_path / "audit_chain.jsonl"
+    seg = tmp_path / "segments"
+    seg.mkdir()
+    entries = [_entry(0, "2026-05")]
+    _write_monolithic_chain(src, entries)
+    original = src.read_bytes()
+
+    migrate_monolithic_chain(source_path=src, segment_dir=seg)
+    assert src.read_bytes() == original
+
+
+def test_migration_refuses_overwrite_by_default(tmp_path):
+    """Running migration twice without overwrite=True raises so
+    operators can't accidentally truncate a previously-migrated
+    chain."""
+    src = tmp_path / "audit_chain.jsonl"
+    seg = tmp_path / "segments"
+    seg.mkdir()
+    _write_monolithic_chain(src, [_entry(0, "2026-05")])
+
+    migrate_monolithic_chain(source_path=src, segment_dir=seg)
+    with pytest.raises(MigrationError, match="refusing to overwrite"):
+        migrate_monolithic_chain(source_path=src, segment_dir=seg)
+
+
+def test_migration_overwrite_true_replaces_files(tmp_path):
+    """overwrite=True allows re-migration. Useful only after manual
+    cleanup of a partially-migrated state."""
+    src = tmp_path / "audit_chain.jsonl"
+    seg = tmp_path / "segments"
+    seg.mkdir()
+    _write_monolithic_chain(src, [_entry(0, "2026-05")])
+
+    migrate_monolithic_chain(source_path=src, segment_dir=seg)
+    # Second call with overwrite=True succeeds.
+    outcome = migrate_monolithic_chain(
+        source_path=src, segment_dir=seg, overwrite=True,
+    )
+    assert outcome.segments_created == 1
+
+
+def test_migration_raises_on_missing_source(tmp_path):
+    seg = tmp_path / "segments"
+    seg.mkdir()
+    with pytest.raises(MigrationError, match="not found"):
+        migrate_monolithic_chain(
+            source_path=tmp_path / "nope.jsonl", segment_dir=seg,
+        )
+
+
+def test_migration_raises_on_malformed_json(tmp_path):
+    src = tmp_path / "audit_chain.jsonl"
+    seg = tmp_path / "segments"
+    seg.mkdir()
+    src.write_text("not_json\n", encoding="utf-8")
+    with pytest.raises(MigrationError, match="malformed JSON"):
+        migrate_monolithic_chain(source_path=src, segment_dir=seg)
+
+
+def test_migration_raises_on_missing_required_field(tmp_path):
+    src = tmp_path / "audit_chain.jsonl"
+    seg = tmp_path / "segments"
+    seg.mkdir()
+    src.write_text(
+        json.dumps({"seq": 0, "event_type": "x"}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(MigrationError, match="missing field"):
+        migrate_monolithic_chain(source_path=src, segment_dir=seg)
+
+
+def test_migration_output_passes_verify_sealed_segments(tmp_path):
+    """Round-trip: migrate a chain, then run verify_sealed_segments
+    against the produced index — every sealed segment hashes clean."""
+    src = tmp_path / "audit_chain.jsonl"
+    seg = tmp_path / "segments"
+    seg.mkdir()
+    entries = (
+        [_entry(i, "2026-03") for i in range(3)]
+        + [_entry(i, "2026-04") for i in range(3, 6)]
+        + [_entry(i, "2026-05") for i in range(6, 9)]
+    )
+    _write_monolithic_chain(src, entries)
+
+    outcome = migrate_monolithic_chain(source_path=src, segment_dir=seg)
+    r = verify_sealed_segments(
+        index=outcome.new_index, segment_dir=seg,
+    )
+    assert r.ok is True
+    assert r.segments_verified == 2  # last month is tail (unsealed)

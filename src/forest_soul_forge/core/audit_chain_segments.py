@@ -581,3 +581,197 @@ def verify_sealed_segments(
         segments_verified=verified,
         issues=tuple(issues),
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR-0073 T4 (B304) — migration helper
+# ---------------------------------------------------------------------------
+
+
+class MigrationError(RuntimeError):
+    """Raised when the migration can't proceed cleanly (source chain
+    missing, malformed entry, conflicting target file). The migration
+    is a one-shot operator action — bailing on a hard failure is
+    safer than producing half-written segment files."""
+
+
+@dataclass(frozen=True)
+class MigrationOutcome:
+    """Per-segment summary of one migration pass.
+
+    ``entries_written`` is per-month so the operator can audit the
+    split. ``files`` is the list of segment files the migration
+    created (relative to ``segment_dir``).
+    """
+    segments_created: int
+    entries_written: dict[str, int]
+    files: tuple[str, ...]
+    new_index: SegmentIndex
+
+
+def _month_from_iso(ts: str) -> str:
+    """Extract 'YYYY-MM' from an ISO 8601 timestamp.
+
+    Handles the canonical chain shape (``2026-04-23T18:35:28Z``)
+    plus offset-tagged variants. We slice the first 7 characters
+    because the chain timestamps always start with YYYY-MM-… and
+    that's cheaper than fromisoformat for a one-shot migration.
+    """
+    if len(ts) < 7 or ts[4] != "-":
+        raise MigrationError(f"unexpected timestamp shape: {ts!r}")
+    return ts[:7]
+
+
+def migrate_monolithic_chain(
+    *,
+    source_path: Path,
+    segment_dir: Path,
+    overwrite: bool = False,
+) -> MigrationOutcome:
+    """Split a single audit_chain.jsonl into monthly segment files.
+
+    Reads ``source_path`` line by line, groups entries by
+    ``YYYY-MM`` from the ``timestamp`` field, writes one
+    segment file per month into ``segment_dir`` under the
+    canonical ``audit_chain_YYYY-MM.jsonl`` filename, and builds
+    a fresh :class:`SegmentIndex` with every month-segment except
+    the last marked ``sealed=True``. The last (most recent)
+    segment is the new tail — ``sealed=False`` so a future
+    :func:`seal_segment` pass can promote it.
+
+    Sealing semantics: sealed segments get their ``merkle_root``
+    computed at migration time. The tail's merkle_root is None
+    (it grows as entries arrive). This means an operator who runs
+    migration then immediately runs :func:`verify_sealed_segments`
+    will see clean Merkle roots on every sealed month.
+
+    Side effects: writes N files + the index. Does NOT modify the
+    source ``audit_chain.jsonl`` — the operator's pre-migration
+    chain stays intact for rollback. The migration is one-shot;
+    after it lands, subsequent appends go through the normal
+    audit chain surface plus :func:`append_segment_entry` (the
+    daemon hook for that lands separately).
+
+    Parameters
+    ----------
+    source_path:
+        Path to the existing monolithic ``audit_chain.jsonl``.
+    segment_dir:
+        Directory where per-month segment files + the index get
+        written. Must already exist.
+    overwrite:
+        When False (default), refuse if any target segment file
+        already exists in ``segment_dir``. This protects an
+        already-migrated operator from re-running and producing
+        truncated or duplicated segment files. ``True`` overwrites
+        — useful only for re-migration after manual cleanup.
+    """
+    if not source_path.exists():
+        raise MigrationError(f"source chain not found: {source_path}")
+    if not segment_dir.exists():
+        raise MigrationError(f"segment_dir not found: {segment_dir}")
+
+    # Group entries by month preserving original line text. We keep
+    # the raw line so the migration is byte-for-byte faithful — any
+    # downstream re-hashing must match the original.
+    by_month: dict[str, list[tuple[int, str, str]]] = {}
+    # Items are (seq, entry_hash, raw_line).
+    month_order: list[str] = []
+
+    with source_path.open("r", encoding="utf-8") as f:
+        for lineno, raw in enumerate(f, start=1):
+            line = raw.rstrip("\n")
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as e:
+                raise MigrationError(
+                    f"{source_path}:{lineno}: malformed JSON: {e}"
+                ) from e
+            try:
+                ts = obj["timestamp"]
+                seq = obj["seq"]
+                entry_hash = obj["entry_hash"]
+            except KeyError as e:
+                raise MigrationError(
+                    f"{source_path}:{lineno}: missing field {e}"
+                ) from e
+            month = _month_from_iso(ts)
+            if month not in by_month:
+                by_month[month] = []
+                month_order.append(month)
+            by_month[month].append((int(seq), str(entry_hash), line))
+
+    if not month_order:
+        raise MigrationError(
+            f"source chain has no entries: {source_path}"
+        )
+
+    # Build segment files + meta. Pre-flight overwrite check first
+    # so we don't write half the files before discovering a
+    # conflict.
+    target_files = {
+        month: segment_dir / segment_filename_for_month(month)
+        for month in month_order
+    }
+    if not overwrite:
+        existing = [
+            str(p) for p in target_files.values() if p.exists()
+        ]
+        if existing:
+            raise MigrationError(
+                "refusing to overwrite existing segment files; "
+                f"use overwrite=True to force. files: {existing}"
+            )
+
+    # Sort months chronologically so the last month becomes the
+    # tail. dict iteration order is insertion order; we rely on
+    # the chain being seq-ordered (which is the canonical invariant
+    # — verify() would fail otherwise).
+    sorted_months = sorted(month_order)
+    last_month = sorted_months[-1]
+
+    metas: list[SegmentMeta] = []
+    entries_written: dict[str, int] = {}
+    written_files: list[str] = []
+
+    for month in sorted_months:
+        items = by_month[month]
+        seqs = [it[0] for it in items]
+        hashes = [it[1] for it in items]
+        lines = [it[2] for it in items]
+        target = target_files[month]
+
+        # Write the segment file.
+        with target.open("w", encoding="utf-8") as out:
+            for line in lines:
+                out.write(line)
+                if not line.endswith("\n"):
+                    out.write("\n")
+
+        entries_written[month] = len(items)
+        written_files.append(target.name)
+
+        is_tail = month == last_month
+        meta = SegmentMeta(
+            seq_start=min(seqs),
+            seq_end=None if is_tail else max(seqs),
+            file=target.name,
+            month=month,
+            sealed=not is_tail,
+            merkle_root=None if is_tail else merkle_root(hashes),
+        )
+        metas.append(meta)
+
+    new_index = SegmentIndex(
+        schema_version=SCHEMA_VERSION,
+        segments=tuple(metas),
+    )
+
+    return MigrationOutcome(
+        segments_created=len(sorted_months),
+        entries_written=entries_written,
+        files=tuple(written_files),
+        new_index=new_index,
+    )
