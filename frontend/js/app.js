@@ -18,6 +18,7 @@ import * as catalogGrantsPanel from "./catalog-grants.js";       // B223 / ADR-0
 import * as marketplacePanel from "./marketplace.js";            // B228 / ADR-0055 M4
 import * as orchestratorPanel from "./orchestrator.js";          // B299 / ADR-0067 T7
 import * as operatorWizardPanel from "./operator-wizard.js";     // B318 / ADR-0068 T7b
+import * as voicePane from "./voice.js";                          // B326 / ADR-0070 T3
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
 import * as mcpPluginsPanel from "./mcp-plugins.js";
@@ -80,6 +81,7 @@ async function boot() {
     marketplacePanel.start();      // B228 / ADR-0055 M4
     orchestratorPanel.start();     // B299 / ADR-0067 T7
     operatorWizardPanel.start();   // B318 / ADR-0068 T7b
+    voicePane.initVoicePane();     // B326 / ADR-0070 T3
     skillsPanel.start();
     toolRegistryPanel.start();
     mcpPluginsPanel.start();
@@ -172,6 +174,10 @@ async function boot() {
   // Lazy-loads on first tab activation. Non-fatal when
   // /operator/* aren't registered.
   operatorWizardPanel.start();
+  // ADR-0070 T3 (B326) — Voice tab. Push-to-talk + TTS playback.
+  // Lazy-loads MediaRecorder on first tab activation; degrades
+  // cleanly when /voice/* aren't registered.
+  voicePane.initVoicePane();
 }
 
 if (document.readyState === "loading") {
