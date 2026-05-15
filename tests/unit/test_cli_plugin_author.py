@@ -230,3 +230,210 @@ def test_tier_rubric_present_in_docstring(tmp_path):
     _run_new(_args(target=str(target), tier="network", tool="x"))
     src = (target / "tools" / "x.py").read_text()
     assert "outbound HTTP" in src
+
+
+# ---------------------------------------------------------------------------
+# ADR-0071 T3 (B310) — fsf plugin-adapt (MCP wrapper generator)
+# ---------------------------------------------------------------------------
+
+import yaml
+
+from forest_soul_forge.cli.plugin_author import (
+    _run_adapt,
+    add_adapt_subparser,
+)
+
+
+def _adapt_args(**kwargs):
+    """Default args for the adapter; override per test."""
+    defaults = {
+        "name":             "test-upstream",
+        "upstream_version": "0.1.0",
+        "transport":        "stdio",
+        "command":          "./server",
+        "url":              None,
+        "tool":             ["search_web"],
+        "tier":             "read_only",
+        "license":          "MIT",
+        "target":           None,
+        "force":            False,
+    }
+    defaults.update(kwargs)
+    return argparse.Namespace(**defaults)
+
+
+def test_adapt_stdio_happy_path(tmp_path):
+    target = tmp_path / "brave-search"
+    rc = _run_adapt(_adapt_args(
+        name="brave-search",
+        transport="stdio",
+        command="./server",
+        tool=["search_web", "search_image"],
+        tier="network",
+        target=str(target),
+    ))
+    assert rc == 0
+    assert (target / "plugin.yaml").exists()
+    assert (target / "README.md").exists()
+
+    manifest = yaml.safe_load((target / "plugin.yaml").read_text())
+    assert manifest["name"] == "brave-search"
+    assert manifest["type"] == "mcp_server"
+    assert manifest["side_effects"] == "network"
+    assert manifest["capabilities"] == [
+        "mcp.brave-search.search_web",
+        "mcp.brave-search.search_image",
+    ]
+    assert manifest["entry_point"]["type"] == "stdio"
+    assert manifest["entry_point"]["command"] == "./server"
+    # sha256 placeholder must be in the manifest so install-time
+    # verification has somewhere to read from.
+    assert "sha256" in manifest["entry_point"]
+
+
+def test_adapt_http_omits_sha256(tmp_path):
+    """http transport doesn't carry a binary checksum — manifest
+    must omit sha256 to avoid a misleading "verified" field."""
+    target = tmp_path / "remote-svc"
+    rc = _run_adapt(_adapt_args(
+        name="remote-svc",
+        transport="http", command=None, url="http://127.0.0.1:9000",
+        tool=["ping"],
+        target=str(target),
+    ))
+    assert rc == 0
+    m = yaml.safe_load((target / "plugin.yaml").read_text())
+    assert m["entry_point"]["type"] == "http"
+    assert m["entry_point"]["url"] == "http://127.0.0.1:9000"
+    assert "sha256" not in m["entry_point"]
+
+
+def test_adapt_read_only_tier_defaults_no_approval(tmp_path):
+    """read_only tier means tools fire without per-call approval —
+    requires_human_approval defaults all entries to false."""
+    target = tmp_path / "test-plugin"
+    _run_adapt(_adapt_args(
+        target=str(target), tier="read_only",
+        tool=["a", "b"],
+    ))
+    m = yaml.safe_load((target / "plugin.yaml").read_text())
+    assert m["requires_human_approval"] == {"a": False, "b": False}
+
+
+def test_adapt_higher_tier_defaults_require_approval(tmp_path):
+    """Non-read_only tiers default to true so the operator sees an
+    approval prompt at first call. They can override per-tool."""
+    target = tmp_path / "test-plugin"
+    _run_adapt(_adapt_args(
+        target=str(target), tier="filesystem",
+        tool=["read", "write"],
+    ))
+    m = yaml.safe_load((target / "plugin.yaml").read_text())
+    assert m["requires_human_approval"] == {"read": True, "write": True}
+
+
+def test_adapt_refuses_uppercase_name(tmp_path, capsys):
+    rc = _run_adapt(_adapt_args(
+        name="BadName", target=str(tmp_path / "x"),
+    ))
+    assert rc == 2
+    assert "lowercase" in capsys.readouterr().err
+
+
+def test_adapt_refuses_no_tools(tmp_path, capsys):
+    rc = _run_adapt(_adapt_args(
+        tool=[], target=str(tmp_path / "x"),
+    ))
+    assert rc == 2
+    assert "at least one --tool" in capsys.readouterr().err
+
+
+def test_adapt_refuses_bad_tool_name(tmp_path, capsys):
+    rc = _run_adapt(_adapt_args(
+        tool=["BadTool"], target=str(tmp_path / "x"),
+    ))
+    assert rc == 2
+    assert "underscores" in capsys.readouterr().err
+
+
+def test_adapt_refuses_stdio_without_command(tmp_path, capsys):
+    rc = _run_adapt(_adapt_args(
+        transport="stdio", command=None,
+        target=str(tmp_path / "x"),
+    ))
+    assert rc == 2
+    assert "--command" in capsys.readouterr().err
+
+
+def test_adapt_refuses_http_without_url(tmp_path, capsys):
+    rc = _run_adapt(_adapt_args(
+        transport="http", command=None, url=None,
+        target=str(tmp_path / "x"),
+    ))
+    assert rc == 2
+    assert "--url" in capsys.readouterr().err
+
+
+def test_adapt_refuses_existing_dir_without_force(tmp_path, capsys):
+    target = tmp_path / "exists"
+    target.mkdir()
+    rc = _run_adapt(_adapt_args(target=str(target)))
+    assert rc == 2
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_adapt_force_overwrites(tmp_path):
+    target = tmp_path / "existing"
+    target.mkdir()
+    # First adapt scaffolds.
+    rc = _run_adapt(_adapt_args(
+        target=str(target), force=True, tool=["first"],
+    ))
+    assert rc == 0
+    # Second adapt with different tools overwrites.
+    rc = _run_adapt(_adapt_args(
+        target=str(target), force=True, tool=["second"],
+    ))
+    assert rc == 0
+    m = yaml.safe_load((target / "plugin.yaml").read_text())
+    assert "mcp.test-upstream.second" in m["capabilities"]
+
+
+def test_adapt_add_subparser_registers(tmp_path):
+    """add_adapt_subparser registers a parsable command."""
+    root = argparse.ArgumentParser(prog="fsf")
+    sub = root.add_subparsers(dest="cmd")
+    add_adapt_subparser(sub)
+    args = root.parse_args([
+        "plugin-adapt", "my-wrapper",
+        "--transport", "stdio",
+        "--command", "./svr",
+        "--tool", "do_thing",
+    ])
+    assert args.name == "my-wrapper"
+    assert args.transport == "stdio"
+    assert args.command == "./svr"
+    assert args.tool == ["do_thing"]
+
+
+def test_adapt_readme_includes_install_procedure_for_stdio(tmp_path):
+    """Stdio README must walk the operator through computing the
+    binary sha256 (the install-time verification anchor)."""
+    target = tmp_path / "test-plugin"
+    _run_adapt(_adapt_args(target=str(target), transport="stdio",
+                           command="./server"))
+    readme = (target / "README.md").read_text()
+    assert "shasum -a 256" in readme
+    assert "fsf plugin install" in readme
+
+
+def test_adapt_readme_warns_about_http_endpoint_verification(tmp_path):
+    """Http README must call out that no checksum protection
+    exists — operator validates via TLS/token."""
+    target = tmp_path / "test-plugin"
+    _run_adapt(_adapt_args(
+        target=str(target), transport="http",
+        command=None, url="http://x",
+    ))
+    readme = (target / "README.md").read_text()
+    assert "TLS" in readme or "token" in readme

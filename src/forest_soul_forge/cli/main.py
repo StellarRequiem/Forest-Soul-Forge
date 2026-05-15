@@ -298,8 +298,14 @@ def _build_parser() -> argparse.ArgumentParser:
     # tests/ + README from a name + tier + tool name.
     from forest_soul_forge.cli.plugin_author import (
         add_subparser as _plugin_author_add_subparser,
+        add_adapt_subparser as _plugin_adapt_add_subparser,
     )
     _plugin_author_add_subparser(sub)
+    # `fsf plugin-adapt ...` — ADR-0071 T3 (B310) MCP wrapper
+    # generator. Port-face path: scaffolds plugin.yaml + README
+    # that bridge an existing upstream MCP server through
+    # Forest's mcp_call.v1 dispatcher.
+    _plugin_adapt_add_subparser(sub)
 
     # `fsf provenance ...` — ADR-0072 T2 (B303) behavior-provenance
     # inspection. precedence / resolve / list subcommands. Read-only;

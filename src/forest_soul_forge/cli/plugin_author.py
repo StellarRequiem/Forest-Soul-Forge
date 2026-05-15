@@ -252,6 +252,366 @@ See `plugin.yaml` `license` field.
 """
 
 
+# ---------------------------------------------------------------------------
+# ADR-0071 T3 (B310) — `fsf plugin adapt`
+# ---------------------------------------------------------------------------
+
+
+_UPSTREAM_NAME_RE = _NAME_RE   # same convention as plugin-new
+_CAPABILITY_RE = __import__("re").compile(r"^[a-z][a-z0-9_]*$")
+
+
+def add_adapt_subparser(parent_subparsers: argparse._SubParsersAction) -> None:
+    """Register `fsf plugin-adapt` — ADR-0071 T3 port-face generator.
+
+    Produces a Forest plugin wrapper around an existing upstream
+    MCP server. The operator provides:
+
+      - the upstream's name, version, license
+      - its transport (stdio or http) + endpoint (command for
+        stdio, URL for http)
+      - a list of tool names to expose
+      - the side-effect tier governance should treat the wrapper at
+
+    The wrapper is an ADR-0043 plugin manifest with `type:
+    mcp_server` + capabilities derived from the supplied tools.
+    Forest's mcp_call.v1 dispatcher bridge handles the runtime —
+    operator never writes Python.
+
+    Distinct from `fsf plugin-new`:
+      * plugin-new ships an operator-authored MCP server stub
+        with Python tool modules
+      * plugin-adapt wraps an existing upstream binary, no
+        Python stubs
+
+    Output goes to ``~/.forest/plugins/<name>/`` by default
+    (override via ``--target``).
+    """
+    adapt = parent_subparsers.add_parser(
+        "plugin-adapt",
+        help=(
+            "Generate a Forest plugin wrapper around an existing "
+            "upstream MCP server (ADR-0071 T3)."
+        ),
+    )
+    adapt.add_argument(
+        "name",
+        help="Plugin name (lowercase + hyphens, e.g. 'brave-search').",
+    )
+    adapt.add_argument(
+        "--upstream-version", default="0.1.0",
+        help="Version string for the wrapper (default: 0.1.0).",
+    )
+    adapt.add_argument(
+        "--transport", choices=["stdio", "http"], default="stdio",
+        help=(
+            "MCP transport. stdio: the upstream is a local binary "
+            "Forest spawns. http: the upstream listens on a port."
+        ),
+    )
+    adapt.add_argument(
+        "--command",
+        help=(
+            "stdio transport: path to the upstream binary (e.g. "
+            "'./server' or '/usr/local/bin/brave-search-mcp'). "
+            "Required for --transport=stdio."
+        ),
+    )
+    adapt.add_argument(
+        "--url",
+        help=(
+            "http transport: URL the upstream listens on (e.g. "
+            "'http://127.0.0.1:7300'). Required for --transport=http."
+        ),
+    )
+    adapt.add_argument(
+        "--tool", action="append", default=[],
+        help=(
+            "Upstream tool name to expose. Repeat for multiple tools. "
+            "Each tool becomes capability 'mcp.<plugin-name>.<tool>'. "
+            "Tool names must be lowercase + underscores."
+        ),
+    )
+    adapt.add_argument(
+        "--tier",
+        choices=("read_only", "network", "filesystem", "external"),
+        default="read_only",
+        help=(
+            "Side-effect tier the wrapper governs at (ADR-0043). "
+            "read_only requires no per-call operator approval; "
+            "other tiers gate at dispatch time. Pick the LOWEST "
+            "tier that covers the upstream's actual reach."
+        ),
+    )
+    adapt.add_argument(
+        "--license", default="MIT",
+        help="SPDX license id for the wrapper manifest (default: MIT).",
+    )
+    adapt.add_argument(
+        "--target", default=None,
+        help="Output dir. Default: ~/.forest/plugins/<name>/.",
+    )
+    adapt.add_argument(
+        "--force", action="store_true",
+        help="Overwrite an existing target directory.",
+    )
+    adapt.set_defaults(_run=_run_adapt)
+
+
+def _run_adapt(args: argparse.Namespace) -> int:
+    """Generate the Forest plugin wrapper. Returns 0 on success,
+    2 on validation refusal."""
+    if not _UPSTREAM_NAME_RE.match(args.name):
+        print(
+            f"REFUSED: plugin name {args.name!r} must be lowercase + "
+            f"hyphens, e.g. brave-search",
+            file=sys.stderr,
+        )
+        return 2
+
+    if not args.tool:
+        print(
+            "REFUSED: at least one --tool is required",
+            file=sys.stderr,
+        )
+        return 2
+    for tool in args.tool:
+        if not _CAPABILITY_RE.match(tool):
+            print(
+                f"REFUSED: tool {tool!r} must be lowercase + "
+                f"underscores (e.g. search_web)",
+                file=sys.stderr,
+            )
+            return 2
+
+    if args.transport == "stdio" and not args.command:
+        print(
+            "REFUSED: --transport stdio requires --command "
+            "(path to the upstream binary)",
+            file=sys.stderr,
+        )
+        return 2
+    if args.transport == "http" and not args.url:
+        print(
+            "REFUSED: --transport http requires --url",
+            file=sys.stderr,
+        )
+        return 2
+
+    target = (
+        Path(args.target).expanduser() if args.target
+        else Path.home() / ".forest" / "plugins" / args.name
+    )
+    if target.exists() and not args.force:
+        print(
+            f"REFUSED: {target} already exists. Pass --force to "
+            f"overwrite (existing files will be replaced).",
+            file=sys.stderr,
+        )
+        return 2
+
+    target.mkdir(parents=True, exist_ok=True)
+
+    plugin_yaml = _render_adapt_plugin_yaml(
+        name=args.name,
+        upstream_version=args.upstream_version,
+        license_=args.license,
+        tier=args.tier,
+        tools=list(args.tool),
+        transport=args.transport,
+        command=args.command,
+        url=args.url,
+    )
+    (target / "plugin.yaml").write_text(plugin_yaml, encoding="utf-8")
+
+    readme = _render_adapt_readme(
+        name=args.name, tools=list(args.tool),
+        transport=args.transport,
+        command=args.command, url=args.url,
+        tier=args.tier,
+    )
+    (target / "README.md").write_text(readme, encoding="utf-8")
+
+    print(f"Scaffolded MCP wrapper at {target}")
+    print()
+    print("Next steps:")
+    print(f"  1. cd {target}")
+    print("  2. Read README.md for the install procedure")
+    if args.transport == "stdio":
+        print(
+            "  3. Compute the sha256 of the upstream binary + "
+            "paste it into plugin.yaml"
+        )
+    print("  4. Install: fsf plugin install . --plugin-root ~/.forest/plugins")
+    return 0
+
+
+def _render_adapt_plugin_yaml(
+    *,
+    name: str,
+    upstream_version: str,
+    license_: str,
+    tier: str,
+    tools: list[str],
+    transport: str,
+    command: str | None,
+    url: str | None,
+) -> str:
+    """Render the ADR-0043 mcp_server manifest for an upstream wrapper.
+
+    The capability list is one entry per upstream tool, namespaced
+    under the plugin name so two plugins exposing 'search' don't
+    collide.
+    """
+    capabilities = "\n".join(
+        f"  - mcp.{name}.{t}" for t in tools
+    )
+    approval_lines = "\n".join(
+        f"  {t}: false" if tier == "read_only" else f"  {t}: true"
+        for t in tools
+    )
+    if transport == "stdio":
+        entry_block = (
+            "entry_point:\n"
+            "  type: stdio\n"
+            f"  command: {command}\n"
+            "  # REQUIRED: compute the sha256 of the upstream binary +\n"
+            "  # paste it below. Run: shasum -a 256 {cmd}\n".format(cmd=command)
+            + "  sha256: \"0000000000000000000000000000000000000000000000000000000000000000\"\n"
+        )
+    else:
+        entry_block = (
+            "entry_point:\n"
+            "  type: http\n"
+            f"  url: {url}\n"
+            "  # http transport doesn't carry a binary sha256 —\n"
+            "  # operator must validate the endpoint's identity\n"
+            "  # via TLS / token / etc. before install.\n"
+        )
+
+    return f"""# ADR-0043 plugin manifest. Scaffolded by `fsf plugin-adapt`.
+# This wrapper bridges an existing upstream MCP server into
+# Forest's mcp_call.v1 dispatcher. See README.md for installation.
+
+schema_version: 1
+name: {name}
+display_name: "{name.replace('-', ' ').title()}"
+version: "{upstream_version}"
+author: "@your-handle"
+license: {license_}
+
+type: mcp_server
+# ADR-0043: the tier governs what side-effects Forest accepts
+# from this plugin's tools. Choose the LOWEST tier that covers
+# the upstream's actual reach.
+side_effects: {tier}
+
+capabilities:
+{capabilities}
+
+# Per-tool approval map (ADR-0043). 'false' means the tool fires
+# without operator-per-call confirmation; 'true' surfaces an
+# approval prompt. read_only defaults to false; higher tiers
+# default to true. Override per-tool here if needed.
+requires_human_approval:
+{approval_lines}
+
+{entry_block}
+# No required secrets configured. If the upstream needs an API
+# key or token, add it here as a `required_secrets:` list — see
+# examples/plugins/brave-search for the pattern.
+required_secrets: []
+"""
+
+
+def _render_adapt_readme(
+    *,
+    name: str,
+    tools: list[str],
+    transport: str,
+    command: str | None,
+    url: str | None,
+    tier: str,
+) -> str:
+    tool_lines = "\n".join(f"- `mcp.{name}.{t}`" for t in tools)
+    if transport == "stdio":
+        install_block = f"""## Install (stdio transport)
+
+1. **Build or download the upstream binary** to `{command}` (or
+   wherever your manifest references). For most MCP servers this
+   means cloning the upstream repo and following its build
+   instructions.
+
+2. **Compute the binary's sha256**:
+
+   ```bash
+   shasum -a 256 {command}
+   ```
+
+   Paste the hex digest into `plugin.yaml` under
+   `entry_point.sha256`. Forest verifies this hash at install
+   time and refuses to load a plugin whose binary doesn't match.
+
+3. **Install the plugin**:
+
+   ```bash
+   fsf plugin install . --plugin-root ~/.forest/plugins
+   ```
+
+   Forest copies the directory into the plugin root, verifies
+   the manifest schema, computes the binary's actual sha256,
+   compares against `entry_point.sha256`, and registers the
+   plugin's capabilities. The operator confirms before
+   activation.
+"""
+    else:
+        install_block = f"""## Install (http transport)
+
+1. **Verify the endpoint** — http transport doesn't carry a
+   binary checksum. You're trusting `{url}` to be the real
+   upstream; validate via TLS cert pinning, token auth, or
+   similar before install.
+
+2. **Install the plugin**:
+
+   ```bash
+   fsf plugin install . --plugin-root ~/.forest/plugins
+   ```
+"""
+    return f"""# {name}
+
+Forest plugin wrapper around an upstream MCP server, scaffolded
+by `fsf plugin-adapt`. Side-effect tier: **{tier}**.
+
+## Exposed capabilities
+
+{tool_lines}
+
+Each capability bridges to the upstream tool of the same name
+via Forest's `mcp_call.v1` dispatcher. Agents granted any of these
+capabilities call them like any other Forest tool — the bridge
+handles the transport.
+
+{install_block}
+
+## What this wrapper is NOT
+
+- It does not contain Python code. The upstream MCP server is
+  the implementation; this manifest is the bridge config.
+- It does not change the upstream's tool surface. Renaming a tool
+  here doesn't rename it upstream; the wrapper's capability name
+  is what Forest agents call, but the upstream is invoked under
+  its own name.
+
+## What's queued
+
+A future tranche will let `fsf plugin-adapt` introspect a running
+upstream's `list_tools()` instead of requiring the operator to
+spell out the tool list. Until then, the operator pulls the tool
+list from the upstream's README + adds them via `--tool` flags.
+"""
+
+
 def _render_tool_module(tool: str, tier: str) -> str:
     """Render tools/<tool>.py — Tool Protocol stub.
 
