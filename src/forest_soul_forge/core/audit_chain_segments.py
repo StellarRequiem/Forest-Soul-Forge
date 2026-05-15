@@ -454,3 +454,130 @@ def seal_segment(
         anchor=anchor,
         next_segment_path=next_segment_path,
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR-0073 T3a (B301) — sealed-segment Merkle verifier
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SegmentVerifyIssue:
+    """One issue surfaced by ``verify_sealed_segments``.
+
+    ``kind`` is a stable string for programmatic dispatch in callers
+    (the future verify_chain mode='tail' integration, dashboards,
+    operator runbooks). ``segment_file`` always points at the
+    affected file; ``details`` is human-readable.
+    """
+    kind: str   # "merkle_mismatch" | "file_missing" | "no_root" | "scan_error"
+    segment_file: str
+    details: str
+
+
+@dataclass(frozen=True)
+class SegmentVerifyResult:
+    """Aggregate outcome of a sealed-segment verification pass.
+
+    ``ok`` is True iff every sealed segment hashes to its stored
+    merkle_root. ``segments_verified`` counts segments that hashed
+    clean (excludes ones with issues). Issues are surfaced as a
+    tuple so the operator sees ALL problems in one pass instead of
+    bailing on the first.
+    """
+    ok: bool
+    segments_verified: int
+    issues: tuple[SegmentVerifyIssue, ...]
+
+
+def verify_sealed_segments(
+    *,
+    index: SegmentIndex,
+    segment_dir: Path,
+) -> SegmentVerifyResult:
+    """Verify each sealed segment's Merkle root against its file.
+
+    For every segment in the index with ``sealed=True``:
+
+      1. Read the segment file; extract entry_hash from each entry.
+      2. Compute Merkle root via :func:`merkle_root`.
+      3. Compare to the segment's stored ``merkle_root``.
+
+    A mismatch is the tamper signal — somebody edited the file
+    after seal time. The operator's response is to consult the
+    on-chain ``audit_chain_anchor`` event for the segment (the
+    anchor carries the same Merkle root, signed if ADR-0049 is
+    active) and treat the disk file as suspect.
+
+    This function is the building block for the full verify_chain
+    mode='tail' integration (T3b, queued): once an operator
+    confirms every sealed segment hashes clean, the line-by-line
+    verifier can skip those entries and only walk the tail. T3a
+    here ships the substrate without touching the existing
+    AuditChain.verify() to keep the diff focused.
+
+    Errors don't raise — they accumulate as issues. Callers that
+    want to refuse on any issue check ``result.ok``. Returning
+    issues by value lets dashboards / runbooks show "5 segments
+    sealed, 1 mismatch on 2026-03" without re-running.
+
+    A segment marked sealed but missing ``merkle_root`` is a
+    schema violation; surfaces as ``kind="no_root"`` so the
+    operator can chase the index-corruption case separately from
+    actual tamper.
+    """
+    issues: list[SegmentVerifyIssue] = []
+    verified = 0
+
+    for seg in index.sealed_segments():
+        if seg.merkle_root is None:
+            issues.append(SegmentVerifyIssue(
+                kind="no_root",
+                segment_file=seg.file,
+                details=(
+                    "segment marked sealed but missing merkle_root "
+                    "in the index"
+                ),
+            ))
+            continue
+
+        seg_path = segment_dir / seg.file
+        try:
+            hashes, _seqs = _read_segment_hashes_and_seqs(seg_path)
+        except SealError as e:
+            # _read_segment_hashes_and_seqs uses "missing"/"empty"/
+            # "malformed JSON"/"missing entry_hash" in its messages.
+            # Classify the first two as file_missing, the rest as
+            # scan_error so dashboards can split presentation.
+            msg = str(e)
+            if "missing" in msg and seg.file in msg:
+                kind = "file_missing"
+            else:
+                kind = "scan_error"
+            issues.append(SegmentVerifyIssue(
+                kind=kind,
+                segment_file=seg.file,
+                details=msg,
+            ))
+            continue
+
+        recomputed = merkle_root(hashes)
+        if recomputed != seg.merkle_root:
+            issues.append(SegmentVerifyIssue(
+                kind="merkle_mismatch",
+                segment_file=seg.file,
+                details=(
+                    f"stored root {seg.merkle_root[:16]}… vs "
+                    f"recomputed {recomputed[:16]}… "
+                    f"over {len(hashes)} entries"
+                ),
+            ))
+            continue
+
+        verified += 1
+
+    return SegmentVerifyResult(
+        ok=not issues,
+        segments_verified=verified,
+        issues=tuple(issues),
+    )

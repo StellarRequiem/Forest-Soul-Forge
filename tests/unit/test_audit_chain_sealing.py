@@ -225,3 +225,161 @@ def test_seal_segment_raises_on_empty_tail_file(tmp_path):
     idx = _tail_index(seg_file, "2026-05")
     with pytest.raises(SealError, match="empty"):
         seal_segment(index=idx, segment_dir=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# ADR-0073 T3a (B301) — verify_sealed_segments
+# ---------------------------------------------------------------------------
+
+from forest_soul_forge.core.audit_chain_segments import (
+    SegmentVerifyIssue,
+    SegmentVerifyResult,
+    verify_sealed_segments,
+)
+
+
+def _sealed_index(file_name: str, entry_hashes: list[str],
+                  month: str = "2026-05", seq_start: int = 0,
+                  override_root: str | None = None) -> SegmentIndex:
+    """Build a one-segment sealed index with the Merkle root
+    derived from `entry_hashes` (or `override_root` to simulate
+    a tamper situation where the stored root doesn't match the
+    file)."""
+    root = override_root if override_root is not None else merkle_root(entry_hashes)
+    seq_end = seq_start + len(entry_hashes) - 1
+    return SegmentIndex(
+        schema_version=1,
+        segments=(
+            SegmentMeta(
+                seq_start=seq_start,
+                seq_end=seq_end,
+                file=file_name,
+                month=month,
+                sealed=True,
+                merkle_root=root,
+            ),
+        ),
+    )
+
+
+def test_verify_sealed_segments_clean(tmp_path):
+    """A sealed segment whose file hashes to the stored root verifies."""
+    file = "audit_chain_2026-05.jsonl"
+    entries = [
+        {"seq": 0, "entry_hash": "a" * 64},
+        {"seq": 1, "entry_hash": "b" * 64},
+    ]
+    _write_segment(tmp_path / file, entries)
+    idx = _sealed_index(file, ["a" * 64, "b" * 64])
+
+    r = verify_sealed_segments(index=idx, segment_dir=tmp_path)
+    assert isinstance(r, SegmentVerifyResult)
+    assert r.ok is True
+    assert r.segments_verified == 1
+    assert r.issues == ()
+
+
+def test_verify_sealed_segments_detects_merkle_mismatch(tmp_path):
+    """A segment whose file hashes differently from the stored root
+    surfaces as kind='merkle_mismatch' — the tamper signal."""
+    file = "audit_chain_2026-05.jsonl"
+    entries = [
+        {"seq": 0, "entry_hash": "a" * 64},
+        {"seq": 1, "entry_hash": "c" * 64},  # not what the stored root expects
+    ]
+    _write_segment(tmp_path / file, entries)
+    idx = _sealed_index(
+        file, ["a" * 64, "b" * 64],  # stored root computed from these
+    )
+
+    r = verify_sealed_segments(index=idx, segment_dir=tmp_path)
+    assert r.ok is False
+    assert len(r.issues) == 1
+    assert r.issues[0].kind == "merkle_mismatch"
+    assert r.issues[0].segment_file == file
+
+
+def test_verify_sealed_segments_detects_missing_file(tmp_path):
+    """A sealed segment whose file isn't on disk surfaces as
+    kind='file_missing' — operator can restore from backup."""
+    idx = _sealed_index("nonexistent.jsonl", ["a" * 64])
+    r = verify_sealed_segments(index=idx, segment_dir=tmp_path)
+    assert r.ok is False
+    assert r.issues[0].kind == "file_missing"
+
+
+def test_verify_sealed_segments_detects_no_root(tmp_path):
+    """A segment marked sealed but missing merkle_root in the index
+    is a schema violation; surfaces as kind='no_root' so the operator
+    chases it separately from actual tamper."""
+    idx = SegmentIndex(schema_version=1, segments=(
+        SegmentMeta(
+            seq_start=0, seq_end=0, file="x.jsonl",
+            month="2026-05", sealed=True, merkle_root=None,
+        ),
+    ))
+    r = verify_sealed_segments(index=idx, segment_dir=tmp_path)
+    assert r.ok is False
+    assert r.issues[0].kind == "no_root"
+
+
+def test_verify_sealed_segments_skips_unsealed(tmp_path):
+    """Unsealed (tail) segments are out of scope for this verifier —
+    the line-by-line AuditChain.verify() covers them."""
+    idx = SegmentIndex(schema_version=1, segments=(
+        SegmentMeta(
+            seq_start=0, seq_end=None, file="audit_chain_2026-05.jsonl",
+            month="2026-05", sealed=False, merkle_root=None,
+        ),
+    ))
+    r = verify_sealed_segments(index=idx, segment_dir=tmp_path)
+    assert r.ok is True
+    assert r.segments_verified == 0
+    assert r.issues == ()
+
+
+def test_verify_sealed_segments_reports_all_issues_in_one_pass(tmp_path):
+    """Multi-segment index with a mix of clean + tampered segments
+    reports both — caller sees the full picture in one call rather
+    than bailing on first issue."""
+    f1 = "audit_chain_2026-01.jsonl"
+    f2 = "audit_chain_2026-02.jsonl"
+    # Clean segment.
+    _write_segment(tmp_path / f1, [
+        {"seq": 0, "entry_hash": "a" * 64},
+        {"seq": 1, "entry_hash": "b" * 64},
+    ])
+    # Tampered segment.
+    _write_segment(tmp_path / f2, [
+        {"seq": 2, "entry_hash": "c" * 64},
+        {"seq": 3, "entry_hash": "d" * 64},
+    ])
+
+    idx = SegmentIndex(schema_version=1, segments=(
+        SegmentMeta(
+            seq_start=0, seq_end=1, file=f1, month="2026-01",
+            sealed=True, merkle_root=merkle_root(["a" * 64, "b" * 64]),
+        ),
+        SegmentMeta(
+            seq_start=2, seq_end=3, file=f2, month="2026-02",
+            sealed=True, merkle_root=merkle_root(["x" * 64, "y" * 64]),  # wrong
+        ),
+    ))
+
+    r = verify_sealed_segments(index=idx, segment_dir=tmp_path)
+    assert r.ok is False
+    assert r.segments_verified == 1  # the clean one
+    assert len(r.issues) == 1  # the tampered one
+    assert r.issues[0].kind == "merkle_mismatch"
+    assert r.issues[0].segment_file == f2
+
+
+def test_verify_sealed_segments_issue_shape():
+    """SegmentVerifyIssue is frozen + has the locked field set."""
+    issue = SegmentVerifyIssue(
+        kind="merkle_mismatch",
+        segment_file="x.jsonl",
+        details="test",
+    )
+    with pytest.raises(Exception):
+        issue.kind = "other"  # noqa
