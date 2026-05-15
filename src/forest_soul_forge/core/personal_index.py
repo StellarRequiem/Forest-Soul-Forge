@@ -170,9 +170,13 @@ class PersonalIndex:
     SQLite-VEC without changing the API.
 
     Operations:
-      add(doc_id, text, source, tags) — embed + store
-      search(query, k=10) — cosine top-k retrieval
-      delete(doc_id) — remove from index
+      add(doc_id, text, source, tags) — embed + store (also
+        feeds the BM25 inverted index for hybrid retrieval).
+      search(query, k=10, mode='cosine'|'bm25'|'hybrid') —
+        top-k retrieval. Cosine is the pre-T3 default; bm25 is
+        the lexical companion; hybrid runs both and fuses via
+        Reciprocal Rank Fusion (T3 / B321).
+      delete(doc_id) — remove from index (vector + BM25 both).
       has(doc_id) — existence check
       count() — total documents
     """
@@ -185,6 +189,12 @@ class PersonalIndex:
         # In-memory store: doc_id → (IndexDocument, embedding)
         self._store: dict[str, tuple[IndexDocument, list[float]]] = {}
         self._lock = threading.RLock()
+        # ADR-0076 T3 (B321): BM25 inverted index. Co-mutated
+        # with the vector store so the two retrieval paths stay
+        # consistent (a doc lives in BOTH or NEITHER). Lazy
+        # import to keep the module load light.
+        from forest_soul_forge.core.personal_index_bm25 import BM25Index
+        self._bm25 = BM25Index()
 
     def add(
         self,
@@ -207,6 +217,11 @@ class PersonalIndex:
         )
         with self._lock:
             self._store[doc_id] = (doc, embedding)
+            # ADR-0076 T3 (B321): feed BM25 from the same write
+            # path so the two retrieval surfaces stay aligned.
+            # add() is idempotent in BM25 too — re-adding the
+            # same doc_id clears the prior entry first.
+            self._bm25.add(doc_id, text)
 
     def add_batch(
         self,
@@ -232,17 +247,61 @@ class PersonalIndex:
                     tags=tuple(it.get("tags") or []),
                 )
                 self._store[doc_id] = (doc, emb)
+                # ADR-0076 T3 (B321): mirror into BM25.
+                self._bm25.add(doc_id, str(it["text"]))
 
     def search(
         self,
         query: str,
         k: int = 10,
+        mode: str = "cosine",
+        *,
+        rrf_k: int = 60,
+        candidate_multiplier: int = 3,
     ) -> list[SearchResult]:
-        """Cosine top-k retrieval. Empty store returns []."""
+        """Top-k retrieval. Empty store returns [].
+
+        ADR-0076 T3 (B321) — mode selects the retrieval surface:
+
+          'cosine' — pure semantic similarity (default, pre-T3
+            behavior preserved).
+          'bm25'   — pure lexical BM25Okapi. Use when the query
+            asks for an exact phrase / proper noun the embedder
+            tends to blur over.
+          'hybrid' — runs cosine + BM25 in parallel, fuses via
+            Reciprocal Rank Fusion (Cormack et al., 2009). The
+            most balanced surface; default for personal_recall.v1
+            (T4). ``rrf_k`` is the RRF constant (default 60);
+            ``candidate_multiplier`` is how many extra results
+            each leg pulls before fusion (default 3× the final k,
+            wider net → better RRF outcomes on small overlap).
+
+        SearchResult.similarity carries the retrieval-mode score:
+        cosine → cosine similarity in [-1, 1]; bm25 → BM25 raw
+        score (unbounded ≥ 0); hybrid → RRF score (unbounded
+        ≥ 0). Callers should treat similarity as a relative-order
+        signal within ONE retrieval, not as a cross-mode metric.
+        """
         if not isinstance(query, str) or not query:
             raise PersonalIndexError("query must be a non-empty string")
         if k <= 0:
             return []
+        if mode == "cosine":
+            return self._search_cosine(query, k)
+        if mode == "bm25":
+            return self._search_bm25(query, k)
+        if mode == "hybrid":
+            return self._search_hybrid(
+                query, k,
+                rrf_k=rrf_k,
+                candidate_multiplier=candidate_multiplier,
+            )
+        raise PersonalIndexError(
+            f"unknown search mode {mode!r}; must be one of "
+            f"'cosine', 'bm25', 'hybrid'"
+        )
+
+    def _search_cosine(self, query: str, k: int) -> list[SearchResult]:
         query_emb = self.embedder.embed(query)
         with self._lock:
             scored: list[tuple[float, IndexDocument]] = []
@@ -259,10 +318,79 @@ class PersonalIndex:
             for sim, doc in scored[:k]
         ]
 
+    def _search_bm25(self, query: str, k: int) -> list[SearchResult]:
+        hits = self._bm25.search(query, k)
+        with self._lock:
+            results: list[SearchResult] = []
+            for doc_id, score in hits:
+                entry = self._store.get(doc_id)
+                if entry is None:
+                    # Defensive: should not happen because add/delete
+                    # mirror across both indexes under the same lock.
+                    continue
+                doc, _ = entry
+                results.append(SearchResult(
+                    doc_id=doc.doc_id, text=doc.text,
+                    source=doc.source, tags=doc.tags,
+                    similarity=score,
+                ))
+        return results
+
+    def _search_hybrid(
+        self,
+        query: str,
+        k: int,
+        *,
+        rrf_k: int,
+        candidate_multiplier: int,
+    ) -> list[SearchResult]:
+        """RRF over cosine top-(k*m) + BM25 top-(k*m). The wider
+        candidate pool (m=3 by default) gives RRF more chances
+        to find docs that surface in both rankings — the multi-
+        ranker bonus is the whole point of RRF."""
+        from forest_soul_forge.core.personal_index_bm25 import rrf_fuse
+        candidate_k = max(k * candidate_multiplier, k)
+        cos_results = self._search_cosine(query, candidate_k)
+        bm25_results = self._search_bm25(query, candidate_k)
+        # Build the rankings (doc_id lists) for the RRF fuse.
+        cos_rank = [r.doc_id for r in cos_results]
+        bm25_rank = [r.doc_id for r in bm25_results]
+        fused = rrf_fuse([cos_rank, bm25_rank], rrf_k=rrf_k)
+        # Stitch the SearchResult back from the cosine pool first,
+        # then the BM25 pool, since RRF only returned (doc_id,
+        # score). The metadata is stable across both — we just
+        # need the doc info.
+        doc_lookup: dict[str, IndexDocument] = {}
+        for r in cos_results:
+            doc_lookup[r.doc_id] = IndexDocument(
+                doc_id=r.doc_id, text=r.text,
+                source=r.source, tags=r.tags,
+            )
+        for r in bm25_results:
+            doc_lookup.setdefault(r.doc_id, IndexDocument(
+                doc_id=r.doc_id, text=r.text,
+                source=r.source, tags=r.tags,
+            ))
+        out: list[SearchResult] = []
+        for doc_id, rrf_score in fused[:k]:
+            doc = doc_lookup.get(doc_id)
+            if doc is None:
+                continue
+            out.append(SearchResult(
+                doc_id=doc.doc_id, text=doc.text,
+                source=doc.source, tags=doc.tags,
+                similarity=rrf_score,
+            ))
+        return out
+
     def delete(self, doc_id: str) -> bool:
         """Remove a document. Returns True if it existed."""
         with self._lock:
-            return self._store.pop(doc_id, None) is not None
+            removed = self._store.pop(doc_id, None) is not None
+            if removed:
+                # ADR-0076 T3 (B321): mirror the delete into BM25.
+                self._bm25.remove(doc_id)
+            return removed
 
     def has(self, doc_id: str) -> bool:
         with self._lock:
@@ -277,6 +405,7 @@ class PersonalIndex:
         rebuild flow."""
         with self._lock:
             self._store.clear()
+            self._bm25.clear()
 
 
 # ---------------------------------------------------------------------------
