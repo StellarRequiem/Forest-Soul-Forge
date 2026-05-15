@@ -105,6 +105,48 @@ class WorkHours:
 
 
 @dataclass(frozen=True)
+class VoiceSample:
+    """One pronunciation reference for TTS personalization (ADR-0068 T5, B315).
+
+    The operator records short audio samples — a name, a domain term,
+    an unusual word — so the Voice I/O TTS layer (ADR-0070) can match
+    pronunciation. The sample is a file pointer + the word/phrase it
+    demonstrates; the audio itself lives next to the profile under
+    ``data/operator/voice_samples/``.
+
+    No Reality Anchor seeds — these are operational pointers, not
+    operator-assertion-grade facts. The TTS subsystem reads the
+    profile and resolves the file paths at synthesize time.
+    """
+    phrase: str           # the word/phrase the sample demonstrates
+    audio_path: str       # path relative to data/operator/voice_samples/
+    notes: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class WritingSample:
+    """One text reference for Content Studio style matching
+    (ADR-0068 T5, B315).
+
+    The operator points at writing samples — past emails, blog posts,
+    slack messages — that demonstrate their voice. Content Studio
+    agents read these as exemplars before producing operator-facing
+    text. The sample is a file pointer; the text lives next to the
+    profile under ``data/operator/writing_samples/``.
+
+    ``channel`` is operator-defined free-form (e.g. "email",
+    "blog", "slack", "academic_paper") — Forest doesn't enforce
+    a taxonomy.
+
+    No Reality Anchor seeds — same rationale as VoiceSample.
+    """
+    title: str            # human-readable name for the sample
+    file_path: str        # path relative to data/operator/writing_samples/
+    channel: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class TrustCirclePerson:
     """One person in the operator's trust circle (ADR-0068 T4, B314).
 
@@ -149,8 +191,14 @@ class OperatorProfile:
     # empty tuple — backward-compat with v1 yamls authored before T4.
     # Each person becomes a Reality Anchor ground-truth seed at boot.
     trust_circle: tuple[TrustCirclePerson, ...] = ()
-    # Forward-compat slot for tranches T5-T6 (voice samples,
-    # financial jurisdiction). Stays empty before those tranches.
+    # ADR-0068 T5 (B315): operator's reference materials.
+    # voice_samples feeds Voice I/O TTS personalization (ADR-0070);
+    # writing_samples feeds Content Studio style matching. Both
+    # default to empty for backward-compat with pre-T5 yamls.
+    voice_samples: tuple[VoiceSample, ...] = ()
+    writing_samples: tuple[WritingSample, ...] = ()
+    # Forward-compat slot for tranches T6 (financial jurisdiction).
+    # Stays empty before that tranche.
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -268,6 +316,9 @@ def save_operator_profile(
         # tranches; the explicit forward of trust_circle here is
         # the same pattern T5-T6 will follow.
         trust_circle=profile.trust_circle,
+        # ADR-0068 T5 (B315): forward voice + writing samples too.
+        voice_samples=profile.voice_samples,
+        writing_samples=profile.writing_samples,
         extra=profile.extra,
     )
 
@@ -526,6 +577,15 @@ def _validate_and_construct(
     # YAML rather than have agents miss a person they expected to be
     # in scope.
     trust_circle = _parse_trust_circle(op.get("trust_circle"), source_path)
+    # ADR-0068 T5 (B315): voice_samples + writing_samples. Same
+    # forward-compat shape as trust_circle — absent → empty tuple,
+    # malformed → raise. No RA seeds; these are operational pointers.
+    voice_samples = _parse_voice_samples(
+        op.get("voice_samples"), source_path,
+    )
+    writing_samples = _parse_writing_samples(
+        op.get("writing_samples"), source_path,
+    )
 
     return OperatorProfile(
         schema_version=int(sv),
@@ -539,6 +599,8 @@ def _validate_and_construct(
         created_at=str(created_at),
         updated_at=str(updated_at),
         trust_circle=trust_circle,
+        voice_samples=voice_samples,
+        writing_samples=writing_samples,
         extra=extra,
     )
 
@@ -612,6 +674,17 @@ def _to_yaml(profile: OperatorProfile) -> str:
         payload["operator"]["trust_circle"] = [
             _person_to_dict(p) for p in profile.trust_circle
         ]
+    # ADR-0068 T5 (B315): voice_samples + writing_samples emit
+    # only when non-empty so an operator who hasn't recorded any
+    # gets a clean YAML.
+    if profile.voice_samples:
+        payload["operator"]["voice_samples"] = [
+            _voice_sample_to_dict(s) for s in profile.voice_samples
+        ]
+    if profile.writing_samples:
+        payload["operator"]["writing_samples"] = [
+            _writing_sample_to_dict(s) for s in profile.writing_samples
+        ]
     if profile.extra:
         payload["operator"]["extra"] = dict(profile.extra)
 
@@ -634,6 +707,102 @@ def _person_to_dict(p: TrustCirclePerson) -> dict[str, Any]:
         out["email"] = p.email
     if p.notes is not None:
         out["notes"] = p.notes
+    return out
+
+
+# ---------------------------------------------------------------------------
+# ADR-0068 T5 (B315) — voice + writing samples parsers + serializers
+# ---------------------------------------------------------------------------
+
+
+def _parse_voice_samples(
+    raw: Any, source_path: Path,
+) -> tuple[VoiceSample, ...]:
+    """Parse the voice_samples list. Returns empty tuple when absent."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise OperatorProfileError(
+            f"operator.voice_samples at {source_path} must be a list "
+            f"of sample mappings; got {type(raw).__name__}"
+        )
+    samples: list[VoiceSample] = []
+    for idx, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise OperatorProfileError(
+                f"operator.voice_samples[{idx}] at {source_path} must "
+                f"be a mapping; got {type(entry).__name__}"
+            )
+        for required in ("phrase", "audio_path"):
+            if required not in entry:
+                raise OperatorProfileError(
+                    f"operator.voice_samples[{idx}] at {source_path} "
+                    f"missing required field {required!r}"
+                )
+            if not isinstance(entry[required], str) or not entry[required].strip():
+                raise OperatorProfileError(
+                    f"operator.voice_samples[{idx}].{required} at "
+                    f"{source_path} must be a non-empty string"
+                )
+        samples.append(VoiceSample(
+            phrase=entry["phrase"],
+            audio_path=entry["audio_path"],
+            notes=entry.get("notes") if entry.get("notes") else None,
+        ))
+    return tuple(samples)
+
+
+def _parse_writing_samples(
+    raw: Any, source_path: Path,
+) -> tuple[WritingSample, ...]:
+    """Parse the writing_samples list. Returns empty tuple when absent."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise OperatorProfileError(
+            f"operator.writing_samples at {source_path} must be a list "
+            f"of sample mappings; got {type(raw).__name__}"
+        )
+    samples: list[WritingSample] = []
+    for idx, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise OperatorProfileError(
+                f"operator.writing_samples[{idx}] at {source_path} must "
+                f"be a mapping; got {type(entry).__name__}"
+            )
+        for required in ("title", "file_path"):
+            if required not in entry:
+                raise OperatorProfileError(
+                    f"operator.writing_samples[{idx}] at {source_path} "
+                    f"missing required field {required!r}"
+                )
+            if not isinstance(entry[required], str) or not entry[required].strip():
+                raise OperatorProfileError(
+                    f"operator.writing_samples[{idx}].{required} at "
+                    f"{source_path} must be a non-empty string"
+                )
+        samples.append(WritingSample(
+            title=entry["title"],
+            file_path=entry["file_path"],
+            channel=entry.get("channel") if entry.get("channel") else None,
+            notes=entry.get("notes") if entry.get("notes") else None,
+        ))
+    return tuple(samples)
+
+
+def _voice_sample_to_dict(s: VoiceSample) -> dict[str, Any]:
+    out: dict[str, Any] = {"phrase": s.phrase, "audio_path": s.audio_path}
+    if s.notes is not None:
+        out["notes"] = s.notes
+    return out
+
+
+def _writing_sample_to_dict(s: WritingSample) -> dict[str, Any]:
+    out: dict[str, Any] = {"title": s.title, "file_path": s.file_path}
+    if s.channel is not None:
+        out["channel"] = s.channel
+    if s.notes is not None:
+        out["notes"] = s.notes
     return out
 
 
