@@ -38,6 +38,7 @@ from forest_soul_forge.daemon.routers import character_sheet as character_sheet_
 from forest_soul_forge.daemon.routers import genres as genres_router
 from forest_soul_forge.daemon.routers import memory_consents as memory_consents_router
 from forest_soul_forge.daemon.routers import memory_consolidation as memory_consolidation_router
+from forest_soul_forge.daemon.routers import operator as operator_router
 from forest_soul_forge.daemon.routers import pending_calls as pending_calls_router
 from forest_soul_forge.daemon.routers import preview as preview_router
 from forest_soul_forge.daemon.routers import runtime as runtime_router
@@ -1041,6 +1042,11 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     # recent-summaries, pin/unpin. Operator inspection + protection
     # surface on the B294-B307 consolidation substrate.
     app.include_router(memory_consolidation_router.router)
+    # ADR-0068 T7 (B317): /operator/profile/connectors GET +
+    # /operator/connectors/{domain_id}/{connector_name} POST.
+    # Operator-driven connector consent substrate; first-boot
+    # wizard (T7b) drives it.
+    app.include_router(operator_router.router)
     app.include_router(verifier_router.router)
     app.include_router(character_sheet_router.router)
     app.include_router(preview_router.router)

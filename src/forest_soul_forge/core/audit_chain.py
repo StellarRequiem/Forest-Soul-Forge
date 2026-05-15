@@ -162,6 +162,13 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     # supplied reason. The audit chain becomes the canonical
     # before-vs-after diff history for operator identity.
     "operator_profile_changed",
+    # ADR-0068 T7 (B317) — operator-driven connector consent decisions.
+    # Emitted by POST /operator/connectors/{...} when the operator
+    # grants / denies / pends a domain connector. payload carries
+    # (domain_id, connector_name, old_status, new_status, notes).
+    # The first-boot wizard (T7b) emits one of these per choice;
+    # subsequent changes (revoke, re-grant) emit additional entries.
+    "operator_connector_consent_changed",
     # ADR-003X K2 — operator-emitted ceremony events. Distinct from
     # tool-emitted events because the EMITTER is a human, not an
     # agent. Used to mark milestones, identity events, governance

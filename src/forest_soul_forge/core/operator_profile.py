@@ -116,6 +116,35 @@ class WorkHours:
 
 
 @dataclass(frozen=True)
+class ConnectorConsent:
+    """One domain-connector consent record (ADR-0068 T7, B317).
+
+    The operator's first-boot wizard (T7b, queued) walks the
+    operator through each declared domain's connector and records
+    a decision per (domain_id, connector_name). The record carries
+    a coarse 3-state status:
+
+      - ``granted``  — operator has authorized this connector
+      - ``denied``   — operator has actively refused
+      - ``pending``  — wizard has surfaced it but operator hasn't
+                       decided yet (or hasn't reached this connector
+                       in the wizard flow)
+
+    Granted/denied entries carry ``decided_at`` (ISO timestamp);
+    pending entries leave it None. ``notes`` is operator-supplied
+    free-text rationale that surfaces in the audit chain.
+    """
+    domain_id: str
+    connector_name: str
+    status: str
+    decided_at: Optional[str] = None
+    notes: Optional[str] = None
+
+
+_CONNECTOR_STATUS_VALUES = frozenset({"granted", "denied", "pending"})
+
+
+@dataclass(frozen=True)
 class FinancialContext:
     """Operator's financial + jurisdictional context
     (ADR-0068 T6, B316).
@@ -245,8 +274,14 @@ class OperatorProfile:
     # context. Singleton (None when absent — backward-compat with
     # pre-T6 yamls). Reality Anchor seeds currency + tax_residence.
     financial: Optional[FinancialContext] = None
-    # Forward-compat slot for tranche T7 (consent wizard records).
-    # Stays empty before that tranche.
+    # ADR-0068 T7 (B317): operator's per-domain-connector consent
+    # records. Default empty tuple — backward-compat with pre-T7
+    # yamls. The first-boot wizard (T7b, queued) populates this;
+    # operator_consent_grant via /operator/connectors/{...} mutates
+    # individual entries. No Reality Anchor seeds — these are
+    # consent state, not assertion-grade facts.
+    connectors: tuple[ConnectorConsent, ...] = ()
+    # Forward-compat slot.
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -369,6 +404,8 @@ def save_operator_profile(
         writing_samples=profile.writing_samples,
         # ADR-0068 T6 (B316): forward financial context.
         financial=profile.financial,
+        # ADR-0068 T7 (B317): forward connectors list.
+        connectors=profile.connectors,
         extra=profile.extra,
     )
 
@@ -688,6 +725,9 @@ def _validate_and_construct(
     )
     # ADR-0068 T6 (B316): financial context. None when absent.
     financial = _parse_financial(op.get("financial"), source_path)
+    # ADR-0068 T7 (B317): connector consent records. Empty tuple
+    # when absent; per-entry validation lives in _parse_connectors.
+    connectors = _parse_connectors(op.get("connectors"), source_path)
 
     return OperatorProfile(
         schema_version=int(sv),
@@ -704,6 +744,7 @@ def _validate_and_construct(
         voice_samples=voice_samples,
         writing_samples=writing_samples,
         financial=financial,
+        connectors=connectors,
         extra=extra,
     )
 
@@ -795,6 +836,12 @@ def _to_yaml(profile: OperatorProfile) -> str:
         payload["operator"]["financial"] = _financial_to_dict(
             profile.financial,
         )
+    # ADR-0068 T7 (B317): emit connectors only when non-empty so
+    # pre-wizard yamls stay clean.
+    if profile.connectors:
+        payload["operator"]["connectors"] = [
+            _connector_to_dict(c) for c in profile.connectors
+        ]
     if profile.extra:
         payload["operator"]["extra"] = dict(profile.extra)
 
@@ -979,6 +1026,162 @@ def _financial_to_dict(f: FinancialContext) -> dict[str, Any]:
     if f.preferred_tooling:
         out["preferred_tooling"] = list(f.preferred_tooling)
     return out
+
+
+def _parse_connectors(
+    raw: Any, source_path: Path,
+) -> tuple[ConnectorConsent, ...]:
+    """Parse operator.connectors. Returns empty tuple when absent.
+
+    Each entry must have domain_id + connector_name + status
+    (one of granted/denied/pending). decided_at must be present
+    when status != 'pending'. notes is optional.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise OperatorProfileError(
+            f"operator.connectors at {source_path} must be a list of "
+            f"consent mappings; got {type(raw).__name__}"
+        )
+    seen_keys: set[tuple[str, str]] = set()
+    out: list[ConnectorConsent] = []
+    for idx, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise OperatorProfileError(
+                f"operator.connectors[{idx}] at {source_path} must be "
+                f"a mapping; got {type(entry).__name__}"
+            )
+        for required in ("domain_id", "connector_name", "status"):
+            if required not in entry:
+                raise OperatorProfileError(
+                    f"operator.connectors[{idx}] at {source_path} "
+                    f"missing required field {required!r}"
+                )
+            if not isinstance(entry[required], str) or not entry[required].strip():
+                raise OperatorProfileError(
+                    f"operator.connectors[{idx}].{required} at "
+                    f"{source_path} must be a non-empty string"
+                )
+
+        status = entry["status"]
+        if status not in _CONNECTOR_STATUS_VALUES:
+            raise OperatorProfileError(
+                f"operator.connectors[{idx}].status at {source_path} "
+                f"must be one of {sorted(_CONNECTOR_STATUS_VALUES)}; "
+                f"got {status!r}"
+            )
+
+        decided_at = entry.get("decided_at")
+        if status != "pending" and not decided_at:
+            raise OperatorProfileError(
+                f"operator.connectors[{idx}].decided_at at "
+                f"{source_path} is required when status is "
+                f"{status!r} (only 'pending' entries may omit it)"
+            )
+        if decided_at is not None and not isinstance(decided_at, str):
+            raise OperatorProfileError(
+                f"operator.connectors[{idx}].decided_at at "
+                f"{source_path} must be an ISO-8601 string"
+            )
+
+        key = (entry["domain_id"], entry["connector_name"])
+        if key in seen_keys:
+            raise OperatorProfileError(
+                f"operator.connectors at {source_path} has duplicate "
+                f"entry for ({key[0]!r}, {key[1]!r})"
+            )
+        seen_keys.add(key)
+
+        out.append(ConnectorConsent(
+            domain_id=entry["domain_id"],
+            connector_name=entry["connector_name"],
+            status=status,
+            decided_at=decided_at if decided_at else None,
+            notes=entry.get("notes") if entry.get("notes") else None,
+        ))
+    return tuple(out)
+
+
+def _connector_to_dict(c: ConnectorConsent) -> dict[str, Any]:
+    """Serialize one ConnectorConsent to a dict; optional fields
+    omitted when None."""
+    out: dict[str, Any] = {
+        "domain_id": c.domain_id,
+        "connector_name": c.connector_name,
+        "status": c.status,
+    }
+    if c.decided_at is not None:
+        out["decided_at"] = c.decided_at
+    if c.notes is not None:
+        out["notes"] = c.notes
+    return out
+
+
+def upsert_connector_consent(
+    profile: OperatorProfile,
+    *,
+    domain_id: str,
+    connector_name: str,
+    status: str,
+    decided_at: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> OperatorProfile:
+    """Insert or update one connector consent on the profile.
+
+    Pure function — returns a new OperatorProfile with the
+    connectors tuple updated. The HTTP endpoint (B317) consumes
+    this + saves the result.
+
+    ``status`` must be one of granted/denied/pending. When status
+    != 'pending', decided_at defaults to now if not supplied.
+    """
+    if status not in _CONNECTOR_STATUS_VALUES:
+        raise OperatorProfileError(
+            f"status must be one of {sorted(_CONNECTOR_STATUS_VALUES)}; "
+            f"got {status!r}"
+        )
+    if status != "pending" and decided_at is None:
+        decided_at = _now_iso()
+
+    new_entry = ConnectorConsent(
+        domain_id=domain_id,
+        connector_name=connector_name,
+        status=status,
+        decided_at=decided_at,
+        notes=notes,
+    )
+
+    # Replace the matching entry or append.
+    updated: list[ConnectorConsent] = []
+    replaced = False
+    for c in profile.connectors:
+        if (c.domain_id, c.connector_name) == (domain_id, connector_name):
+            updated.append(new_entry)
+            replaced = True
+        else:
+            updated.append(c)
+    if not replaced:
+        updated.append(new_entry)
+
+    return OperatorProfile(
+        schema_version=profile.schema_version,
+        operator_id=profile.operator_id,
+        name=profile.name,
+        preferred_name=profile.preferred_name,
+        email=profile.email,
+        timezone=profile.timezone,
+        locale=profile.locale,
+        work_hours=profile.work_hours,
+        created_at=profile.created_at,
+        updated_at=profile.updated_at,
+        trust_circle=profile.trust_circle,
+        voice_samples=profile.voice_samples,
+        writing_samples=profile.writing_samples,
+        financial=profile.financial,
+        connectors=tuple(updated),
+        extra=profile.extra,
+    )
 
 
 def _voice_sample_to_dict(s: VoiceSample) -> dict[str, Any]:
