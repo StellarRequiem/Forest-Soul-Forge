@@ -17,6 +17,7 @@ import * as forgedProposalsPanel from "./forged-proposals.js";  // B205
 import * as catalogGrantsPanel from "./catalog-grants.js";       // B223 / ADR-0060 T6
 import * as marketplacePanel from "./marketplace.js";            // B228 / ADR-0055 M4
 import * as orchestratorPanel from "./orchestrator.js";          // B299 / ADR-0067 T7
+import * as operatorWizardPanel from "./operator-wizard.js";     // B318 / ADR-0068 T7b
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
 import * as mcpPluginsPanel from "./mcp-plugins.js";
@@ -78,6 +79,7 @@ async function boot() {
     catalogGrantsPanel.start();    // B223 / ADR-0060 T6
     marketplacePanel.start();      // B228 / ADR-0055 M4
     orchestratorPanel.start();     // B299 / ADR-0067 T7
+    operatorWizardPanel.start();   // B318 / ADR-0068 T7b
     skillsPanel.start();
     toolRegistryPanel.start();
     mcpPluginsPanel.start();
@@ -165,6 +167,11 @@ async function boot() {
   // when /orchestrator/* aren't registered (older daemon) the
   // pane shows error toasts but the rest of the app is fine.
   orchestratorPanel.start();
+  // ADR-0068 T7b (B318) — Operator-context wizard pane.
+  // Walks the operator through per-domain connector consent.
+  // Lazy-loads on first tab activation. Non-fatal when
+  // /operator/* aren't registered.
+  operatorWizardPanel.start();
 }
 
 if (document.readyState === "loading") {

@@ -121,6 +121,16 @@
         <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.5 6.5 L4 4 M9.5 6.5 L12 4 M6.5 9.5 L4 12 M9.5 9.5 L12 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
         Orchestrator
       </button>
+      <!-- ADR-0068 T7b (B318) — Operator-context wizard pane.
+           Walks the operator through per-domain connector
+           consent decisions. Reads /orchestrator/domains for
+           the declared connectors per domain + /operator/profile/
+           connectors for current consent state; POSTs choices
+           through /operator/connectors/{domain}/{connector}. -->
+      <button class="tab" data-tab="operator-wizard" role="tab" aria-selected="false">
+        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7 L7 10 L12 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+        Operator
+      </button>
       <!-- ADR-003Y Y6 — Chat tab. Multi-turn conversations with agents. -->
       <button class="tab" data-tab="chat" role="tab" aria-selected="false">
         <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4 H14 V11 H8 L5 14 V11 H2 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
@@ -747,6 +757,36 @@
         </div>
         <div class="panel__body">
           <div id="orch-routes" class="ra-section">loading…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- Operator wizard — ADR-0068 T7b (B318) connector consent      -->
+    <!-- substrate UX. Walks the operator through each domain's       -->
+    <!-- declared connectors with grant/deny/pending choices.         -->
+    <!-- ========================================================== -->
+    <section class="tab-panel" data-panel="operator-wizard" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Operator</h2>
+          <div class="panel__actions">
+            <button class="btn btn--ghost btn--sm" id="op-refresh-btn" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="op-status" class="ra-section">loading…</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Domain connectors</h3>
+          <div class="panel__actions">
+            <span class="lbl ra-note">grant / deny each connector per domain</span>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="op-connectors" class="ra-section">loading…</div>
         </div>
       </div>
     </section>
