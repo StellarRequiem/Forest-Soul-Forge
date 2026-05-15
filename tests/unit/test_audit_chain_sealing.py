@@ -546,3 +546,172 @@ def test_migration_output_passes_verify_sealed_segments(tmp_path):
     )
     assert r.ok is True
     assert r.segments_verified == 2  # last month is tail (unsealed)
+
+
+# ---------------------------------------------------------------------------
+# ADR-0073 T5 (B309) — seal_audit_segment_runner
+# ---------------------------------------------------------------------------
+
+import asyncio
+from datetime import timezone
+
+from forest_soul_forge.core.audit_chain_segments import (
+    SealRunResult,
+    load_segment_index,
+    save_segment_index,
+    seal_audit_segment_runner,
+)
+
+
+class _MockAuditChain:
+    """Captures audit_chain_anchor append calls."""
+
+    def __init__(self, raise_on_append: bool = False):
+        self.events: list[tuple[str, dict]] = []
+        self._raise = raise_on_append
+
+    def append(self, event_type, payload, *, agent_dna=None):
+        if self._raise:
+            raise RuntimeError("simulated chain failure")
+        self.events.append((event_type, dict(payload)))
+
+
+def _seed_index_with_tail(
+    tmp_path: Path,
+    *,
+    month: str,
+    seg_file: str | None = None,
+    entry_count: int = 3,
+) -> tuple[Path, Path]:
+    """Prepare (segment_dir, index_path) with one unsealed tail
+    in the given month and `entry_count` rows on disk."""
+    segdir = tmp_path / "segments"
+    segdir.mkdir()
+    idx_path = tmp_path / "index.json"
+    fname = seg_file or f"audit_chain_{month}.jsonl"
+    entries = [
+        {"seq": i, "entry_hash": f"{i:064d}", "event_type": "test"}
+        for i in range(entry_count)
+    ]
+    with (segdir / fname).open("w") as f:
+        for e in entries:
+            f.write(json.dumps(e) + "\n")
+    idx = SegmentIndex(schema_version=1, segments=(
+        SegmentMeta(
+            seq_start=0, seq_end=None, file=fname, month=month,
+            sealed=False, merkle_root=None,
+        ),
+    ))
+    save_segment_index(idx, idx_path)
+    return segdir, idx_path
+
+
+def test_seal_runner_seals_past_month_tail(tmp_path):
+    """Tail's month is past current_month → runner seals + emits
+    audit_chain_anchor."""
+    segdir, idx_path = _seed_index_with_tail(tmp_path, month="2026-04")
+    chain = _MockAuditChain()
+    now = datetime(2026, 5, 15, tzinfo=timezone.utc)
+
+    result = asyncio.run(seal_audit_segment_runner(
+        index_path=idx_path, segment_dir=segdir,
+        audit_chain=chain, now=now,
+    ))
+
+    assert isinstance(result, SealRunResult)
+    assert result.ok is True
+    assert result.sealed_segment_file == "audit_chain_2026-04.jsonl"
+    assert result.next_segment_file == "audit_chain_2026-05.jsonl"
+    assert len(chain.events) == 1
+    assert chain.events[0][0] == "audit_chain_anchor"
+    payload = chain.events[0][1]
+    assert payload["prior_segment_file"] == "audit_chain_2026-04.jsonl"
+    assert payload["prior_segment_entry_count"] == 3
+    assert payload["prior_merkle_root"]  # non-empty hex string
+
+
+def test_seal_runner_persists_new_index(tmp_path):
+    """After a successful seal the on-disk index reflects the new
+    state — operator can reload to verify."""
+    segdir, idx_path = _seed_index_with_tail(tmp_path, month="2026-04")
+    chain = _MockAuditChain()
+    now = datetime(2026, 5, 15, tzinfo=timezone.utc)
+    asyncio.run(seal_audit_segment_runner(
+        index_path=idx_path, segment_dir=segdir,
+        audit_chain=chain, now=now,
+    ))
+    reloaded = load_segment_index(idx_path)
+    assert reloaded.segments[0].sealed is True
+    assert reloaded.segments[0].merkle_root is not None
+    assert reloaded.segments[1].sealed is False
+    assert reloaded.segments[1].month == "2026-05"
+
+
+def test_seal_runner_skips_when_tail_is_current_month(tmp_path):
+    """Sealing mid-month would split events that belong together.
+    Refuse with no_op_reason='tail_is_current_month'."""
+    segdir, idx_path = _seed_index_with_tail(tmp_path, month="2026-04")
+    chain = _MockAuditChain()
+    now = datetime(2026, 4, 20, tzinfo=timezone.utc)
+
+    result = asyncio.run(seal_audit_segment_runner(
+        index_path=idx_path, segment_dir=segdir,
+        audit_chain=chain, now=now,
+    ))
+    assert result.ok is False
+    assert result.no_op_reason == "tail_is_current_month"
+    assert chain.events == []
+
+
+def test_seal_runner_force_overrides_current_month_guard(tmp_path):
+    """force=True is the escape hatch for manual operator-driven
+    seals (e.g. after a long pause where the operator wants to
+    seal early)."""
+    segdir, idx_path = _seed_index_with_tail(tmp_path, month="2026-04")
+    chain = _MockAuditChain()
+    now = datetime(2026, 4, 20, tzinfo=timezone.utc)
+
+    result = asyncio.run(seal_audit_segment_runner(
+        index_path=idx_path, segment_dir=segdir,
+        audit_chain=chain, now=now, force=True,
+    ))
+    assert result.ok is True
+    assert len(chain.events) == 1
+
+
+def test_seal_runner_no_tail_returns_graceful_noop(tmp_path):
+    """A missing or empty index produces no_op_reason='no_tail_segment'
+    (operator needs to run the migration helper first)."""
+    segdir = tmp_path / "segments"
+    segdir.mkdir()
+    idx_path = tmp_path / "missing_index.json"
+    chain = _MockAuditChain()
+
+    result = asyncio.run(seal_audit_segment_runner(
+        index_path=idx_path, segment_dir=segdir,
+        audit_chain=chain,
+        now=datetime(2026, 5, 15, tzinfo=timezone.utc),
+    ))
+    assert result.ok is False
+    assert result.no_op_reason == "no_tail_segment"
+
+
+def test_seal_runner_anchor_emit_failure_surfaces_softly(tmp_path):
+    """If the chain.append raises after the index was already
+    persisted, the runner returns ok=False with the error in
+    no_op_reason. The disk state (sealed segment + new tail) stays
+    — rolling back would leave a half-sealed segment, worse than
+    a missing anchor entry."""
+    segdir, idx_path = _seed_index_with_tail(tmp_path, month="2026-04")
+    chain = _MockAuditChain(raise_on_append=True)
+    now = datetime(2026, 5, 15, tzinfo=timezone.utc)
+
+    result = asyncio.run(seal_audit_segment_runner(
+        index_path=idx_path, segment_dir=segdir,
+        audit_chain=chain, now=now,
+    ))
+    assert result.ok is False
+    assert "anchor_emit_failed" in result.no_op_reason
+    # The index was persisted before the failed emit.
+    reloaded = load_segment_index(idx_path)
+    assert reloaded.segments[0].sealed is True

@@ -775,3 +775,168 @@ def migrate_monolithic_chain(
         files=tuple(written_files),
         new_index=new_index,
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR-0073 T5 (B309) — sealing runner
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SealRunResult:
+    """Outcome of one ``seal_audit_segment_runner`` invocation.
+
+    ``no_op_reason`` is non-None when the runner declined to seal
+    (e.g. the current tail is the same month — it's not time to
+    seal yet). In that case ``sealed_segment_file`` is empty.
+    """
+    ok: bool
+    no_op_reason: Optional[str]
+    sealed_segment_file: str
+    next_segment_file: str
+    anchor_payload: Optional[dict]
+    wall_clock_ms: float
+
+
+async def seal_audit_segment_runner(
+    *,
+    index_path: Path,
+    segment_dir: Path,
+    audit_chain: Any,
+    force: bool = False,
+    now: Optional[datetime] = None,
+) -> SealRunResult:
+    """ADR-0073 T5: scheduled-task runner that seals the current
+    audit-chain tail segment when its month is past.
+
+    Lifecycle:
+
+    1. Load the index from disk via :func:`load_segment_index`.
+    2. Identify the current tail; if its ``month`` equals the
+       current UTC month and ``force=False``, bail with
+       ``no_op_reason="tail_is_current_month"``. Sealing
+       mid-month would split events that belong together.
+    3. Call :func:`seal_segment` to compute the new index +
+       anchor payload (pure function — no disk writes yet).
+    4. Persist the new index via :func:`save_segment_index`.
+    5. Append the ``audit_chain_anchor`` event to the chain so the
+       on-chain record of the seal exists. The chain entry's
+       ``event_data`` is the AnchorPayload's dict form per ADR-0073
+       Decision 4 — operators see the sealed segment's file +
+       merkle_root + entry count without consulting the index.
+
+    Errors during seal_segment surface via the SealError pathway;
+    the runner returns ``ok=False`` with the error in
+    ``no_op_reason`` rather than raising. This matches the
+    scheduler-task contract (every failure mode visible in the
+    chain, not as an unhandled exception).
+
+    The caller (the ADR-0075 budget-capped scheduled task) holds
+    the daemon's write_lock so the anchor emit + index write
+    don't race with other chain writers.
+    """
+    started = now or datetime.now(timezone.utc)
+
+    try:
+        index = load_segment_index(index_path)
+    except SegmentIndexError as e:
+        return SealRunResult(
+            ok=False,
+            no_op_reason=f"load_index_failed: {e}",
+            sealed_segment_file="",
+            next_segment_file="",
+            anchor_payload=None,
+            wall_clock_ms=_seal_wall_clock_ms(started),
+        )
+
+    tail = index.current()
+    if tail is None:
+        return SealRunResult(
+            ok=False,
+            no_op_reason="no_tail_segment",
+            sealed_segment_file="",
+            next_segment_file="",
+            anchor_payload=None,
+            wall_clock_ms=_seal_wall_clock_ms(started),
+        )
+
+    current_month = started.strftime("%Y-%m")
+    if tail.month == current_month and not force:
+        return SealRunResult(
+            ok=False,
+            no_op_reason="tail_is_current_month",
+            sealed_segment_file=tail.file,
+            next_segment_file="",
+            anchor_payload=None,
+            wall_clock_ms=_seal_wall_clock_ms(started),
+        )
+
+    try:
+        outcome = seal_segment(
+            index=index,
+            segment_dir=segment_dir,
+            next_month=current_month,
+        )
+    except SealError as e:
+        return SealRunResult(
+            ok=False,
+            no_op_reason=f"seal_failed: {e}",
+            sealed_segment_file=tail.file,
+            next_segment_file="",
+            anchor_payload=None,
+            wall_clock_ms=_seal_wall_clock_ms(started),
+        )
+
+    # Persist the new index BEFORE emitting the anchor entry. If
+    # the chain append fails after we wrote the index, the operator
+    # sees the new tail + the missing anchor — recoverable. If we
+    # did the chain emit first and then the index write failed,
+    # the chain would carry an anchor for a segment the index
+    # doesn't reflect — worse.
+    save_segment_index(outcome.new_index, index_path)
+
+    # Append the anchor entry to the chain. The chain's `append`
+    # method handles seq + prev_hash + entry_hash + (signing if
+    # ADR-0049 is active). agent_dna=None marks this as an
+    # operator/system event.
+    anchor_dict = {
+        "prior_segment_file":        outcome.anchor.prior_segment_file,
+        "prior_seq_end":             outcome.anchor.prior_seq_end,
+        "prior_merkle_root":         outcome.anchor.prior_merkle_root,
+        "prior_segment_entry_count": outcome.anchor.prior_segment_entry_count,
+    }
+    try:
+        if audit_chain is not None:
+            audit_chain.append(
+                "audit_chain_anchor", anchor_dict, agent_dna=None,
+            )
+    except Exception as e:
+        # The seal already landed on disk; the anchor emit failed.
+        # Operator must re-emit manually or the chain stays missing
+        # this anchor. Soft-fail rather than rolling back the
+        # index — rolling back would leave the segment file in a
+        # half-sealed state.
+        return SealRunResult(
+            ok=False,
+            no_op_reason=f"anchor_emit_failed: {e}",
+            sealed_segment_file=outcome.anchor.prior_segment_file,
+            next_segment_file=outcome.next_segment_path.name,
+            anchor_payload=anchor_dict,
+            wall_clock_ms=_seal_wall_clock_ms(started),
+        )
+
+    return SealRunResult(
+        ok=True,
+        no_op_reason=None,
+        sealed_segment_file=outcome.anchor.prior_segment_file,
+        next_segment_file=outcome.next_segment_path.name,
+        anchor_payload=anchor_dict,
+        wall_clock_ms=_seal_wall_clock_ms(started),
+    )
+
+
+def _seal_wall_clock_ms(started: datetime) -> float:
+    return round(
+        (datetime.now(timezone.utc) - started).total_seconds() * 1000.0,
+        2,
+    )
