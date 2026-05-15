@@ -82,6 +82,17 @@ _LOCALE_RE = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")
 # HH:MM in 24-hour form.
 _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
+# ADR-0068 T6 (B316): loose validation for financial fields.
+# Currency: ISO 4217 three-letter uppercase code (USD, EUR, JPY, …).
+_CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+# Tax residence: ISO 3166-1 alpha-2, optionally with a subdivision
+# (US, US-CA, GB-ENG). Permissive on subdivision length because
+# countries vary (US is 2-letter, GB-ENG is 3, JP-13 is digits).
+_TAX_RESIDENCE_RE = re.compile(r"^[A-Z]{2}(-[A-Z0-9]{1,4})?$")
+# Fiscal year start: MM-DD. Calendar-year operators get 01-01;
+# UK personal tax year is 04-06; US federal is 10-01.
+_MMDD_RE = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
+
 
 class OperatorProfileError(RuntimeError):
     """Raised when the profile file is missing required fields,
@@ -102,6 +113,39 @@ class WorkHours:
     """
     start: str
     end: str
+
+
+@dataclass(frozen=True)
+class FinancialContext:
+    """Operator's financial + jurisdictional context
+    (ADR-0068 T6, B316).
+
+    Singleton sub-record: each operator has at most one. Feeds
+    Finance Guardian and any cross-domain agent that needs to
+    reason in operator-currency or operator-jurisdiction (e.g.
+    a Daily Life OS reminder for "tax filing deadline" picks
+    the right deadline by ``tax_residence``).
+
+    Fields:
+      - ``currency``: ISO 4217 three-letter code (USD, EUR, GBP, …).
+      - ``tax_residence``: ISO 3166-1 alpha-2 country code, or
+        country+subdivision (US-CA, GB-ENG). Free-form-ish — the
+        loader does a loose regex check, not a full lookup.
+      - ``fiscal_year_start``: MM-DD of the operator's fiscal-year
+        start (01-01 for calendar-year; 04-01 for UK personal).
+      - ``preferred_tooling``: list of strings naming the operator's
+        preferred finance tooling (e.g. ['Quicken', 'YNAB']).
+        Finance Guardian agents consult this to avoid recommending
+        tools the operator doesn't use.
+
+    Reality Anchor seeds emit currency + tax_residence at HIGH
+    severity — an agent claiming the wrong currency to a
+    transaction agent is a high-stakes mistake.
+    """
+    currency: str
+    tax_residence: str
+    fiscal_year_start: str
+    preferred_tooling: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -197,7 +241,11 @@ class OperatorProfile:
     # default to empty for backward-compat with pre-T5 yamls.
     voice_samples: tuple[VoiceSample, ...] = ()
     writing_samples: tuple[WritingSample, ...] = ()
-    # Forward-compat slot for tranches T6 (financial jurisdiction).
+    # ADR-0068 T6 (B316): operator's financial + jurisdictional
+    # context. Singleton (None when absent — backward-compat with
+    # pre-T6 yamls). Reality Anchor seeds currency + tax_residence.
+    financial: Optional[FinancialContext] = None
+    # Forward-compat slot for tranche T7 (consent wizard records).
     # Stays empty before that tranche.
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -319,6 +367,8 @@ def save_operator_profile(
         # ADR-0068 T5 (B315): forward voice + writing samples too.
         voice_samples=profile.voice_samples,
         writing_samples=profile.writing_samples,
+        # ADR-0068 T6 (B316): forward financial context.
+        financial=profile.financial,
         extra=profile.extra,
     )
 
@@ -432,6 +482,56 @@ def profile_to_ground_truth_seeds(profile: OperatorProfile) -> list[dict]:
         "forbidden_terms": [],
         "source": "operator_profile.yaml",
     })
+
+    # ADR-0068 T6 (B316): seed currency + tax_residence as HIGH-
+    # severity facts when financial context is present. A Finance
+    # Guardian agent claiming "your reporting currency is GBP"
+    # when the operator's profile says USD is a high-stakes
+    # mistake; Reality Anchor catches it before the recommendation
+    # lands in operator-facing output.
+    if profile.financial is not None:
+        seeds.append({
+            "id": "operator_currency",
+            "severity": "HIGH",
+            "statement": (
+                f"The operator's reporting currency is "
+                f"{profile.financial.currency}."
+            ),
+            "domain_keywords": [
+                "operator", "currency", "finance", "reporting",
+            ],
+            "canonical_terms": [profile.financial.currency],
+            "forbidden_terms": [],
+            "source": "operator_profile.yaml",
+        })
+        seeds.append({
+            "id": "operator_tax_residence",
+            "severity": "HIGH",
+            "statement": (
+                f"The operator's tax residence is "
+                f"{profile.financial.tax_residence}."
+            ),
+            "domain_keywords": [
+                "operator", "tax residence", "jurisdiction", "finance",
+            ],
+            "canonical_terms": [profile.financial.tax_residence],
+            "forbidden_terms": [],
+            "source": "operator_profile.yaml",
+        })
+        seeds.append({
+            "id": "operator_fiscal_year",
+            "severity": "MEDIUM",
+            "statement": (
+                f"The operator's fiscal year starts "
+                f"{profile.financial.fiscal_year_start} (MM-DD)."
+            ),
+            "domain_keywords": [
+                "operator", "fiscal year", "tax", "deadline",
+            ],
+            "canonical_terms": [profile.financial.fiscal_year_start],
+            "forbidden_terms": [],
+            "source": "operator_profile.yaml",
+        })
 
     # ADR-0068 T4 (B314): seed one fact per trust-circle person.
     # The seed's canonical_terms include the person's name; the
@@ -586,6 +686,8 @@ def _validate_and_construct(
     writing_samples = _parse_writing_samples(
         op.get("writing_samples"), source_path,
     )
+    # ADR-0068 T6 (B316): financial context. None when absent.
+    financial = _parse_financial(op.get("financial"), source_path)
 
     return OperatorProfile(
         schema_version=int(sv),
@@ -601,6 +703,7 @@ def _validate_and_construct(
         trust_circle=trust_circle,
         voice_samples=voice_samples,
         writing_samples=writing_samples,
+        financial=financial,
         extra=extra,
     )
 
@@ -685,6 +788,13 @@ def _to_yaml(profile: OperatorProfile) -> str:
         payload["operator"]["writing_samples"] = [
             _writing_sample_to_dict(s) for s in profile.writing_samples
         ]
+    # ADR-0068 T6 (B316): emit financial only when set. None is the
+    # backward-compat default for pre-T6 yamls and stays out of the
+    # output entirely.
+    if profile.financial is not None:
+        payload["operator"]["financial"] = _financial_to_dict(
+            profile.financial,
+        )
     if profile.extra:
         payload["operator"]["extra"] = dict(profile.extra)
 
@@ -788,6 +898,87 @@ def _parse_writing_samples(
             notes=entry.get("notes") if entry.get("notes") else None,
         ))
     return tuple(samples)
+
+
+def _parse_financial(
+    raw: Any, source_path: Path,
+) -> Optional[FinancialContext]:
+    """Parse operator.financial. Returns None when absent."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise OperatorProfileError(
+            f"operator.financial at {source_path} must be a mapping; "
+            f"got {type(raw).__name__}"
+        )
+    for required in ("currency", "tax_residence", "fiscal_year_start"):
+        if required not in raw:
+            raise OperatorProfileError(
+                f"operator.financial at {source_path} missing required "
+                f"field {required!r}"
+            )
+
+    currency = raw["currency"]
+    if not isinstance(currency, str) or not _CURRENCY_RE.match(currency):
+        raise OperatorProfileError(
+            f"operator.financial.currency at {source_path} must be a "
+            f"three-letter ISO 4217 code (e.g. 'USD'); got {currency!r}"
+        )
+
+    tax_residence = raw["tax_residence"]
+    if not isinstance(tax_residence, str) or not _TAX_RESIDENCE_RE.match(
+        tax_residence,
+    ):
+        raise OperatorProfileError(
+            f"operator.financial.tax_residence at {source_path} must "
+            f"be ISO 3166-1 alpha-2 (optionally with subdivision, e.g. "
+            f"'US-CA'); got {tax_residence!r}"
+        )
+
+    fiscal_year_start = raw["fiscal_year_start"]
+    if not isinstance(fiscal_year_start, str) or not _MMDD_RE.match(
+        fiscal_year_start,
+    ):
+        raise OperatorProfileError(
+            f"operator.financial.fiscal_year_start at {source_path} "
+            f"must be MM-DD (e.g. '01-01' for calendar year, '04-06' "
+            f"for UK personal tax year); got {fiscal_year_start!r}"
+        )
+
+    pt_raw = raw.get("preferred_tooling", [])
+    if pt_raw is None:
+        pt_raw = []
+    if not isinstance(pt_raw, list):
+        raise OperatorProfileError(
+            f"operator.financial.preferred_tooling at {source_path} "
+            f"must be a list of strings; got {type(pt_raw).__name__}"
+        )
+    for idx, t in enumerate(pt_raw):
+        if not isinstance(t, str) or not t.strip():
+            raise OperatorProfileError(
+                f"operator.financial.preferred_tooling[{idx}] at "
+                f"{source_path} must be a non-empty string; got {t!r}"
+            )
+
+    return FinancialContext(
+        currency=currency,
+        tax_residence=tax_residence,
+        fiscal_year_start=fiscal_year_start,
+        preferred_tooling=tuple(pt_raw),
+    )
+
+
+def _financial_to_dict(f: FinancialContext) -> dict[str, Any]:
+    """Serialize FinancialContext to a dict. preferred_tooling
+    omitted when empty so the YAML stays minimal."""
+    out: dict[str, Any] = {
+        "currency": f.currency,
+        "tax_residence": f.tax_residence,
+        "fiscal_year_start": f.fiscal_year_start,
+    }
+    if f.preferred_tooling:
+        out["preferred_tooling"] = list(f.preferred_tooling)
+    return out
 
 
 def _voice_sample_to_dict(s: VoiceSample) -> dict[str, Any]:
