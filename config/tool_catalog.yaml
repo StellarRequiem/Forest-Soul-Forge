@@ -545,6 +545,61 @@ tools:
       - assistant
       - operator_steward
 
+  personal_recall.v1:
+    name: personal_recall
+    version: "1"
+    description: |
+      ADR-0076 T4 hybrid retrieval over the operator's personal-
+      context PersonalIndex. Returns top-k hits via Reciprocal
+      Rank Fusion over BM25 lexical + cosine semantic rankings.
+
+      Genre-gated to {companion, assistant, operator_steward,
+      domain_orchestrator}. Other genres get tool_call_rejected
+      at validate-time.
+
+      Indexes ONLY scope='personal' memory rows — the agent-
+      private surface stays out of the vector index by design
+      (B313 + B320). Memory.append's indexer hook lands new
+      personal-scope writes asynchronously; queries see them
+      within ms-to-seconds of the write.
+
+      mode='hybrid' (default) — RRF over BM25 + cosine. Best
+      for natural-language operator queries.
+      mode='cosine'           — pure semantic. Best for
+      paraphrase / synonym matching.
+      mode='bm25'             — pure lexical. Best for exact
+      phrases / proper nouns / numbers.
+
+      Refuses with substrate_unwired when ctx.personal_index is
+      None (operator hasn't enabled FSF_PERSONAL_INDEX_ENABLED).
+
+      The audit_payload records query_hash (NOT the raw query) +
+      mode + limit + hit_count. Operator privacy: what the
+      operator searched for never lands on the chain in plaintext.
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          minLength: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+        mode:
+          type: string
+          enum: [hybrid, cosine, bm25]
+          default: hybrid
+      required:
+        - query
+    side_effects: read_only
+    archetype_tags:
+      - companion
+      - assistant
+      - operator_steward
+      - domain_orchestrator
+
   verify_claim.v1:
     name: verify_claim
     version: "1"

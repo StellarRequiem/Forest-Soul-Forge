@@ -562,6 +562,12 @@ class ToolDispatcher:
     # See ``_resolve_shortcut_match`` for the full eligibility chain
     # and ``_shortcut_substitute`` for the recorded-action playback.
     procedural_shortcuts_table: Any = None
+    # ADR-0076 T4 (B322) — optional PersonalIndex handle plumbed
+    # into ToolContext.personal_index. None when the operator
+    # hasn't enabled the substrate; personal_recall.v1 refuses
+    # cleanly in that case. Set by lifespan when
+    # FSF_PERSONAL_INDEX_ENABLED=true.
+    personal_index: Any = None
     # Closures returning the live env-var read so an operator who flips
     # FSF_PROCEDURAL_SHORTCUT_ENABLED at runtime sees the change without
     # restarting the daemon. Default closures keep the substrate OFF
@@ -1003,6 +1009,7 @@ class ToolDispatcher:
             priv_client=self.priv_client,
             agent_registry=self.agent_registry,
             procedural_shortcuts=self.procedural_shortcuts_table,
+            personal_index=self.personal_index,
         )
         # ADR-0051 T4 (B264): route through the sandbox-aware execution
         # helper. When FSF_TOOL_SANDBOX=off (default) this is bit-
@@ -2276,6 +2283,7 @@ class ToolDispatcher:
             delegate=delegate_fn,
             priv_client=self.priv_client,
             procedural_shortcuts=self.procedural_shortcuts_table,
+            personal_index=self.personal_index,
         )
         # ADR-0051 T4: same sandbox-aware path as the primary dispatch.
         # When FSF_TOOL_SANDBOX=off this is bit-identical to in-process.

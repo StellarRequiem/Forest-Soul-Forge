@@ -280,6 +280,11 @@ def build_or_get_tool_dispatcher(app):
         # (default trusted-host posture) → plaintext reads, bit-
         # identical pre-T5b behavior.
         master_key=getattr(app.state, "master_key", None),
+        # ADR-0076 T4 (B322) — PersonalIndex handle for
+        # personal_recall.v1. None when the operator hasn't opted
+        # into the substrate; the tool refuses cleanly with
+        # substrate_unwired.
+        personal_index=getattr(app.state, "personal_index", None),
     )
     # ADR-0054 T6 (B194) — procedural-shortcut substrate wiring.
     # Master switch is ``settings.procedural_shortcut_enabled`` (default

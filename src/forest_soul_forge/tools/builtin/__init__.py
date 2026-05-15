@@ -48,6 +48,7 @@ from forest_soul_forge.tools.builtin.security_scan import SecurityScanTool
 from forest_soul_forge.tools.builtin.decompose_intent import DecomposeIntentTool
 from forest_soul_forge.tools.builtin.operator_profile_read import OperatorProfileReadTool
 from forest_soul_forge.tools.builtin.operator_profile_write import OperatorProfileWriteTool
+from forest_soul_forge.tools.builtin.personal_recall import PersonalRecallTool
 from forest_soul_forge.tools.builtin.route_to_domain import RouteToDomainTool
 from forest_soul_forge.tools.builtin.verify_claim import VerifyClaimTool
 from forest_soul_forge.tools.builtin.semgrep_scan import SemgrepScanTool
@@ -322,6 +323,14 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # seed computation; operator reloads via /reality-anchor/
     # reload.
     registry.register(OperatorProfileWriteTool())
+    # ADR-0076 T4 (B322) — personal_recall.v1. Hybrid BM25+cosine
+    # retrieval over the operator's PersonalIndex (scope='personal'
+    # only). Genre-gated to {companion, assistant, operator_steward,
+    # domain_orchestrator}. Refuses cleanly when the personal_index
+    # substrate isn't wired (FSF_PERSONAL_INDEX_ENABLED=false). The
+    # four ten-domain semantic-search consumers (Knowledge Forge /
+    # Content Studio / Learning Coach / Research Lab) reach for this.
+    registry.register(PersonalRecallTool())
     # ADR-0067 T2 (Burst 280) — decompose_intent.v1. LLM-driven
     # cross-domain orchestrator decomposer. Reads config/domains/*.yaml
     # at call time, prompts the local model with the live domain

@@ -115,6 +115,13 @@ class ToolContext:
     # for pre-T6 daemons); the tool refuses cleanly with
     # "procedural shortcut substrate not wired" rather than crashing.
     procedural_shortcuts: Any = None
+    # ADR-0076 T4 (B322) — bound PersonalIndex for the personal_recall.v1
+    # tool's semantic-search surface. The daemon's lifespan populates
+    # this when FSF_PERSONAL_INDEX_ENABLED=true; otherwise stays None
+    # and the tool refuses cleanly with "personal index not wired."
+    # Genre-gated at the tool layer (only companion / assistant /
+    # operator_steward / domain_orchestrator may read).
+    personal_index: Any = None
 
 
 @dataclass(frozen=True)
