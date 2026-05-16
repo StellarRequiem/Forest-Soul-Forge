@@ -646,6 +646,130 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  # ---- ADR-0077 (B331-B333) D4 advanced rollout: three new roles --------
+  # Draft authored 2026-05-16; operator approved. See
+  # docs/audits/2026-05-16-d4-advanced-rollout-drafts.md for the per-
+  # role rationale + birth proposals.
+
+  test_author:
+    # Test-first agent. Writes failing tests against a spec BEFORE
+    # software_engineer implements. Researcher genre — read-heavy
+    # with allowlisted network reach (framework docs); writes ONLY
+    # the tests/ tree. Distinct from software_engineer by the
+    # production-code-edit forbid.
+    policies:
+      - id: forbid_production_code_edit
+        rule: forbid
+        triggers: [edit_src_dir, modify_production_module, write_outside_tests]
+        rationale: "test_author writes tests ONLY. The production code under test belongs to software_engineer. This invariant is what makes test-first discipline trustworthy — operators can audit Engineer's compliance against test_author's failing tests."
+      - id: require_assertion_in_test
+        rule: require
+        triggers: [emit_test_file]
+        rationale: "A test file with no assert is noise. Every test_author emission must include at least one assertion (pytest `assert` or framework-equivalent)."
+      - id: approval_for_test_dependency_add
+        rule: require_human_approval
+        triggers: [install_unvetted_package, add_test_dependency]
+        rationale: "Test deps need operator review just like production deps — supply-chain concern doesn't disappear because the package is dev-only."
+      - id: forbid_self_test_deletion
+        rule: forbid
+        triggers: [delete_test_self_authored, remove_failing_test_self_authored]
+        rationale: "Tests this agent wrote become operator-traceable evidence. Only the operator or software_engineer may retire them. Prevents the agent from quietly walking back its own assertions when software_engineer can't make them pass."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - edit_src_dir
+      - modify_production_module
+      - bypass_test_pass_gate
+      - delete_self_authored_test
+    operator_duties:
+      - "Treat test_author's failing tests as load-bearing: if it ships failing assertions and Engineer's PR makes them pass, that's the contract."
+      - "Audit test_author's test-deletion rate — false-positive flags get noisy fast; deletions should be rare and explicit, and never by test_author itself."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  migration_pilot:
+    # Schema/data migration owner. Guardian genre — analysis-primary
+    # (FK cascade, dry-run rehearsal); the apply step is operator-
+    # gated per call. Dry-run is automatic; apply is the operator's
+    # decision after reviewing the migration + rollback plans.
+    policies:
+      - id: require_dry_run_before_apply
+        rule: require
+        triggers: [migration_apply, schema_change_apply, data_migration_apply]
+        rationale: "Every migration apply must be preceded by a successful dry-run in a scratch SQLite within the same dispatch. The dry-run produces the FK-cascade plan + rollback plan that the operator approves at the apply step."
+      - id: require_human_approval_for_apply
+        rule: require_human_approval
+        triggers: [migration_apply, schema_change_apply, data_migration_apply]
+        rationale: "Migrations are irreversible from the operator's perspective. The dry-run is automatic; the apply is operator-only."
+      - id: forbid_silent_drop
+        rule: forbid
+        triggers: [drop_table_without_archive, truncate_without_backup, delete_column_with_data]
+        rationale: "Data loss requires an explicit archive step that's part of the migration plan. Drop-without-archive is forbidden unconditionally; the operator cannot waive this."
+      - id: require_rollback_plan
+        rule: require
+        triggers: [migration_plan_emission]
+        rationale: "Every migration plan ships with a parallel rollback plan. The audit chain records both so the operator can choose to roll back without the agent in the loop."
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - drop_table_without_archive
+      - apply_without_dry_run
+      - direct_registry_write_outside_migration
+    operator_duties:
+      - "Review every migration plan against the rollback plan before approving the apply step. The agent has done the FK-cascade math; you do the does-this-match-business-intent check."
+      - "Audit migration_pilot's dry-run history quarterly — a high false-positive rate (dry-runs that pass but applies that fail) means the dry-run setup drifted from production."
+      - "Never approve a migration apply if the rollback plan is empty. That's the system telling you it can't undo what's about to happen."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  release_gatekeeper:
+    # Pre-release gating. Guardian genre — inspection-only; emits a
+    # structured pass/fail decision into the audit chain. The release
+    # action (tag + push + publish) belongs to the operator; the gate
+    # is advisory and authoritative.
+    policies:
+      - id: forbid_release_action
+        rule: forbid
+        triggers: [tag_release, push_tag, publish_artifact, send_release_announcement]
+        rationale: "release_gatekeeper produces a pass/fail decision. The release ACT (tag + push + publish) belongs to the operator. This separation is what makes the gate trustworthy."
+      - id: require_conformance_evidence
+        rule: require
+        triggers: [emit_release_decision]
+        rationale: "Every pass decision must cite (a) the conformance-suite run id, (b) the drift-sentinel snapshot id, (c) the changelog completeness check id, (d) the signed-artifact verification id. A pass without all four citations is invalid."
+      - id: require_fail_explanation
+        rule: require
+        triggers: [emit_fail_decision]
+        rationale: "Fail decisions cite the specific check that failed + a one-paragraph explanation. 'Failed' alone is unactionable."
+      - id: forbid_check_skip
+        rule: forbid
+        triggers: [skip_conformance_check, override_drift_sentinel, ignore_changelog_gap]
+        rationale: "The operator can override a failed gate by tagging the release manually, but release_gatekeeper itself can never skip a check. The gate is what it is."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.80
+    out_of_scope:
+      - tag_release
+      - push_tag
+      - publish_artifact
+      - skip_conformance_check
+    operator_duties:
+      - "Treat a fail decision as authoritative. If you tag a release over a fail decision, document why in the commit message — the audit chain compares the two."
+      - "Audit release_gatekeeper's pass/fail ratio over time. Pure-pass agents are not gates; expect 5-15% fail rate on real releases."
+      - "Update the conformance suite when the gate flags drift the operator considers acceptable. The fix is to teach the gate, not to override it."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   verifier_loop:
     # ADR-0036 — Memory Contradiction Auditor. Guardian-genre agent
     # that scans target memory for contradictions and stamps the

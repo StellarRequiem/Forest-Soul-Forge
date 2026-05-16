@@ -157,6 +157,8 @@ genres:
       - code_reviewer            # SW track — coding swarm Reviewer
       - verifier_loop            # ADR-0036 — memory contradiction auditor
       - reality_anchor           # ADR-0063 — pre-action ground-truth verifier
+      - migration_pilot          # ADR-0077 (B331-B333) — D4 advanced rollout
+      - release_gatekeeper       # ADR-0077 (B331-B333) — D4 advanced rollout
 
   researcher:
     description: |
@@ -184,6 +186,7 @@ genres:
       - vendor_research
       - knowledge_consolidator
       - system_architect         # SW track — coding swarm Architect
+      - test_author              # ADR-0077 (B331-B333) — D4 advanced rollout
 
   companion:
     description: |

@@ -615,6 +615,42 @@ roles:
       emotional: 0.4
       embodiment: 0.4
 
+  # ---- ADR-0077 (B331-B333) D4 advanced rollout roles --------------------
+  # Three new agents that round out the SW-track triune:
+  #   - test_author        — researcher genre; tests-first discipline.
+  #   - migration_pilot    — guardian genre; dry-run + apply-gated migrations.
+  #   - release_gatekeeper — guardian genre; conformance + drift + signed-artifact.
+  # See docs/decisions/ADR-0077-d4-code-review-advanced-rollout.md.
+  test_author:
+    description: "Test-first discipline. Reads the spec / design, drafts probing test cases, writes failing assertions, hands back to software_engineer. Distinct from software_engineer by never touching the production code under test — only the tests/ tree. Genre: researcher. ADR-0077."
+    domain_weights:
+      security: 1.4
+      audit: 2.0
+      cognitive: 2.3
+      communication: 1.4
+      emotional: 0.4
+      embodiment: 1.2
+
+  migration_pilot:
+    description: "Schema and data migration owner. Analyzes FK cascades, dry-runs in a scratch SQLite, surfaces the migration plan + rollback plan, requires operator approval before applying to the registry. Distinct from software_engineer by NEVER applying migrations without explicit operator approval at the apply step. Genre: guardian. ADR-0077."
+    domain_weights:
+      security: 2.2
+      audit: 2.4
+      cognitive: 2.0
+      communication: 1.4
+      emotional: 0.4
+      embodiment: 0.9
+
+  release_gatekeeper:
+    description: "Pre-release gating. Runs the conformance suite + drift sentinel + changelog completeness check + signed-artifact reproducibility verification before a release tag. Read-only; emits a structured pass/fail decision into the audit chain. Owns the kernel/SoulUX boundary check from ADR-0044. Genre: guardian. ADR-0077."
+    domain_weights:
+      security: 2.2
+      audit: 2.6
+      cognitive: 1.7
+      communication: 1.8
+      emotional: 0.4
+      embodiment: 0.5
+
   domain_orchestrator:
     description: "ADR-0067 T5 Cross-Domain Orchestrator. Singleton-per-forest router that decomposes operator utterances (via decompose_intent.v1) and routes each sub-intent to the right domain swarm (via route_to_domain.v1 + the resolve_route() engine). Sits behind the Persistent Assistant Chat (ADR-0047) so the operator talks to one front door while the orchestrator dispatches across ten domains. Genre: companion. Kit: decompose_intent.v1 + route_to_domain.v1 + operator_profile_read.v1 + llm_think.v1 + delegate.v1 + verify_claim.v1."
     domain_weights:
