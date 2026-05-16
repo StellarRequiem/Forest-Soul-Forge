@@ -119,10 +119,18 @@ def test_test_author_in_researcher_genre(genre_engine):
 
 
 @pytest.mark.parametrize("role", ("migration_pilot", "release_gatekeeper"))
-def test_guardian_roles_in_guardian_genre(genre_engine, role):
+def test_actuator_roles_in_actuator_genre(genre_engine, role):
+    """B341 correction: migration_pilot and release_gatekeeper
+    were originally placed in guardian per ADR-0077's "advisory"
+    framing, but their actual kits need shell_exec (external)
+    which exceeds guardian's read_only ceiling. Genre = action
+    surface; the advisory invariant is enforced via constitutional
+    policies (forbid_release_action, require_human_approval_for_
+    apply), not by genre."""
     g = genre_engine.genre_for(role)
-    assert g is not None and g.name == "guardian", (
-        f"{role}: expected guardian; got {g.name if g else 'unclaimed'}"
+    assert g is not None and g.name == "actuator", (
+        f"{role}: expected actuator (B341 correction); got "
+        f"{g.name if g else 'unclaimed'}"
     )
 
 

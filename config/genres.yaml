@@ -128,6 +128,8 @@ genres:
       - alert_dispatcher
       - software_engineer        # SW track — coding swarm Engineer
       - experimenter             # ADR-0056 — Smith / sandbox self-improvement
+      - migration_pilot          # ADR-0077 / B341 — moved from guardian
+      - release_gatekeeper       # ADR-0077 / B341 — moved from guardian
 
   guardian:
     description: |
@@ -157,8 +159,13 @@ genres:
       - code_reviewer            # SW track — coding swarm Reviewer
       - verifier_loop            # ADR-0036 — memory contradiction auditor
       - reality_anchor           # ADR-0063 — pre-action ground-truth verifier
-      - migration_pilot          # ADR-0077 (B331-B333) — D4 advanced rollout
-      - release_gatekeeper       # ADR-0077 (B331-B333) — D4 advanced rollout
+      # NOTE — migration_pilot + release_gatekeeper were originally
+      # placed here in ADR-0077 with "advisory-only" framing, but
+      # their actual kits need shell_exec (external) which exceeds
+      # guardian's read_only ceiling. B341 corrected the placement
+      # to actuator. Genre = action surface; advisory stance is
+      # enforced via constitutional policies (forbid_release_action,
+      # require_human_approval_for_apply) not by genre.
 
   researcher:
     description: |

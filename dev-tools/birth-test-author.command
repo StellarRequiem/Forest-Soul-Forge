@@ -176,4 +176,6 @@ echo "  next steps:     birth-migration-pilot.command + birth-release-gatekeeper
 echo "=========================================================="
 echo
 echo "Press any key to close this window."
-read -n 1
+# `|| true` so EOF (e.g. invoked from the umbrella with
+# stdin redirected to /dev/null) doesn't trip set -e.
+read -n 1 || true

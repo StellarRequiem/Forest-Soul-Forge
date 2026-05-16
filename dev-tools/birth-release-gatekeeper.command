@@ -153,4 +153,4 @@ echo "test (commit-burst334)."
 echo "=========================================================="
 echo
 echo "Press any key to close this window."
-read -n 1
+read -n 1 || true  # EOF-tolerant for non-interactive callers
