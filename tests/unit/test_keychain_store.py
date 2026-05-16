@@ -54,12 +54,20 @@ def test_constructor_succeeds_on_darwin(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_valid_name_allowlist():
-    """The allowlist is alnum + _ - . — refuse anything else to
-    keep argv parsing predictable + side-step shell escaping."""
+    """The allowlist is alnum + _ - . : — refuse anything else to
+    keep argv parsing predictable + side-step shell escaping.
+
+    Colon allowed because agent_key_store (ADR-0049 T4) uses
+    ``forest_agent_key:<instance_id>`` as its secret-name format
+    — fix landed 2026-05-16 when the original colon-rejecting
+    rule blocked D4 advanced rollout agent birth end-to-end."""
     assert _valid_name("openai_key")
     assert _valid_name("github-pat")
     assert _valid_name("api.token.v2")
     assert _valid_name("a")
+    # Colon allowed for agent_key_store's namespacing convention.
+    assert _valid_name("forest_agent_key:test_author_52b54fee")
+    assert _valid_name("ns:name")
 
     assert not _valid_name("")
     assert not _valid_name("name with space")

@@ -51,6 +51,14 @@ daemon = [
     "uvicorn[standard]>=0.27",
     "pydantic>=2.5",
     "pydantic-settings>=2.1",
+    # ADR-0070 T2 (B287) — /voice/transcribe uses FastAPI Form(...)
+    # decorators which require python-multipart at module load time.
+    # Caught 2026-05-16 when force-restart-daemon rebuilt the venv
+    # and python-multipart wasn't installed (it had been present
+    # transitively before some other dep removed it). Promoting to
+    # an explicit hard dep so the daemon extras-set is self-
+    # contained.
+    "python-multipart>=0.0.20",
     "httpx>=0.26",
     # ADR-003X Phase C1 — per-agent encrypted secrets store. AES-256-GCM
     # via the standard `cryptography` package. ~3 MB wheel; only needed

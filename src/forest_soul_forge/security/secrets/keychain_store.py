@@ -234,10 +234,21 @@ class KeychainStore:
 def _valid_name(name: str) -> bool:
     """Reject names containing characters that confuse argv parsing
     or the keychain CLI. Allowed: ASCII letters, digits, underscore,
-    hyphen, dot."""
+    hyphen, dot, colon.
+
+    Colon is allowed because agent_key_store (ADR-0049 T4) uses
+    ``forest_agent_key:<instance_id>`` as its secret-name format —
+    the prefix-colon namespace delimiter is part of its contract.
+    macOS ``security add-generic-password`` accepts colons in the
+    -s (service) name without escaping; argv-quoting is unaffected
+    by colons either. Original validator was over-conservative;
+    caught during D4 birth attempt on 2026-05-16 when the keychain
+    backend rejected ``forest_agent_key:test_author_...`` and
+    blocked agent birth end-to-end.
+    """
     if not name:
         return False
     for ch in name:
-        if not (ch.isalnum() or ch in "_-."):
+        if not (ch.isalnum() or ch in "_-.:"):
             return False
     return True
