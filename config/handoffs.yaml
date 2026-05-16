@@ -51,6 +51,24 @@ default_skill_per_capability:
     capability: implementation
     skill_name: implement_feature
     skill_version: "1"
+  # ADR-0077 advanced rollout — three new capabilities. The skills
+  # themselves (propose_tests.v1 / safe_migration.v1 /
+  # release_check.v1) ship in T4 (B335-B337); these mappings define
+  # the routing target. The dispatcher discovers the missing skill
+  # at execute time and returns a clean "skill not found" error,
+  # which is what we want during the T2b → T4 window.
+  - domain: d4_code_review
+    capability: test_proposal
+    skill_name: propose_tests
+    skill_version: "1"
+  - domain: d4_code_review
+    capability: migration_safety
+    skill_name: safe_migration
+    skill_version: "1"
+  - domain: d4_code_review
+    capability: release_gating
+    skill_name: release_check
+    skill_version: "1"
 
   # D8 Compliance Auditor
   - domain: d8_compliance

@@ -28,6 +28,19 @@ entry_agents:
     capability: implementation
   - role: code_reviewer
     capability: review_signoff
+  # ADR-0077 (B332-B333) — advanced rollout agents. Roles defined
+  # in trait_tree.yaml + genres.yaml + constitution_templates.yaml;
+  # birth scripts at dev-tools/birth-{test-author,migration-pilot,
+  # release-gatekeeper}.command. Until those scripts run, the
+  # routing engine returns UNROUTABLE_NO_ALIVE_AGENT for these
+  # capabilities — the operator-visible signal that the rollout
+  # is mid-flight.
+  - role: test_author
+    capability: test_proposal
+  - role: migration_pilot
+    capability: migration_safety
+  - role: release_gatekeeper
+    capability: release_gating
 
 capabilities:
   - architectural_design
