@@ -1,0 +1,171 @@
+schema_version: 1
+name: release_check
+version: '1'
+description: |
+  release_gatekeeper's pre-release gating skill. Runs the
+  conformance suite + drift sentinel + chain integrity check +
+  changelog completeness check. Emits a structured pass/fail
+  decision with the required citations from ADR-0077's
+  require_conformance_evidence policy.
+
+  Five-step pipeline:
+    1. prior_context — memory_recall lineage-mode for prior
+       release decisions (what passed, what failed, why)
+    2. conformance — shell_exec runs the conformance test suite
+       (pytest tests/conformance/ — operator-defined boundary)
+    3. drift_sentinel — shell_exec runs `fsf check-drift` (the
+       repo's drift sentinel script catches schema/contract
+       drift)
+    4. chain_verify — audit_chain_verify.v1 confirms the chain
+       has no fork or signature gap as of the proposed release
+       tag's parent commit
+    5. decide — llm_think synthesizes the four evidence sources
+       into a structured PASS / FAIL / FAIL-WITH-OVERRIDE
+       verdict. require_fail_explanation policy means a FAIL
+       must cite the specific check that failed; require_
+       conformance_evidence means a PASS must cite all four
+       evidence ids.
+
+  release_gatekeeper is advisory-only. The release ACT (git tag,
+  push, publish) belongs to the operator regardless of this
+  skill's verdict. forbid_release_action constitutional policy
+  blocks the dangerous tools at the kit layer — this skill does
+  not call git/twine/curl.
+
+  ADR-0077 §3 release_gatekeeper. min_confidence_to_act = 0.80
+  per the constitution; below that, request more evidence rather
+  than emit a verdict.
+
+requires:
+  - memory_recall.v1
+  - shell_exec.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+
+inputs:
+  type: object
+  required: [release_tag, parent_commit_sha]
+  properties:
+    release_tag:
+      type: string
+      description: >
+        Proposed release tag. Example: "v0.7.0". The operator
+        WILL NOT have actually tagged it yet — this skill is the
+        pre-tag gate.
+    parent_commit_sha:
+      type: string
+      description: >
+        SHA of the commit the operator plans to tag. The chain-
+        verify step uses this as its terminal seq.
+    conformance_test_path:
+      type: string
+      description: >
+        Optional. Path to the conformance test directory.
+        Default "tests/conformance/" per ADR-0044 §"kernel API
+        conformance suite". Override for a partial-pack release.
+    changelog_path:
+      type: string
+      description: >
+        Optional. Path to CHANGELOG.md. Default "CHANGELOG.md".
+        The drift_sentinel step grep's this for an entry matching
+        the release_tag.
+
+steps:
+  - id: prior_context
+    tool: memory_recall.v1
+    args:
+      query: "release decision conformance drift"
+      mode: lineage
+      limit: 8
+
+  - id: conformance
+    tool: shell_exec.v1
+    args:
+      argv:
+        - "pytest"
+        - "${inputs.conformance_test_path}"
+        - "-q"
+        - "--tb=short"
+      timeout_s: 300
+
+  - id: drift_sentinel
+    tool: shell_exec.v1
+    args:
+      argv:
+        - "sh"
+        - "-c"
+        - "./dev-tools/check-drift.sh && grep -q '${inputs.release_tag}' ${inputs.changelog_path}"
+      timeout_s: 60
+
+  - id: chain_verify
+    tool: audit_chain_verify.v1
+    args: {}
+
+  - id: decide
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are release_gatekeeper. Synthesize the evidence below
+        into a release-readiness decision for tag
+        `${inputs.release_tag}` against parent
+        `${inputs.parent_commit_sha}`.
+
+        Evidence:
+
+        Conformance suite (pytest):
+          returncode: ${conformance.out.returncode}
+          stdout (truncated): ${conformance.out.stdout}
+          stderr: ${conformance.out.stderr}
+
+        Drift sentinel (check-drift + changelog grep):
+          returncode: ${drift_sentinel.out.returncode}
+          stdout: ${drift_sentinel.out.stdout}
+          stderr: ${drift_sentinel.out.stderr}
+
+        Audit chain verify:
+          ${chain_verify.out}
+
+        Prior release decisions (last 8 from lineage memory):
+        ${prior_context.out.entries}
+
+        Decision rules from ADR-0077 release_gatekeeper:
+          - PASS requires ALL of:
+              * conformance returncode == 0
+              * drift_sentinel returncode == 0
+              * chain_verify reports no_fork=true + no_signature_gap=true
+          - FAIL is the verdict when ANY of those failed. Cite
+            the specific failing check.
+          - require_conformance_evidence policy: a PASS verdict
+            MUST cite (a) conformance run, (b) drift snapshot,
+            (c) changelog completeness, (d) chain verify. List
+            them as a 4-item evidence block.
+          - require_fail_explanation policy: a FAIL verdict MUST
+            include a one-paragraph explanation of WHICH check
+            failed and WHY.
+          - min_confidence_to_act 0.80: if you can't reach 0.80
+            confidence (evidence ambiguous, conformance partial),
+            output `INSUFFICIENT-EVIDENCE` instead of GO/NO-GO
+            and request the operator gather more.
+
+        Output structure (in this order):
+          1. EVIDENCE block (4 lines on PASS, fewer on FAIL)
+          2. ANALYSIS paragraph (your reasoning)
+          3. Final verdict line, EXACTLY one of:
+             PASS
+             FAIL
+             INSUFFICIENT-EVIDENCE
+        The verdict line is the LAST line, no trailing prose.
+
+output:
+  release_tag: ${inputs.release_tag}
+  parent_commit_sha: ${inputs.parent_commit_sha}
+  conformance_returncode: ${conformance.out.returncode}
+  conformance_stdout: ${conformance.out.stdout}
+  drift_sentinel_returncode: ${drift_sentinel.out.returncode}
+  drift_sentinel_stdout: ${drift_sentinel.out.stdout}
+  chain_verify_result: ${chain_verify.out}
+  decision: ${decide.out.response}
+  # The operator reads `decision`, parses the final-line verdict,
+  # and DECIDES whether to tag. release_gatekeeper does not act;
+  # forbid_release_action policy + missing git/twine/curl in the
+  # kit make that physically impossible regardless of policy.

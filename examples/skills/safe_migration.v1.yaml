@@ -1,0 +1,195 @@
+schema_version: 1
+name: safe_migration
+version: '1'
+description: |
+  migration_pilot's analysis + dry-run skill. Produces the FK-
+  cascade plan + rollback plan, copies the registry to a scratch
+  SQLite, runs the proposed migration in scratch, and reports
+  integrity. The actual apply is a SEPARATE operator-driven step
+  (constitutional policy require_human_approval_for_apply gates
+  it; this skill never runs against the production registry).
+
+  Six-step pipeline:
+    1. prior_context — memory_recall lineage-mode for prior
+       migration patterns + recent FK-cascade analysis
+    2. analyze — llm_think reasons about the proposed
+       migration_sql against the current schema. Produces an
+       FK-cascade plan (tables touched, cascade order, blast
+       radius) + a parallel rollback plan (the SQL that undoes
+       the change). ADR-0077's require_rollback_plan policy
+       requires this — empty rollback plan = invalid migration.
+    3. clone_registry — shell_exec copies data/registry.sqlite
+       to /tmp/registry.dryrun.<timestamp>.sqlite. The scratch
+       file is operator-inspectable; it does NOT touch
+       production.
+    4. dry_run — shell_exec runs the proposed migration SQL
+       against the scratch file via `sqlite3 ... < ...`.
+    5. integrity_check — shell_exec runs PRAGMA integrity_check
+       on the scratch to confirm the schema didn't corrupt.
+    6. recommend — llm_think synthesizes the dry-run results +
+       the rollback plan into a go/no-go recommendation the
+       operator reads.
+
+  Output is what the operator reviews before they trigger the
+  actual apply. The apply path is intentionally NOT in this
+  skill — the operator runs `fsf migrate apply <migration.sql>`
+  (operator-only command) once they've reviewed the recommendation.
+
+requires:
+  - memory_recall.v1
+  - llm_think.v1
+  - shell_exec.v1
+
+inputs:
+  type: object
+  required: [migration_sql_path, migration_id]
+  properties:
+    migration_sql_path:
+      type: string
+      description: >
+        Absolute or repo-relative path to the .sql file containing
+        the proposed migration. The skill reads the file via
+        cat in the dry_run step.
+    migration_id:
+      type: string
+      description: >
+        Operator-readable id for this migration — used to name
+        the scratch file + tag the audit trail. Example:
+        "v23_add_personal_index_metadata". Pattern: snake_case,
+        starts with v<schema_version_target>.
+    context_query:
+      type: string
+      description: >
+        Optional. memory_recall query for prior migration patterns
+        (similar tables touched, prior cascade analysis). Default
+        is "migration FK cascade".
+
+steps:
+  - id: prior_context
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.context_query}
+      mode: lineage
+      limit: 10
+
+  - id: analyze
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are migration_pilot, the schema/data migration owner
+        in D4 Code Review. Analyze the migration SQL at
+        `${inputs.migration_sql_path}` (id: `${inputs.migration_id}`).
+
+        Cat the file content yourself if needed for context:
+        the actual SQL will be applied in a later step against
+        a scratch SQLite copy.
+
+        Prior context from memory:
+        ${prior_context.out.entries}
+
+        Produce TWO blocks of output, separated by the literal
+        delimiter `---ROLLBACK---`:
+
+        BLOCK 1 (FK-CASCADE PLAN):
+          - List every table touched in the order the SQLite
+            engine will process them.
+          - For each table, name the FK relationships that will
+            cascade (ON DELETE CASCADE, ON UPDATE CASCADE, etc.)
+            and the dependent tables that get touched.
+          - Identify any data loss (DROP TABLE, DROP COLUMN with
+            data, TRUNCATE). Forbid_silent_drop policy refuses
+            unconditional drops; flag them.
+          - Estimate blast radius (rows-affected order of
+            magnitude).
+
+        BLOCK 2 (ROLLBACK PLAN):
+          - SQL that undoes the change. If the migration drops
+            a column with data, the rollback CANNOT recover the
+            data; in that case, write `-- IRREVERSIBLE: <reason>`
+            on a comment line and explain.
+          - If the migration creates a new table, the rollback
+            is `DROP TABLE name;`.
+          - If the migration alters a column's type, the rollback
+            converts it back AND notes any data-truncation risk.
+
+        Do NOT include prose outside the two blocks. The operator
+        + later steps parse on the `---ROLLBACK---` delimiter.
+
+  - id: clone_registry
+    tool: shell_exec.v1
+    args:
+      argv:
+        - "sh"
+        - "-c"
+        - "cp data/registry.sqlite /tmp/registry.dryrun.${inputs.migration_id}.sqlite && echo /tmp/registry.dryrun.${inputs.migration_id}.sqlite"
+      timeout_s: 10
+
+  - id: dry_run
+    tool: shell_exec.v1
+    args:
+      argv:
+        - "sh"
+        - "-c"
+        - "sqlite3 /tmp/registry.dryrun.${inputs.migration_id}.sqlite < ${inputs.migration_sql_path}"
+      timeout_s: 60
+
+  - id: integrity_check
+    tool: shell_exec.v1
+    args:
+      argv:
+        - "sqlite3"
+        - "/tmp/registry.dryrun.${inputs.migration_id}.sqlite"
+        - "PRAGMA integrity_check;"
+      timeout_s: 30
+
+  - id: recommend
+    tool: llm_think.v1
+    args:
+      prompt: |
+        Synthesize the dry-run results into a go/no-go
+        recommendation the operator reads before they decide to
+        apply this migration to the production registry.
+
+        Migration: ${inputs.migration_id}
+        Source SQL: ${inputs.migration_sql_path}
+
+        FK + rollback analysis:
+        ${analyze.out.response}
+
+        Dry-run output (sqlite3 returncode + stdout + stderr):
+          returncode: ${dry_run.out.returncode}
+          stdout: ${dry_run.out.stdout}
+          stderr: ${dry_run.out.stderr}
+
+        Integrity check:
+          stdout: ${integrity_check.out.stdout}
+          (expected: literal "ok")
+
+        Output a single recommendation paragraph + a verdict
+        line. Verdict line MUST be EXACTLY one of:
+          GO          — migration safe to apply; rollback plan
+                        intact; integrity check passed.
+          NO-GO       — at least one block failed; do NOT apply.
+                        Cite the specific failure.
+          NEEDS-REVIEW — dry-run passed but the operator should
+                        eyeball something (e.g., blast radius
+                        > 10K rows, irreversible block flagged).
+
+        The verdict line is the LAST line of your output, no
+        trailing prose. Operator tooling parses on `^GO$` /
+        `^NO-GO$` / `^NEEDS-REVIEW$`.
+
+output:
+  migration_id: ${inputs.migration_id}
+  source_sql_path: ${inputs.migration_sql_path}
+  scratch_db_path: ${clone_registry.out.stdout}
+  fk_and_rollback_analysis: ${analyze.out.response}
+  dry_run_returncode: ${dry_run.out.returncode}
+  dry_run_stdout: ${dry_run.out.stdout}
+  dry_run_stderr: ${dry_run.out.stderr}
+  integrity_stdout: ${integrity_check.out.stdout}
+  recommendation: ${recommend.out.response}
+  # Operator reads recommendation, eyeballs the analysis +
+  # scratch DB, and IF the verdict is GO + their own review
+  # agrees, fires `fsf migrate apply` (operator-only command,
+  # not part of this skill).
