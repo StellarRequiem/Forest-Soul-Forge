@@ -2542,6 +2542,58 @@ archetypes:
       - delegate.v1
       - code_read.v1            # SW.A.5 — read diffs to review them
 
+  # ---- ADR-0077 (B331-B336) D4 advanced rollout per-role kits -----------
+  # Phase α closure caught that birthing a `test_author` agent landed
+  # only `timestamp_window.v1` in its kit — the researcher genre's
+  # default_kit_pattern is research-oriented (web_research +
+  # corpus_synthesis + citation_management) and test_author needs to
+  # actually write test files + run pytest. The per-role override is
+  # the idiomatic fix: a role with an entry here gets the explicit kit
+  # regardless of genre default. See ADR-0077 §"Tool kit" tables for
+  # the per-role rationale.
+  test_author:
+    # Researcher genre + tests-only kit. forbid_production_code_edit
+    # constitutional policy + code_edit's allowed_paths constraint
+    # (patched post-birth) together enforce the tests-only invariant.
+    standard_tools:
+      - llm_think.v1            # reason about edge cases
+      - memory_write.v1
+      - memory_recall.v1
+      - delegate.v1             # hand back to software_engineer
+      - code_read.v1            # read the spec + existing tests
+      - code_edit.v1            # write test files (allowed_paths=[tests/])
+      - shell_exec.v1           # pytest invocation (allowed_commands=[pytest, python3])
+      - web_fetch.v1            # framework docs (allowed_hosts patched at birth)
+      - pytest_run.v1           # canonical test runner if available
+
+  migration_pilot:
+    # Guardian genre + migration-owner kit. require_dry_run_before_apply
+    # + require_human_approval_for_apply constitutional policies are
+    # the load-bearing gates; the tool kit just provides the surface.
+    standard_tools:
+      - llm_think.v1            # FK-cascade reasoning
+      - memory_write.v1
+      - memory_recall.v1
+      - delegate.v1             # escalate to operator via approval queue
+      - code_read.v1            # read the registry schema + migration files
+      - code_edit.v1            # write migration files (allowed_paths patched)
+      - shell_exec.v1           # sqlite3 dry-run + pytest (allowed_commands patched)
+      - audit_chain_verify.v1   # post-apply chain integrity check
+
+  release_gatekeeper:
+    # Guardian genre + advisory-only kit. forbid_release_action policy
+    # blocks every release-acting tool at the kit layer regardless of
+    # posture. shell_exec is allowed but constrained to pytest + fsf.
+    standard_tools:
+      - llm_think.v1            # borderline-case judgment (min_confidence 0.80)
+      - memory_write.v1
+      - memory_recall.v1
+      - delegate.v1
+      - code_read.v1            # walk the changelog + diff stat
+      - audit_chain_verify.v1   # chain integrity for the release tag's parent
+      - shell_exec.v1           # pytest conformance suite + fsf drift sentinel
+      - pytest_run.v1           # canonical conformance runner
+
   # ---- ADR-0036 verification track --------------------------------------
   # Backfilled in Burst 126 after Phase A audit (2026-04-30) flagged the
   # missing archetype. verifier_loop was previously falling through to

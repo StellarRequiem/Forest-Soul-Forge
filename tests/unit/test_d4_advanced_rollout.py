@@ -238,3 +238,72 @@ def test_min_confidence_calibration(constitution_templates):
     assert thresholds["test_author"] == 0.55
     assert thresholds["migration_pilot"] == 0.70
     assert thresholds["release_gatekeeper"] == 0.80
+
+
+# ---------------------------------------------------------------------------
+# tool_catalog.yaml archetype kits (ADR-0077 T2.5 / B336)
+# ---------------------------------------------------------------------------
+# Without explicit archetype entries the three D4 roles would inherit
+# only the researcher / guardian genre's default_kit_pattern, which is
+# research-oriented and lacks code_edit / shell_exec. The first
+# TestAuthor-D4 birth (2026-05-16) demonstrated the problem — only
+# `timestamp_window.v1` landed in its constitution. B336 adds per-role
+# archetype bundles so future births get the correct purpose-built kit.
+
+
+@pytest.fixture(scope="module")
+def tool_catalog():
+    from forest_soul_forge.core.tool_catalog import load_catalog
+    return load_catalog(REPO_ROOT / "config" / "tool_catalog.yaml")
+
+
+@pytest.mark.parametrize("role", D4_ADVANCED_ROLES)
+def test_role_has_archetype_kit(tool_catalog, role):
+    """Each D4 advanced role must have an archetype entry so the
+    birth path's resolve_kit composes the explicit kit rather than
+    falling back to the genre default."""
+    assert role in tool_catalog.archetypes, (
+        f"role {role!r} missing from tool_catalog.yaml archetypes — "
+        f"birth will fall back to genre default kit"
+    )
+
+
+def _kit_names(tool_catalog, role):
+    return {ref.name for ref in tool_catalog.archetypes[role].standard_tools}
+
+
+def test_test_author_kit_includes_code_edit_and_shell_exec(tool_catalog):
+    """test_author MUST have code_edit (to write tests) + shell_exec
+    (to run pytest). Without these the role is non-functional."""
+    kit = _kit_names(tool_catalog, "test_author")
+    assert "code_edit" in kit
+    assert "shell_exec" in kit
+    assert "code_read" in kit  # read the spec
+    # Researcher genre's web_fetch is preserved for framework-docs lookup.
+    assert "web_fetch" in kit
+
+
+def test_migration_pilot_kit_includes_code_edit_and_shell_exec(tool_catalog):
+    """migration_pilot writes migration files + runs sqlite3 dry-run.
+    code_read for schema inspection, audit_chain_verify for post-apply."""
+    kit = _kit_names(tool_catalog, "migration_pilot")
+    assert "code_edit" in kit
+    assert "shell_exec" in kit
+    assert "code_read" in kit
+    assert "audit_chain_verify" in kit
+
+
+def test_release_gatekeeper_kit_is_read_only_plus_shell(tool_catalog):
+    """release_gatekeeper runs the conformance suite (shell_exec
+    restricted to pytest+fsf) + chain verify. It MUST NOT have
+    code_edit — the forbid_release_action policy is enforced at
+    constitutional layer, but the kit shouldn't even expose the
+    knife."""
+    kit = _kit_names(tool_catalog, "release_gatekeeper")
+    assert "shell_exec" in kit
+    assert "audit_chain_verify" in kit
+    assert "code_read" in kit
+    assert "code_edit" not in kit, (
+        "release_gatekeeper must not have code_edit — gate is "
+        "advisory-only; release acts belong to the operator"
+    )
