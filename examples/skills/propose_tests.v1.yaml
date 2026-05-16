@@ -1,0 +1,151 @@
+schema_version: 1
+name: propose_tests
+version: '1'
+description: |
+  Test-first discipline skill. test_author runs this against a
+  spec or design + writes a failing test file BEFORE
+  software_engineer implements. Three-step:
+
+    1. memory_recall — pull relevant prior context (spec
+       discussion, related test patterns) from lineage memory.
+    2. llm_think — analyze the spec + propose concrete test
+       cases. Output: a self-contained pytest module body that
+       imports the (not-yet-written) production module under
+       test and asserts the spec's claims. The test is EXPECTED
+       to fail at this stage — software_engineer's job is to
+       make it pass.
+    3. code_edit — write the proposed file to disk under
+       `tests/` (allowed_paths constraint enforces this).
+    4. shell_exec — run pytest against the new file. We EXPECT
+       a non-zero exit; the assertion is "tests are well-formed
+       enough to be collected + fail for the right reason"
+       rather than "tests pass." The output is fed back to
+       software_engineer as the contract.
+
+  ADR-0077 §1 (test_author kit). Closes the loop the operator
+  flagged when TestAuthor-D4 birthed with only timestamp_window
+  in its kit.
+
+requires:
+  - memory_recall.v1
+  - llm_think.v1
+  - code_edit.v1
+  - shell_exec.v1
+
+inputs:
+  type: object
+  required: [spec_summary, target_test_path, production_module_path]
+  properties:
+    spec_summary:
+      type: string
+      description: >
+        Natural-language summary of what the production code is
+        supposed to do. The operator writes this directly OR
+        software_engineer passes it through after decompose_intent
+        carved a 'test_proposal' subintent. Should mention the
+        public surface (functions / classes / endpoints) +
+        the invariants the spec asserts.
+    target_test_path:
+      type: string
+      description: >
+        Relative path under tests/ where the new failing test
+        file should be written. Example:
+        "tests/unit/test_new_widget.py". The code_edit
+        allowed_paths constraint blocks writes outside tests/.
+    production_module_path:
+      type: string
+      description: >
+        Import path of the production module the tests will
+        target. Example: "forest_soul_forge.core.new_widget".
+        Used to populate the test file's `import` statement.
+        software_engineer creates this module after the tests
+        land.
+    context_query:
+      type: string
+      description: >
+        Optional. memory_recall query string for prior context
+        (related ADR discussion, similar test patterns). Default
+        is the production_module_path so the recall pulls any
+        prior memory tagged with that module name.
+
+steps:
+  - id: prior_context
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.context_query}
+      mode: lineage
+      limit: 5
+
+  - id: draft
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are test_author, the test-first agent in D4 Code
+        Review. Draft a self-contained pytest module that tests
+        the spec below. The tests SHOULD fail right now because
+        the production module doesn't exist yet — that's the
+        whole point. They should fail for the right reason
+        (import error, NotImplementedError, missing return
+        value), not for syntax errors or test-side bugs.
+
+        Spec to test:
+        ${inputs.spec_summary}
+
+        Production module the tests will import (don't write
+        this; software_engineer does):
+          import path: ${inputs.production_module_path}
+
+        Prior context from memory (may be empty):
+        ${prior_context.out.entries}
+
+        Output rules:
+          - One pytest module body, ready to write to disk
+            verbatim.
+          - Start with the module docstring naming the spec.
+          - Import the production module at top-of-file. If the
+            spec is for a class, also import the class name.
+          - Each test function starts with `test_` and contains
+            at least one `assert`.
+          - 3-8 test functions total. Cover the happy path
+            first, then 1-2 edge cases (empty input, boundary
+            value, error-shape).
+          - Do NOT include a `pytest.skip(...)` anywhere — the
+            invariant is that the failing tests fail for the
+            right reason, not that they're skipped.
+          - Do NOT mock the module-under-test. The spec is
+            about what the real implementation should do.
+          - No prose / no markdown fences in your output.
+            Just the .py file content.
+
+  - id: write_test
+    tool: code_edit.v1
+    args:
+      path: ${inputs.target_test_path}
+      content: ${draft.out.response}
+      mode: write
+
+  - id: collect_and_run
+    tool: shell_exec.v1
+    args:
+      argv: ["pytest", "--collect-only", "-q", "${inputs.target_test_path}"]
+      timeout_s: 30
+
+  - id: confirm_failure
+    tool: shell_exec.v1
+    args:
+      argv: ["pytest", "-x", "-q", "${inputs.target_test_path}"]
+      timeout_s: 60
+
+output:
+  written_path: ${inputs.target_test_path}
+  production_module: ${inputs.production_module_path}
+  draft_content: ${draft.out.response}
+  collect_stdout: ${collect_and_run.out.stdout}
+  collect_returncode: ${collect_and_run.out.returncode}
+  pytest_stdout: ${confirm_failure.out.stdout}
+  pytest_returncode: ${confirm_failure.out.returncode}
+  # The contract: pytest_returncode SHOULD be non-zero (5 =
+  # collection_failed, 1 = test_failed, 2 = usage_error are all
+  # acceptable "test failed as expected" outcomes). software_
+  # engineer reads pytest_stdout to see what assertions to
+  # satisfy.
