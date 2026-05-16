@@ -101,4 +101,4 @@ echo "    test_proposal capability via decompose_intent →"
 echo "    routes to TestAuthor-D4 → propose_tests.v1 runs."
 echo
 echo "Press any key to close."
-read -n 1
+read -n 1 || true  # EOF-tolerant for non-interactive callers
