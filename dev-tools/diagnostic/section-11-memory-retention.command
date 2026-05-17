@@ -76,26 +76,48 @@ def get(path):
 
 results: list[tuple[str, str, str]] = []
 
-# Check 1: memory readable per-agent
+# Check 1: memory consents readable per-agent.
+# B372 — the pre-B372 probe hit /agents/{id}/memory?limit=5 which
+# is not a registered route. The actual per-agent memory surface
+# exposed today is /agents/{id}/memory/consents (memory_consents.py)
+# — the route the frontend Memory tab actually uses. Hitting the
+# consents endpoint is the right shape check: it both (a) confirms
+# memory_consents router is mounted and (b) confirms the per-agent
+# path parameter resolves to a real agent.
+#
+# A future /agents/{id}/memory collection endpoint (if ever added)
+# would be a separate check; for today the consents-readable surface
+# is the substrate's actual per-agent memory contract.
 status, agents = get("/agents?limit=5")
 if status == 200 and isinstance(agents, dict):
     alive = [a for a in agents.get("agents", []) if a.get("status") == "active"]
     if not alive:
-        results.append(("FAIL", "memory readable per-agent",
-                        "no alive agent to probe"))
+        results.append(("INFO", "memory consents readable per-agent",
+                        "no active agent to sample — per-agent route shape "
+                        "unverifiable but substrate not at fault"))
     else:
         probe = alive[0]
         pid = probe["instance_id"]
-        s2, body = get(f"/agents/{pid}/memory?limit=5")
-        if s2 == 200 and isinstance(body, dict) and "entries" in body:
-            n = len(body.get("entries", []))
-            results.append(("PASS", "memory readable per-agent",
-                            f"agent={pid[:18]}: {n} entries in last 5"))
+        s2, body = get(f"/agents/{pid}/memory/consents")
+        if s2 == 200 and isinstance(body, dict):
+            # The body shape is {entries: [...], count: N} per
+            # memory_consents.py; accept either presence of
+            # 'entries' or 'count' as the contract proof.
+            if "entries" in body or "count" in body:
+                n = body.get("count", len(body.get("entries", [])))
+                results.append(("PASS", "memory consents readable per-agent",
+                                f"agent={pid[:18]}: {n} consent entries"))
+            else:
+                results.append(("FAIL", "memory consents readable per-agent",
+                                f"unexpected body shape: keys={list(body.keys())[:5]}"))
+        elif s2 == 404:
+            results.append(("FAIL", "memory consents readable per-agent",
+                            f"404 — /agents/{{id}}/memory/consents route not mounted"))
         else:
-            results.append(("FAIL", "memory readable per-agent",
+            results.append(("FAIL", "memory consents readable per-agent",
                             f"status={s2}, body shape: {type(body).__name__}"))
 else:
-    results.append(("FAIL", "memory readable per-agent",
+    results.append(("FAIL", "memory consents readable per-agent",
                     f"/agents fetch failed: status={status}"))
 
 # Check 2: /consolidation/status

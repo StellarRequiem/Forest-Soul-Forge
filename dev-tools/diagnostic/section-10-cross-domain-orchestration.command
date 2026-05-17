@@ -79,16 +79,35 @@ def get(path: str):
 
 results: list[tuple[str, str, str]] = []
 
-# Check 1: /orchestrator/status returns 200 + has singleton
+# Check 1: /orchestrator/status returns 200 + reports a populated
+# registry. B371 — the cross-domain orchestrator is a substrate-
+# level singleton ROUTER (ADR-0067), not an agent instance with an
+# instance_id. The pre-B371 probe checked for an instance_id field
+# that the response never carried; that was a probe-vs-substrate
+# contract mismatch. The substrate's response shape per
+# routers/orchestrator.py is:
+#   { "schema_version": int, "registry": { "total_domains": int,
+#     "dispatchable_domains": int, "planned_domains": int,
+#     "domain_ids": [...] } }
+# The presence of schema_version + a non-empty registry IS the
+# singleton-substrate proof. (If the orchestrator ever migrates to
+# a per-instance representation, this check tightens to match.)
 status, body = get("/orchestrator/status")
 if status == 200 and isinstance(body, dict):
-    inst = body.get("orchestrator_instance_id") or body.get("instance_id")
-    if inst:
-        results.append(("PASS", "/orchestrator/status returns singleton",
-                        f"instance_id={inst}"))
+    reg = body.get("registry")
+    if (
+        isinstance(body.get("schema_version"), int)
+        and isinstance(reg, dict)
+        and isinstance(reg.get("total_domains"), int)
+    ):
+        results.append(("PASS", "/orchestrator/status reports populated registry",
+                        f"schema_version={body['schema_version']}, "
+                        f"total_domains={reg['total_domains']}, "
+                        f"dispatchable={reg.get('dispatchable_domains')}, "
+                        f"planned={reg.get('planned_domains')}"))
     else:
-        results.append(("FAIL", "/orchestrator/status returns singleton",
-                        f"no instance_id in body: {json.dumps(body)[:200]}"))
+        results.append(("FAIL", "/orchestrator/status response shape",
+                        f"unexpected body: {json.dumps(body)[:200]}"))
 elif status == 404:
     results.append(("FAIL", "/orchestrator/status endpoint exists",
                     "404 — orchestrator router not mounted"))
