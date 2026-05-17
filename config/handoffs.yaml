@@ -41,6 +41,16 @@ default_skill_per_capability:
     capability: incident_response
     skill_name: respond_to_incident
     skill_version: "1"
+  # ADR-0078 Phase A — forensic_archive maps to archive_evidence.v1.
+  # The skill itself ships in B346 (T4); this mapping declares intent
+  # so route_to_domain.v1 can resolve the (domain, capability) pair
+  # the moment the skill lands. Pre-skill-install dispatches return a
+  # clean "skill not found" error from the dispatcher, which is the
+  # operator-visible signal that the wiring is ahead of the artifact.
+  - domain: d3_local_soc
+    capability: forensic_archive
+    skill_name: archive_evidence
+    skill_version: "1"
 
   # D4 Code Review
   - domain: d4_code_review
@@ -103,3 +113,18 @@ cascade_rules:
     reason: |
       Every incident response triggers a compliance evidence
       capture — the SOC event becomes part of the audit packet.
+
+# ADR-0078 Phase A — NO new cascade rules from forensic_archive.
+# Deliberate. The ADR's Decision 4 named three cascades on the
+# D3 side (one pre-existing d3→d8, two pending Phase D for
+# anomaly_detection and detection_authoring). A
+# d3.incident_response → d3.forensic_archive cascade would be
+# attractive — "every incident response auto-preserves evidence" —
+# but it would also make the archivist's read_only attestation
+# fire on every SOC alert, inflating the audit chain with
+# attestations of artifacts that the operator may never consult.
+# Phase D (SOAR playbooks, ADR-0066) is the right home for that
+# cascade: a playbook step can decide WHICH incidents need
+# auto-archive based on severity + classification rather than
+# blanket-cascading every response. Until then, forensic_archive
+# is operator-triggered.
