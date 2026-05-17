@@ -65,7 +65,12 @@ from forest_soul_forge.tools.base import (
 
 
 _NAME = "operator_profile_write"
-_VERSION = "v1"
+# B353 fix: bare version string (registry composes ".v" prefix
+# itself via base.py:273 `f"{name}.v{version}"`). Pre-B353 this
+# was "v1" which produced operator_profile_write.vv1 in the
+# registry and surfaced as the tool_runtime startup_diagnostic
+# failure (registry/catalog mismatch).
+_VERSION = "1"
 
 
 # Field paths supported in T2. Each maps to the OperatorProfile

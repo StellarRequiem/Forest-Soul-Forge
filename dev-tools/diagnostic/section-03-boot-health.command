@@ -105,30 +105,65 @@ if startup is None:
     report_lines.append(f"- **[FAIL]** /healthz missing startup_diagnostics field")
     fail_n += 1
 else:
-    # startup_diagnostics is typically a dict {check_name: {status: ok|fail, ...}}
+    # startup_diagnostics may be a dict OR a list of dicts. The
+    # daemon currently returns a list of {component, status, ...}.
+    # B353 (post-first-real-run): treat 'ok' as pass, treat
+    # disabled/off/skipped as informational (operator opt-in
+    # defaults like FSF_ENABLE_PRIV_CLIENT=false), only count
+    # failed/error/degraded as bad. Without this filter every
+    # privacy-preserving default trips a fake FAIL and hides the
+    # actual signal.
+    INFO_STATUSES = {"disabled", "off", "skipped", "not_configured", "n/a"}
+    BAD_STATUSES = {"failed", "error", "degraded", "broken"}
     bad_checks = []
     ok_checks = []
-    iter_items = startup.items() if isinstance(startup, dict) else enumerate(startup)
-    for k, v in iter_items:
+    info_checks = []
+    if isinstance(startup, list):
+        items = [
+            (it.get("component", f"#{i}") if isinstance(it, dict) else str(i), it)
+            for i, it in enumerate(startup)
+        ]
+    else:
+        items = list(startup.items())
+    for k, v in items:
         if isinstance(v, dict):
             s = v.get("status", "unknown")
         else:
             s = str(v)
         if s == "ok":
             ok_checks.append(k)
+        elif s in INFO_STATUSES:
+            info_checks.append((k, s))
+        elif s in BAD_STATUSES:
+            err = v.get("error") if isinstance(v, dict) else ""
+            bad_checks.append((k, s, err))
         else:
-            bad_checks.append((k, s))
+            # Unknown status — treat as bad to surface drift in the
+            # status vocabulary itself.
+            bad_checks.append((k, s, ""))
     if bad_checks:
+        # Render bad checks with the error string for each — that's
+        # what the operator needs to actually act on.
+        detail = "; ".join(
+            f"{k}={s}" + (f" ({err[:80]})" if err else "")
+            for k, s, err in bad_checks[:5]
+        )
         report_lines.append(
-            f"- **[FAIL]** startup_diagnostics has {len(bad_checks)} non-ok entries: "
-            f"{bad_checks[:5]}"
+            f"- **[FAIL]** startup_diagnostics has {len(bad_checks)} bad entries: "
+            f"{detail}"
         )
         fail_n += 1
     else:
         report_lines.append(
-            f"- **[PASS]** startup_diagnostics all-green ({len(ok_checks)} checks)"
+            f"- **[PASS]** startup_diagnostics all-green "
+            f"({len(ok_checks)} ok, {len(info_checks)} informational opt-outs)"
         )
         pass_n += 1
+    if info_checks:
+        report_lines.append(
+            f"- **[INFO]** opt-in defaults intentionally off: "
+            f"{', '.join(f'{k}={s}' for k, s in info_checks)}"
+        )
 
 # check 4: daemon HEAD SHA vs local HEAD SHA (if daemon reports it)
 daemon_sha = None
