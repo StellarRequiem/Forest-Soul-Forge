@@ -68,6 +68,27 @@ genres = load_genres(REPO / "config" / "genres.yaml")
 tool_keys = {td.key for td in catalog.tools.values()}
 tool_side_effects = {td.key: td.side_effects for td in catalog.tools.values()}
 
+# Quarantine manifest (B369) — instance_id -> reason. Agents listed
+# here have known broken constitutions; the operator has acknowledged
+# them and is awaiting a decision (archive / repair / retire).
+# Parse failures for quarantined agents land as INFO not FAIL so
+# the daily summary doesn't churn on already-tracked state.
+QUARANTINE: dict[str, str] = {}
+import yaml as _yaml_for_quar
+_q_path = REPO / "config" / "agent_quarantine.yaml"
+if _q_path.exists():
+    try:
+        _q = _yaml_for_quar.safe_load(_q_path.read_text(encoding="utf-8")) or {}
+        for _e in (_q.get("entries") or []):
+            _iid = _e.get("instance_id")
+            if _iid:
+                QUARANTINE[_iid] = (_e.get("reason") or "").strip()
+    except Exception:
+        # A broken quarantine file shouldn't blow up the harness.
+        # The empty dict means "no quarantine" — strict checks apply
+        # to all agents as the fallback safe posture.
+        pass
+
 # Forged tools (ADR-0058) — install via the forge pipeline and live
 # at data/forge/tools/installed/<name>.v<ver>.yaml rather than the
 # static catalog. Section 05 must treat these as legitimate kit
@@ -131,7 +152,19 @@ for ag in agents:
     try:
         doc = yaml.safe_load(Path(const_path).read_text(encoding="utf-8"))
     except Exception as e:
-        results.append(("FAIL", name, f"constitution parse failed: {e}"))
+        # B369 — constitution parse failures land as INFO (not
+        # FAIL) for agents present in config/agent_quarantine.yaml.
+        # The operator's quarantine entry IS the paper trail; the
+        # harness shouldn't keep flagging it FAIL once the operator
+        # has acknowledged the broken state. Untracked parse
+        # failures still surface as FAIL.
+        q_reason = QUARANTINE.get(iid)
+        if q_reason:
+            short = q_reason.splitlines()[0] if q_reason else ""
+            results.append(("INFO", name,
+                            f"constitution parse failed (quarantined): {short}"))
+        else:
+            results.append(("FAIL", name, f"constitution parse failed: {e}"))
         continue
 
     # tools listed in constitution

@@ -1,0 +1,72 @@
+# Agent quarantine manifest.
+#
+# Lists agents in a "known-broken, awaiting operator decision"
+# state. Diagnostic harness section 05 reads this file; quarantined
+# agents have their constitution-parse failures reported as INFO
+# (with the operator-supplied reason) rather than FAIL. The intent
+# is to remove daily-summary noise for agents the operator already
+# knows about WITHOUT silently hiding them.
+#
+# Lifecycle:
+#   1. Operator notices a parse failure (or other constitution
+#      defect) in the diagnostic summary.
+#   2. Operator adds an entry here with the reason + intended
+#      resolution (archive / repair / retire). The entry is the
+#      paper trail.
+#   3. Once the operator acts (e.g. archives via /archive endpoint,
+#      or rebuilds the constitution via the proper birth pipeline),
+#      the entry is removed from this file.
+#
+# Schema:
+#   schema_version: 1
+#   entries:
+#     - instance_id: <agent instance_id from /agents>
+#       agent_name: <human label, for operator readability>
+#       constitution_path: <relative path>
+#       reason: <one-line summary>
+#       intended_resolution: archive | repair | retire | decision_pending
+#       observed: <ISO date>
+#
+# B369 — three agents born 2026-05-07 carry a manually-appended
+# free-text override block at the end of their constitution YAML.
+# The text isn't a YAML key:value pair so the file fails to parse.
+# constitution_hash for these agents is bound to their pre-append
+# content (assuming the append happened post-birth), so blindly
+# rewriting the YAML would change identity. Operator decision
+# needed: archive these zombie agents OR rebirth them via the
+# proper pipeline (which would mint new instance_ids and let the
+# audit trail show the lineage).
+
+schema_version: 1
+
+entries:
+  - instance_id: "system_architect_054edc592917"
+    agent_name: "Kraine"
+    constitution_path: "soul_generated/Kraine__system_architect_054edc592917.constitution.yaml"
+    reason: |
+      Constitution YAML has a stray free-text 'override' block at
+      EOF — 'you are the first version of a personal companion...'
+      — not wrapped in a YAML key, so the parser hits 'could not
+      find expected colon'. The text appears to be a manually-
+      appended operator note that was never properly schema-fitted.
+    intended_resolution: decision_pending
+    observed: "2026-05-17"
+
+  - instance_id: "knowledge_consolidator_9dd33078e7bd"
+    agent_name: "Victor"
+    constitution_path: "soul_generated/Victor__knowledge_consolidator_9dd33078e7bd.constitution.yaml"
+    reason: |
+      Same broken 'override' append pattern as Kraine (system
+      architect variant). Constitution YAML fails parse on the
+      manually-appended free-text line.
+    intended_resolution: decision_pending
+    observed: "2026-05-17"
+
+  - instance_id: "software_engineer_871a237714a1"
+    agent_name: "chaz"
+    constitution_path: "soul_generated/chaz__software_engineer_871a237714a1.constitution.yaml"
+    reason: |
+      Same broken 'override' append pattern. Constitution YAML
+      fails parse on the manually-appended free-text line.
+    intended_resolution: decision_pending
+    observed: "2026-05-17"
