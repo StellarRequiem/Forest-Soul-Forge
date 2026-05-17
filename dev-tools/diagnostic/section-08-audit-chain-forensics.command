@@ -64,6 +64,17 @@ sys.path.insert(0, str(REPO / "src"))
 results: list[tuple[str, str, str]] = []
 
 # ---- 1. chain verify ------------------------------------------------------
+# B364 — pre-B199 fork artifacts: audit_chain.py documents that
+# seqs 3728 / 3735-3738 / 3740 are canonical historical write-race
+# duplicates from before ADR-0050 B199 introduced the per-chain
+# mutex. The chain at those points has duplicate seqs (two entries
+# both claiming the same seq, both with the same prev_hash, one
+# orphaned because nothing references its hash). They are NOT
+# present-day corruption - they are tracked, named, and immutable
+# per the append-only invariant. The harness should distinguish
+# these from genuinely-new chain breaks.
+KNOWN_HISTORICAL_FORKS = {3728, 3735, 3736, 3737, 3738, 3740}
+
 try:
     from forest_soul_forge.core.audit_chain import AuditChain
     chain = AuditChain(Path(CHAIN_PATH))
@@ -74,10 +85,19 @@ try:
         results.append(("PASS", "audit_chain_verify end-to-end",
                         f"chain ok ({n} entries)"))
     else:
-        broken = getattr(res, "broken_at_seq", "?")
+        broken = getattr(res, "broken_at_seq", None)
         reason = getattr(res, "reason", "?")
-        results.append(("FAIL", "audit_chain_verify end-to-end",
-                        f"broken_at_seq={broken}, reason={reason}"))
+        if isinstance(broken, int) and broken in KNOWN_HISTORICAL_FORKS:
+            # Pre-B199 historical fork - documented in
+            # core/audit_chain.py ForkScanResult docstring. The
+            # break IS real but it predates the writer mutex fix
+            # and the chain is append-only, so it stays forever.
+            results.append(("INFO", "audit_chain_verify end-to-end",
+                            f"broken_at_seq={broken} is a documented pre-B199 fork "
+                            f"(ADR-0050); reason={reason}"))
+        else:
+            results.append(("FAIL", "audit_chain_verify end-to-end",
+                            f"broken_at_seq={broken}, reason={reason}"))
 except Exception as e:
     results.append(("FAIL", "audit_chain_verify end-to-end",
                     f"{type(e).__name__}: {e}"))
