@@ -1,0 +1,247 @@
+schema_version: 1
+name: archive_evidence
+version: '1'
+description: |
+  forensic_archivist's chain-of-custody attestation skill. Verifies
+  an artifact's integrity hash against the prior chain, confirms
+  the audit chain itself is intact, evaluates the transition for
+  red flags, and writes a custody attestation to memory.
+
+  Read-only end-to-end. The skill NEVER mutates the artifact bytes;
+  the apply path (physically moving the file between operator-
+  controlled directories) belongs to the operator. ADR-0078
+  Phase A's design invariant: the archivist verifies + attests;
+  the operator moves bytes. The four constitutional policies enforce
+  this at the governance layer (forbid_artifact_mutation,
+  require_chain_of_custody_log, forbid_silent_archive,
+  require_integrity_hash_verification); the skill structure enforces
+  it at the workflow layer (no code_edit, no shell_exec in
+  `requires`).
+
+  Five-step pipeline:
+    1. prior_context — memory_recall scope=private for any prior
+       chain-of-custody entries for this artifact_id. The chain is
+       per-artifact + append-only; gaps mean handoffs went un-logged
+       (operator-visible).
+    2. verify_artifact_integrity — file_integrity mode=snapshot on
+       artifact_path. Produces the current sha256 that the attestation
+       will record. Stamps the path's symlink-aware digest (the
+       catalog tool refuses to follow symlinks, so a planted link
+       can't trick the archivist into attesting against a decoy).
+    3. verify_chain_integrity — audit_chain_verify confirms the
+       daemon's audit chain itself is hash-linked end-to-end. A
+       broken chain invalidates ANY new attestation; the skill
+       halts in step 4 if this returns non-ok.
+    4. evaluate_transition — llm_think reasons about the transition.
+       Compares current_hash against the prior chain (mismatch =
+       tamper_suspected, halts). Compares transition_type against
+       the chain's prior state (e.g., retire after retire = invalid).
+       Emits either an ATTEST verdict (with the four-tuple to record)
+       or a HALT verdict (with the specific reason).
+    5. write_attestation — memory_write scope=private records the
+       chain-of-custody entry. ONLY runs if step 4 returned ATTEST.
+       If step 4 returned HALT, this step still runs to record the
+       halt itself (operator-visible signal that something needs
+       attention) — but the content marks it as a halt event, not
+       a transition attestation.
+
+  Output goes back to the operator (or the orchestrator that routed
+  the forensic_archive subintent). The custody log is queryable
+  per artifact_id via memory_recall.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - file_integrity.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+
+inputs:
+  type: object
+  required: [artifact_id, artifact_path, transition_type, attestor_reason]
+  properties:
+    artifact_id:
+      type: string
+      description: >
+        Operator-readable identifier for the artifact. Convention:
+        "<incident_id>_<artifact_kind>_<short>" — e.g.,
+        "INC-2026-001_memdump_apache". Used as the memory_recall
+        query AND the tag on the written attestation, so the per-
+        artifact chain is reconstructible by querying that exact
+        string.
+    artifact_path:
+      type: string
+      description: >
+        Absolute or repo-relative path to the artifact file or
+        directory. Must be under data/forensics/ (the per-tool
+        allowed_paths constraint patched at birth time enforces
+        this). Passed directly to file_integrity.
+    transition_type:
+      type: string
+      enum: [acquire, handoff, retire]
+      description: >
+        The custody transition being attested.
+          acquire — first entry into the chain. No prior_hash
+                    expected; the archivist stamps the initial
+                    hash and records the source.
+          handoff — custody changes hands. prior_hash MUST match
+                    the chain's most recent entry for this artifact;
+                    current_hash MUST match prior_hash (bytes don't
+                    change in a handoff — only custody does).
+          retire  — artifact leaves the chain. prior_hash MUST
+                    match; the entry records the retirement reason.
+    attestor_reason:
+      type: string
+      description: >
+        Operator-supplied reason for the transition. Audit-readable
+        prose; gets recorded verbatim in the attestation tags so
+        the chain has the WHY alongside the WHAT.
+    handoff_to:
+      type: string
+      description: >
+        Required when transition_type=handoff. The party receiving
+        custody (operator name, agent instance_id, or external
+        entity). The evaluate_transition step validates that this
+        field is present + non-empty when transition_type=handoff.
+    expected_prior_hash:
+      type: string
+      description: >
+        Optional. Operator-asserted prior hash. If present, the
+        evaluate_transition step verifies it matches what
+        prior_context returned (defense-in-depth against the
+        operator + the chain disagreeing about the prior state).
+
+steps:
+  - id: prior_context
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.artifact_id}
+      mode: private
+      limit: 20
+
+  - id: verify_artifact_integrity
+    tool: file_integrity.v1
+    args:
+      paths: ["${inputs.artifact_path}"]
+      mode: snapshot
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: evaluate_transition
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are forensic_archivist, the chain-of-custody guardian
+        in D3 Local SOC. Evaluate a custody transition and emit
+        an attestation verdict.
+
+        Transition being attested:
+          artifact_id:      ${inputs.artifact_id}
+          artifact_path:    ${inputs.artifact_path}
+          transition_type:  ${inputs.transition_type}
+          attestor_reason:  ${inputs.attestor_reason}
+          handoff_to:       ${inputs.handoff_to}
+          expected_prior:   ${inputs.expected_prior_hash}
+
+        Verified artifact integrity (file_integrity output):
+        ${verify_artifact_integrity.out.digests}
+
+        Audit chain integrity (audit_chain_verify output):
+          status: ${verify_chain_integrity.out.status}
+          broken_at: ${verify_chain_integrity.out.broken_at}
+          reason: ${verify_chain_integrity.out.reason}
+
+        Prior chain-of-custody entries for this artifact (most
+        recent first; may be empty for first-acquire):
+        ${prior_context.out.entries}
+
+        Apply these decision rules IN ORDER. Stop at the first
+        match and emit the corresponding verdict.
+
+        1. If audit chain status != "ok":
+             HALT — chain_broken: <reason>. Any new attestation
+             written against a broken chain is itself invalid; the
+             operator must repair the chain first.
+
+        2. If transition_type == "acquire" AND prior entries
+           exist for this artifact_id:
+             HALT — duplicate_acquire: artifact already in custody;
+             this would create a fork in the chain.
+
+        3. If transition_type IN {"handoff", "retire"} AND no
+           prior entries exist:
+             HALT — orphan_transition: no acquire entry on record;
+             cannot hand off or retire what was never acquired.
+
+        4. If transition_type == "handoff" AND
+           inputs.handoff_to is empty:
+             HALT — missing_handoff_target: handoff requires a
+             recipient party.
+
+        5. If transition_type IN {"handoff", "retire"} AND the
+           current artifact hash from verify_artifact_integrity
+           does NOT match the most recent prior chain entry's
+           recorded hash:
+             HALT — tamper_suspected: bytes changed between
+             prior attestation and now. Cite both hashes.
+
+        6. If inputs.expected_prior_hash is non-empty AND does
+           NOT match the chain's most recent prior hash:
+             HALT — operator_chain_disagreement: operator-asserted
+             prior hash does not match the chain.
+
+        7. Otherwise:
+             ATTEST — emit the attestation tuple. Format the
+             output as:
+                VERDICT: ATTEST
+                ARTIFACT_ID: ${inputs.artifact_id}
+                PRIOR_HASH: <hex or NONE if first acquire>
+                CURRENT_HASH: <hex from verify_artifact_integrity>
+                TRANSITION: ${inputs.transition_type}
+                ATTESTOR: ForensicArchivist-D3
+                REASON: ${inputs.attestor_reason}
+                HANDOFF_TO: <value or NONE>
+
+        For HALT verdicts, format as:
+                VERDICT: HALT
+                ARTIFACT_ID: ${inputs.artifact_id}
+                HALT_CODE: <one of: chain_broken, duplicate_acquire,
+                           orphan_transition, missing_handoff_target,
+                           tamper_suspected, operator_chain_disagreement>
+                DETAIL: <one-line explanation citing concrete values>
+
+        The last line of your output MUST be the VERDICT line and
+        the block MUST be parseable by simple regex. Do not include
+        prose outside the block.
+
+  - id: write_attestation
+    tool: memory_write.v1
+    args:
+      # Both ATTEST and HALT events are recorded — the chain captures
+      # WHY a transition was refused as well as WHEN one succeeded.
+      # That's the auditable surface the operator queries later.
+      content: ${evaluate_transition.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "chain_of_custody"
+        - "${inputs.artifact_id}"
+        - "transition:${inputs.transition_type}"
+        - "attestor:ForensicArchivist-D3"
+
+output:
+  artifact_id: ${inputs.artifact_id}
+  artifact_path: ${inputs.artifact_path}
+  transition_type: ${inputs.transition_type}
+  current_hash: ${verify_artifact_integrity.out.digests}
+  chain_status: ${verify_chain_integrity.out.status}
+  verdict_block: ${evaluate_transition.out.response}
+  attestation_entry_id: ${write_attestation.out.entry_id}
+  # Operator reads verdict_block to see ATTEST vs HALT; queries
+  # memory by artifact_id to walk the chain; queries the audit
+  # chain for the corresponding audit events (memory_write.v1
+  # emits a memory_written event that joins the attestation to
+  # the chain-of-custody intent).
