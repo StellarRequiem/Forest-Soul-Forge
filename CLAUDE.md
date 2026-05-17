@@ -58,6 +58,47 @@ extract a large file, check the trust-surface count:
 The §0 Hippocratic gate still applies — if the decomposition has
 no concrete governance harm to point to, leave in place.
 
+**§2 Dispatcher wiring discipline — B350 lesson:**
+
+Every subsystem the dispatcher claims to expose via `ToolContext`
+needs THREE things, or it's silently dead code on the HTTP path:
+
+1. **A typed field on `ToolContext`** in
+   `src/forest_soul_forge/tools/base.py`. Default `None`. Inline
+   comment explaining what the subsystem is and when the tool
+   should refuse cleanly vs. raise.
+2. **A population line in `dispatcher.py`** inside the
+   `ToolContext(...)` constructor call (~line 999). Pattern:
+   `subsystem_name=self.attr_holding_the_subsystem`.
+3. **A probe in `dev-tools/diagnostic/section-06-ctx-wiring.command`**
+   — one entry in the `SUBSYSTEMS` list that dispatches a tool
+   depending on the subsystem and asserts the response doesn't
+   contain a "not wired" error message.
+
+Missing any one of these = the tool that depends on the subsystem
+passes unit tests (test fixture constructs `ToolContext` by hand)
+but raises `ToolValidationError` on the HTTP path. Discovered
+2026-05-17: `audit_chain_verify.v1` had been dead since
+ADR-0033 Phase B1 because nobody had written the dispatcher wire
+line. Unit tests passed for years. The bug only surfaced when D3
+Phase A's `archive_evidence.v1` skill became the first real
+consumer in live verification.
+
+**§3 Bare version strings in tool registration — B353 lesson:**
+
+In `src/forest_soul_forge/tools/builtin/<tool>.py`, the
+`_VERSION` constant MUST be a bare numeric string like `"1"`,
+NOT a `v`-prefixed string like `"v1"`. The registry's key
+composer at `tools/base.py:_key` does `f"{name}.v{version}"` —
+passing `"v1"` produces `<tool>.vv1` in the registry while the
+catalog has `<tool>.v1`, and `tool_runtime` startup_diagnostics
+flags it as a registry/catalog mismatch.
+
+Every other builtin uses `_VERSION = "1"`. Mirror that exactly
+when adding a new builtin tool. The diagnostic harness section 04
+catches this drift automatically; if you see a tool_runtime
+warning after adding a new tool, this is the first thing to check.
+
 ## Verification discipline
 
 - After every code change: run the relevant test file
