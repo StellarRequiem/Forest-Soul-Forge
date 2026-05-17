@@ -2220,6 +2220,285 @@ tools:
     sandbox_eligible: false
     archetype_tags: [system_architect, software_engineer, code_reviewer, companion, researcher, investigator, guardian]
 
+  # ===========================================================
+  # B363 — six curated-prompt LLM tools that revive the dead-
+  # skill set flagged by section-02-skill-manifests. Each is a
+  # thin wrapper over provider.complete with a stable per-tool
+  # system prompt; same read_only side-effects posture as
+  # llm_think.v1 so Guardian-genre agents can call them without
+  # per-call human approval. Implementations share
+  # _prompt_template_base for consistent audit shape +
+  # max_tokens/task_kind/temperature handling.
+  #
+  # Why not just call llm_think with operator-supplied prompts:
+  # each curated tool's audit row records the INTENT (text_summarize
+  # was called) rather than 'llm_think with prompt = ...'. That
+  # gives the operator's audit-chain readback a typed surface
+  # instead of a wall of free-form prompts. Skills can also pin
+  # to a specific curated tool, so a workflow's behavior doesn't
+  # drift when an operator re-words their llm_think prompt.
+  # ===========================================================
+
+  text_summarize.v1:
+    name: text_summarize
+    version: "1"
+    description: |
+      Summarize a text blob to a target length and style. Wraps an
+      LLM call with a stable summarization system prompt. Output
+      is a draft summary; never modifies the source. Used by
+      agent_activity_digest, agent_introspect, commit_changelog,
+      memory_consolidate, morning_briefing, release_notes.
+    input_schema:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 16000
+          description: "The text blob to summarize."
+        target_words:
+          type: integer
+          minimum: 10
+          maximum: 1500
+          default: 150
+        style:
+          type: string
+          enum: [bullet_points, paragraph, tldr]
+          default: paragraph
+        focus:
+          type: string
+          description: "Optional emphasis hint - the summary will prioritize this angle."
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 8192
+          default: 600
+        task_kind:
+          type: string
+          enum: [classify, generate, safety_check, conversation, tool_use]
+          default: generate
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+    side_effects: read_only
+    sandbox_eligible: false
+    archetype_tags: [companion, researcher, system_architect, code_reviewer, investigator, guardian]
+
+  code_explain.v1:
+    name: code_explain
+    version: "1"
+    description: |
+      Explain what a code snippet does. Audience-tunable
+      (novice/peer/expert). Reading-only; never modifies the
+      code. Used by bug_report_polish + code_review_quick.
+    input_schema:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 16000
+        audience:
+          type: string
+          enum: [novice, peer, expert]
+          default: peer
+        language:
+          type: string
+          description: "Optional language hint when extension/contents are ambiguous."
+        focus:
+          type: string
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 8192
+          default: 800
+        task_kind:
+          type: string
+          enum: [classify, generate, safety_check, conversation, tool_use]
+          default: generate
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+    side_effects: read_only
+    sandbox_eligible: false
+    archetype_tags: [code_reviewer, software_engineer, system_architect, researcher]
+
+  email_draft.v1:
+    name: email_draft
+    version: "1"
+    description: |
+      Draft an email body from intent + audience + tone. Output is
+      a draft for operator review — tool NEVER sends the email
+      itself (no network side-effects). Used by bug_report_polish
+      + meeting_followup.
+    input_schema:
+      type: object
+      required: [intent]
+      properties:
+        intent:
+          type: string
+          minLength: 1
+          maxLength: 16000
+          description: "What the operator wants the email to convey."
+        recipient:
+          type: string
+          maxLength: 200
+        sender:
+          type: string
+          maxLength: 200
+        tone:
+          type: string
+          enum: [formal, friendly, direct, apologetic, neutral]
+          default: neutral
+        length:
+          type: string
+          enum: [short, medium, long]
+          default: medium
+        context:
+          type: string
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 8192
+          default: 700
+        task_kind:
+          type: string
+          enum: [classify, generate, safety_check, conversation, tool_use]
+          default: generate
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+    side_effects: read_only
+    sandbox_eligible: false
+    archetype_tags: [companion, researcher, code_reviewer]
+
+  commit_message.v1:
+    name: commit_message
+    version: "1"
+    description: |
+      Generate a commit message from a diff or change summary.
+      Output is text only — tool NEVER runs git commands. Used
+      by commit_changelog + release_notes.
+    input_schema:
+      type: object
+      required: [diff]
+      properties:
+        diff:
+          type: string
+          minLength: 1
+          maxLength: 16000
+          description: "The diff or change summary."
+        format:
+          type: string
+          enum: [conventional, imperative, plain]
+          default: conventional
+        scope:
+          type: string
+          maxLength: 100
+        ticket:
+          type: string
+          maxLength: 100
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 8192
+          default: 400
+        task_kind:
+          type: string
+          enum: [classify, generate, safety_check, conversation, tool_use]
+          default: generate
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+    side_effects: read_only
+    sandbox_eligible: false
+    archetype_tags: [software_engineer, system_architect, code_reviewer]
+
+  action_items_extract.v1:
+    name: action_items_extract
+    version: "1"
+    description: |
+      Extract ownable action items from a text blob (meeting
+      transcript, conversation log, document). Returns a
+      structured list. Used by meeting_followup.
+    input_schema:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 16000
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+        require_owner:
+          type: boolean
+          default: false
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 8192
+          default: 700
+        task_kind:
+          type: string
+          enum: [classify, generate, safety_check, conversation, tool_use]
+          default: classify
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+    side_effects: read_only
+    sandbox_eligible: false
+    archetype_tags: [companion, researcher, system_architect]
+
+  tone_shift.v1:
+    name: tone_shift
+    version: "1"
+    description: |
+      Rewrite a text blob in a different tone/register while
+      preserving meaning, facts, and numbers. Used by
+      release_notes to adapt a technical draft for a less-
+      technical audience.
+    input_schema:
+      type: object
+      required: [text, target_tone]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 16000
+        target_tone:
+          type: string
+          enum: [formal, casual, professional, friendly, direct, gentle, enthusiastic, neutral, executive_summary, marketing, technical]
+        preserve_structure:
+          type: boolean
+          default: true
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 8192
+          default: 800
+        task_kind:
+          type: string
+          enum: [classify, generate, safety_check, conversation, tool_use]
+          default: generate
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+    side_effects: read_only
+    sandbox_eligible: false
+    archetype_tags: [companion, code_reviewer, researcher]
+
   code_read.v1:
     name: code_read
     version: "1"

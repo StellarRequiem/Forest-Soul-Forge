@@ -65,6 +65,16 @@ from forest_soul_forge.tools.builtin.memory_verify import MemoryVerifyTool
 from forest_soul_forge.tools.builtin.code_edit import CodeEditTool
 from forest_soul_forge.tools.builtin.code_read import CodeReadTool
 from forest_soul_forge.tools.builtin.llm_think import LlmThinkTool
+# B363 - six curated LLM-wrapper tools that revive the dead-skill
+# set flagged by section-02-skill-manifests. Each is a thin wrapper
+# over provider.complete with a stable per-tool system prompt; same
+# read_only side-effects posture as llm_think.v1.
+from forest_soul_forge.tools.builtin.text_summarize import TextSummarizeTool
+from forest_soul_forge.tools.builtin.code_explain import CodeExplainTool
+from forest_soul_forge.tools.builtin.email_draft import EmailDraftTool
+from forest_soul_forge.tools.builtin.commit_message import CommitMessageTool
+from forest_soul_forge.tools.builtin.action_items_extract import ActionItemsExtractTool
+from forest_soul_forge.tools.builtin.tone_shift import ToneShiftTool
 from forest_soul_forge.tools.builtin.shell_exec import ShellExecTool
 from forest_soul_forge.tools.builtin.suggest_agent import SuggestAgentTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
@@ -127,6 +137,12 @@ __all__ = [
     "McpCallTool",
     "SuggestAgentTool",
     "LlmThinkTool",
+    "TextSummarizeTool",
+    "CodeExplainTool",
+    "EmailDraftTool",
+    "CommitMessageTool",
+    "ActionItemsExtractTool",
+    "ToneShiftTool",
     "CodeReadTool",
     "CodeEditTool",
     "ShellExecTool",
@@ -243,6 +259,18 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # (Reviewer) agents without per-call human approval. Honors the
     # T2.2b usage_cap_tokens task_cap (clips max_tokens down).
     registry.register(LlmThinkTool())
+    # B363 - six curated LLM-wrapper tools revive the dead-skill set
+    # flagged by section-02 (text_summarize was referenced by 5
+    # skills; commit_message by 2; etc.). Each is read_only and
+    # built on _prompt_template_base for consistent audit shape +
+    # max_tokens / task_kind / temperature handling. Subclasses
+    # override _validate_specific + _build_prompts only.
+    registry.register(TextSummarizeTool())
+    registry.register(CodeExplainTool())
+    registry.register(EmailDraftTool())
+    registry.register(CommitMessageTool())
+    registry.register(ActionItemsExtractTool())
+    registry.register(ToneShiftTool())
     # SW-track A.5 — code-side tools so the coding triune can DO work
     # on this repo, not just discuss it.
     #   code_read.v1   — read_only;  Architect+Engineer+Reviewer
