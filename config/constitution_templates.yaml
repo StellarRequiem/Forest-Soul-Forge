@@ -965,6 +965,45 @@ role_base:
     # to the operator rather than auto-routing to a bad guess.
     reality_anchor:
       enabled: true
+    # B362 — the four common-template blocks every constitution
+    # carries, added to satisfy section-01-static-config's
+    # "every template has required blocks" check. The orchestrator
+    # is a routing layer, so its thresholds + scope are conservative
+    # — high min_confidence (matches confidence_floor) so ambiguous
+    # decompositions surface to the operator, and a tight scope
+    # boundary (NEVER take direct action, NEVER recurse into self).
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.50
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      # The orchestrator is a router; every side-effect must
+      # happen downstream via a delegated agent. These are the
+      # capabilities the policies already forbid_direct_action +
+      # forbid_self_delegate enforce — listing them here gives the
+      # operator one place to see what the orchestrator MUST NOT do.
+      - filesystem_write
+      - network_post
+      - subprocess_spawn
+      - dispatch_external_side_effect
+      - self_invocation
+      - recursive_delegation
+    operator_duties:
+      - "Review ambiguous (sub-confidence_floor) decompositions
+         weekly — the orchestrator surfaces these instead of
+         guessing."
+      - "Audit one-step cascade rule: every domain_routed event
+         must pair with exactly one agent_delegated event
+         downstream, never a second domain_routed."
+      - "Verify constitution_hash matches the immutable template
+         hash on each daemon restart (boot diagnostic does this
+         automatically; operator confirms via section-03)."
+    drift_monitoring:
+      # The orchestrator is a singleton — its constitution is
+      # bound to its identity. Any deviation is a corruption signal.
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
 
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new role_base entries)
