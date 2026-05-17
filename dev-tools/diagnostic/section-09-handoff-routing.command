@@ -86,8 +86,23 @@ else:
                     f"{len(handoffs.default_skill_per_capability)} mappings"))
 
 # Check 2: every entry_agent role exists in trait_engine AND is claimed by a genre
+# B365 — planned domains are intentionally upstream of their rollout
+# arc (ADR-0067 dependency order: D4 -> D3 -> D8 -> D1 -> D2 -> D7 ->
+# D9 -> D10 -> D5 -> D6). Their entry_agents may reference roles
+# whose wiring lands when the arc begins. Strict checking would
+# force premature wiring; skip planned domains for this check and
+# rely on the planned-domain catalogue in section 01 for visibility.
 bad = []
+planned_deferred = []
 for did, doc in domains.items():
+    if (doc.get("status") or "").lower() == "planned":
+        unlanded = [
+            ea.get("role") for ea in (doc.get("entry_agents") or [])
+            if ea.get("role") and ea.get("role") not in trait_roles
+        ]
+        if unlanded:
+            planned_deferred.append(f"{did}: {sorted(set(unlanded))}")
+        continue
     for ea in doc.get("entry_agents") or []:
         role = ea.get("role")
         if role and role not in trait_roles:
@@ -99,8 +114,11 @@ if bad:
                     "; ".join(bad[:5])))
 else:
     n = sum(len(d.get("entry_agents") or []) for d in domains.values())
+    suffix = ""
+    if planned_deferred:
+        suffix = f"; deferred (planned domains): {'; '.join(planned_deferred)}"
     results.append(("PASS", "entry_agents reference real claimed roles",
-                    f"{n} entry_agents across {len(domains)} domains"))
+                    f"{n} entry_agents across {len(domains)} domains{suffix}"))
 
 # Check 3: cascade rules — both domains exist, target_capability is in target_domain
 bad = []

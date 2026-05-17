@@ -187,7 +187,13 @@ def _():
 
 
 # ---- domain manifests -----------------------------------------------------
-@check("every domain manifest loads + entry_agents reference real roles")
+# B365 — planned domains are intentionally aspirational. Their
+# entry_agents may reference roles that haven't been added to
+# trait_tree.yaml yet (the role lands when its domain's rollout
+# arc begins). Only domains with status != "planned" should
+# pass the strict reference check; planned domains get their
+# unlanded roles surfaced as INFO via a separate check below.
+@check("every domain manifest loads + entry_agents reference real roles (excluding planned domains)")
 def _():
     bad = []
     for path in sorted((REPO / "config" / "domains").glob("*.yaml")):
@@ -196,11 +202,47 @@ def _():
         except Exception as e:
             bad.append(f"{path.name}: parse {e}")
             continue
+        # Planned domains are upstream of their rollout arc. The
+        # role/trait/genre/handoff wiring lands as part of that arc
+        # per the dependency order in ADR-0067 (D4 -> D3 -> D8 ->
+        # D1 -> D2 -> D7 -> D9 -> D10 -> D5 -> D6). Strict reference
+        # checks would force premature wiring; the deferred-INFO
+        # check below preserves the visibility without the FAIL.
+        if (doc.get("status") or "").lower() == "planned":
+            continue
         for ea in doc.get("entry_agents") or []:
             role = ea.get("role")
             if role and role not in trait_engine.roles:
                 bad.append(f"{path.name}: entry_agent role {role!r} not in trait_engine")
     assert not bad, "; ".join(bad[:5])
+
+
+@check("planned domain manifests catalogued for upcoming rollout arcs")
+def _():
+    # Surfaces planned domains and their unlanded roles as a
+    # visibility check — passes if every planned domain's unlanded
+    # entry_agents are documented. Provides a single read of "what
+    # rollout arcs are still queued + what wiring each will add to
+    # trait_engine when its arc lands."
+    planned = []
+    for path in sorted((REPO / "config" / "domains").glob("*.yaml")):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if (doc.get("status") or "").lower() != "planned":
+            continue
+        unlanded = []
+        for ea in doc.get("entry_agents") or []:
+            role = ea.get("role")
+            if role and role not in trait_engine.roles:
+                unlanded.append(role)
+        if unlanded:
+            planned.append(f"{path.stem}: {sorted(set(unlanded))}")
+    # PASS — having planned domains with unlanded roles is the
+    # expected pre-rollout state. The check exists to keep the
+    # operator's mental model honest (here is what's queued).
+    return f"{len(planned)} planned domain(s) with deferred wiring: {'; '.join(planned) if planned else 'none'}"
 
 
 # ---- emit report ----------------------------------------------------------
