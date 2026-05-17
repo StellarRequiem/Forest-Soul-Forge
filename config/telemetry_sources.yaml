@@ -1,0 +1,39 @@
+# ADR-0064 T2 — Telemetry source allowlist.
+#
+# Operator's load-bearing list of which telemetry sources can ingest.
+# Engineer-edited via PR; code-reviewed before merge. The
+# AdapterIngestor refuses to start any adapter whose source isn't
+# listed here, even if the operator manually instantiated the class.
+#
+# Schema:
+#   sources:
+#     - name: <SOURCE identifier; must match Adapter.SOURCE class attr>
+#       adapter_class: <module:ClassName import path>
+#       enabled: true|false
+#       config: <kwargs passed to the adapter's __init__>
+#
+# To add a source:
+#   1. Implement the Adapter subclass under
+#      src/forest_soul_forge/security/telemetry/adapters/<name>.py
+#   2. Add an entry here with enabled: false
+#   3. Operator review + flip to enabled: true via PR
+#   4. Daemon restart picks it up
+#
+# To disable a source temporarily:
+#   Flip enabled: true → false + daemon restart. The data already
+#   ingested stays in the store (retention sweep handles it).
+
+schema_version: 1
+
+sources:
+  # ADR-0064 T2 reference adapter — macOS unified log stream.
+  # Starts disabled. Operator enables explicitly after reading the
+  # default predicate + confirming the scope is what they want.
+  - name: macos_unified_log
+    adapter_class: forest_soul_forge.security.telemetry.adapters.macos_unified_log:MacosUnifiedLogAdapter
+    enabled: false
+    config:
+      # Default predicate covers auth + xprotect + any Error/Fault.
+      # Override to widen (e.g., add networking subsystems) or narrow
+      # (e.g., just the auth subsystem for a focused investigation).
+      predicate: 'subsystem == "com.apple.securityd" OR subsystem == "com.apple.authd" OR subsystem == "com.apple.xprotect" OR (messageType == "Error" OR messageType == "Fault")'
