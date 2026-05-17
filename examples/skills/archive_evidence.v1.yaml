@@ -98,18 +98,26 @@ inputs:
         the chain has the WHY alongside the WHAT.
     handoff_to:
       type: string
+      default: ""
       description: >
         Required when transition_type=handoff. The party receiving
         custody (operator name, agent instance_id, or external
         entity). The evaluate_transition step validates that this
         field is present + non-empty when transition_type=handoff.
+        Defaults to "" so the prompt resolver does not raise on the
+        acquire path (where the field is absent by definition); the
+        rule-6 HALT in evaluate_transition handles the missing-target
+        case explicitly when transition_type=handoff.
     expected_prior_hash:
       type: string
+      default: ""
       description: >
         Optional. Operator-asserted prior hash. If present, the
         evaluate_transition step verifies it matches what
         prior_context returned (defense-in-depth against the
         operator + the chain disagreeing about the prior state).
+        Defaults to "" so the prompt resolver does not raise when
+        the operator does not provide one.
 
 steps:
   - id: prior_context
