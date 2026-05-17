@@ -4,6 +4,15 @@
 // + learned rules (active/pending/refused) + hardcoded handoffs.
 //
 // Closes ADR-0072 5/5 and Phase α at 10/10.
+//
+// B361 — daemon-bound calls now route through api.js (api.get).
+// Previously used raw `fetch("/provenance/...")` which hit the
+// static frontend server on port 5173 instead of the daemon on
+// 7423; the Provenance tab was dead in the standard dev
+// configuration. Routing through api.js inherits API_BASE
+// resolution + X-FSF-Token auth.
+
+import { api, ApiError } from "./api.js";
 
 let _initialized = false;
 
@@ -196,33 +205,27 @@ async function _refreshAll() {
     "prov-handoffs":    document.getElementById("prov-handoffs"),
   };
   try {
-    const res = await fetch("/provenance/active");
-    if (!res.ok) {
-      for (const el of Object.values(errBoxes)) {
-        if (el) el.innerHTML = `<span class="muted">HTTP ${res.status}</span>`;
-      }
-      return;
-    }
-    const data = await res.json();
+    const data = await api.get("/provenance/active");
     _renderPrecedence(data.precedence || []);
     _renderPreferences(data.preferences || []);
     _renderRules(data.learned_rules || {});
   } catch (e) {
+    const msg = (e instanceof ApiError)
+      ? `HTTP ${e.status}`
+      : `error: ${_escape(e.message || e)}`;
     for (const el of Object.values(errBoxes)) {
-      if (el) el.innerHTML = `<span class="muted">error: ${_escape(e.message || e)}</span>`;
+      if (el) el.innerHTML = `<span class="muted">${msg}</span>`;
     }
   }
   try {
-    const hres = await fetch("/provenance/handoffs");
-    if (hres.ok) {
-      _renderHandoffs(await hres.json());
-    } else {
-      const el = document.getElementById("prov-handoffs");
-      if (el) el.innerHTML = `<span class="muted">HTTP ${hres.status}</span>`;
-    }
+    const handoffs = await api.get("/provenance/handoffs");
+    _renderHandoffs(handoffs);
   } catch (e) {
     const el = document.getElementById("prov-handoffs");
-    if (el) el.innerHTML = `<span class="muted">handoffs error: ${_escape(e.message || e)}</span>`;
+    const msg = (e instanceof ApiError)
+      ? `HTTP ${e.status}`
+      : `handoffs error: ${_escape(e.message || e)}`;
+    if (el) el.innerHTML = `<span class="muted">${msg}</span>`;
   }
 }
 

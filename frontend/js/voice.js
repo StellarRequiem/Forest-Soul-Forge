@@ -11,6 +11,15 @@
 // /voice/transcribe is happy to ingest. Skip the encoding dance.
 //
 // Wake-word and continuous streaming modes land in T4 (B327).
+//
+// B361 — all daemon-bound calls go through api.js (api.get for
+// status, multipart for file uploads). Previously this module used
+// raw `fetch("/voice/...")` which hit the static frontend server on
+// port 5173 instead of the daemon on 7423; the Voice tab was dead
+// in the standard dev configuration. Routing through api.js
+// inherits API_BASE resolution + X-FSF-Token auth.
+
+import { api, multipart, ApiError } from "./api.js";
 
 const VOICE_STATE_IDLE = "idle";
 const VOICE_STATE_RECORDING = "recording";
@@ -118,18 +127,16 @@ async function _onStop() {
   const ext = type.includes("webm") ? "webm" : type.includes("wav") ? "wav" : "audio";
   fd.append("audio", blob, `ptt-${Date.now()}.${ext}`);
   try {
-    const res = await fetch("/voice/transcribe", { method: "POST", body: fd });
-    if (!res.ok) {
-      _setState(VOICE_STATE_ERROR, `HTTP ${res.status}`);
-      const body = await res.text().catch(() => "");
-      console.warn("voice/transcribe failed:", body);
-      return;
-    }
-    const transcript = await res.json();
+    const transcript = await multipart("/voice/transcribe", fd);
     _renderTranscript(transcript);
     _setState(VOICE_STATE_IDLE);
   } catch (e) {
-    _setState(VOICE_STATE_ERROR, e.message || String(e));
+    if (e instanceof ApiError) {
+      _setState(VOICE_STATE_ERROR, `HTTP ${e.status}`);
+      console.warn("voice/transcribe failed:", e.body);
+    } else {
+      _setState(VOICE_STATE_ERROR, e.message || String(e));
+    }
   }
 }
 
@@ -138,12 +145,7 @@ async function _refreshStatus() {
   if (!el) return;
   el.textContent = "loading backend status…";
   try {
-    const res = await fetch("/voice/status");
-    if (!res.ok) {
-      el.innerHTML = `<span class="muted">backend status unavailable (HTTP ${res.status})</span>`;
-      return;
-    }
-    const data = await res.json();
+    const data = await api.get("/voice/status");
     const asr = data.asr || {};
     const tts = data.tts || {};
     const act = data.activity_24h || {};
@@ -159,7 +161,11 @@ async function _refreshStatus() {
       `${act.synthesized || 0} synthesized, ` +
       `${act.failed || 0} failed</div>`;
   } catch (e) {
-    el.innerHTML = `<span class="muted">backend status error: ${_escape(e.message || e)}</span>`;
+    if (e instanceof ApiError) {
+      el.innerHTML = `<span class="muted">backend status unavailable (HTTP ${e.status})</span>`;
+    } else {
+      el.innerHTML = `<span class="muted">backend status error: ${_escape(e.message || e)}</span>`;
+    }
   }
 }
 
@@ -174,17 +180,17 @@ async function _speak() {
   try {
     const fd = new FormData();
     fd.append("text", text);
-    const res = await fetch("/voice/synthesize", { method: "POST", body: fd });
-    if (!res.ok) {
-      console.warn("voice/synthesize failed:", res.status);
-      return;
-    }
+    const res = await multipart("/voice/synthesize", fd, { expectBinary: true });
     const blob = await res.blob();
     audio.src = URL.createObjectURL(blob);
     audio.style.display = "block";
     audio.play().catch(() => {});
   } catch (e) {
-    console.warn("speak failed:", e);
+    if (e instanceof ApiError) {
+      console.warn("voice/synthesize failed:", e.status, e.body);
+    } else {
+      console.warn("speak failed:", e);
+    }
   } finally {
     if (btn) btn.disabled = false;
   }

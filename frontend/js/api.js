@@ -136,6 +136,75 @@ export const api = {
 };
 
 /**
+ * Send a multipart/form-data request. Use this for file uploads
+ * (voice transcribe/synthesize) where the body cannot be JSON.
+ *
+ * B361 — voice.js + provenance.js previously called raw `fetch()`
+ * without API_BASE, which 404'd against the static frontend server
+ * on port 5173. This helper threads through the same API_BASE +
+ * token plumbing every other write uses, so voice + provenance
+ * land on the daemon regardless of how the frontend is served.
+ *
+ * Returns the parsed response. For non-2xx, throws ApiError with
+ * the parsed body in `.detail`.
+ *
+ * Use `expectBinary: true` when the daemon returns audio/binary
+ * payload (voice/synthesize). The returned value is then the raw
+ * Response object so the caller can read it as a blob.
+ */
+export async function multipart(path, formData, { method = "POST", expectBinary = false } = {}) {
+  const url = API_BASE + (path.startsWith("/") ? path : "/" + path);
+  const token = getToken();
+  const headers = {};
+  if (token) headers["X-FSF-Token"] = token;
+  // Note: we deliberately don't set Content-Type — the browser sets
+  // multipart/form-data with the right boundary when we pass FormData.
+
+  let resp;
+  try {
+    resp = await fetch(url, { method, headers, body: formData });
+  } catch (netErr) {
+    throw new ApiError("network error: " + netErr.message, {
+      status: 0,
+      detail: { detail: netErr.message },
+      body: null,
+      url,
+    });
+  }
+
+  if (!resp.ok) {
+    const raw = await resp.text();
+    let parsed = null;
+    if (raw) {
+      try { parsed = JSON.parse(raw); } catch { /* non-JSON body */ }
+    }
+    const detailStr =
+      (parsed && typeof parsed.detail === "string" && parsed.detail) ||
+      (parsed && parsed.detail && JSON.stringify(parsed.detail)) ||
+      resp.statusText ||
+      "request failed";
+    throw new ApiError(`${resp.status} ${detailStr}`, {
+      status: resp.status,
+      detail: parsed,
+      body: raw,
+      url,
+    });
+  }
+
+  if (expectBinary) {
+    // Caller will .blob() / .arrayBuffer() it themselves.
+    return resp;
+  }
+  const raw = await resp.text();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/**
  * A concrete "write" helper that bakes in:
  *   - idempotency key generation
  *   - 401 -> prompt for token (once, via the callback)
