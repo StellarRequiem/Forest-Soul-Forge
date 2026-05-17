@@ -59,6 +59,14 @@ mkdir -p "$TARGET_DIR" "$ARTIFACT_ROOT" "$HERE/data/forge/skills/installed"
 : > "$AUDIT_TAIL"
 
 # ---- helpers --------------------------------------------------------------
+# IMPORTANT: $(auth_header) word-splits in bash and mangles the header.
+# `echo "-H X-FSF-Token: $TOKEN"` returns a single string that bash then
+# splits into 3 tokens (-H, X-FSF-Token:, <token>); curl sees the header
+# value as empty and the token as a positional arg (interpreted as URL).
+# The daemon then rejects with "missing or invalid X-FSF-Token".
+# The fix: inline `-H "X-FSF-Token: $TOKEN"` everywhere a curl POST runs.
+# We keep auth_header() defined for backward compat with the GET preflight
+# loop above; the writes inline the header by hand.
 auth_header() { [[ -n "$TOKEN" ]] && echo "-H X-FSF-Token: $TOKEN" || echo ""; }
 log()     { local msg="$1"; printf "[%s] %s\n" "$(date -u +%H:%M:%S)" "$msg" | tee -a "$RUN_LOG"; }
 section() { printf "\n=========== %s ===========\n" "$1" | tee -a "$RUN_LOG"; }
@@ -134,7 +142,8 @@ else
 fi
 cp "$SKILL_SRC" "$SKILL_DST" || die "cp failed"
 
-reload_resp=$(curl -s --max-time 10 -X POST "$DAEMON/skills/reload" $(auth_header) 2>&1)
+reload_resp=$(curl -s --max-time 10 -X POST "$DAEMON/skills/reload" \
+  -H "X-FSF-Token: $TOKEN" 2>&1)
 log "  reload response: $(echo "$reload_resp" | head -c 200)"
 
 # Verify the skill is now in the catalog.
@@ -192,7 +201,8 @@ log "  POST $DAEMON/agents/$ARCHIVIST_ID/skills/run"
 # Drop -f so the body surfaces on 4xx/5xx.
 dispatch_resp=$(curl -s --max-time 120 -X POST \
   "$DAEMON/agents/$ARCHIVIST_ID/skills/run" \
-  -H "Content-Type: application/json" $(auth_header) \
+  -H "Content-Type: application/json" \
+  -H "X-FSF-Token: $TOKEN" \
   -d "$payload" 2>&1)
 echo "$dispatch_resp" > "$DISPATCH_RESP"
 log "  response saved → $DISPATCH_RESP"

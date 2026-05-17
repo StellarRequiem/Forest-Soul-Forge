@@ -1010,6 +1010,15 @@ class ToolDispatcher:
             agent_registry=self.agent_registry,
             procedural_shortcuts=self.procedural_shortcuts_table,
             personal_index=self.personal_index,
+            # B350 — surface the dispatcher's bound AuditChain so
+            # audit_chain_verify.v1 (and future chain-walking tools)
+            # can resolve the chain via ctx.audit_chain. Mirror the
+            # pattern used by memory / delegate / agent_registry —
+            # every other dispatcher-owned subsystem is exposed as a
+            # typed field, not a constraints dict key. Before B350
+            # this tool was effectively dead code on the HTTP path
+            # (only test fixtures populated constraints["audit_chain"]).
+            audit_chain=self.audit,
         )
         # ADR-0051 T4 (B264): route through the sandbox-aware execution
         # helper. When FSF_TOOL_SANDBOX=off (default) this is bit-

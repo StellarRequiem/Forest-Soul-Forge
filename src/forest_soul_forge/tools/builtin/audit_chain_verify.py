@@ -125,21 +125,32 @@ class AuditChainVerifyTool:
 def _resolve_chain(ctx: ToolContext):
     """Pull the AuditChain instance from ctx. Two paths:
 
-    * ``ctx.constraints['audit_chain']`` — test fallback (in-memory
-      chain constructed by the test fixture)
-    * (future) ``ctx.audit_chain`` — daemon-wired field
+    * ``ctx.audit_chain`` — daemon-wired typed field (B350). The
+      dispatcher populates this from its own ``self.audit``
+      reference for every dispatched tool call. Preferred path.
+    * ``ctx.constraints['audit_chain']`` — test fallback. The
+      existing test_b1_tools.py fixture and other unit tests
+      construct ToolContext directly with this key set; preserving
+      it keeps those tests green without rewrites.
 
-    Refuses cleanly when neither is set so the dispatcher returns
-    a 4xx rather than crashing on AttributeError.
+    Order matters: typed field wins because the daemon always
+    populates it, while constraints["audit_chain"] only exists in
+    tests. Were a test to set both, the typed field is the truth.
+
+    Refuses cleanly when neither is set so the dispatcher returns a
+    4xx rather than crashing on AttributeError. The error message
+    explicitly references B350 so future-us debugging a regression
+    knows where to start.
     """
-    chain = (ctx.constraints or {}).get("audit_chain")
+    chain = getattr(ctx, "audit_chain", None)
     if chain is not None:
         return chain
-    chain = getattr(ctx, "audit_chain", None)
+    chain = (ctx.constraints or {}).get("audit_chain")
     if chain is not None:
         return chain
     raise ToolValidationError(
         "audit_chain_verify.v1: no AuditChain bound to ctx (daemon "
-        "wiring missing). The daemon must populate the chain ref "
-        "before dispatching."
+        "wiring missing). The dispatcher should set ctx.audit_chain "
+        "from its own self.audit reference (see B350); tests can pass "
+        "via constraints['audit_chain']."
     )

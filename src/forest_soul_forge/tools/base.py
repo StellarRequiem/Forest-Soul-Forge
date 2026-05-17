@@ -122,6 +122,18 @@ class ToolContext:
     # Genre-gated at the tool layer (only companion / assistant /
     # operator_steward / domain_orchestrator may read).
     personal_index: Any = None
+    # B350 — bound AuditChain instance for audit_chain_verify.v1 (and
+    # any future tool that needs to verify or walk the chain). Before
+    # B350, the only path was via constraints["audit_chain"], populated
+    # only by test fixtures; the daemon never wired it, which meant
+    # audit_chain_verify.v1 has been raising ToolValidationError
+    # whenever invoked through the HTTP dispatch path (direct or via a
+    # skill). Discovered live during D3 Phase A verification when
+    # archive_evidence.v1's verify_chain_integrity step blew up.
+    # The dispatcher populates this from its own AuditChain reference;
+    # constraints["audit_chain"] still works as a back-compat fallback
+    # for the existing test_b1_tools.py fixture.
+    audit_chain: Any = None
 
 
 @dataclass(frozen=True)
