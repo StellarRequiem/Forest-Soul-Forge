@@ -68,6 +68,27 @@ genres = load_genres(REPO / "config" / "genres.yaml")
 tool_keys = {td.key for td in catalog.tools.values()}
 tool_side_effects = {td.key: td.side_effects for td in catalog.tools.values()}
 
+# Forged tools (ADR-0058) — install via the forge pipeline and live
+# at data/forge/tools/installed/<name>.v<ver>.yaml rather than the
+# static catalog. Section 05 must treat these as legitimate kit
+# entries, otherwise every agent that uses a forged tool (Translator
+# Sandbox, etc.) gets flagged.
+import yaml as _yaml_for_forge  # alias to avoid colliding with `yaml` import below
+forged_dir = REPO / "data" / "forge" / "tools" / "installed"
+if forged_dir.exists():
+    for p in sorted(forged_dir.glob("*.yaml")):
+        try:
+            fd = _yaml_for_forge.safe_load(p.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        fname = fd.get("name")
+        fver = fd.get("version")
+        if not (fname and fver):
+            continue
+        key = f"{fname}.v{fver}"
+        tool_keys.add(key)
+        tool_side_effects[key] = fd.get("side_effects", "read_only")
+
 # genre.max_side_effects → which side_effect levels are <= ceiling.
 SIDE_EFFECT_LEVELS = ["read_only", "filesystem", "network", "external"]
 

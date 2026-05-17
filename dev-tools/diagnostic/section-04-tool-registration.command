@@ -63,9 +63,31 @@ REPO = Path.cwd()
 sys.path.insert(0, str(REPO / "src"))
 
 from forest_soul_forge.core.tool_catalog import load_catalog
+import yaml as _yaml
 
 catalog = load_catalog(REPO / "config" / "tool_catalog.yaml")
 catalog_keys = {td.key for td in catalog.tools.values()}  # name.vN
+
+# Forged tools live in data/forge/tools/installed/<name>.v<ver>.yaml
+# rather than the static catalog (ADR-0058: the forge pipeline
+# installs runtime-loaded tools without round-tripping through the
+# checked-in catalog YAML). Section 04 must treat these as
+# legitimate registrations, not orphans — they are by-design
+# registered-but-not-in-catalog and the operator approved them at
+# install time via the marketplace.
+forged_dir = REPO / "data" / "forge" / "tools" / "installed"
+forged_keys: set[str] = set()
+if forged_dir.exists():
+    for p in sorted(forged_dir.glob("*.yaml")):
+        try:
+            doc = _yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        name = doc.get("name")
+        ver = doc.get("version")
+        if name and ver:
+            forged_keys.add(f"{name}.v{ver}")
+known_keys = catalog_keys | forged_keys
 
 # pull /tools/registered
 req = urllib.request.Request(DAEMON + "/tools/registered")
@@ -97,7 +119,11 @@ for t in tools:
 results: list[tuple[str, str, str]] = []
 
 missing = sorted(catalog_keys - registered_keys)
-extra = sorted(registered_keys - catalog_keys)
+# Orphans are now "registered but not in catalog AND not a forged
+# installed tool" — forged tools are a legitimate runtime-only
+# registration class per ADR-0058.
+extra = sorted(registered_keys - known_keys)
+forged_registered = sorted(forged_keys & registered_keys)
 
 if missing:
     results.append((
@@ -122,15 +148,36 @@ else:
     results.append((
         "PASS",
         "no orphan registrations",
-        f"{len(registered_keys)} registered tools all in catalog",
+        f"{len(registered_keys)} registered tools all accounted for "
+        f"({len(catalog_keys)} catalog + {len(forged_registered)} forged)",
     ))
 
-# Count match (informational PASS regardless)
+# Count match — registered total should equal catalog + forged.
+expected_total = len(catalog_keys) + len(forged_registered)
 results.append((
-    "PASS" if len(catalog_keys) == len(registered_keys) else "FAIL",
-    "catalog count == registered count",
-    f"catalog={len(catalog_keys)}, registered={len(registered_keys)}",
+    "PASS" if expected_total == len(registered_keys) else "FAIL",
+    "catalog + forged count == registered count",
+    f"catalog={len(catalog_keys)}, forged={len(forged_registered)}, "
+    f"registered={len(registered_keys)}",
 ))
+
+# Forged-tools visibility check — surfaces what runtime-installed
+# tools are live so the operator has one place to read "what did
+# the forge pipeline add to my agent's reach?"
+if forged_registered:
+    results.append((
+        "PASS",
+        f"forged tools catalogued ({len(forged_registered)} installed)",
+        ", ".join(forged_registered),
+    ))
+elif forged_keys:
+    # We see files but the daemon didn't register them — drift to
+    # surface.
+    results.append((
+        "FAIL",
+        "forged tools loaded into daemon",
+        f"on-disk={sorted(forged_keys)} not in /tools/registered",
+    ))
 
 passed = sum(1 for r in results if r[0] == "PASS")
 failed = sum(1 for r in results if r[0] == "FAIL")
