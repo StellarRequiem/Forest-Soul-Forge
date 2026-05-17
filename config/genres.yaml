@@ -159,6 +159,13 @@ genres:
       - code_reviewer            # SW track — coding swarm Reviewer
       - verifier_loop            # ADR-0036 — memory contradiction auditor
       - reality_anchor           # ADR-0063 — pre-action ground-truth verifier
+      - forensic_archivist       # ADR-0078 Phase A (B342-B347) — D3 chain-of-custody
+      # NOTE — forensic_archivist's kit is genuinely read_only:
+      # audit_chain_verify + file_integrity + memory_recall + memory_write
+      # + delegate. The apply path (acquire/archive/retire) is operator-
+      # driven (the archivist verifies + logs; the operator moves files).
+      # That keeps it inside guardian's read_only ceiling unlike
+      # migration_pilot + release_gatekeeper whose kits needed shell_exec.
       # NOTE — migration_pilot + release_gatekeeper were originally
       # placed here in ADR-0077 with "advisory-only" framing, but
       # their actual kits need shell_exec (external) which exceeds

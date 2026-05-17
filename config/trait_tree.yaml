@@ -615,6 +615,23 @@ roles:
       emotional: 0.4
       embodiment: 0.4
 
+  # ---- ADR-0078 (B342-B347) D3 Local SOC Phase A role --------------------
+  # forensic_archivist: chain-of-custody for incident artifacts
+  # (memory dumps, pcap captures, log slices, isolated processes).
+  # Guardian genre, read_only — never mutates an artifact, just
+  # logs custody transitions + verifies integrity. The audit-grade
+  # surface a real SOC needs but the existing 9-agent swarm
+  # doesn't cover. ADR-0078 Phase A.
+  forensic_archivist:
+    description: "Chain-of-custody guardian for SOC artifacts. Logs custody transitions, verifies integrity hashes, NEVER mutates an artifact. Read-only by design — the apply path (acquire, archive, retire) is operator-driven. Trait emphasis: audit + double_checking. Genre: guardian. ADR-0078 Phase A."
+    domain_weights:
+      security: 2.0     # SOC role; security awareness load-bearing
+      audit: 2.5        # the audit-discharge surface for incident artifacts
+      cognitive: 1.6    # hash verification + custody-graph reasoning
+      communication: 1.4 # custody reports operator-facing
+      emotional: 0.4
+      embodiment: 0.5   # read-heavy; rare writes (own log entries)
+
   # ---- ADR-0077 (B331-B333) D4 advanced rollout roles --------------------
   # Three new agents that round out the SW-track triune:
   #   - test_author        — researcher genre; tests-first discipline.

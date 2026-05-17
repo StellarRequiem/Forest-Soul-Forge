@@ -35,12 +35,19 @@ entry_agents:
     capability: access_audit
   - role: deception_duke
     capability: deception_management
+  # ADR-0078 Phase A (B342-B347) — chain-of-custody guardian.
+  # Read-only kit; the apply path is operator-driven. Distinct
+  # from vault_warden's forensic_cleanup: vault_warden DISPOSES,
+  # forensic_archivist PRESERVES + ATTESTS.
+  - role: forensic_archivist
+    capability: forensic_archive
 
 capabilities:
   - incident_response
   - log_monitoring
   - anomaly_detection
   - forensic_cleanup
+  - forensic_archive       # ADR-0078 Phase A
   - vulnerability_check
   - access_audit
   - deception_management

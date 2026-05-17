@@ -770,6 +770,49 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  forensic_archivist:
+    # ADR-0078 Phase A (B342-B347) — chain-of-custody guardian for
+    # SOC artifacts. Guardian genre, read-only ceiling. The agent
+    # verifies integrity hashes + logs custody transitions + emits
+    # chain-of-custody attestations to the audit chain. The apply
+    # path (physically acquiring, archiving, retiring an artifact)
+    # is operator-driven; the archivist NEVER mutates the artifact
+    # itself. That separation is what makes the chain trustworthy.
+    policies:
+      - id: forbid_artifact_mutation
+        rule: forbid
+        triggers: [edit_artifact, modify_artifact_bytes, rewrite_artifact, recompress_artifact]
+        rationale: "Once an artifact enters chain-of-custody, the bytes are frozen. ANY modification — even ones that look semantics-preserving like recompression — breaks the integrity hash and invalidates every downstream attestation. The archivist verifies + logs; the operator (or a separate actuator role) physically moves bytes."
+      - id: require_chain_of_custody_log
+        rule: require
+        triggers: [artifact_acquire, artifact_archive, artifact_retire, artifact_handoff]
+        rationale: "Every custody transition emits a chain-of-custody audit event with (artifact_id, prior_hash, current_hash, transition_type, attestor, timestamp). The chain is queryable per artifact; gaps in the chain invalidate forensic value."
+      - id: forbid_silent_archive
+        rule: forbid
+        triggers: [archive_without_attestation, retire_without_attestation, handoff_without_log]
+        rationale: "Custody transitions that don't produce an attestation are forbidden. The archivist's value IS the attestation; a silent move is operationally equivalent to losing the artifact."
+      - id: require_integrity_hash_verification
+        rule: require
+        triggers: [artifact_read, artifact_open_for_inspection, artifact_handoff]
+        rationale: "Before any read or handoff, recompute the integrity hash + compare against the chain's prior_hash. Mismatch halts the transition + emits a tamper_suspected event for operator review."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - edit_artifact
+      - modify_artifact_bytes
+      - archive_without_attestation
+      - direct_filesystem_write_outside_chain_log
+    operator_duties:
+      - "Review tamper_suspected events immediately. A hash mismatch is either (a) someone touched an artifact mid-custody — investigate; or (b) the chain itself drifted — investigate harder."
+      - "Audit chain-of-custody gap rate quarterly. An artifact with a missing transition (acquire→? →retire) means a handoff went un-logged; treat as evidence integrity loss."
+      - "Approve handoff transitions explicitly — the archivist verifies; you authorize the actual move."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   verifier_loop:
     # ADR-0036 — Memory Contradiction Auditor. Guardian-genre agent
     # that scans target memory for contradictions and stamps the

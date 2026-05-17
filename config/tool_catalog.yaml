@@ -2594,6 +2594,28 @@ archetypes:
       - shell_exec.v1           # pytest conformance suite + fsf drift sentinel
       - pytest_run.v1           # canonical conformance runner
 
+  # ---- ADR-0078 (B342-B347) D3 Local SOC advanced rollout Phase A ------
+  # forensic_archivist is genuinely read_only — every tool in the kit
+  # has side_effects: read_only EXCEPT memory_write (which writes to the
+  # archivist's own private memory scope, not the filesystem). The
+  # physical artifact moves (acquire/archive/retire) are operator-driven;
+  # the archivist's contribution is the chain-of-custody attestation
+  # written to the audit chain via the underlying tools. This is why
+  # forensic_archivist STAYS in guardian (read_only ceiling) unlike
+  # migration_pilot + release_gatekeeper which B341 had to move to
+  # actuator for kit-tier compliance.
+  forensic_archivist:
+    standard_tools:
+      - llm_think.v1            # judgment when prior_hash ≠ current_hash
+      - memory_write.v1         # custody log in private memory
+      - memory_recall.v1        # look up prior custody chain for an artifact
+      - delegate.v1             # escalate tamper_suspected to operator
+      - audit_chain_verify.v1   # verify the chain itself before attesting
+      - file_integrity.v1       # sha256 the artifact + compare to prior_hash
+      - code_read.v1            # read attached metadata files (.sha256, .manifest)
+      # No shell_exec. No code_edit. No external network. Read-only by
+      # construction; that's the genre invariant.
+
   # ---- ADR-0036 verification track --------------------------------------
   # Backfilled in Burst 126 after Phase A audit (2026-04-30) flagged the
   # missing archetype. verifier_loop was previously falling through to
