@@ -20,6 +20,7 @@ import * as orchestratorPanel from "./orchestrator.js";          // B299 / ADR-0
 import * as operatorWizardPanel from "./operator-wizard.js";     // B318 / ADR-0068 T7b
 import * as voicePane from "./voice.js";                          // B326 / ADR-0070 T3
 import * as provenancePane from "./provenance.js";                // B330 / ADR-0072 T5
+import * as capabilityTreePanel from "./capability-tree.js";     // B381 / ADR-0080 T2
 import * as skillsPanel from "./skills.js";
 import * as toolRegistryPanel from "./tool-registry.js";
 import * as mcpPluginsPanel from "./mcp-plugins.js";
@@ -84,6 +85,7 @@ async function boot() {
     operatorWizardPanel.start();   // B318 / ADR-0068 T7b
     voicePane.initVoicePane();     // B326 / ADR-0070 T3
     provenancePane.initProvenancePane();  // B330 / ADR-0072 T5 — Phase α 10/10
+    capabilityTreePanel.start();  // B381 / ADR-0080 T2
     skillsPanel.start();
     toolRegistryPanel.start();
     mcpPluginsPanel.start();
@@ -184,6 +186,12 @@ async function boot() {
   // Phase α 10/10. Shows operator preferences + active /
   // pending / refused learned rules + hardcoded handoffs.
   provenancePane.initProvenancePane();
+  // ADR-0080 T2 (B381) — Agent Capabilities pane. Per-agent
+  // dependency tree backed by GET /agents/{id}/capability-tree
+  // (B380 substrate). Subscribes to state.agents so the picker
+  // stays in sync; same lazy-load posture as the other per-
+  // agent panels.
+  capabilityTreePanel.start();
 }
 
 if (document.readyState === "loading") {

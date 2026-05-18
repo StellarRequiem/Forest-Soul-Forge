@@ -169,6 +169,11 @@ TABS = [
     ("operator-wizard", "Operator Wizard", False),
     ("voice",           "Voice",           False),
     ("chat",            "Chat",            False),
+    # ADR-0080 T2 (B381) — Agent Capabilities tab. Required: the
+    # tab depends on /agents/{id}/capability-tree which B380
+    # shipped; if the endpoint is missing the substrate has
+    # regressed.
+    ("capabilities",    "Capabilities",    True),
 ]
 
 FORBIDDEN = (

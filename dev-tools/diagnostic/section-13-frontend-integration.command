@@ -156,6 +156,10 @@ TAB_ENDPOINTS = [
     ("Operator Wizard", ["/operator/profile/connectors"],                               False),
     ("Voice",          ["/voice/status"],                                               False),
     ("Chat",           ["/conversations?limit=10"],                                     False),
+    # ADR-0080 T2 (B381) — Agent Capabilities tab. Per-agent
+    # endpoint; sample an active agent the same way Pending +
+    # Memory do.
+    ("Capabilities",   [("{aid}", "/agents/{aid}/capability-tree")],                    True),
 ]
 
 results: list[tuple[str, str, str]] = []
