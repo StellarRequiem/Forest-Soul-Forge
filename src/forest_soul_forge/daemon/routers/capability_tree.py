@@ -38,14 +38,20 @@ This endpoint is the substrate for the new frontend
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from forest_soul_forge.daemon.deps import get_registry, get_tool_registry
+from forest_soul_forge.daemon.deps import (
+    get_audit_chain,
+    get_registry,
+    get_tool_registry,
+    get_write_lock,
+)
 from forest_soul_forge.registry import Registry
 from forest_soul_forge.registry.registry import UnknownAgentError
 
@@ -293,4 +299,179 @@ async def get_capability_tree(
             mcp_plugins=mcp_nodes,
         ),
         summary=summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# T3 (B382) — capability-toggle endpoint
+# ---------------------------------------------------------------------------
+
+class CapabilityToggleIn(BaseModel):
+    """Body for POST /agents/{id}/capability-toggle.
+
+    capability_key is the same key the tree returns:
+      tools  -> "name.vN"
+      skills -> "name.vN"   (the skill's catalog key)
+      mcp    -> the plugin name (no version suffix yet; placeholder)
+
+    enabled=True asks to enable a previously-disabled capability;
+    enabled=False asks to disable. Hard_wired capabilities reject
+    with 409 regardless of the value — rebirth is the only path
+    to remove a constitution-bound tool, per ADR-0080 D5 +
+    CLAUDE.md constitution-hash invariant.
+    """
+    capability_key: str = Field(..., min_length=1, max_length=200)
+    enabled: bool
+
+
+class CapabilityToggleOut(BaseModel):
+    """Response shape — operator gets back the audit trail."""
+    instance_id: str
+    capability_key: str
+    binding: str             # hard_wired | operator_toggleable
+    requested_enabled: bool
+    accepted: bool           # True if the toggle was recorded
+    audit_event_seq: int | None
+    detail: str
+
+
+def _classify_capability(
+    capability_key: str,
+    const_tools: list[dict[str, Any]],
+    skill_catalog: Any,
+) -> tuple[str, str]:
+    """Map a capability_key to (binding, kind).
+
+    binding   - hard_wired | operator_toggleable | unknown
+    kind      - tool | skill | mcp | unknown
+
+    constitution-bound tools => hard_wired/tool.
+    catalog skills           => operator_toggleable/skill.
+    everything else          => unknown/unknown (the caller
+                                returns 404 with detail).
+    """
+    constitution_keys = {_tool_key(t) for t in const_tools}
+    if capability_key in constitution_keys:
+        return ("hard_wired", "tool")
+    if skill_catalog is not None and hasattr(skill_catalog, "skills"):
+        if capability_key in skill_catalog.skills:
+            return ("operator_toggleable", "skill")
+    # mcp plugins live elsewhere; T1 placeholder doesn't classify them.
+    return ("unknown", "unknown")
+
+
+@router.post(
+    "/{instance_id}/capability-toggle",
+    response_model=CapabilityToggleOut,
+)
+async def toggle_capability(
+    instance_id: str,
+    body: CapabilityToggleIn,
+    request: Request,
+    registry: Registry = Depends(get_registry),
+    chain=Depends(get_audit_chain),
+    write_lock: threading.Lock = Depends(get_write_lock),
+) -> CapabilityToggleOut:
+    """T3 (B382) — operator toggle for a per-agent capability.
+
+    Validates the (agent, capability) pair against the tree's
+    composition rules. Hard_wired tools reject with 409. Operator-
+    toggleable skills record a `capability_toggled` audit chain
+    event with the requested state. Actual runtime gating of
+    toggled-off skills lands in T3b (a small per-agent overrides
+    table; ships in its own burst with a schema bump). For now
+    the audit trail IS the durable record — operators can replay
+    intent from the chain even before the runtime enforces it.
+
+    Why audit-first / enforcement-later:
+      - The audit chain is append-only and tamper-evident; it's
+        the source of truth in every other Forest mutation.
+      - Schema bumps require migration discipline. Shipping the
+        endpoint contract + audit emission first lets T2's
+        frontend mature against a stable shape before T3b adds
+        the storage layer.
+      - Operators see the toggle land immediately (the event
+        appears in the audit tail). T3b makes the runtime
+        listen to it.
+    """
+    # 1. Agent exists.
+    try:
+        agent = registry.get_agent(instance_id)
+    except UnknownAgentError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"unknown agent: {e}",
+        ) from e
+
+    # 2. Resolve capability binding from the tree's composition
+    # rules. Read constitution tools + skill catalog same way the
+    # GET endpoint does so the toggle's view of the tree stays
+    # consistent with what the operator sees.
+    const_tools = _read_constitution_tools(getattr(agent, "constitution_path", None))
+    skill_catalog = getattr(request.app.state, "skill_catalog", None)
+    binding, kind = _classify_capability(
+        body.capability_key, const_tools, skill_catalog,
+    )
+
+    if binding == "unknown":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"capability_key {body.capability_key!r} is not in agent "
+                f"{instance_id!r}'s capability tree. Check spelling + "
+                f"that the skill/tool is in the catalog."
+            ),
+        )
+
+    if binding == "hard_wired":
+        # Per CLAUDE.md identity-hash invariant + ADR-0080 D5:
+        # constitution-bound tools cannot be toggled off without
+        # rebirth. The 409 (Conflict) tells the operator the
+        # request is well-formed but rejected by the model.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"capability_key {body.capability_key!r} is hard_wired by "
+                f"agent {instance_id!r}'s constitution. Rebirth is the only "
+                f"path to remove a constitution-bound tool (see ADR-0080 "
+                f"D5 + the constitution-hash immutability invariant)."
+            ),
+        )
+
+    # 3. Emit the audit event. The write_lock ensures single-writer
+    # discipline; same posture as agent_posture_changed.
+    operator_id = getattr(request.state, "operator_id", None)
+    with write_lock:
+        entry = chain.append(
+            "capability_toggled",
+            {
+                "instance_id":      instance_id,
+                "capability_key":   body.capability_key,
+                "kind":              kind,
+                "binding":           binding,
+                "requested_enabled": body.enabled,
+                "set_by":            operator_id,
+                # prior_state is "unknown" today — T3b adds the
+                # storage table that lets us record actual prior
+                # state. Audit reader can reconstruct intent by
+                # walking the chain for this (instance_id,
+                # capability_key) pair.
+                "prior_state":       "unknown",
+            },
+            agent_dna=getattr(agent, "dna", None),
+        )
+
+    return CapabilityToggleOut(
+        instance_id=instance_id,
+        capability_key=body.capability_key,
+        binding=binding,
+        requested_enabled=body.enabled,
+        accepted=True,
+        audit_event_seq=getattr(entry, "seq", None),
+        detail=(
+            f"toggle recorded in audit chain (seq={getattr(entry, 'seq', '?')}). "
+            f"Runtime enforcement lands in T3b; until then, the audit "
+            f"trail is the durable record. Operator can replay intent "
+            f"via memory/audit query for this (agent, capability) pair."
+        ),
     )

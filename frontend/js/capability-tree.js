@@ -20,8 +20,9 @@
 //
 // Click any node to populate the detail pane with its full row.
 
-import { api, ApiError } from "./api.js";
+import { api, ApiError, writeCall } from "./api.js";
 import * as state from "./state.js";
+import { toast } from "./toast.js";
 
 let _selectedAgent = "";
 let _lastTree = null;
@@ -89,6 +90,51 @@ function _node(label, status, binding, payload) {
   labelEl.textContent = label;
   labelEl.style.flex = "1";
   el.appendChild(labelEl);
+
+  // B382 (T3) — operator-toggleable nodes get a toggle button.
+  // Click POSTs /capability-toggle; the audit event is the
+  // durable record (runtime enforcement lands in T3b).
+  if (binding === "operator_toggleable" && payload && payload.name) {
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "btn btn--ghost";
+    toggleBtn.style.cssText = "padding:2px 8px; font-size:11px;";
+    // "disable" if currently live, "enable" if currently broken/in_progress
+    const wantEnable = status !== "live";
+    toggleBtn.textContent = wantEnable ? "enable" : "disable";
+    toggleBtn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();  // don't trigger the node's detail-pane click
+      const capKey = payload.version
+        ? `${payload.name}.v${payload.version}`
+        : payload.name;
+      try {
+        const out = await writeCall(
+          `/agents/${encodeURIComponent(_selectedAgent)}/capability-toggle`,
+          { capability_key: capKey, enabled: wantEnable },
+        );
+        toast({
+          title: "Capability toggle recorded",
+          msg: `${capKey} -> ${wantEnable ? "enable" : "disable"} ` +
+               `(audit seq ${out.audit_event_seq})`,
+          kind: "info",
+          ttl: 6000,
+        });
+        // Refresh tree so any state change is reflected.
+        _loadTreeFor(_selectedAgent);
+      } catch (e) {
+        const msg = (e instanceof ApiError)
+          ? `HTTP ${e.status}: ${e.detail && e.detail.detail || e.message}`
+          : (e.message || String(e));
+        toast({
+          title: "Toggle failed",
+          msg: msg,
+          kind: "error",
+          ttl: 10000,
+        });
+      }
+    });
+    el.appendChild(toggleBtn);
+  }
 
   el.addEventListener("click", () => _renderDetail(payload));
   return el;

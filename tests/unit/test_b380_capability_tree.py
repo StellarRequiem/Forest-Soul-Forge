@@ -87,23 +87,49 @@ def _make_constitution(path: Path, tools: list[dict[str, Any]]) -> None:
     path.write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
+class _StubChain:
+    """Records every append for inspection."""
+    def __init__(self):
+        self.appended = []
+        self._seq = 100
+
+    def append(self, event_type, payload, agent_dna=None):
+        self._seq += 1
+        entry = type("Entry", (), {
+            "seq": self._seq,
+            "event_type": event_type,
+            "event_data": payload,
+            "agent_dna": agent_dna,
+        })()
+        self.appended.append(entry)
+        return entry
+
+
 def _build_app(
     agent: _StubAgent | None,
     registered_keys: set[str],
     skills: dict[str, _StubSkillDef] | None = None,
+    chain: _StubChain | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
     app.state.tool_registry = _StubToolRegistry(registered_keys)
     app.state.skill_catalog = _StubSkillCatalog(skills or {})
     app.state.genre_engine = _StubGenres()
-    # Wire dependency overrides for the registry + tool registry.
+    app.state.audit_chain = chain or _StubChain()
+    import threading as _t
+    app.state.write_lock = _t.Lock()
+    # Wire dependency overrides.
     from forest_soul_forge.daemon.deps import (
+        get_audit_chain as real_get_audit_chain,
         get_registry as real_get_registry,
         get_tool_registry as real_get_tool_registry,
+        get_write_lock as real_get_write_lock,
     )
     app.dependency_overrides[real_get_registry] = lambda: _StubRegistry(agent)
     app.dependency_overrides[real_get_tool_registry] = lambda: app.state.tool_registry
+    app.dependency_overrides[real_get_audit_chain] = lambda: app.state.audit_chain
+    app.dependency_overrides[real_get_write_lock] = lambda: app.state.write_lock
     return app
 
 
@@ -271,3 +297,102 @@ def test_mcp_plugins_empty_today(tmp_path):
     ).json()
     assert body["tree"]["mcp_plugins"] == []
     assert body["summary"]["mcp_plugins_total"] == 0
+
+
+# ---- T3 (B382) — capability-toggle endpoint -------------------------------
+
+class TestCapabilityToggle:
+    """POST /agents/{id}/capability-toggle behaviour."""
+
+    def _setup(self, tmp_path):
+        const_path = tmp_path / "agent.constitution.yaml"
+        _make_constitution(const_path, [
+            {"name": "llm_think", "version": "1", "side_effects": "read_only"},
+        ])
+        agent = _StubAgent(
+            instance_id="tg1", role="guardian_role",
+            agent_name="Toggle-Test", posture="green",
+            constitution_path=str(const_path),
+        )
+        skill = _StubSkillDef(
+            name="summarize_audit", version="1",
+            description="test skill",
+            requires=["llm_think.v1"],
+        )
+        chain = _StubChain()
+        app = _build_app(
+            agent=agent,
+            registered_keys={"llm_think.v1"},
+            skills={"summarize_audit.v1": skill},
+            chain=chain,
+        )
+        return app, agent, chain
+
+    def test_unknown_agent_404(self, tmp_path):
+        app = _build_app(agent=None, registered_keys=set())
+        r = TestClient(app).post(
+            "/agents/ghost/capability-toggle",
+            json={"capability_key": "llm_think.v1", "enabled": False},
+        )
+        assert r.status_code == 404
+
+    def test_unknown_capability_404(self, tmp_path):
+        app, agent, _ = self._setup(tmp_path)
+        r = TestClient(app).post(
+            f"/agents/{agent.instance_id}/capability-toggle",
+            json={"capability_key": "ghost.v99", "enabled": False},
+        )
+        assert r.status_code == 404
+        assert "not in agent" in r.json()["detail"]
+
+    def test_hard_wired_tool_409(self, tmp_path):
+        """Constitution-bound tools reject — rebirth is the only
+        path to remove. Per ADR-0080 D5 + CLAUDE.md sec3."""
+        app, agent, chain = self._setup(tmp_path)
+        r = TestClient(app).post(
+            f"/agents/{agent.instance_id}/capability-toggle",
+            json={"capability_key": "llm_think.v1", "enabled": False},
+        )
+        assert r.status_code == 409
+        assert "hard_wired" in r.json()["detail"]
+        # No audit event for a rejected toggle.
+        assert len(chain.appended) == 0
+
+    def test_skill_toggle_records_audit_event(self, tmp_path):
+        app, agent, chain = self._setup(tmp_path)
+        r = TestClient(app).post(
+            f"/agents/{agent.instance_id}/capability-toggle",
+            json={"capability_key": "summarize_audit.v1", "enabled": False},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["binding"] == "operator_toggleable"
+        assert body["accepted"] is True
+        assert body["requested_enabled"] is False
+        assert body["audit_event_seq"] is not None
+        # Audit chain recorded the event.
+        assert len(chain.appended) == 1
+        e = chain.appended[0]
+        assert e.event_type == "capability_toggled"
+        assert e.event_data["instance_id"] == agent.instance_id
+        assert e.event_data["capability_key"] == "summarize_audit.v1"
+        assert e.event_data["kind"] == "skill"
+        assert e.event_data["binding"] == "operator_toggleable"
+        assert e.event_data["requested_enabled"] is False
+
+    def test_enable_and_disable_each_record(self, tmp_path):
+        """Two toggles -> two audit events, each carrying the
+        requested state."""
+        app, agent, chain = self._setup(tmp_path)
+        c = TestClient(app)
+        c.post(
+            f"/agents/{agent.instance_id}/capability-toggle",
+            json={"capability_key": "summarize_audit.v1", "enabled": False},
+        )
+        c.post(
+            f"/agents/{agent.instance_id}/capability-toggle",
+            json={"capability_key": "summarize_audit.v1", "enabled": True},
+        )
+        assert len(chain.appended) == 2
+        assert chain.appended[0].event_data["requested_enabled"] is False
+        assert chain.appended[1].event_data["requested_enabled"] is True
