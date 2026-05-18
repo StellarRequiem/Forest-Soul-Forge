@@ -17,25 +17,39 @@ lines into the parse pipeline WITHOUT spawning a subprocess. Tests
 use this to exercise the parser + batching + store wiring without
 the timing complexity of real subprocess I/O.
 
-What ships in T3 (NOT in this file):
-  - Audit chain emission for telemetry_batch_ingested events
-  - ADR-0051 sandbox wrapping of the subprocess
-For T2, subprocess.Popen runs the adapter command directly. The
-sandbox hookup is a wrapper around the same lifecycle, so adding
-it later doesn't require restructuring this code.
+B377 (T3) — audit chain emission landed here:
+  When flush_pending() successfully calls store.ingest_batch(), it
+  now ALSO emits a `telemetry_batch_ingested` audit chain entry
+  recording batch_id + source + event_count + integrity_root +
+  first_timestamp + last_timestamp. The integrity_root is the
+  sha256 of the sorted concatenation of each event's
+  integrity_hash — a single anchor digest the verify CLI can
+  recompute from the store and compare against the chain entry.
+
+What still ships later:
+  - ADR-0051 sandbox wrapping of the subprocess (T6's micro-
+    batching layer is the natural place to add it).
 """
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from .adapter import Adapter
 from .events import TelemetryEvent
 from .retention import classify_retention
 from .store import TelemetryStore, TelemetryStoreError
+
+if TYPE_CHECKING:
+    # Import-cycle avoidance: the ingestor is constructed inside
+    # the daemon's lifespan, which also constructs the audit chain.
+    # Importing AuditChain at type-check time only keeps the cycle
+    # broken at runtime.
+    from forest_soul_forge.core.audit_chain import AuditChain
 
 
 DEFAULT_BATCH_SIZE = 100
@@ -85,6 +99,20 @@ class AdapterIngestor:
         flush_interval_s: float = DEFAULT_FLUSH_INTERVAL_S,
         # Override for tests that want to avoid real subprocess time.
         spawn: Callable[[list[str]], subprocess.Popen] | None = None,
+        # B377 (T3) — audit chain handle. When set, every successful
+        # flush_pending emits a `telemetry_batch_ingested` event so
+        # the chain records the batch_id + integrity_root anchor.
+        # Optional with default None so legacy callers (T2 tests
+        # constructing AdapterIngestor without the daemon's
+        # AuditChain) keep working.
+        audit_chain: "AuditChain | None" = None,
+        # The chain's `agent_dna` field is the actor of the event.
+        # Telemetry batch ingestion is system-attributed by default
+        # (the ingestor isn't itself an agent), so None is the
+        # canonical value. When telemetry_steward (T4) lands and
+        # drives ingestors on behalf of an agent, that agent's
+        # dna gets passed here instead.
+        chain_agent_dna: str | None = None,
     ) -> None:
         if batch_size < 1:
             raise IngestorError(f"batch_size must be >= 1; got {batch_size}")
@@ -96,6 +124,8 @@ class AdapterIngestor:
         self.store = store
         self.batch_size = batch_size
         self.flush_interval_s = flush_interval_s
+        self.audit_chain = audit_chain
+        self.chain_agent_dna = chain_agent_dna
         self.stats = IngestorStats()
 
         self._spawn = spawn or self._default_spawn
@@ -248,7 +278,21 @@ class AdapterIngestor:
 
         Returns the batch_id if anything was flushed, else None
         (empty pending). The batch_id is the audit-chain anchor
-        T3 will record per ADR-0064 D5."""
+        per ADR-0064 D5.
+
+        B377 (T3): after a successful ingest_batch, also emit the
+        `telemetry_batch_ingested` chain entry — batch_id + source
+        + event_count + integrity_root + first/last_timestamp. If
+        the chain emission fails (chain handle wasn't passed, or
+        append raised), the store insert is still durable; we just
+        log to `stats.last_error` so the operator can spot it.
+        Store + chain emission are NOT atomic across each other —
+        the store transaction commits before the chain entry
+        lands. Mid-failure surface: store has the batch, chain
+        doesn't reference it, verify CLI flags `chain_entry_missing`
+        on read. Acceptable for telemetry (the canonical pattern
+        is store-first then-anchor; the inverse would risk anchor-
+        without-data which is worse)."""
         with self._pending_lock:
             batch = list(self._pending)
             self._pending.clear()
@@ -263,4 +307,48 @@ class AdapterIngestor:
         self.stats.batches_flushed += 1
         self.stats.last_flush_at = time.time()
         self._last_flush_clock = time.monotonic()
+
+        # B377 (T3) — anchor the batch in the audit chain.
+        if self.audit_chain is not None:
+            try:
+                integrity_root = _compute_integrity_root(batch)
+                timestamps = sorted(ev.timestamp for ev in batch)
+                self.audit_chain.append(
+                    "telemetry_batch_ingested",
+                    {
+                        "batch_id":         batch_id,
+                        "source":           self.adapter.SOURCE,
+                        "event_count":      len(batch),
+                        "integrity_root":   integrity_root,
+                        "first_timestamp":  timestamps[0],
+                        "last_timestamp":   timestamps[-1],
+                    },
+                    agent_dna=self.chain_agent_dna,
+                )
+            except Exception as e:
+                # The store insert is durable; we don't roll it
+                # back if chain emission fails. Record so the
+                # operator can investigate.
+                self.stats.last_error = (
+                    f"telemetry_batch_ingested chain append failed "
+                    f"for batch_id={batch_id}: {e!r}"
+                )
+
         return batch_id
+
+
+def _compute_integrity_root(events: list[TelemetryEvent]) -> str:
+    """Merkle-like root over the sorted concatenation of each
+    event's integrity_hash.
+
+    Sorted-before-concat keeps the root invariant under permutation
+    of the events within a batch (the store's INSERT order is the
+    iteration order of the input list; a re-run with the same set
+    of events in a different order should produce the same root,
+    or the verify CLI's recompute won't match a chain anchor
+    written from a different order)."""
+    h = hashlib.sha256()
+    for ih in sorted(ev.integrity_hash for ev in events):
+        h.update(ih.encode("utf-8"))
+        h.update(b"\n")
+    return h.hexdigest()
