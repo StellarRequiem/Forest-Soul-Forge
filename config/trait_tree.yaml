@@ -649,6 +649,23 @@ roles:
       emotional: 0.4    # weight floor per trait_engine schema (min 0.4)
       embodiment: 0.5   # read-heavy; the steward never spawns adapters itself
 
+  # ---- ADR-0064 T6 (B385) D3 Phase B threat intel curator ---------------
+  # threat_intel_curator: ingests external threat-intel feeds (IOC
+  # lists, MITRE ATT&CK mappings, advisory feeds), verifies their
+  # provenance, tags freshness, writes to a local intel cache.
+  # NEVER acts on the intel (response_rogue's lane). Sibling to
+  # telemetry_steward: stewardship of an external feed, not of
+  # the local pipeline.
+  threat_intel_curator:
+    description: "External threat-intel feed curation. Pulls from operator-configured intel sources (IOC lists, advisory feeds, ATT&CK mappings), verifies provenance + signatures where available, tags freshness, writes to local intel cache. NEVER acts on findings (response_rogue's job), NEVER analyzes runtime events (anomaly_ace's job). Pure curation hygiene. Genre: guardian. ADR-0064 T6."
+    domain_weights:
+      security: 2.4     # SOC role; intel content is security signal
+      audit: 2.2        # provenance + freshness tagging is audit work
+      cognitive: 1.5    # parsing + dedupe heuristics on intel feeds
+      communication: 1.5 # operator-facing intel summaries
+      emotional: 0.4
+      embodiment: 0.5   # read-heavy; never modifies external sources
+
   # ---- ADR-0077 (B331-B333) D4 advanced rollout roles --------------------
   # Three new agents that round out the SW-track triune:
   #   - test_author        — researcher genre; tests-first discipline.

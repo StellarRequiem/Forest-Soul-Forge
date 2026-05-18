@@ -2912,6 +2912,24 @@ archetypes:
       # in SQLite, integrity_root is the batch-level anchor). No code_read
       # (steward doesn't read source code / configs). Strict read_only.
 
+  # ADR-0064 T6 (B385) — threat_intel_curator archetype kit.
+  # All read_only. Curator pulls intel via web_fetch (allowlisted
+  # to operator-configured intel sources), verifies + tags +
+  # writes to memory cache. Never acts on intel.
+  threat_intel_curator:
+    standard_tools:
+      - llm_think.v1            # judgment on feed content / dedupe heuristics
+      - memory_recall.v1        # query the local intel cache
+      - memory_write.v1         # write curated intel rows
+      - delegate.v1             # escalate signature-verification failures
+      - audit_chain_verify.v1   # confirm chain before publishing intel summaries
+      - text_summarize.v1       # condense long advisory feeds
+      - web_fetch.v1            # pull external intel (gated by per-agent allowlist; sources from config/threat_intel_sources.yaml when that ships)
+      - file_integrity.v1       # verify downloaded intel artifacts (sha256)
+      # No shell_exec. No code_edit. No browser_action. The curator
+      # uses web_fetch with a tight allowlist; richer feed-pull paths
+      # (Playwright, MCP-driven, etc.) would land in a follow-on ADR.
+
   # ---- ADR-0036 verification track --------------------------------------
   # Backfilled in Burst 126 after Phase A audit (2026-04-30) flagged the
   # missing archetype. verifier_loop was previously falling through to

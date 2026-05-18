@@ -58,6 +58,13 @@ default_skill_per_capability:
     capability: telemetry_oversight
     skill_name: telemetry_steward_brief
     skill_version: "1"
+  # ADR-0064 T6 (B385) — threat_intel_curation capability maps to
+  # threat_intel_refresh.v1. The skill pulls operator-configured
+  # intel sources, verifies provenance, writes to local cache.
+  - domain: d3_local_soc
+    capability: threat_intel_curation
+    skill_name: threat_intel_refresh
+    skill_version: "1"
 
   # D4 Code Review
   - domain: d4_code_review

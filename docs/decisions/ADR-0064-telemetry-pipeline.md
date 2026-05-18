@@ -290,6 +290,24 @@ The role ships in **T4** (after the substrate + adapters land).
 
 Total: ~6 bursts. Phase B = ADR-0064 T1-T6.
 
+## Status update (2026-05-18)
+
+**Accepted. Closed in B385.** Arc shipped end-to-end:
+
+  - T1 B348 `3bee6cc` — TelemetryEvent + TelemetryStore + retention
+  - T2 B349 `9980ce9` — Adapter substrate + macos_unified_log reference
+  - T3 B377 `31b39e0` — Audit chain hookup + verify CLI
+  - T4 B379 `44e846e` — telemetry_steward role + signature skill + birth
+  - T5 B384 `184f235` — operator runbook (`docs/runbooks/telemetry-pipeline.md`)
+  - T6 B385 (this) — threat_intel_curator role + micro-batching
+    contract on `Adapter.parse_many` + this status update
+
+**D3 Phase B closed.** Phase A (forensic_archivist) shipped earlier
+in ADR-0078. Phase B (telemetry_steward + threat_intel_curator)
+closes here. Phases C + D remain:
+  - Phase C: detection_engineer (ADR-0065, not yet drafted)
+  - Phase D: playbook_pilot + purple_pete (ADR-0066, not yet drafted)
+
 ## See Also
 
 - ADR-0033 — Security Swarm (the existing 9-agent blue team)

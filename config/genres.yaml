@@ -161,6 +161,7 @@ genres:
       - reality_anchor           # ADR-0063 — pre-action ground-truth verifier
       - forensic_archivist       # ADR-0078 Phase A (B342-B347) — D3 chain-of-custody
       - telemetry_steward        # ADR-0064 T4 (B379) — D3 Phase B pipeline oversight
+      - threat_intel_curator     # ADR-0064 T6 (B385) — D3 Phase B external intel curation
       # NOTE — telemetry_steward's kit is also genuinely read_only:
       # audit_chain_verify + memory_recall + memory_write + llm_think +
       # delegate. The steward reviews recent batch anchors + writes

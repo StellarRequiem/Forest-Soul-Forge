@@ -48,6 +48,12 @@ entry_agents:
   # reviews event CONTENT.
   - role: telemetry_steward
     capability: telemetry_oversight
+  # ADR-0064 T6 (B385) — Phase B threat intel curator. Read-only
+  # kit; pulls + tags external intel feeds. Distinct from
+  # patch_patrol's vulnerability_check: curator handles
+  # FEED CONTENT; patch_patrol handles SYSTEM STATE.
+  - role: threat_intel_curator
+    capability: threat_intel_curation
 
 capabilities:
   - incident_response
@@ -56,6 +62,7 @@ capabilities:
   - forensic_cleanup
   - forensic_archive       # ADR-0078 Phase A
   - telemetry_oversight    # ADR-0064 T4 (B379) — D3 Phase B
+  - threat_intel_curation  # ADR-0064 T6 (B385) — D3 Phase B
   - vulnerability_check
   - access_audit
   - deception_management

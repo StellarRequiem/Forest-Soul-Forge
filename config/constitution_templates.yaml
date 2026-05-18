@@ -858,6 +858,50 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  threat_intel_curator:
+    # ADR-0064 T6 (B385) — external threat-intel feed curator.
+    # Guardian genre, read-only ceiling. Pulls from operator-
+    # configured external sources, verifies provenance, tags
+    # freshness, writes to local intel cache. Never analyzes
+    # runtime events (anomaly_ace's lane). Never acts on intel
+    # (response_rogue's lane). Pure feed-curation hygiene.
+    policies:
+      - id: forbid_runtime_event_analysis
+        rule: forbid
+        triggers: [analyze_telemetry_event, classify_runtime_anomaly, score_observed_behavior]
+        rationale: "Curator looks at INTEL FEEDS (external advisory content), not at LOCAL EVENTS. Analyzing telemetry crosses into anomaly_ace's lane. Drawing operational conclusions from feed content alone (without local-event correlation) is operator territory at most."
+      - id: forbid_response_action
+        rule: forbid
+        triggers: [isolate_process, block_network, quarantine_artifact, dispatch_alert_external, modify_firewall_rule]
+        rationale: "Curator never acts on intel — that's response_rogue's job (operator-gated). Curator publishes intel to the cache; downstream agents consume."
+      - id: require_provenance_attestation
+        rule: require
+        triggers: [add_intel_entry, update_intel_entry, refresh_feed]
+        rationale: "Every intel row written to the cache must carry source URL + retrieval timestamp + signature hash (where available). Unprovenanced intel is operator-pollution risk; the cache MUST be queryable by provenance."
+      - id: forbid_silent_feed_substitution
+        rule: forbid
+        triggers: [swap_feed_source, redirect_feed, override_signature_verification]
+        rationale: "Feed source list is operator-configured. The curator pulls from the allowlist; it does not modify the allowlist or substitute alternative URLs. Pipeline-hygiene parallel to telemetry_steward's forbid_silent_pipeline_pause."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - analyze_telemetry_event
+      - isolate_process
+      - block_network
+      - swap_feed_source
+      - dispatch_alert_external
+      - modify_firewall_rule
+    operator_duties:
+      - "Maintain the allowlist of intel sources at `config/threat_intel_sources.yaml` (a future ADR will land that file; today the curator reads operator-configured URLs from its memory)."
+      - "Review the freshness window quarterly — intel older than 90 days for IOCs and 1 year for ATT&CK mappings is operator-decision territory (refresh vs. retire)."
+      - "Treat signature-verification failures as feed compromise; do NOT auto-refresh the failing feed. The curator's policy require_provenance_attestation forbids the write; the operator investigates upstream."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   verifier_loop:
     # ADR-0036 — Memory Contradiction Auditor. Guardian-genre agent
     # that scans target memory for contradictions and stamps the

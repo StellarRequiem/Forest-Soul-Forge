@@ -95,6 +95,23 @@ class Adapter(abc.ABC):
         """
         return None
 
+    def parse_many(self, line: str) -> list[TelemetryEvent]:
+        """OPTIONAL — emit multiple events per stdout line.
+
+        ADR-0064 T6 (B385) micro-batching. High-frequency adapters
+        can buffer N events per pipe write (e.g., emit a JSON array
+        with N events per line) and split them here. The ingestor
+        checks for this override before falling back to parse().
+
+        Default implementation delegates to parse() so existing
+        single-event adapters keep working unchanged. Override only
+        when the source format genuinely carries multiple events
+        per line — overriding without that property creates more
+        boilerplate without any throughput benefit.
+        """
+        ev = self.parse(line)
+        return [ev] if ev is not None else []
+
     # ---- helpers exposed to subclasses ----------------------------------
 
     def make_event(

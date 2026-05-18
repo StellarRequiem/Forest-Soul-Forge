@@ -227,18 +227,46 @@ class AdapterIngestor:
 
     def _handle_line(self, line: str) -> None:
         self.stats.lines_seen += 1
+        # B385 (T6) — micro-batching: prefer parse_many which can
+        # emit multiple events per pipe write (e.g., an adapter
+        # that buffers internally). Default Adapter.parse_many
+        # delegates to single-event parse() so subclasses inherit
+        # it for free; duck-typed adapters that don't subclass
+        # Adapter (test stubs, third-party adapters that only
+        # implement parse()) get a runtime fallback below.
         try:
-            event = self.adapter.parse(line)
+            parse_many = getattr(self.adapter, "parse_many", None)
+            if callable(parse_many):
+                events = parse_many(line)
+            else:
+                # Duck-typed adapter without parse_many — fall back
+                # to single-event parse(). Same contract as the
+                # pre-B385 ingestor; existing adapters keep working.
+                ev = self.adapter.parse(line)
+                events = [ev] if ev is not None else []
         except Exception as e:
-            # Adapter contract says parse MUST NOT raise; if one
-            # does, we treat it as a dropped line + log the error.
-            # We do NOT let it kill the ingestor.
+            # parse/parse_many MUST NOT raise per Adapter contract.
+            # A misbehaving adapter doesn't kill the ingestor.
             self.stats.lines_dropped += 1
             self.stats.last_error = (
                 f"parse raised on line {line[:80]!r}: "
                 f"{type(e).__name__}: {e}"
             )
             return
+        if not events:
+            self.stats.lines_dropped += 1
+            return
+        # Multi-event path: iterate each via the same retention +
+        # rebuild + append path the single-event path uses. The
+        # split below preserves the existing per-event behavior.
+        for event in events:
+            self._handle_event(event)
+        return  # the rest of _handle_line moved into _handle_event
+
+    def _handle_event(self, event: TelemetryEvent) -> None:
+        # The body of the original _handle_line, now per-event so
+        # parse_many's batch results all flow through the same
+        # retention + rebuild + append path.
         if event is None:
             self.stats.lines_dropped += 1
             return
