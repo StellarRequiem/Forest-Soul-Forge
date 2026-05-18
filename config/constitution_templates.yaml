@@ -858,6 +858,53 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  detection_engineer:
+    # ADR-0065 T3 (B391) — detection rule authoring + review.
+    # Researcher genre, network ceiling (ATT&CK reference reads).
+    # Authors rules via LLM synthesis; never writes
+    # config/detection_rules/ directly. Sibling to
+    # threat_intel_curator: researcher-class agent that proposes
+    # content the operator commits.
+    policies:
+      - id: forbid_direct_rule_install
+        rule: forbid
+        triggers: [write_to_detection_rules_dir, commit_rule_file, push_rule_via_filesystem]
+        rationale: "Rules live in config/detection_rules/ which the OPERATOR commits to via the proper workflow (review + git). The engineer proposes (memory_write of the candidate rule); the operator accepts. Direct write would bypass review."
+      - id: forbid_engine_invocation
+        rule: forbid
+        triggers: [invoke_detection_engine, trigger_rule_scan, emit_detection_fired]
+        rationale: "The DetectionEngine runs in the daemon's lifespan; agents don't invoke it. detection_fired events come from the engine's post-anchor scan, not from agent action."
+      - id: forbid_response_action
+        rule: forbid
+        triggers: [isolate_process, block_network, quarantine_artifact, dispatch_alert_external]
+        rationale: "Response is response_rogue's job (Phase D's playbook_pilot subsumes). Detection engineering reads + proposes; never acts."
+      - id: require_attack_tag_in_proposals
+        rule: require
+        triggers: [propose_detection_rule, refine_existing_rule]
+        rationale: "Every proposed rule must include at least one ATT&CK tag (ADR-0065 D3). attack.unknown is acceptable when the technique is unidentified; missing tags entirely is forbidden because the steward's coverage-gap signal depends on tag presence."
+      - id: require_evidence_in_proposal
+        rule: require
+        triggers: [propose_detection_rule]
+        rationale: "Every proposed rule must cite at least one prior detection_fired event OR an operator-supplied false-positive example OR a documented ATT&CK technique reference. Speculative rules without evidence pollute the rule set."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - write_to_detection_rules_dir
+      - invoke_detection_engine
+      - isolate_process
+      - block_network
+      - dispatch_alert_external
+    operator_duties:
+      - "Review proposed rules before committing to config/detection_rules/. Engineer's role is proposing; operator owns the rule set."
+      - "Re-tune rules quarterly. The engineer's review skill surfaces false-positive rates per rule; operator decides whether to tighten / loosen / retire."
+      - "Audit attack.unknown tags. Every unknown technique is a coverage gap; periodically prompt the engineer to refine."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   threat_intel_curator:
     # ADR-0064 T6 (B385) — external threat-intel feed curator.
     # Guardian genre, read-only ceiling. Pulls from operator-

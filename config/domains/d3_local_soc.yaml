@@ -54,6 +54,15 @@ entry_agents:
   # FEED CONTENT; patch_patrol handles SYSTEM STATE.
   - role: threat_intel_curator
     capability: threat_intel_curation
+  # ADR-0065 T3 (B391) — Phase C detection engineer. Researcher
+  # kit; authors rules + reviews matches. Distinct from
+  # anomaly_ace's anomaly_detection: engineer AUTHORS detection
+  # CONTENT (rules); anomaly_ace consumes detection_fired events
+  # for LLM-grade follow-up. Distinct from telemetry_steward:
+  # steward sees BATCH metadata; engineer sees DETECTION matches
+  # + proposes rules.
+  - role: detection_engineer
+    capability: detection_authoring
 
 capabilities:
   - incident_response
@@ -63,6 +72,7 @@ capabilities:
   - forensic_archive       # ADR-0078 Phase A
   - telemetry_oversight    # ADR-0064 T4 (B379) — D3 Phase B
   - threat_intel_curation  # ADR-0064 T6 (B385) — D3 Phase B
+  - detection_authoring    # ADR-0065 T3 (B391) — D3 Phase C
   - vulnerability_check
   - access_audit
   - deception_management

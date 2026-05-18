@@ -2912,6 +2912,23 @@ archetypes:
       # in SQLite, integrity_root is the batch-level anchor). No code_read
       # (steward doesn't read source code / configs). Strict read_only.
 
+  # ADR-0065 T3 (B391) — detection_engineer archetype kit.
+  # Researcher genre; allowed network reach for ATT&CK reference
+  # pulls. No filesystem write (engineer proposes via memory_write;
+  # operator commits the actual rule file). No shell_exec / code_edit.
+  detection_engineer:
+    standard_tools:
+      - llm_think.v1            # rule synthesis + false-positive analysis
+      - memory_recall.v1        # walk prior detection_fired + prior proposals
+      - memory_write.v1         # record proposed rules + review notes
+      - delegate.v1             # escalate ambiguous rule cases
+      - audit_chain_verify.v1   # chain-level integrity before drawing trend
+      - text_summarize.v1       # condense ATT&CK references
+      - web_fetch.v1            # ATT&CK technique catalog (operator-allowlisted)
+      # Explicitly NO code_edit / shell_exec / file_integrity. The
+      # engineer's surface is read + propose; the rule file commit
+      # is operator-driven.
+
   # ADR-0064 T6 (B385) — threat_intel_curator archetype kit.
   # All read_only. Curator pulls intel via web_fetch (allowlisted
   # to operator-configured intel sources), verifies + tags +

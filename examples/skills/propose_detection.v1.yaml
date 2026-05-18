@@ -1,0 +1,211 @@
+schema_version: 1
+name: propose_detection
+version: '1'
+description: |
+  detection_engineer's signature skill. Synthesizes a candidate
+  Sigma-subset detection rule from operator-supplied context
+  (technique focus, prior matches, false-positive examples) and
+  writes the proposal to private memory for operator review.
+
+  The skill NEVER writes config/detection_rules/ directly — that's
+  forbidden by the constitution's forbid_direct_rule_install
+  policy. The operator reads the proposal from memory, reviews,
+  edits if needed, and commits the rule via the proper git
+  workflow.
+
+  Pipeline:
+    1. prior_proposals — memory_recall scope=private for prior
+       proposed rules on the same technique. Dedupe + iterative
+       refinement.
+    2. verify_chain_integrity — audit_chain_verify before drawing
+       trends from prior detection_fired events. Required by
+       chain-discipline policies inherited across the SOC roles.
+    3. attack_reference — web_fetch the ATT&CK technique page
+       (operator-supplied URL or canonical
+       https://attack.mitre.org/techniques/<id>). Cached locally
+       via the fetched body's sha256 so a future operator review
+       can compare against the source we synthesized from.
+    4. summarize_attack — text_summarize the ATT&CK page to the
+       parts relevant for detection (data sources +
+       implementation examples). Keeps the proposal prompt
+       focused.
+    5. synthesize_rule — llm_think generates a Sigma-subset rule
+       YAML body. Constrained by the prompt to use only the v1
+       subset (equality matches, no modifiers, no timeframe,
+       attack.<technique> tag mandatory).
+    6. record_proposal — memory_write scope=private records the
+       full proposal { technique, source_ref, candidate_rule,
+       rationale, confidence } with tags so operator can query
+       proposals by technique or session.
+
+  Output: structured proposal text + memory entry id. The
+  operator reads the proposal, validates the rule body parses
+  via the Sigma-subset parser (T1 substrate), and commits to
+  config/detection_rules/<rule_id>.yml when accepted.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - text_summarize.v1
+  - web_fetch.v1
+
+inputs:
+  type: object
+  required: [technique, focus]
+  properties:
+    technique:
+      type: string
+      description: >
+        ATT&CK technique ID (e.g. T1059.004) or 'unknown' if the
+        operator hasn't identified one. Used as the proposal's
+        attack tag (the rule MUST carry at least one tag per
+        ADR-0065 D3; the engineer's require_attack_tag_in_proposals
+        policy refuses to emit a proposal without it).
+    focus:
+      type: string
+      description: >
+        Operator-supplied description of what the rule should
+        detect — observed behavior, prior detection_fired events,
+        false-positive complaints. The synthesizer's prompt
+        constrains the proposal to this focus rather than
+        speculating across all of ATT&CK.
+    attack_url:
+      type: string
+      default: ""
+      description: >
+        Optional override URL for the ATT&CK technique reference.
+        Default empty -> the skill constructs
+        https://attack.mitre.org/techniques/<technique>/ if the
+        technique is a real ID; for 'unknown' the operator must
+        pass a URL or skip the reference step.
+    false_positive_examples:
+      type: string
+      default: ""
+      description: >
+        Optional operator-supplied prose describing observed
+        false-positive cases the rule should explicitly NOT fire
+        on. Threaded into the synthesizer's prompt as exclusion
+        constraints.
+
+steps:
+  - id: prior_proposals
+    tool: memory_recall.v1
+    args:
+      query: "propose_detection:${inputs.technique}"
+      mode: private
+      limit: 5
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: attack_reference
+    tool: web_fetch.v1
+    args:
+      url: ${inputs.attack_url}
+
+  - id: summarize_attack
+    tool: text_summarize.v1
+    args:
+      text: ${attack_reference.out.body}
+      target_words: 200
+      style: bullet_points
+      focus: "data sources + implementation examples relevant to detection rule authoring"
+
+  - id: synthesize_rule
+    tool: llm_think.v1
+    args:
+      task_kind: generate
+      prompt: |
+        You are detection_engineer, the SOC's detection-as-code
+        author. Synthesize a single candidate Sigma-subset rule
+        from the inputs below. The rule MUST conform to the v1
+        subset: equality field matches only, no modifiers
+        (fieldname|contains/regex/startswith), no timeframe block,
+        no aggregation, at least one ATT&CK tag.
+
+        Technique focus: ${inputs.technique}
+        Operator focus prose: ${inputs.focus}
+
+        Prior proposals on this technique (most recent first;
+        may be empty):
+        ${prior_proposals.out.entries}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        ATT&CK reference summary:
+        ${summarize_attack.out.response}
+
+        False-positive examples the operator wants explicitly
+        excluded:
+        ${inputs.false_positive_examples}
+
+        Output the proposal in this exact shape:
+
+        # CANDIDATE RULE
+        ```yaml
+        id: <snake_case rule id>
+        title: <one-line human title>
+        description: |
+          <2-4 sentence rationale linked to the technique>
+        level: <low|medium|high|critical>
+        tags:
+          - attack.${inputs.technique}
+        logsource:
+          source: <telemetry source name from the substrate>
+          event_type: <one of the closed event_type enum>
+        detection:
+          selection:
+            <field.dotted.path>: <expected literal value>
+          # additional selections for AND/OR composition
+          condition: <selection / selection or filter / etc.>
+        ```
+
+        # RATIONALE
+        <one paragraph linking the rule to the technique +
+        the operator focus + the ATT&CK reference summary>
+
+        # CONFIDENCE
+        <low|medium|high>: <one-sentence justification>
+
+        Do NOT include modifiers, timeframe, or aggregation in
+        the rule. If the operator-supplied focus genuinely needs
+        time-window correlation, output instead:
+
+          # CANDIDATE RULE: UNREPRESENTABLE
+          The requested detection requires <feature>, which is
+          outside the v1 Sigma subset. Operator must author this
+          out of band or wait for ADR-0065 v2 to land
+          <feature> support.
+
+        Do NOT speculate. If the operator focus doesn't have
+        enough specificity to author a rule (e.g., "detect bad
+        stuff"), output:
+
+          # CANDIDATE RULE: NEEDS_CLARIFICATION
+          <one sentence listing the specific concrete behavior
+          the operator needs to describe>
+
+  - id: record_proposal
+    tool: memory_write.v1
+    args:
+      content: ${synthesize_rule.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "propose_detection"
+        - "technique:${inputs.technique}"
+        - "attestor:detection_engineer"
+
+output:
+  technique: ${inputs.technique}
+  chain_status: ${verify_chain_integrity.out.status}
+  proposal: ${synthesize_rule.out.response}
+  proposal_entry_id: ${record_proposal.out.entry_id}
+  attack_reference_summary: ${summarize_attack.out.response}
+  # Operator reads proposal; if accepted, copies the YAML block
+  # to config/detection_rules/<rule_id>.yml + commits.

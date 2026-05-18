@@ -65,6 +65,13 @@ default_skill_per_capability:
     capability: threat_intel_curation
     skill_name: threat_intel_refresh
     skill_version: "1"
+  # ADR-0065 T3 (B391) — detection_authoring capability maps to
+  # propose_detection.v1. The engineer proposes new rules / tunes
+  # existing rules; operator commits accepted proposals.
+  - domain: d3_local_soc
+    capability: detection_authoring
+    skill_name: propose_detection
+    skill_version: "1"
 
   # D4 Code Review
   - domain: d4_code_review

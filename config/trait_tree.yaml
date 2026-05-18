@@ -666,6 +666,23 @@ roles:
       emotional: 0.4
       embodiment: 0.5   # read-heavy; never modifies external sources
 
+  # ---- ADR-0065 T3 (B391) D3 Phase C detection engineer ------------------
+  # detection_engineer: authors + reviews + tunes detection rules.
+  # Does NOT run rules at runtime (the DetectionEngine does). Does
+  # NOT write to config/detection_rules/ directly (operator commits
+  # rules); engineer proposes, operator accepts. Pure rule-authoring
+  # hygiene with allowlisted ATT&CK reference reach. Sibling to
+  # threat_intel_curator in design pattern.
+  detection_engineer:
+    description: "Detection rule authoring + review. Reads telemetry batches + recent detection_fired events; uses LLM synthesis + ATT&CK reference reads to propose new rules / tune existing rules / flag false-positive rates. NEVER writes config/detection_rules/ directly (operator commits). NEVER runs the engine (the substrate does). Genre: researcher (allowlisted network for ATT&CK reference + LLM judgment; no action surface). ADR-0065 T3."
+    domain_weights:
+      security: 2.4     # SOC role; detection content is security signal
+      audit: 2.3        # rule provenance + version tracking is audit work
+      cognitive: 2.4    # rule synthesis + false-positive analysis is cognitive
+      communication: 1.5 # operator-facing rule proposals
+      emotional: 0.4
+      embodiment: 0.5
+
   # ---- ADR-0077 (B331-B333) D4 advanced rollout roles --------------------
   # Three new agents that round out the SW-track triune:
   #   - test_author        — researcher genre; tests-first discipline.
