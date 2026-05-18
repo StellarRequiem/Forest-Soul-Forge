@@ -62,6 +62,14 @@ SECTIONS=(
   # gracefully degrades to SKIPPED when playwright/chromium aren't
   # installed (offline operator boxes).
   "14-browser-smoke"
+  # B394 / ADR-0081 T1 - substrate wiring cross-check. Asks
+  # cross-cutting questions the per-layer sections (04/05/09) can't:
+  # cataloged tools without any carrier, skills routed via handoffs
+  # that no archetype can actually run, orphan tools, and handoff
+  # routes whose terminal skill or required tools are missing. The
+  # B363/B392 gap class surfaces here within seconds of introduction.
+  # Daemon-independent; reads disk only.
+  "15-wiring-cross-check"
 )
 
 declare -a SECTION_RC=()
