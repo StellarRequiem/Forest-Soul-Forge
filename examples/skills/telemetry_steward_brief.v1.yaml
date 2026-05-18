@@ -1,0 +1,195 @@
+schema_version: 1
+name: telemetry_steward_brief
+version: '1'
+description: |
+  telemetry_steward's signature skill. Produces an operator-readable
+  brief on recent telemetry ingestion health based on batch-anchor
+  metadata pulled from the audit chain.
+
+  Pipeline:
+    1. prior_briefs — memory_recall scope=private for prior steward
+       briefs (so the new brief can note trends vs. yesterday).
+    2. verify_chain_integrity — audit_chain_verify confirms the
+       chain itself is hash-linked end-to-end before we draw any
+       conclusions from its content. Required by the constitution's
+       require_batch_anchor_verification policy.
+    3. summarize_batches — llm_think reviews the operator-supplied
+       recent_batches list (each entry: batch_id, source,
+       event_count, integrity_root, first_timestamp, last_timestamp)
+       and emits a structured brief. Flags include:
+         - volume_drop: source emitted 50%+ fewer events than its
+           prior-7-day average (operator must supply the average
+           OR the steward reports "no baseline").
+         - missing_source: a previously-active source emitted
+           zero batches in the window.
+         - freshness_stall: last_timestamp on any source is
+           >24h old when a flush should be expected (per-source
+           configurable threshold; absent → operator decides).
+         - unverified_anchor: an anchor's integrity_root field
+           is missing, malformed, or fails sha256 sanity (length
+           != 64 hex chars).
+       The skill DOES NOT attempt to verify integrity_root against
+       the store directly — that's `fsf telemetry verify` CLI
+       territory and requires DB read access the steward doesn't
+       have. The brief flags the batches the operator should
+       verify; the operator runs the CLI.
+    4. write_brief — memory_write scope=private records the brief
+       with tags so future briefs can be queried by date.
+
+  Output goes to the operator (or the orchestrator if dispatched
+  via /orchestrator). The steward NEVER takes action on findings;
+  follow-ups are operator-driven.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - text_summarize.v1
+
+inputs:
+  type: object
+  required: [recent_batches]
+  properties:
+    recent_batches:
+      type: array
+      description: >
+        List of recent telemetry_batch_ingested anchors to review.
+        Each item must include batch_id, source, event_count,
+        integrity_root, first_timestamp, last_timestamp (i.e., the
+        shape ingestor.py:_compute_integrity_root emits into the
+        chain entry). The operator (or a substrate query) supplies
+        the list — the skill itself doesn't pull from the chain
+        directly today (a future scope_chain_query.v1 tool could
+        change this).
+      items:
+        type: object
+        required: [batch_id, source, event_count, integrity_root, first_timestamp, last_timestamp]
+        properties:
+          batch_id:         {type: string}
+          source:           {type: string}
+          event_count:      {type: integer}
+          integrity_root:   {type: string}
+          first_timestamp:  {type: string}
+          last_timestamp:   {type: string}
+    window_label:
+      type: string
+      default: ""
+      description: >
+        Optional human label for the window the brief covers
+        (e.g., "last 24h", "since 2026-05-18T00:00Z"). Included
+        verbatim in the brief output for operator readability.
+    operator_focus:
+      type: string
+      default: ""
+      description: >
+        Optional emphasis hint. If set, the steward's brief
+        prioritizes this angle (e.g., "freshness", "macos_unified_log").
+
+steps:
+  - id: prior_briefs
+    tool: memory_recall.v1
+    args:
+      query: "telemetry_steward_brief"
+      mode: private
+      limit: 7
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: summarize_batches
+    tool: llm_think.v1
+    args:
+      task_kind: classify
+      prompt: |
+        You are telemetry_steward, the SOC's pipeline-hygiene
+        guardian. Produce a brief on recent telemetry ingestion
+        health.
+
+        Window: ${inputs.window_label}
+        Operator focus: ${inputs.operator_focus}
+
+        Audit chain integrity (verify_chain_integrity output):
+          status: ${verify_chain_integrity.out.status}
+          reason: ${verify_chain_integrity.out.reason}
+
+        Prior briefs (most recent first; may be empty for first
+        run):
+        ${prior_briefs.out.entries}
+
+        Recent batches to review:
+        ${inputs.recent_batches}
+
+        Apply these rules IN ORDER. Emit a single brief at the end.
+
+        1. If audit chain status != "ok":
+             Output: HALT — chain_broken. Any conclusions about
+             pipeline state drawn from an unverified chain would
+             themselves be untrustworthy. Operator must repair
+             the chain before the next brief.
+             Stop here.
+
+        2. For each batch, check integrity_root sanity:
+             - exactly 64 hex chars (sha256 length)
+             - lowercase hex only
+           Flag malformed roots as unverified_anchor.
+
+        3. Aggregate by source. For each source, compute:
+             - total batches in window
+             - total events in window
+             - earliest first_timestamp
+             - latest last_timestamp
+             - freshness_seconds = (now - latest last_timestamp)
+               (you don't know "now"; if it's >24h since
+                latest last_timestamp BY OPERATOR JUDGMENT,
+                flag freshness_stall — be conservative)
+
+        4. Compare against prior briefs (if any) for volume
+           continuity. Sudden drops (50%+ fewer events than a
+           same-window comparable prior brief) → flag volume_drop
+           citing both numbers.
+
+        5. Note sources that appeared in prior briefs but have
+           zero batches in the current window → missing_source.
+
+        6. Emit the brief as a structured markdown block:
+             ## Telemetry Steward Brief
+             window: ${inputs.window_label}
+             chain_status: ok
+             ### Per-source summary
+             - source_A: N batches, M events, freshness Xh
+             - source_B: ...
+             ### Flags
+             - unverified_anchor: batch_id <id> (root malformed)
+             - volume_drop: source_A 50 -> 12 batches vs prior
+             - freshness_stall: source_C last seen 30h ago
+             - missing_source: source_D absent (was in prior 3 briefs)
+             ### Recommendation
+             <one operator-actionable sentence>
+
+        Do not analyze event CONTENT. The steward stays in the
+        metadata lane. Recommendations are observational only
+        ("operator should investigate freshness_stall on
+        source_C"); never instructive ("isolate process X" —
+        that's response_rogue's job).
+
+  - id: write_brief
+    tool: memory_write.v1
+    args:
+      content: ${summarize_batches.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "telemetry_steward_brief"
+        - "window:${inputs.window_label}"
+        - "attestor:telemetry_steward"
+
+output:
+  window_label: ${inputs.window_label}
+  chain_status: ${verify_chain_integrity.out.status}
+  brief: ${summarize_batches.out.response}
+  brief_entry_id: ${write_brief.out.entry_id}
+  # Operator reads brief; queries memory_recall by
+  # 'telemetry_steward_brief' to walk historical briefs.

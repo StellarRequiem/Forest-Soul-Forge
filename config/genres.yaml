@@ -160,6 +160,13 @@ genres:
       - verifier_loop            # ADR-0036 — memory contradiction auditor
       - reality_anchor           # ADR-0063 — pre-action ground-truth verifier
       - forensic_archivist       # ADR-0078 Phase A (B342-B347) — D3 chain-of-custody
+      - telemetry_steward        # ADR-0064 T4 (B379) — D3 Phase B pipeline oversight
+      # NOTE — telemetry_steward's kit is also genuinely read_only:
+      # audit_chain_verify + memory_recall + memory_write + llm_think +
+      # delegate. The steward reviews recent batch anchors + writes
+      # summaries; it never spawns adapters (T2 substrate handles that)
+      # and never analyzes raw events (anomaly_ace's job). Same
+      # read-only-by-construction posture as forensic_archivist.
       # NOTE — forensic_archivist's kit is genuinely read_only:
       # audit_chain_verify + file_integrity + memory_recall + memory_write
       # + delegate. The apply path (acquire/archive/retire) is operator-

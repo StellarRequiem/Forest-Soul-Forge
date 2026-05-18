@@ -632,6 +632,23 @@ roles:
       emotional: 0.4
       embodiment: 0.5   # read-heavy; rare writes (own log entries)
 
+  # ---- ADR-0064 T4 (B379) D3 Phase B telemetry steward ---------------------
+  # telemetry_steward: oversees the telemetry ingestion pipeline.
+  # Reads recent batches' chain anchors, verifies integrity, and
+  # surfaces operator-actionable summaries. Guardian genre,
+  # read_only — does NOT analyze (anomaly_ace does that), does NOT
+  # respond (response_rogue does), does NOT alert on its own.
+  # Pure observability hygiene per ADR-0064 D7.
+  telemetry_steward:
+    description: "Telemetry ingestion oversight. Reads recent batch anchors from the audit chain, verifies integrity_root matches the store, summarizes ingestion health (volume, source diversity, freshness, anomalies). NEVER analyzes the events themselves (anomaly_ace's job), NEVER responds to findings (response_rogue's job). Pure pipeline hygiene. Genre: guardian. ADR-0064 T4."
+    domain_weights:
+      security: 1.8     # SOC role; aware of security signal but doesn't act on it
+      audit: 2.6        # the load-bearing trait — verify-and-summarize is audit work
+      cognitive: 1.7    # statistical aggregation + anomaly heuristics on batch metadata
+      communication: 1.6 # operator-facing summaries are the deliverable
+      emotional: 0.4    # weight floor per trait_engine schema (min 0.4)
+      embodiment: 0.5   # read-heavy; the steward never spawns adapters itself
+
   # ---- ADR-0077 (B331-B333) D4 advanced rollout roles --------------------
   # Three new agents that round out the SW-track triune:
   #   - test_author        — researcher genre; tests-first discipline.

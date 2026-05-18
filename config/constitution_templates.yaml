@@ -813,6 +813,51 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  telemetry_steward:
+    # ADR-0064 T4 (B379) — telemetry ingestion oversight role. Guardian
+    # genre, read-only ceiling. The steward reads recent batch anchors
+    # from the audit chain, verifies the store's integrity_root still
+    # matches each anchor, and emits operator-readable summaries.
+    # Does NOT analyze raw events (anomaly_ace), NOT respond to
+    # findings (response_rogue), NOT alert on its own. Pure pipeline
+    # hygiene per ADR-0064 D7.
+    policies:
+      - id: forbid_event_analysis
+        rule: forbid
+        triggers: [analyze_event_content, classify_threat_severity, score_anomaly]
+        rationale: "Event content analysis is anomaly_ace's job. The steward looks at BATCH metadata (volume, source, freshness, integrity_root) — not individual events. Drawing analytical conclusions from raw events crosses into anomaly_ace's lane and dilutes attribution in the audit chain."
+      - id: forbid_response_action
+        rule: forbid
+        triggers: [isolate_process, block_network, quarantine_artifact, dispatch_alert_external]
+        rationale: "Response is response_rogue's job (and operator-approved). The steward's value is observability hygiene; taking action on what it observes would short-circuit the SOC's response-rogue gate."
+      - id: require_batch_anchor_verification
+        rule: require
+        triggers: [summarize_batch, mark_batch_reviewed]
+        rationale: "Every batch the steward reviews must first be verified against its chain anchor via audit_chain_verify (chain integrity) + integrity_root recompute. Reviewing without verification produces a summary that's only as trustworthy as the unverified store."
+      - id: forbid_silent_pipeline_pause
+        rule: forbid
+        triggers: [pause_adapter, throttle_ingestion, drop_event_class]
+        rationale: "The steward observes; it does not modulate the pipeline. Pipeline configuration (rate, retention, allowed sources) is operator-driven. Silent throttling would create a blindspot in the audit trail."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - analyze_event_content
+      - isolate_process
+      - block_network
+      - pause_adapter
+      - throttle_ingestion
+      - dispatch_alert_external
+    operator_duties:
+      - "Review steward summaries daily — the steward surfaces metadata-level anomalies (sudden volume drop, missing source, unverified anchor) but escalation to operator action is yours."
+      - "Treat a CHAIN_ENTRY_MISSING verdict from the verify CLI as a mid-flush-crash signal — investigate why the daemon dropped between store.ingest_batch and chain.append; the store has data the chain doesn't reference."
+      - "Treat a MISMATCH verdict as tamper-evidence — recompute against backup, then investigate the integrity_hash divergence in the store row."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   verifier_loop:
     # ADR-0036 — Memory Contradiction Auditor. Guardian-genre agent
     # that scans target memory for contradictions and stamps the

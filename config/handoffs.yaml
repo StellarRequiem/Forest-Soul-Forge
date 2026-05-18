@@ -51,6 +51,13 @@ default_skill_per_capability:
     capability: forensic_archive
     skill_name: archive_evidence
     skill_version: "1"
+  # ADR-0064 T4 (B379) — telemetry_oversight capability maps to
+  # telemetry_steward_brief.v1. The skill summarizes recent batch
+  # ingestion health; the steward is the only role that runs it.
+  - domain: d3_local_soc
+    capability: telemetry_oversight
+    skill_name: telemetry_steward_brief
+    skill_version: "1"
 
   # D4 Code Review
   - domain: d4_code_review

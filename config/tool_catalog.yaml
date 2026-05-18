@@ -2895,6 +2895,23 @@ archetypes:
       # No shell_exec. No code_edit. No external network. Read-only by
       # construction; that's the genre invariant.
 
+  # ADR-0064 T4 (B379) — telemetry_steward archetype kit.
+  # All read_only. Steward reviews batch anchors + summarizes; never
+  # touches raw events (anomaly_ace's lane) and never acts on findings
+  # (response_rogue's lane). Adapter lifecycle is T2 substrate's job;
+  # the steward doesn't spawn or pause adapters either.
+  telemetry_steward:
+    standard_tools:
+      - llm_think.v1            # summarization + judgment on batch metadata
+      - memory_recall.v1        # look up prior steward briefs for trending
+      - memory_write.v1         # record briefs in private memory
+      - delegate.v1             # escalate MISMATCH / CHAIN_ENTRY_MISSING to operator
+      - audit_chain_verify.v1   # chain-level integrity (load-bearing per policy require_batch_anchor_verification)
+      - text_summarize.v1       # curated summarization of batch-metadata digests
+      # No shell_exec. No file_integrity (raw events aren't files — they're
+      # in SQLite, integrity_root is the batch-level anchor). No code_read
+      # (steward doesn't read source code / configs). Strict read_only.
+
   # ---- ADR-0036 verification track --------------------------------------
   # Backfilled in Burst 126 after Phase A audit (2026-04-30) flagged the
   # missing archetype. verifier_loop was previously falling through to

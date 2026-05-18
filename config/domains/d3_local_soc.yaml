@@ -41,6 +41,13 @@ entry_agents:
   # forensic_archivist PRESERVES + ATTESTS.
   - role: forensic_archivist
     capability: forensic_archive
+  # ADR-0064 T4 (B379) — Phase B telemetry steward. Read-only kit;
+  # oversees the T2 adapter substrate's batch anchors. Distinct
+  # from anomaly_ace's anomaly_detection: the steward reviews
+  # BATCH metadata (volume/freshness/integrity_root); anomaly_ace
+  # reviews event CONTENT.
+  - role: telemetry_steward
+    capability: telemetry_oversight
 
 capabilities:
   - incident_response
@@ -48,6 +55,7 @@ capabilities:
   - anomaly_detection
   - forensic_cleanup
   - forensic_archive       # ADR-0078 Phase A
+  - telemetry_oversight    # ADR-0064 T4 (B379) — D3 Phase B
   - vulnerability_check
   - access_audit
   - deception_management
