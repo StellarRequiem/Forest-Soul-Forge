@@ -1,7 +1,22 @@
 # ADR-0080 — Per-agent capability tree UI
 
-**Status:** Proposed
-**Date:** 2026-05-17
+**Status:** Accepted (4/5 tranches shipped; T4 deferred indefinitely)
+**Date:** 2026-05-17 proposal, 2026-05-18 close
+**Closed in:** B383 (this commit). Tranches:
+  - T1 B380 (`972ff9b`) — backend GET endpoint
+  - T2 B381 (`0560d0f`) — frontend Capabilities tab
+  - T3 B382 (`e767be3`) — toggle endpoint + audit event
+  - T4 (DEFERRED) — inferred tool→tool prerequisite edges; not
+    needed for daily operator workflow today
+  - T5 B383 (this) — runbook (`docs/runbooks/agent-capability-tree.md`)
+    + this status update
+
+Plus a queued follow-on: **T3b** lands the per-agent overrides
+table + runtime enforcement of toggles. The audit chain is the
+durable record in the meantime; T3b only converts intent into
+gating.
+
+
 **Tracks:** Frontend / Operator UX / Governance surface
 **Supersedes:** none (augments existing global Skills + Tool
 Registry tabs)
