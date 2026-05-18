@@ -55,6 +55,13 @@ SECTIONS=(
   "11-memory-retention"
   "12-encryption-at-rest"
   "13-frontend-integration"
+  # B366 - browser-driven smoke (Playwright + DOM text inspection).
+  # Catches frontend boot regressions section-13's API-level
+  # probe can't see (raw fetch bypass, boot-asymmetry, JS exceptions
+  # mid-render). Slower (~20s) because it drives a real Chromium;
+  # gracefully degrades to SKIPPED when playwright/chromium aren't
+  # installed (offline operator boxes).
+  "14-browser-smoke"
 )
 
 declare -a SECTION_RC=()
@@ -149,11 +156,99 @@ done
   fi
 } >> "$SUMMARY"
 
+# ---- B367: single browsable index.html ------------------------------------
+# Operator-friendly UX: a single page with the tally at top, per-section
+# deep-links into each report.md, and inline thumbnails for the section-14
+# tab screenshots. Markdown stays the canonical machine-readable artifact;
+# the HTML is its visual sibling.
+INDEX_HTML="$RUN_ROOT/index.html"
+SHOT_DIR_REL="../diagnostic-14-browser-smoke/screenshots"
+
+# Build per-section status badge HTML.
+section_rows=""
+for i in "${!SECTIONS[@]}"; do
+  section="${SECTIONS[$i]}"
+  rc="${SECTION_RC[$i]}"
+  dur="${SECTION_DUR[$i]}s"
+  case "$rc" in
+    0)        status="PASS"; color="#2e7d32" ;;
+    missing)  status="MISSING"; color="#888" ;;
+    *)        status="FAIL"; color="#c62828" ;;
+  esac
+  rpt_rel="../diagnostic-${section}/report.md"
+  section_rows="$section_rows<tr><td>$((i+1))</td><td>$section</td><td style=\"background:$color;color:#fff;padding:2px 8px;border-radius:3px;\">$status</td><td>$dur</td><td><a href=\"$rpt_rel\">report.md</a></td></tr>"
+done
+
+# Build screenshot gallery from section-14 (B366) outputs, if present.
+shots_block=""
+shots_dir="$REPO_ROOT/data/test-runs/diagnostic-14-browser-smoke/screenshots"
+if [ -d "$shots_dir" ]; then
+  shots_block="<h2>Tab screenshots (section 14)</h2><div style=\"display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;\">"
+  for shot in "$shots_dir"/*.png; do
+    [ -e "$shot" ] || continue
+    base=$(basename "$shot" .png)
+    shots_block="$shots_block<figure style=\"margin:0;\"><img src=\"$SHOT_DIR_REL/$(basename "$shot")\" style=\"width:100%;height:auto;border:1px solid #ccc;border-radius:4px;\"><figcaption style=\"font-family:monospace;font-size:12px;text-align:center;padding:4px 0;\">$base</figcaption></figure>"
+  done
+  shots_block="$shots_block</div>"
+fi
+
+# Pull the consolidated FAIL list out of summary.md verbatim so the
+# index mirrors the markdown.
+fail_block=$(awk '/^## Consolidated punch list/,/^## Tally/' "$SUMMARY" | sed '$d')
+
+cat > "$INDEX_HTML" <<EOF
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>FSF diagnostic — $TIMESTAMP</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 16px; color: #222; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    h2 { font-size: 16px; margin: 24px 0 8px; }
+    .meta { color: #666; font-size: 13px; margin-bottom: 16px; }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    th, td { padding: 6px 10px; border-bottom: 1px solid #eee; text-align: left; }
+    .tally { font-size: 14px; padding: 12px; background: #f5f5f5; border-radius: 4px; margin: 12px 0 24px; }
+    .tally b { font-size: 18px; }
+    pre { background: #f8f8f8; padding: 10px; border-radius: 4px; white-space: pre-wrap; font-size: 13px; }
+    a { color: #1565c0; }
+  </style>
+</head>
+<body>
+  <h1>FSF diagnostic — $TIMESTAMP</h1>
+  <div class="meta">
+    git SHA: <code>$GIT_SHA</code>
+    &nbsp;&middot;&nbsp; run id: <code>diagnostic-all-$TIMESTAMP</code>
+    &nbsp;&middot;&nbsp; sections: ${#SECTIONS[@]}
+  </div>
+  <div class="tally">
+    <b>$pass PASS</b> &nbsp;/&nbsp; <b style="color:#c62828">$fail FAIL</b>${missing:+ &nbsp;/&nbsp; <b style="color:#888">$missing MISSING</b>}
+  </div>
+  <h2>Section results</h2>
+  <table>
+    <thead><tr><th>#</th><th>Section</th><th>Status</th><th>Duration</th><th>Report</th></tr></thead>
+    <tbody>$section_rows</tbody>
+  </table>
+  <h2>Consolidated punch list</h2>
+  <pre>$fail_block</pre>
+  $shots_block
+  <h2>Source artifacts</h2>
+  <ul>
+    <li>Machine-readable summary: <a href="summary.md">summary.md</a></li>
+    <li>Per-section stdout: <code>section-*.stdout.log</code> in this directory</li>
+    <li>Per-section reports: linked in the table above</li>
+  </ul>
+</body>
+</html>
+EOF
+
 echo
 echo "=========================================================="
 echo "Summary:"
 echo "  $pass PASS / $fail FAIL${missing:+ / $missing MISSING}"
 echo "  Full summary: $SUMMARY"
+echo "  Browsable:    $INDEX_HTML"
 echo "=========================================================="
 echo
 echo "Press any key to close."
