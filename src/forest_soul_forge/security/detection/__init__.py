@@ -16,6 +16,10 @@ The Sigma subset shipped here is intentionally narrow:
   - level: severity passthrough
   - tags: MITRE ATT&CK technique IDs (mandatory per ADR-0065 D3)
 """
+from forest_soul_forge.security.detection.engine import (
+    DetectionEngine,
+    DetectionScanResult,
+)
 from forest_soul_forge.security.detection.events import (
     DetectionMatch,
     DetectionRule,
@@ -30,6 +34,8 @@ __all__ = [
     "DetectionRule",
     "DetectionMatch",
     "DetectionRuleError",
+    "DetectionEngine",
+    "DetectionScanResult",
     "parse_rule",
     "parse_rules_from_dir",
 ]

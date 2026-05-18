@@ -113,6 +113,14 @@ class AdapterIngestor:
         # drives ingestors on behalf of an agent, that agent's
         # dna gets passed here instead.
         chain_agent_dna: str | None = None,
+        # B390 (ADR-0065 T2) — detection engine handle. When set,
+        # every successful flush invokes engine.scan(batch_id,
+        # events) AFTER the telemetry_batch_ingested anchor lands.
+        # Optional with default None so single-host deploys
+        # without rules + legacy tests keep working unchanged.
+        # The engine's own ready() gate refuses to scan if any
+        # rule fails to parse (ADR-0065 D7).
+        detection_engine: "Any | None" = None,
     ) -> None:
         if batch_size < 1:
             raise IngestorError(f"batch_size must be >= 1; got {batch_size}")
@@ -126,6 +134,7 @@ class AdapterIngestor:
         self.flush_interval_s = flush_interval_s
         self.audit_chain = audit_chain
         self.chain_agent_dna = chain_agent_dna
+        self.detection_engine = detection_engine
         self.stats = IngestorStats()
 
         self._spawn = spawn or self._default_spawn
@@ -360,6 +369,31 @@ class AdapterIngestor:
                 self.stats.last_error = (
                     f"telemetry_batch_ingested chain append failed "
                     f"for batch_id={batch_id}: {e!r}"
+                )
+
+        # B390 (ADR-0065 T2) — after the anchor lands, run the
+        # detection engine across the batch. Per-rule matches emit
+        # one detection_fired chain event each. Engine failure is
+        # non-fatal to ingest (same store-first / anchor-second
+        # posture as B377): chain emission is best-effort, the
+        # store data + anchor are durable regardless.
+        if self.detection_engine is not None:
+            try:
+                self.detection_engine.scan(
+                    batch_id=batch_id,
+                    events=batch,
+                    audit_chain=self.audit_chain,
+                    agent_dna=self.chain_agent_dna,
+                )
+            except Exception as e:
+                # Don't let a misbehaving rule set kill the
+                # ingestor. Section-08 (audit forensics) will
+                # surface the missing detection_fired events on
+                # the next harness run if the engine starts
+                # silently failing.
+                self.stats.last_error = (
+                    f"detection_engine.scan failed for "
+                    f"batch_id={batch_id}: {e!r}"
                 )
 
         return batch_id
