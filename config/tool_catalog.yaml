@@ -2615,11 +2615,19 @@ archetypes:
       # dns_lookup.v1 NOT included — see comment above (genre ceiling)
       - traffic_flow_local.v1   # was flow_summary.v1; read_only — fits observer
       - timestamp_window.v1
+      - llm_think.v1            # B392 — operator-readable reasoning over observations
+      - text_summarize.v1       # B392 — operator-facing summaries (read_only)
+      - memory_recall.v1        # B392 — base read access to private memory
+      - memory_write.v1         # B392 — write own observation log
   log_analyst:
     standard_tools:
       - log_scan.v1              # was log_grep.v1
       - log_aggregate.v1
       - timestamp_window.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
+      - memory_recall.v1
+      - memory_write.v1
   anomaly_investigator:
     standard_tools:
       # packet_query.v1 deferred to Phase G tshark_pcap_query.v1
@@ -2629,6 +2637,10 @@ archetypes:
       - anomaly_score.v1         # half of was baseline_compare.v1
       - log_correlate.v1         # was correlation_window.v1
       - timestamp_window.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
+      - memory_recall.v1
+      - memory_write.v1
 
   # ---- ADR-0033 Phase D — Security Swarm role kits (9) -------------------
   # Every Swarm role gets memory_recall + memory_write so they can read and
@@ -2640,6 +2652,10 @@ archetypes:
   # pending operator scoping of MFA posture target), decoy_file (functionally
   # absorbed by canary_token.v1). When those land, add them to the
   # corresponding role.
+  # B392 — all 9-swarm SOC archetypes get llm_think + text_summarize
+  # so the operator can get readable summaries of their findings.
+  # Both are read_only; fits guardian/investigator ceiling for every
+  # role here without exception.
   patch_patrol:
     standard_tools:
       - patch_check.v1
@@ -2647,6 +2663,8 @@ archetypes:
       - timestamp_window.v1
       - memory_recall.v1
       - memory_write.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
 
   gatekeeper:
     standard_tools:
@@ -2655,6 +2673,8 @@ archetypes:
       - timestamp_window.v1
       - memory_recall.v1
       - memory_write.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
 
   log_lurker:
     standard_tools:
@@ -2665,6 +2685,8 @@ archetypes:
       - memory_recall.v1
       - memory_write.v1
       - delegate.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
 
   anomaly_ace:
     standard_tools:
@@ -2676,6 +2698,8 @@ archetypes:
       - memory_recall.v1
       - memory_write.v1
       - delegate.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
 
   net_ninja:
     standard_tools:
@@ -2686,6 +2710,8 @@ archetypes:
       - memory_recall.v1
       - memory_write.v1
       - delegate.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
 
   response_rogue:
     standard_tools:
@@ -2696,6 +2722,8 @@ archetypes:
       - memory_recall.v1
       - memory_write.v1
       - delegate.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
 
   zero_zero:
     standard_tools:
@@ -2708,6 +2736,8 @@ archetypes:
       - memory_write.v1
       - memory_disclose.v1
       - delegate.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
 
   vault_warden:
     standard_tools:
@@ -2719,6 +2749,8 @@ archetypes:
       - memory_write.v1
       - memory_disclose.v1
       - delegate.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
 
   deception_duke:
     standard_tools:
@@ -2729,6 +2761,8 @@ archetypes:
       - memory_write.v1
       - memory_disclose.v1
       - delegate.v1
+      - llm_think.v1             # B392
+      - text_summarize.v1        # B392
 
   # ---- SW-track coding swarm kits ---------------------------------------
   # The 3 specialists in the coding triune. Architect designs (researcher
@@ -2756,6 +2790,10 @@ archetypes:
       - code_read.v1            # SW.A.5 — read what's there
       - code_edit.v1            # SW.A.5 — write changes (gated by genre)
       - shell_exec.v1           # SW.A.5 — run tests / git (gated by genre)
+      - text_summarize.v1       # B392 — commit_changelog/release_notes skills
+      - code_explain.v1         # B392 — code_review_quick/bug_report_polish skills
+      - commit_message.v1       # B392 — commit_changelog/release_notes skills
+      - email_draft.v1          # B392 — bug_report_polish skill
 
   # ADR-0056 — Experimenter (Smith). Maximally permissive legal
   # kit: every tool that doesn't touch identity-immutable
@@ -2820,6 +2858,11 @@ archetypes:
       - memory_recall.v1
       - delegate.v1
       - code_read.v1            # SW.A.5 — read diffs to review them
+      - text_summarize.v1       # B392 — commit_changelog/release_notes/memory_consolidate
+      - code_explain.v1         # B392 — code_review_quick/bug_report_polish skills
+      - commit_message.v1       # B392 — commit_changelog/release_notes skills
+      - email_draft.v1          # B392 — bug_report_polish skill
+      - tone_shift.v1           # B392 — release_notes skill (audience adapt)
 
   # ---- ADR-0077 (B331-B336) D4 advanced rollout per-role kits -----------
   # Phase α closure caught that birthing a `test_author` agent landed
@@ -3258,6 +3301,10 @@ genre_default_tools:
     # flow_summary → traffic_flow_local
     - traffic_flow_local.v1
     - timestamp_window.v1
+    - llm_think.v1              # B392 — readable reasoning over observations (read_only fits ceiling)
+    - text_summarize.v1         # B392 — operator-facing summaries
+    - memory_recall.v1          # B392 — base read access
+    - memory_write.v1           # B392 — write own log
   investigator:
     # post C-1 dissection 2026-04-30:
     # - packet_query     → deferred (Phase G tshark_pcap_query.v1)
@@ -3269,12 +3316,31 @@ genre_default_tools:
     - anomaly_score.v1
     - log_correlate.v1
     - timestamp_window.v1
+    - llm_think.v1              # B392
+    - text_summarize.v1         # B392
+    - memory_recall.v1
+    - memory_write.v1
   communicator:
     - timestamp_window.v1
+    - llm_think.v1              # B392 — communicators need LLM for content shaping
+    - text_summarize.v1         # B392
+    - email_draft.v1            # B392 — meeting_followup + bug_report_polish skills
+    - action_items_extract.v1   # B392 — meeting_followup skill
+    - tone_shift.v1             # B392 — release_notes skill + audience adapt
+    - memory_recall.v1
+    - memory_write.v1
   guardian:
     - timestamp_window.v1
+    - llm_think.v1              # B392 — guardians review + judge; LLM is load-bearing
+    - text_summarize.v1         # B392
+    - memory_recall.v1
+    - memory_write.v1
   researcher:
     - timestamp_window.v1
+    - llm_think.v1              # B392 — researcher's primary substrate
+    - text_summarize.v1         # B392 — corpus synthesis
+    - memory_recall.v1
+    - memory_write.v1
   # actuator and companion intentionally have NO genre defaults — those
   # genres have outsized risk profiles, and silently giving them tools
   # by genre claim alone would short-circuit the operator's intent.

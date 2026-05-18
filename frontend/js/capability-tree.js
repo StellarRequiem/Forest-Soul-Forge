@@ -35,15 +35,20 @@ function _escape(s) {
 
 // State -> visual class. Centralised so a future theme change
 // touches one place.
+// B392 — added `unavailable` for the per-agent skill gap (skill
+// works on substrate; this agent's kit is missing required tools).
+// "broken" stays reserved for tool-level substrate corruption.
 const STATUS_CLASS = {
   live: "cap-node--live",
   broken: "cap-node--broken",
+  unavailable: "cap-node--unavailable",
   in_progress: "cap-node--inprogress",
 };
 
 const STATUS_GLYPH = {
   live: "✓",
   broken: "✗",
+  unavailable: "○",   // hollow circle — "off for this agent"
   in_progress: "⏳",
 };
 
@@ -68,7 +73,8 @@ function _node(label, status, binding, payload) {
   // strand the user) plus class-based (so a theme can override).
   const statusColors = {
     live: "var(--color-ok, #2e7d32)",
-    broken: "var(--color-bad-muted, #6b6b6b)",
+    broken: "var(--color-bad, #ef5350)",       // real substrate problem — red
+    unavailable: "var(--color-muted, #6b6b6b)", // off for this agent — grey
     in_progress: "var(--color-warn, #ffa726)",
   };
   el.style.color = statusColors[status] || "inherit";
@@ -204,7 +210,7 @@ function _renderTree(tree) {
     "Skills (operator-toggleable)",
     tree.skills.length,
     tree.skills.length
-      ? `${tree.skills.filter(s => s.status === "live").length} live, ${tree.skills.filter(s => s.status === "broken").length} broken`
+      ? `${tree.skills.filter(s => s.status === "live").length} live, ${tree.skills.filter(s => s.status === "unavailable").length} unavailable (agent kit gap)`
       : "",
   );
   for (const s of tree.skills) {
@@ -249,6 +255,10 @@ function _renderSummary(body) {
     ` &middot; tools: <strong>${s.tools_live}/${s.tools_total}</strong> live` +
     (s.tools_broken ? ` <span style="color:var(--color-bad, #ef5350);">(${s.tools_broken} broken)</span>` : "") +
     ` &middot; skills: <strong>${s.skills_live}/${s.skills_total}</strong> live` +
+    // B392 — skills_broken is substrate corruption (rare); skills_unavailable
+    // is per-agent kit gap (common; resolved by rebirth with the right kit).
+    // Different colors so the operator reads severity at a glance.
+    (s.skills_unavailable ? ` <span style="color:var(--color-muted, #6b6b6b);">(${s.skills_unavailable} unavailable)</span>` : "") +
     (s.skills_broken ? ` <span style="color:var(--color-bad, #ef5350);">(${s.skills_broken} broken)</span>` : "")
   );
 }

@@ -216,10 +216,15 @@ def test_missing_constitution_path_yields_empty_tools(tmp_path):
 
 # ---- skill composition: missing tools flagged ----------------------------
 
-def test_skill_with_missing_required_tool_is_broken(tmp_path):
+def test_skill_with_missing_required_tool_is_unavailable(tmp_path):
     """Skill requires text_summarize.v1, but agent's constitution
-    only has llm_think.v1 -> skill is broken with missing_tools=[
-    text_summarize.v1]."""
+    only has llm_think.v1 -> skill is unavailable (not 'broken',
+    per B392 renaming) with missing_tools=[text_summarize.v1].
+
+    Rationale (B392): 'broken' stays reserved for tool-level
+    substrate corruption; for skills, the substrate is fine and
+    the per-agent kit gap is the right framing. Operator-readable
+    distinction matters when reading the Capabilities tab."""
     const_path = tmp_path / "agent.constitution.yaml"
     _make_constitution(const_path, [
         {"name": "llm_think", "version": "1", "side_effects": "read_only"},
@@ -245,7 +250,7 @@ def test_skill_with_missing_required_tool_is_broken(tmp_path):
     assert len(body["tree"]["skills"]) == 1
     s = body["tree"]["skills"][0]
     assert s["name"] == "summarize_audit"
-    assert s["status"] == "broken"
+    assert s["status"] == "unavailable"
     assert s["missing_tools"] == ["text_summarize.v1"]
     assert s["binding"] == "operator_toggleable"
 

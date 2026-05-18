@@ -236,6 +236,14 @@ async def get_capability_tree(
         ))
 
     # ----- Compose skill nodes -----
+    # B392 — skill status uses "unavailable" (not "broken") when this
+    # specific agent's kit doesn't have all required tools. The skill
+    # itself works on the substrate; THIS agent simply can't run it.
+    # "broken" stays reserved for actual substrate corruption (e.g.
+    # tool registered in constitution but not in /tools/registered).
+    # Operator-readable distinction: tool-level broken = substrate
+    # problem; skill-level unavailable = agent kit gap (rebirth fixes
+    # it via the proper pipeline).
     skill_catalog = getattr(request.app.state, "skill_catalog", None)
     skill_nodes: list[SkillNode] = []
     if skill_catalog is not None and hasattr(skill_catalog, "skills"):
@@ -252,10 +260,13 @@ async def get_capability_tree(
                     f"available in agent's kit"
                 )
             else:
-                status_ = "broken"
+                status_ = "unavailable"
                 reason = (
-                    f"installed but {len(missing)}/{len(requires)} "
-                    f"required tools missing from agent's kit"
+                    f"installed on substrate, but agent's kit is "
+                    f"missing {len(missing)}/{len(requires)} required "
+                    f"tools. Skill works on the substrate — agent "
+                    f"needs the missing tools added (via rebirth, per "
+                    f"the constitution-hash invariant)."
                 )
             skill_nodes.append(SkillNode(
                 name=sd.name,
@@ -275,13 +286,18 @@ async def get_capability_tree(
 
     # ----- Summary -----
     summary = {
-        "tools_total":       len(tool_nodes),
-        "tools_live":        sum(1 for n in tool_nodes if n.status == "live"),
-        "tools_broken":      sum(1 for n in tool_nodes if n.status == "broken"),
-        "skills_total":      len(skill_nodes),
-        "skills_live":       sum(1 for n in skill_nodes if n.status == "live"),
-        "skills_broken":     sum(1 for n in skill_nodes if n.status == "broken"),
-        "mcp_plugins_total": len(mcp_nodes),
+        "tools_total":         len(tool_nodes),
+        "tools_live":          sum(1 for n in tool_nodes if n.status == "live"),
+        "tools_broken":        sum(1 for n in tool_nodes if n.status == "broken"),
+        "skills_total":        len(skill_nodes),
+        "skills_live":         sum(1 for n in skill_nodes if n.status == "live"),
+        # B392 — `unavailable` is the per-agent kit gap (skill works
+        # on substrate; this agent's kit is missing required tools).
+        # Distinct from `broken` which stays reserved for substrate
+        # corruption (catalog/registration drift).
+        "skills_unavailable":  sum(1 for n in skill_nodes if n.status == "unavailable"),
+        "skills_broken":       sum(1 for n in skill_nodes if n.status == "broken"),
+        "mcp_plugins_total":   len(mcp_nodes),
     }
 
     return CapabilityTreeOut(
