@@ -23,11 +23,19 @@ def test_trait_tree_has_threat_intel_curator():
     assert role.domain_weights["audit"] >= 2.0
 
 
-def test_threat_intel_curator_is_in_guardian_genre():
+def test_threat_intel_curator_is_in_researcher_genre():
+    """B386 — moved from guardian to researcher because kit needs
+    web_fetch (network), which exceeds guardian's read_only
+    ceiling. Researcher is the natural fit: literature-scan +
+    data-synthesis with allowlisted network reach. Advisory
+    stance enforced via constitution policies, not genre."""
     from forest_soul_forge.core.genre_engine import load_genres
     genres = load_genres(REPO / "config" / "genres.yaml")
+    researcher = genres.genres["researcher"]
+    assert "threat_intel_curator" in researcher.roles
+    # And NOT in guardian anymore.
     guardian = genres.genres["guardian"]
-    assert "threat_intel_curator" in guardian.roles
+    assert "threat_intel_curator" not in guardian.roles
 
 
 def test_constitution_template_has_threat_intel_curator():

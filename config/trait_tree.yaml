@@ -657,7 +657,7 @@ roles:
   # telemetry_steward: stewardship of an external feed, not of
   # the local pipeline.
   threat_intel_curator:
-    description: "External threat-intel feed curation. Pulls from operator-configured intel sources (IOC lists, advisory feeds, ATT&CK mappings), verifies provenance + signatures where available, tags freshness, writes to local intel cache. NEVER acts on findings (response_rogue's job), NEVER analyzes runtime events (anomaly_ace's job). Pure curation hygiene. Genre: guardian. ADR-0064 T6."
+    description: "External threat-intel feed curation. Pulls from operator-configured intel sources (IOC lists, advisory feeds, ATT&CK mappings), verifies provenance + signatures where available, tags freshness, writes to local intel cache. NEVER acts on findings (response_rogue's job), NEVER analyzes runtime events (anomaly_ace's job). Pure curation hygiene. Genre: researcher (B386 moved from guardian to researcher — kit needs web_fetch/network which exceeds guardian's read_only ceiling; advisory stance enforced via constitution policies, not genre). ADR-0064 T6."
     domain_weights:
       security: 2.4     # SOC role; intel content is security signal
       audit: 2.2        # provenance + freshness tagging is audit work
