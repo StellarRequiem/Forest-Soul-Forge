@@ -161,6 +161,7 @@ genres:
       - reality_anchor           # ADR-0063 — pre-action ground-truth verifier
       - forensic_archivist       # ADR-0078 Phase A (B342-B347) — D3 chain-of-custody
       - telemetry_steward        # ADR-0064 T4 (B379) — D3 Phase B pipeline oversight
+      - wiring_sentinel          # ADR-0081 T3 (B396) — substrate wiring coverage sentinel; read_only kit (memory_recall/write + audit_chain_verify + llm_think + delegate + text_summarize)
       # NOTE — threat_intel_curator was originally placed here in B385
       # but its kit needs web_fetch (network) for feed pulls, which
       # exceeds guardian's read_only ceiling. B386 moved the role to
