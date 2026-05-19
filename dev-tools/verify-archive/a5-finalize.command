@@ -18,8 +18,12 @@
 # Idempotent: safe to re-run if any step fails.
 
 set -uo pipefail
+# B422 (2026-05-19): moved from repo root to dev-tools/verify-archive/.
+# This script's paths (`.git/`, `.run/`, `./live-test-*.command`) all
+# assume cwd=repo-root, so we walk up two levels to keep the script
+# runnable in its archive home. Idempotent intent preserved.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-cd "$HERE"
+cd "$HERE/../.."
 
 DAEMON_PORT=7423
 DAEMON_LOG="$HERE/.run/daemon.log"
@@ -155,7 +159,7 @@ if [ ! -x "live-test-sw-coding-tools.command" ]; then
   chmod +x live-test-sw-coding-tools.command 2>/dev/null || true
 fi
 
-if ./live-test-sw-coding-tools.command; then
+if ./dev-tools/live-tests/live-test-sw-coding-tools.command; then
   echo ""
   ok "============================================"
   ok "A.5 FINALIZED — all 5 steps green"

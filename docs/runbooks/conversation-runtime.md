@@ -2,7 +2,7 @@
 
 **ADR:** [ADR-003Y](../decisions/ADR-003Y-conversation-runtime.md)
 **Status:** Accepted (Y1–Y7 shipped end-to-end 2026-04-30)
-**Smoke test:** `live-test-y-full.command`
+**Smoke test:** `dev-tools/live-tests/live-test-y-full.command`
 
 This runbook walks the operator through every endpoint in the
 conversation runtime: opening rooms, adding agents, firing turns,
@@ -225,7 +225,7 @@ events use.
 ## End-to-end smoke
 
 ```bash
-./live-test-y-full.command
+./dev-tools/live-tests/live-test-y-full.command
 ```
 
 This drives all 7 phases in 10 steps, prints results, and verifies
