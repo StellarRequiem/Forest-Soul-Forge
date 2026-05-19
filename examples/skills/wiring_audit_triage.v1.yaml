@@ -102,9 +102,9 @@ steps:
       reason: "wiring_audit_triage step 2: severity-rank gaps"
       allow_out_of_lineage: true
       inputs:
-        style: bullet_points
-        target_words: 250
-        text: |
+        max_tokens: 1200
+        task_kind: generate
+        prompt: |
           You are the code-reviewer in the Triune-Main work cell.
           RANK each item below by operator-impact severity per ADR-0081
           §severity:
@@ -133,9 +133,9 @@ steps:
       reason: "wiring_audit_triage step 3: prioritize remediation order"
       allow_out_of_lineage: true
       inputs:
-        style: paragraph
-        target_words: 400
-        text: |
+        max_tokens: 1500
+        task_kind: generate
+        prompt: |
           You are the system-architect in the Triune-Main work cell.
           Produce a PRIORITIZED REMEDIATION ORDER from the
           severity-ranked list below. Consider dependencies:

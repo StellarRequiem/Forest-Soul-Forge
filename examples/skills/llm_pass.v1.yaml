@@ -2,57 +2,60 @@ schema_version: 1
 name: llm_pass
 version: '1'
 description: |
-  Generic single-step skill wrapping text_summarize.v1. Exists so
+  Generic single-step skill wrapping llm_think.v1. Exists so
   delegate.v1 has a real skill target on sister agents — delegate
   invokes skills (not tools), and we don't want every triune
   participant to need a bespoke skill manifest.
 
   Use this skill as the delegate target when one agent needs to
-  ask another to "run an LLM pass with this prompt and these
-  knobs." The prompt is the `text` input; style + target_words
-  pass through unchanged.
+  ask another to "run an LLM pass with this prompt." The prompt
+  is the `prompt` input; max_tokens + task_kind pass through.
 
-  Single step, no memory writes, no chain branches. The caller
-  (typically Engineer-Main in the Triune-Main work cell) is
-  responsible for capturing the response and deciding what to do
-  with it.
+  Wraps llm_think.v1 (not text_summarize.v1) because llm_think is
+  in every triune-relevant kit (software_engineer, code_reviewer,
+  system_architect, experimenter, every observer/investigator/
+  communicator/guardian/researcher genre default since B392), while
+  text_summarize was missed from system_architect's kit and would
+  require a substrate rebirth to add. Output shape is identical
+  ({response, model, task_kind, elapsed_ms}) so callers reading
+  ${pass.response} work regardless of the underlying tool.
 
 requires:
-  - text_summarize.v1
+  - llm_think.v1
 
 inputs:
   type: object
-  required: [text]
+  required: [prompt]
   properties:
-    text:
+    prompt:
       type: string
       minLength: 1
       description: |
-        The full prompt to feed to text_summarize.v1. Includes
-        whatever persona framing + instructions + source material
-        the caller wants the target agent to process.
-    style:
-      type: string
-      enum: [bullet_points, paragraph, tldr]
-      default: bullet_points
-    target_words:
+        The full prompt to feed to llm_think.v1. Includes whatever
+        persona framing + instructions + source material the
+        caller wants the target agent to process.
+    max_tokens:
       type: integer
-      minimum: 10
-      maximum: 1500
-      default: 300
+      minimum: 1
+      maximum: 8192
+      default: 1200
+    task_kind:
+      type: string
+      enum: [classify, generate, safety_check, conversation, tool_use]
+      default: generate
 
 steps:
   - id: pass
-    tool: text_summarize.v1
+    tool: llm_think.v1
     args:
-      text: ${inputs.text}
-      style: ${inputs.style}
-      target_words: ${inputs.target_words}
+      prompt: ${inputs.prompt}
+      max_tokens: ${inputs.max_tokens}
+      task_kind: ${inputs.task_kind}
 
 output:
   # Surface the wrapped tool's output verbatim so the caller can
   # interpolate ${delegate_step.output.response} just like a
-  # direct text_summarize call.
+  # direct llm_think call.
   response: ${pass.response}
   model: ${pass.model}
   task_kind: ${pass.task_kind}
