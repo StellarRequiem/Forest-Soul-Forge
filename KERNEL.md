@@ -25,17 +25,33 @@ the outside.
 
 ## Status
 
-**v0.5.0** ships the substantive kernel work (governance pipeline,
-posture system, plugin protocol, grants, per-tool + per-grant
-trust dials, audit chain, memory model, conversation runtime).
+**v0.5.0** (tagged 2026-05-04) shipped the substantive kernel work:
+governance pipeline, posture system, plugin protocol, grants,
+per-tool + per-grant trust dials, audit chain, memory model,
+conversation runtime. **v0.6** continued the substrate buildout
+across Bursts 234-420 (78 ADRs filed; +18 ADRs and ~+30k LoC
+since v0.5 tag) — encryption-at-rest (ADR-0050), cross-domain
+orchestrator (ADR-0067), operator profile (ADR-0068), voice I/O
+(ADR-0070), plugin author kit (ADR-0071), behavior provenance
+(ADR-0072), audit chain segmentation (ADR-0073), memory
+consolidation (ADR-0074), scheduler scale (ADR-0075), vector
+index (ADR-0076), diagnostic harness (ADR-0079), capability tree
+(ADR-0080), substrate wiring coverage (ADR-0081). Phase α (10/10
+substrate ADRs) is **closed**. D4 (Code Review) rolled out fully.
+D3 (Local SOC) Phase A closed, B-D in flight.
+
 **v1.0 is not yet committed** — the API stability commitment
 lands when external integrator validation arrives (ADR-0044
-Decision 4 and Phase 6 of the roadmap).
+Decision 4 and Phase 6 of the roadmap). The seven surfaces below
+are *what* will be committed to. The *when* is a future tag.
+Until then, breaking changes within these surfaces require an
+ADR + a deliberate ABI bump signal — not casual refactor.
 
-The seven surfaces below are *what* will be committed to. The
-*when* is a future tag. Until then, breaking changes within these
-surfaces require an ADR + a deliberate ABI bump signal — not
-casual refactor.
+The kernel surface itself is **functionally frozen as of Phase α
+close** — substrate additions now require external-integrator
+demand per ADR-0082 (the explicit freeze posture). Domain
+rollouts continue as userspace ON the kernel, not as kernel
+extensions.
 
 ---
 
@@ -74,7 +90,9 @@ The on-disk evidence layer.
   prev_hash, entry_hash}`. Hash discipline (`entry_hash` =
   `sha256(prev_hash || canonical_json(event))`) and append-only
   semantics are part of the contract.
-- **70+ event-type payload schemas**. Each event type
+- **80+ event-type payload schemas** (160+ string occurrences in
+  `KNOWN_EVENT_TYPES`; canonical set in `core/audit_chain.py`).
+  Each event type
   (`tool_call_dispatched`, `agent_archived`, `memory_consent_granted`,
   `agent_plugin_granted`, `agent_posture_changed`, etc.) has a
   documented payload shape. Adding fields is non-breaking;
@@ -155,8 +173,11 @@ The persistence contract.
   Adding tables, columns with defaults, indexes — all fine.
   Dropping columns, tightening constraints, renaming —
   forbidden. Escape hatch: `rebuild_from_artifacts`.
-- **Current schema version: v15**. Each version's migration is
-  documented inline in `MIGRATIONS[N]`.
+- **Current schema version: v23** (was v15 at B118; +8 versions
+  across B233-B330 for plugin grants, posture, per-tool grants,
+  signing keys, reality_anchor_corrections, encryption_at_rest,
+  vector_index, etc.). Each version's migration is documented
+  inline in `MIGRATIONS[N]`.
 - **Audit chain is the source of truth**. The registry is a
   derived, rebuildable index. A v15 → v16 forward migration that
   loses derivable data is fine; one that loses canonical artifact

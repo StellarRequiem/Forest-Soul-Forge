@@ -4,6 +4,48 @@ A self-contained snapshot for a developer joining the project. What's implemente
 
 > **Refresh cadence:** this doc + [`README.md`](README.md) update together at every phase boundary (Phase A close, Phase B close, Phase D close, etc.) and after any meaningful architectural finding. The two are designed to stay in sync; STATE.md is the developer-facing current-reality view, README.md is the product-and-mission view.
 
+**Refresh marker (B423, 2026-05-19): the body below freezes the post-B258 baseline; the appendix at the end of this doc reconciles every numeric claim against current disk-truth and lists every closed ADR since.**
+
+---
+
+## Status snapshot as of 2026-05-19 (Burst 420, HEAD 077610c)
+
+| Surface | Current |
+|---:|:---|
+| Commits on `main` | **575** |
+| Python LoC (`src/forest_soul_forge/`) | **87,188** (+27,586 / +46% since v0.5 tag) |
+| ADRs filed | **78** (gaps 0009-0015, 0024-0026, 0028-0029 — placeholders) |
+| Schema version | **v23** (post-Phase α encryption + vector + provenance) |
+| Tests | **214 test files** across `tests/unit/` + `tests/integration/` + `tests/conformance/` |
+| Builtin tools (Python files) | **69** (catalog YAML in sync) |
+| Skill manifests | **46** in `examples/skills/`, **38** installed |
+| Trait roles | **54** |
+| Genres | **13** (7 original + 3 security + 3 web) |
+| Alive agents in registry | **34 active / 4 archived / 38 total** |
+| Audit chain entries | **19,211** at `examples/audit_chain.jsonl` |
+| Audit docs filed | **20** in `docs/audits/` |
+| Repo-root `.command` scripts | **26** post-B422 consolidation (was 64) |
+| Archived commit-burst scripts | **391** under `dev-tools/commit-bursts/` |
+| Latest tag | `v0.5.0` (2026-05-04) — v0.6 unanchored (gated on ADR-0044 P6 external integrator validation) |
+
+**Phase α — substrate (10/10 closed):** ADR-0050 encryption-at-rest, ADR-0067 cross-domain orchestrator, ADR-0068 operator profile, ADR-0070 voice I/O, ADR-0071 plugin author kit, ADR-0072 behavior provenance, ADR-0073 audit chain segmentation, ADR-0074 memory consolidation, ADR-0075 scheduler scale, ADR-0076 vector index. Closed across Bursts 281-330 (2026-05-15).
+
+**Domain rollouts (per ADR-0067 dependency order D4 → D3 → D8 → D1 → D2 → D7 → D9 → D10 → D5 → D6):**
+- **D4 Code Review** — CLOSED (ADR-0077, Bursts 331-340). TestAuthor-D4, MigrationPilot-D4, ReleaseGatekeeper-D4 alive.
+- **D3 Local SOC** — Phase A CLOSED (ADR-0078, Bursts 342-347; ForensicArchivist-D3 alive). Phase B telemetry pipeline (ADR-0064) CLOSED Bursts 348-386. Phase C detection-as-code (ADR-0065) in flight; Phase D SOAR playbooks (ADR-0066) proposed.
+- **D8/D1/D2/D7/D9/D10/D5/D6** — upstream; not started.
+
+**Tooling discipline closed since B258:** ADR-0079 diagnostic harness (15 sections, daily 8am scheduled task), ADR-0080 capability tree UI, ADR-0081 substrate wiring coverage (WiringSentinel + 4-hour cadence). Latest diagnostic-all run (2026-05-19T18:41:29Z) reports **14 PASS / 1 FAIL** — single FAIL is 3 orphan tools in section-15, down from 6 in May-19 morning. Triune-Main (Engineer-Main + Reviewer-Main + Architect-Main) live-verified with real multi-agent delegate chain.
+
+**Discipline pass (B422-B424) in flight:**
+- **B422** — script consolidation: 64 → 26 repo-root `.command` files. 38 moved via `git mv` into `dev-tools/{verify-archive,live-tests,commit-bursts}` + `dev-tools/` top-level.
+- **B423** (this commit) — STATE.md + KERNEL.md refresh after 162 bursts of drift.
+- **B424** — ADR-0082 Kernel Freeze Posture: codify "no new top-level kernel subsystems without external integrator demand."
+
+The body that follows reflects the B258 baseline. Treat the snapshot above as the load-bearing current truth.
+
+---
+
 Last updated: 2026-05-13, post-Burst 258 (ADR-0062 closed — supply-chain hardening complete). Bursts 234-258 layered four overlapping arcs onto the post-B233 baseline. (1) **ADR-0053 Per-Tool Plugin Grants — full arc** (B234-B241): schema v17→v18 with `tool_name` column on `agent_plugin_grants`; accessor + endpoint + dispatcher specificity-wins resolver + frontend interactive per-tool toggle grid (B240). (2) **ADR-0049 Per-event signatures — full arc** (B242-B244): AgentKeyStore wrapper at B242, ed25519 keypair at birth (schema v18→v19 adding `agents.public_key`) at B243, sign-on-emit + verify-on-replay + strict-mode flag + operator runbook at B244. **Audit chain is now tamper-PROOF for agent-emitted events.** (3) **License pivot — ADR-0046 Amendment 1** (B245): Apache 2.0 → Elastic License 2.0 (ELv2); commits ≤ `f799757` remain Apache 2.0 per §4 irrevocability; LICENSE.history documents the cutover; GitHub repo topics updated to `source-available` + `elastic-license-v2`. (4) **Three-ADR closure arc — ADR-0061 + ADR-0062 + ADR-0063 all closed end-to-end** (B246-B258, see [`docs/audits/2026-05-13-three-adr-arc.md`](docs/audits/2026-05-13-three-adr-arc.md)): **ADR-0061 Agent Passport** closed B248 (HTTP `POST /agents/{id}/passport` + `fsf passport mint/show/fingerprint` CLI + minted/refused audit events); **ADR-0062 Supply-Chain Scanner + Install Gate** closed B258 (6/6 tranches: IoC catalog at `config/security_iocs.yaml` with 16 rules drawn from npm Shai-Hulud / PyPI LiteLLM / Axios / Anthropic MCP-STDIO-RCE incident IOCs + `security_scan.v1` builtin + install-time gate on three install endpoints + forge-stage scanner with `REJECTED.md` quarantine marker + SoulUX **Security** tab + `/security/*` router); **ADR-0063 Reality Anchor** closed B256 (7/7 tranches: `config/ground_truth.yaml` 14-fact operator-asserted truth catalog + `verify_claim.v1` builtin + `RealityAnchorStep` in governance pipeline + `reality_anchor` singleton-per-forest role + conversation pre-turn hook + schema v19→v20 `reality_anchor_corrections` table with repeat-offender detection + SoulUX **Reality** tab + `/reality-anchor/*` router). v0.5 ADRs remain canonical: **ADR-0042**, **ADR-0043**, **ADR-0045**. New ADRs since B233: **ADR-0049** (per-event signatures, all 8 tranches B242-B244), **ADR-0053** (per-tool plugin grants, all 6 tranches B234-B241), **ADR-0061** (agent passport, closed B248), **ADR-0062** (supply-chain scanner, closed B258), **ADR-0063** (reality anchor, closed B256). License: **ELv2 from `f799757` onward** (B245). Schema: **v20** (post-B255 reality_anchor_corrections table). HEAD: `cd83e83` (post-B258). Latest tag still **v0.5.0** (2026-05-04); v0.6 not yet tagged — gated on integrator validation per ADR-0044 P7. v0.4.0 shipped 2026-05-04 (ADR-0041). v0.3.0 shipped 2026-05-03 (ADR-0036 + ADR-0040). v0.2.0 shipped 2026-05-02 (Phase G.1.A). v0.1.2 shipped 2026-05-01 (ADR-0027-am + ADR-0021-am + ADR-0038). v0.1.1 shipped 2026-04-30. See [CHANGELOG.md](CHANGELOG.md) and [CREDITS.md](CREDITS.md) for the full attribution + ledger.
 
 ---
