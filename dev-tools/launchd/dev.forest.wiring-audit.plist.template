@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ADR-0081 T5 (B398) — LaunchAgent for the 4-hour wiring audit cadence.
+
+  Installed to ~/Library/LaunchAgents/dev.forest.wiring-audit.plist
+  by docs/runbooks/wiring-audit.md install steps. The repo path is
+  baked in here (Forest's repo path is well-known on this machine).
+
+  StartInterval = 14400 seconds = 4 hours, matching ADR-0081 D7.
+    Not hourly (would be notification noise for a substrate that
+    changes a few times per day at most).
+    Not daily (the B363 gap class went undetected for months
+    because no automation watched at sub-day cadence).
+    Quarter-day is the sweet spot.
+
+  RunAtLoad = false — the audit runs on the cadence, not on load.
+  This avoids piling up an audit at every daemon restart.
+
+  Soft-fail policy: stdout + stderr land in /tmp/forest-wiring-audit.{out,err}.log
+  but a non-zero exit from run-wiring-audit.command does NOT trip
+  KeepAlive (we don't set it). Next 4-hour tick retries.
+
+  Dependencies:
+    - dev.forest.daemon must be running (audit dispatches via curl
+      to http://127.0.0.1:7423). If the daemon is down, run-wiring-
+      audit.command exits non-zero; the cadence retries; eventually
+      either the daemon comes back or operator notices the missing
+      audit entries in the chain.
+    - WiringSentinel agent must be born (run dev-tools/birth-wiring-
+      sentinel.command once). The runner exits non-zero if no
+      active WiringSentinel exists.
+
+  Install:
+    cp dev-tools/launchd/dev.forest.wiring-audit.plist.template \
+       ~/Library/LaunchAgents/dev.forest.wiring-audit.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.forest.wiring-audit.plist
+
+  Disable temporarily (e.g., during a known-disruptive substrate rollout):
+    launchctl bootout gui/$(id -u)/dev.forest.wiring-audit
+
+  Trigger an ad-hoc run (don't wait 4 hours):
+    bash /Users/llm01/Forest-Soul-Forge/dev-tools/run-wiring-audit.command
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.forest.wiring-audit</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/llm01/Forest-Soul-Forge/dev-tools/run-wiring-audit.command</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/llm01/Forest-Soul-Forge</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>/Users/llm01</string>
+    <key>FSF_WIRING_AUDIT_TRIGGER</key>
+    <string>scheduled</string>
+  </dict>
+
+  <!-- 4-hour cadence: 14400 seconds. ADR-0081 D7. -->
+  <key>StartInterval</key>
+  <integer>14400</integer>
+
+  <!-- Don't run on load — wait for the first 4-hour tick. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <!-- No KeepAlive: a failed run shouldn't restart immediately;
+       the next 4-hour tick retries. -->
+
+  <key>StandardOutPath</key>
+  <string>/tmp/forest-wiring-audit.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/forest-wiring-audit.err.log</string>
+</dict>
+</plist>
