@@ -58,13 +58,26 @@ for var in ENG_ID REV_ID ARC_ID SEN_ID; do
 done
 
 echo
-echo "[2/4] Fetching most-recent wiring_audit_outcome from WiringSentinel lineage"
-OUTCOME=$(curl -s --max-time 10 "${DAEMON}/agents/${SEN_ID}/memory?tags=wiring_audit&limit=1" \
-  -H "X-FSF-Token: $TOKEN" 2>/dev/null \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); entries=d.get('entries') or d.get('memory') or []; print(entries[0].get('content') if entries else '')" 2>/dev/null \
-  || echo "")
+echo "[2/4] Fetching most-recent wiring_audit_outcome from registry"
+# No /agents/{id}/memory GET endpoint — memory is accessed via the
+# agent's own tools (memory_recall.v1). For the scheduled wrapper
+# we read the registry DB directly. Read-only; fine.
+OUTCOME=$(python3 <<PYEOF
+import sqlite3, sys
+con = sqlite3.connect("$REPO_ROOT/data/registry.sqlite")
+cur = con.cursor()
+# WiringSentinel writes scope=lineage tagged wiring_audit. Pick most recent.
+row = cur.execute("""
+  select content from memory_entries
+  where instance_id = ? and tags_json like '%wiring_audit%'
+  order by created_at desc limit 1
+""", ("$SEN_ID",)).fetchone()
+if row:
+    sys.stdout.write(row[0])
+PYEOF
+)
 if [ -z "$OUTCOME" ]; then
-  echo "ERROR: no wiring_audit_outcome entries found in WiringSentinel lineage."
+  echo "ERROR: no wiring_audit_outcome entries found in registry for $SEN_ID."
   echo "       Run dev-tools/run-wiring-audit.command first to produce an outcome."
   exit 3
 fi
