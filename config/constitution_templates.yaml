@@ -645,6 +645,24 @@ role_base:
       profile_hash_check: per_turn
       max_profile_deviation: 0
       on_drift: halt
+    # B416: code_read.v1 refuses to dispatch without explicit
+    # allowed_paths. code_reviewer needs to walk production source
+    # to write reviews — give it read access to the repo's code
+    # surface (src/ + frontend/js/ + dev-tools/ + docs/) but NOT
+    # to secrets/, .env, soul_generated/ (lineage), data/registry.sqlite,
+    # or examples/audit_chain.jsonl. Forbid policy at the top of
+    # this template still prevents writes.
+    tool_constraints:
+      code_read.v1:
+        allowed_paths:
+          - src/
+          - frontend/js/
+          - frontend/css/
+          - dev-tools/
+          - docs/
+          - tests/
+          - examples/skills/
+          - config/
 
   # ---- ADR-0077 (B331-B333) D4 advanced rollout: three new roles --------
   # Draft authored 2026-05-16; operator approved. See
