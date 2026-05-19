@@ -82,7 +82,9 @@ steps:
       # bullet_points is closest to the severity-tagged punch list
       # the prompt asks the LLM to produce.
       style: bullet_points
-      target_length: 800
+      # text_summarize.v1's input field is `target_words` (int,
+      # 10-1500). NOT target_length.
+      target_words: 400
       text: |
         Substrate wiring coverage audit (wiring_audit.v1, ADR-0081).
 
@@ -135,7 +137,9 @@ steps:
       # the operator can grep, with the LLM summary appended.
       # Structured drilldown lives in coverage.json on disk; the
       # memory entry is the lineage-trackable receipt.
-      content: "wiring_audit_outcome: triggered_by=${inputs.triggered_by} chain_ok=${verify_chain.ok} chain_entries=${verify_chain.entries_verified} orphan_tools=${inputs.coverage.summary.tools_orphan} handoffs_broken=${inputs.coverage.summary.handoffs_broken} skills_unresolvable=${inputs.coverage.summary.skills_unresolvable} skills_no_carrier=${inputs.coverage.summary.skills_no_carrier} | summary: ${summarize.summary}"
+      # text_summarize.v1's output field is `response` (per
+      # PromptTemplateToolBase output schema). NOT `summary`.
+      content: "wiring_audit_outcome: triggered_by=${inputs.triggered_by} chain_ok=${verify_chain.ok} chain_entries=${verify_chain.entries_verified} orphan_tools=${inputs.coverage.summary.tools_orphan} handoffs_broken=${inputs.coverage.summary.handoffs_broken} skills_unresolvable=${inputs.coverage.summary.skills_unresolvable} skills_no_carrier=${inputs.coverage.summary.skills_no_carrier} | summary: ${summarize.response}"
 
 output:
   chain_ok: ${verify_chain.ok}
@@ -143,5 +147,5 @@ output:
   orphan_tools_count: ${inputs.coverage.summary.tools_orphan}
   handoffs_broken_count: ${inputs.coverage.summary.handoffs_broken}
   skills_unresolvable_count: ${inputs.coverage.summary.skills_unresolvable}
-  summary_text: ${summarize.summary}
+  summary_text: ${summarize.response}
   prior_audits_recalled: ${recall_prior.entries}
