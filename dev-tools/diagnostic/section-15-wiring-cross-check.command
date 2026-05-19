@@ -366,6 +366,18 @@ else:
         f"mappings backed by at least one runnable role",
     ))
 
+# B415: surface the future_skill routes as INFO so the operator
+# still sees the forward-intent declarations without false FAILs.
+if handoff_future:
+    results.append((
+        "INFO",
+        f"handoff routes declared ahead of skill ({len(handoff_future)} future_skill)",
+        "; ".join(
+            f"{d}/{c}: {reason[:80]}"
+            for d, c, reason in handoff_future[:5]
+        ) + (f"... +{len(handoff_future)-5} more" if len(handoff_future) > 5 else ""),
+    ))
+
 
 # 4. Broken constitutions count — for situational awareness.
 if broken_constitutions:
@@ -390,6 +402,7 @@ coverage = {
         "skills_no_carrier":   len(skill_no_carrier),
         "handoffs_total":      len(handoff_routes),
         "handoffs_broken":     len(handoff_broken),
+        "handoffs_future":     len(handoff_future),
         "broken_constitutions": len(broken_constitutions),
     },
     "orphan_tools":   sorted(orphan_tools),
@@ -405,6 +418,10 @@ coverage = {
     "handoffs_broken": [
         {"domain": d, "capability": c, "reason": r}
         for d, c, r in handoff_broken
+    ],
+    "handoffs_future": [
+        {"domain": d, "capability": c, "reason": r}
+        for d, c, r in handoff_future
     ],
     # Per-tool carrier matrix (operator drilldown).
     "tool_carriers": {
