@@ -200,6 +200,26 @@ if [ -d "$shots_dir" ]; then
   shots_block="$shots_block</div>"
 fi
 
+# ADR-0081 T2 - render wiring-coverage.html from section-15's
+# coverage.json into the umbrella run dir so the operator gets the
+# rich drilldown view alongside the section-15 report.md. Best-effort;
+# missing coverage.json (e.g. section-15 crashed) is logged not fatal.
+WIRING_COVERAGE_JSON="$REPO_ROOT/data/test-runs/diagnostic-15-wiring-cross-check/coverage.json"
+WIRING_COVERAGE_HTML="$RUN_ROOT/wiring-coverage.html"
+WIRING_LINK=""
+if [ -f "$WIRING_COVERAGE_JSON" ]; then
+  if PY_BIN="$REPO_ROOT/.venv/bin/python3" && [ -x "$PY_BIN" ] \
+     || PY_BIN=python3; then
+    if "$PY_BIN" "$HERE/render-wiring-coverage.py" \
+         "$WIRING_COVERAGE_JSON" "$WIRING_COVERAGE_HTML" \
+         > "$RUN_ROOT/render-wiring-coverage.stdout.log" 2>&1; then
+      WIRING_LINK="<li>Substrate wiring coverage: <a href=\"wiring-coverage.html\">wiring-coverage.html</a> (rich drilldown of section-15 findings)</li>"
+    else
+      echo "warn: render-wiring-coverage.py failed (see render-wiring-coverage.stdout.log)" >&2
+    fi
+  fi
+fi
+
 # Pull the consolidated FAIL list out of summary.md verbatim so the
 # index mirrors the markdown.
 fail_block=$(awk '/^## Consolidated punch list/,/^## Tally/' "$SUMMARY" | sed '$d')
@@ -244,6 +264,7 @@ cat > "$INDEX_HTML" <<EOF
   <h2>Source artifacts</h2>
   <ul>
     <li>Machine-readable summary: <a href="summary.md">summary.md</a></li>
+    $WIRING_LINK
     <li>Per-section stdout: <code>section-*.stdout.log</code> in this directory</li>
     <li>Per-section reports: linked in the table above</li>
   </ul>
