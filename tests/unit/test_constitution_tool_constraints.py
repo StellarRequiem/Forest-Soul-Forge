@@ -30,8 +30,13 @@ from forest_soul_forge.core.trait_engine import TraitEngine
 
 @pytest.fixture
 def trait_engine_default() -> TraitEngine:
-    """A real TraitEngine bootstrapped from the shipped trait tree."""
-    return TraitEngine.from_yaml(Path("config/trait_tree.yaml"))
+    """A real TraitEngine bootstrapped from the shipped trait tree.
+
+    B428 ran the new test file and surfaced an API drift in this
+    fixture: `TraitEngine.from_yaml` doesn't exist. The factory is
+    the constructor itself with an optional tree_path. Hotfix.
+    """
+    return TraitEngine(tree_path=Path("config/trait_tree.yaml"))
 
 
 def _make_templates(tmp_path: Path, role_base: dict) -> Path:
@@ -90,7 +95,7 @@ def test_tool_constraints_override_merges_into_matching_tool(
             }
         ),
     )
-    profile = trait_engine_default.profile_for("network_watcher", trait_values={})
+    profile = trait_engine_default.build_profile("network_watcher")
     pre_tools = (
         {
             "name": "code_read",
@@ -136,7 +141,7 @@ def test_tool_without_matching_override_passes_through_unchanged(
             }
         ),
     )
-    profile = trait_engine_default.profile_for("network_watcher", trait_values={})
+    profile = trait_engine_default.build_profile("network_watcher")
     pre_tools = (
         {
             "name": "memory_recall",
@@ -176,7 +181,7 @@ def test_override_wins_for_shared_keys(tmp_path, trait_engine_default):
             }
         ),
     )
-    profile = trait_engine_default.profile_for("network_watcher", trait_values={})
+    profile = trait_engine_default.build_profile("network_watcher")
     pre_tools = (
         {
             "name": "code_read",
@@ -206,7 +211,7 @@ def test_no_tool_constraints_block_is_noop(tmp_path, trait_engine_default):
     """A template without a tool_constraints block leaves tools
     unchanged."""
     templates_path = _make_templates(tmp_path, _baseline_role())
-    profile = trait_engine_default.profile_for("network_watcher", trait_values={})
+    profile = trait_engine_default.build_profile("network_watcher")
     pre_tools = (
         {
             "name": "code_read",
@@ -239,7 +244,7 @@ def test_empty_tools_with_overrides_is_noop(tmp_path, trait_engine_default):
             }
         ),
     )
-    profile = trait_engine_default.profile_for("network_watcher", trait_values={})
+    profile = trait_engine_default.build_profile("network_watcher")
     c = build(
         profile,
         trait_engine_default,
