@@ -358,6 +358,40 @@ def build(
     out_of_scope = sorted(set(out_of_scope))
     operator_duties = list(operator_duties)  # preserve authorship order
 
+    # ---- layer 4 (B428): template tool_constraints override merge --------
+    # B416 added a `tool_constraints` block to the code_reviewer
+    # role_base template intending its per-tool keys (e.g. "code_read.v1")
+    # to map to a dict whose entries merge into the matching tool's
+    # `constraints` dict. The merge step was missing — template data sat
+    # ignored. ADR-0083 surfaced the architectural finding (rebirth path
+    # was broken at the idempotency layer); after ADR-0083 fixed the
+    # replay wedge, the rebirth ran but produced an identical
+    # constitution_hash because the template overrides weren't being
+    # applied. B428 wires the merge so role_base tool_constraints
+    # actually land in the constitution body. Override keys are
+    # `{tool_name}.v{tool_version}` (matches B416's template format);
+    # override entries are dicts whose keys merge into the tool's
+    # `constraints` dict via dict.update (override-wins for shared keys,
+    # new keys added). Tools without a matching override pass through
+    # unchanged.
+    tool_constraint_overrides = role_base.get("tool_constraints") or {}
+    if tool_constraint_overrides and tools:
+        merged_tools: list[dict[str, Any]] = []
+        for t in tools:
+            name = t.get("name")
+            version = t.get("version")
+            key = f"{name}.v{version}" if name and version is not None else None
+            override = tool_constraint_overrides.get(key) if key else None
+            if override:
+                new_t = dict(t)
+                merged_constraints = dict(t.get("constraints") or {})
+                merged_constraints.update(override)
+                new_t["constraints"] = merged_constraints
+                merged_tools.append(new_t)
+            else:
+                merged_tools.append(t)
+        tools = tuple(merged_tools)
+
     return Constitution(
         schema_version=CONSTITUTION_SCHEMA_VERSION,
         agent_dna=dna_short(profile),
