@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for the Triune-Main scheduled wiring triage.
+
+  Installed to ~/Library/LaunchAgents/dev.forest.triune-triage.plist by
+  hand (see docs/runbooks/wiring-audit.md once updated). Fires
+  dev-tools/run-triune-triage.command on a 24-hour cadence anchored
+  to 7am local; the wiring_audit cadence (4h) produces fresh data,
+  the triune triage runs once a day to give the operator a
+  prioritized punch list.
+
+  Install:
+    cp dev-tools/launchd/dev.forest.triune-triage.plist.template \
+       ~/Library/LaunchAgents/dev.forest.triune-triage.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.forest.triune-triage.plist
+
+  Disable temporarily:
+    launchctl bootout gui/$(id -u)/dev.forest.triune-triage
+
+  Ad-hoc run (don't wait for tomorrow):
+    bash /Users/llm01/Forest-Soul-Forge/dev-tools/run-triune-triage.command
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.forest.triune-triage</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/llm01/Forest-Soul-Forge/dev-tools/run-triune-triage.command</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/llm01/Forest-Soul-Forge</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>/Users/llm01</string>
+    <key>FSF_TRIAGE_TRIGGER</key>
+    <string>scheduled</string>
+  </dict>
+
+  <!-- Daily 7am local. StartCalendarInterval beats StartInterval here
+       because the operator wants a predictable morning brief, not
+       a sliding 24h offset. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>7</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <!-- Don't run on load — wait for the first 7am tick. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/forest-triune-triage.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/forest-triune-triage.err.log</string>
+</dict>
+</plist>
