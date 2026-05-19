@@ -615,6 +615,16 @@ roles:
       emotional: 0.4
       embodiment: 0.4
 
+  wiring_sentinel:
+    description: "ADR-0081 substrate Wiring Sentinel. Singleton-per-forest guardian that runs wiring_audit.v1 on a 4-hour cadence against section-15's coverage.json, escalates medium+ gaps (orphan tools, broken handoffs, unresolvable skill requires) to the operator queue via delegate.v1, and records each audit outcome. Read-only by design — finds gaps; operator owns substrate mutation (ADR-0081 D5). Genre: guardian. Sibling pattern to reality_anchor and verifier_loop."
+    domain_weights:
+      security: 1.6     # cataloged-but-orphan tools are mild supply-chain risk
+      audit: 2.6        # the load-bearing trait — cross-cutting wiring audit IS audit work
+      cognitive: 1.8    # diff prior audits against current coverage; reason about severity
+      communication: 1.8 # operator-facing summaries + delegated punch lists are the deliverable
+      emotional: 0.4    # cold-logic auditor; floor at validator min
+      embodiment: 0.4   # read-only; never spawns or mutates substrate
+
   # ---- ADR-0078 (B342-B347) D3 Local SOC Phase A role --------------------
   # forensic_archivist: chain-of-custody for incident artifacts
   # (memory dumps, pcap captures, log slices, isolated processes).

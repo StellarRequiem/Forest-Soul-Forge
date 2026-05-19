@@ -437,14 +437,16 @@ def _perform_create(
     request_hash = compute_request_hash(endpoint, req.model_dump(mode="json"))
     profile = _build_trait_profile(engine, req.profile)
 
-    # ADR-0063 T4 (Burst 253) + ADR-0067 T5 (Burst 283) — singleton-
-    # per-forest roles. A second active instance of either would
-    # dilute their audit trail + introduce conflict (two anchors with
-    # different verdicts; two orchestrators routing the same utterance
-    # twice). Refuse with 409 if any active instance already exists.
-    # Operator archives the existing one (POST /agents/archive) before
-    # spawning a replacement; archived agents don't trip the check.
-    _SINGLETON_ROLES = {"reality_anchor", "domain_orchestrator"}
+    # ADR-0063 T4 (Burst 253) + ADR-0067 T5 (Burst 283) + ADR-0081 T3
+    # (B396) — singleton-per-forest roles. A second active instance of
+    # any of these would dilute their audit trail + introduce conflict
+    # (two anchors with different verdicts; two orchestrators routing
+    # the same utterance twice; two wiring sentinels emitting conflicting
+    # coverage diffs against the same chain). Refuse with 409 if any
+    # active instance already exists. Operator archives the existing one
+    # (POST /agents/archive) before spawning a replacement; archived
+    # agents don't trip the check.
+    _SINGLETON_ROLES = {"reality_anchor", "domain_orchestrator", "wiring_sentinel"}
     if profile.role in _SINGLETON_ROLES:
         existing = registry.list_agents(role=profile.role, status="active")
         if existing:

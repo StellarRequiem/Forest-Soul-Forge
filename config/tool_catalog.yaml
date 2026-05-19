@@ -3021,6 +3021,30 @@ archetypes:
       - llm_think.v1            # deep semantic pass when pattern is unknown
       - delegate.v1             # escalate to other guardians if needed
 
+  wiring_sentinel:
+    # ADR-0081 T3 (B396) — substrate wiring coverage sentinel.
+    # Guardian-genre singleton; same pattern as reality_anchor and
+    # verifier_loop. Runs wiring_audit.v1 on a 4-hour schedule
+    # against section-15's coverage.json, escalates medium+ gaps
+    # to the operator queue via delegate.v1, records audit outcomes
+    # via memory_write.v1, and verifies the chain via
+    # audit_chain_verify.v1 before reporting.
+    #
+    # READ_ONLY ceiling per guardian genre — the sentinel finds
+    # gaps, the operator fixes them. Per ADR-0081 D5: substrate
+    # mutation is operator-owned; auto-fix would invert every
+    # other constitution-immutability invariant.
+    #
+    # Singleton-per-forest. /birth refuses a second wiring_sentinel
+    # with 409 (same pattern as reality_anchor / verifier_loop).
+    standard_tools:
+      - memory_recall.v1        # look up prior audits + remediation queue
+      - memory_write.v1         # record each audit run's outcome
+      - audit_chain_verify.v1   # verify the chain before auditing
+      - llm_think.v1            # summarize gap severity + draft punch list
+      - delegate.v1             # escalate medium+ gaps to operator queue
+      - text_summarize.v1       # compact long coverage.json into operator-readable summary
+
   # ---- v0.6 role expansion (Burst 124, ADR-0044 §"role inventory") ------
   # 24 roles fleshing out the 8 remaining genre buckets with kits sized
   # to each role's purpose. Tool selection respects each role's genre

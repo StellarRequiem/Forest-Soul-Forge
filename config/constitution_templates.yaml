@@ -1042,6 +1042,98 @@ role_base:
     reality_anchor:
       enabled: true
 
+  wiring_sentinel:
+    # ADR-0081 T3 (B396) — substrate Wiring Sentinel singleton.
+    # Guardian-genre, read_only ceiling. Runs wiring_audit.v1 on a
+    # 4-hour cadence (ADR-0081 D7), reads section-15's coverage.json,
+    # escalates medium+ gaps to the operator queue via delegate.v1,
+    # records audit outcomes via memory_write.v1, and verifies the
+    # audit chain via audit_chain_verify.v1 before reporting.
+    #
+    # Singleton enforcement: /birth refuses a second wiring_sentinel
+    # spawn with 409 (same pattern as reality_anchor / verifier_loop).
+    #
+    # ADR-0081 D5 — substrate mutation is OPERATOR-OWNED. The
+    # sentinel finds; the operator fixes. Auto-fix would invert
+    # every constitution-immutability invariant.
+    policies:
+      - id: forbid_substrate_mutation
+        rule: forbid
+        triggers:
+          - modify_tool_catalog
+          - modify_constitution
+          - modify_skill_manifest
+          - modify_handoff_route
+          - modify_domain_manifest
+          - filesystem_write
+          - network_post
+          - subprocess_spawn
+        rationale: |
+          The wiring sentinel finds gaps; the operator fixes them.
+          ADR-0081 D5: substrate mutation is operator-owned. Auto-
+          fix would invert every constitution-immutability invariant
+          and break the audit-trail discipline that requires every
+          tool_catalog / constitution / skill change to land via
+          a deliberate operator-authored commit burst.
+      - id: forbid_silent_audit
+        rule: forbid
+        triggers: [emit_audit_finding_without_chain_entry]
+        rationale: |
+          Every wiring_audit run MUST emit at least one
+          wiring_audit_completed audit-chain event (success or
+          fail). Silent runs would let regressions hide between
+          runs and defeat the entire point of scheduled monitoring.
+          The sentinel's behavior must itself be auditable.
+      - id: require_chain_verify_before_audit
+        rule: require
+        triggers: [run_wiring_audit]
+        rationale: |
+          The audit chain is the sentinel's ground truth — prior
+          audit outcomes, previously-flagged gaps, the operator's
+          remediation queue, all live there. If the chain is
+          tampered with, the sentinel's diffs against prior state
+          are meaningless. Running audit_chain_verify.v1 first
+          gates every audit on a clean chain.
+      - id: require_severity_classification
+        rule: require
+        triggers: [emit_wiring_gap]
+        rationale: |
+          Every gap escalated to the operator queue MUST carry a
+          severity (info | low | medium | high). Operator triage
+          depends on this for the 4-hour cadence to not become a
+          notification firehose. Per ADR-0081: only medium+ gaps
+          escalate via delegate.v1; info/low surface only in the
+          next diagnostic-all run.
+    allowed_tools:
+      - memory_recall.v1
+      - memory_write.v1
+      - audit_chain_verify.v1
+      - llm_think.v1
+      - delegate.v1
+      - text_summarize.v1
+    risk_thresholds:
+      auto_halt_risk: 0.50    # mirror reality_anchor — the sentinel must not act on shaky audits
+      escalate_risk: 0.20
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - modify_tool_catalog
+      - modify_constitution
+      - modify_skill_manifest
+      - modify_handoff_route
+      - modify_domain_manifest
+      - emit_action_side_effect
+    operator_duties:
+      - "Review delegate-queued wiring gaps at least weekly. The 4-hour cadence means medium+ gaps surface within a quarter-day; latency past a week defeats the discipline."
+      - "Treat sentinel verdicts as advisory at the operator-review layer. The sentinel never mutates substrate; the operator authors the remediation commit burst."
+      - "Re-birth or archive the sentinel if its false-positive rate exceeds 5% on legitimate substrate states — same posture as the reality_anchor / verifier_loop."
+      - "Keep coverage.json fresh by running diagnostic-all (or its scheduled equivalent) on at least a daily cadence; the sentinel's verdict freshness is bounded by section-15's last run."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+    reality_anchor:
+      enabled: true
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the
