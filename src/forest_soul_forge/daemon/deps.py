@@ -343,15 +343,38 @@ def build_or_get_tool_dispatcher(app):
     write_lock = getattr(app.state, "write_lock", None)
     if settings is not None and write_lock is not None:
         from forest_soul_forge.tools.delegator import build_delegator_factory
+
+        def _resolve_provider_for_delegate():
+            """Mirror of skills_run._resolve_active_provider so
+            delegated skills get the same LLM provider plumbing as
+            direct /skills/run dispatch.
+
+            The bug fixed here (B410-followup): the original lambda
+            read `app.state.active_provider`, an attribute that is
+            never written. `app.state.providers` is the providers
+            manager set during startup; `.active()` returns the
+            current provider. Reading the wrong attribute made every
+            delegated call to text_summarize / llm_think / any LLM-
+            backed tool fail with 'no LLM provider wired into this
+            dispatcher.' Discovered when wiring_audit_triage's
+            real-delegate upgrade landed (B409); failures matched
+            CLAUDE.md sec0 §2 dispatcher-wiring discipline class.
+            """
+            providers = getattr(app.state, "providers", None)
+            if providers is None:
+                return None
+            try:
+                return providers.active()
+            except Exception:
+                return None
+
         dispatcher.delegator_factory = build_delegator_factory(
             registry=fsf_registry,
             audit_chain=audit,
             dispatcher=dispatcher,
             skill_install_dir=settings.skill_install_dir,
             write_lock=write_lock,
-            provider_resolver=lambda: getattr(
-                app.state, "active_provider", None,
-            ),
+            provider_resolver=_resolve_provider_for_delegate,
         )
     app.state.tool_dispatcher = dispatcher
     return dispatcher
