@@ -41,7 +41,7 @@ birth_one() {
   local name="$2"
   local posture="$3"
   local posture_reason="$4"
-  local idem="birth-${name,,}"
+  local idem="birth-$(echo "$name" | tr '[:upper:]' '[:lower:]')"
 
   echo
   echo "----- $name ($role) -----"
@@ -84,7 +84,7 @@ JSON
   POSTURE_RESP=$(curl -s --max-time 10 "${DAEMON}/agents/${INSTANCE_ID}/posture" \
     -H "X-FSF-Token: $TOKEN" \
     -H "Content-Type: application/json" \
-    -H "X-Idempotency-Key: posture-${name,,}-init" \
+    -H "X-Idempotency-Key: posture-$(echo "$name" | tr '[:upper:]' '[:lower:]')-init" \
     -d "{\"posture\":\"$posture\",\"reason\":\"$posture_reason\"}" \
     2>&1)
   POSTURE_OK=$(echo "$POSTURE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('posture','?'))" 2>/dev/null || echo "?")
