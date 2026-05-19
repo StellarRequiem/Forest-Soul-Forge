@@ -29,9 +29,7 @@ description: |
   delegate constraint runs cleanly.
 
 requires:
-  - llm_think.v1
   - text_summarize.v1
-  - delegate.v1
   - memory_write.v1
 
 inputs:
@@ -82,70 +80,67 @@ steps:
         ${inputs.recent_outcome}
         --- END wiring_audit_outcome ---
 
+  # NOTE on architecture: a future revision will use delegate.v1 to
+  # fan out to Reviewer-Main + Architect-Main. That requires a generic
+  # llm_pass.v1 single-step skill wrapper (not yet built). For now the
+  # triune is logical/persona-based — Engineer-Main runs all three
+  # text_summarize calls with explicit persona prompts. Real LLM output,
+  # real multi-perspective synthesis. The reviewer_instance_id +
+  # architect_instance_id inputs are recorded in the final memory
+  # write as attribution.
+
   - id: reviewer_rank
-    tool: delegate.v1
+    tool: text_summarize.v1
     args:
-      target_instance_id: ${inputs.reviewer_instance_id}
-      skill_name: text_summarize
-      skill_version: '1'
-      reason: "wiring_audit_triage step 2: rank gaps by ADR-0081 severity"
-      allow_out_of_lineage: true
-      inputs:
-        text: |
-          You are the code-reviewer in the Triune-Main work cell.
-          RANK each item below by operator-impact severity per ADR-0081
-          §severity:
+      style: bullet_points
+      target_words: 250
+      text: |
+        You are the code-reviewer in the Triune-Main work cell.
+        RANK each item below by operator-impact severity per ADR-0081
+        §severity:
 
-            high   - any handoff entry_agents resolve to nothing,
-                     chain break, constitution parse failure.
-            medium - orphan_tools > 0, skills_unresolvable > 0,
-                     broken handoffs with the skill manifest missing.
-            low    - tools_kit_no_agent > 0 (normal during rollouts).
-            info   - freshness notes only.
+          high   - any handoff entry_agents resolve to nothing,
+                   chain break, constitution parse failure.
+          medium - orphan_tools > 0, skills_unresolvable > 0,
+                   broken handoffs with the skill manifest missing.
+          low    - tools_kit_no_agent > 0 (normal during rollouts).
+          info   - freshness notes only.
 
-          Output the SAME list, but prefix each item with [HIGH] /
-          [MEDIUM] / [LOW] / [INFO]. Add one short sentence per item
-          explaining the severity choice.
+        Output the SAME list, but prefix each item with [HIGH] /
+        [MEDIUM] / [LOW] / [INFO]. Add one short sentence per item
+        explaining the severity choice.
 
-          --- BEGIN engineer-extracted action list ---
-          ${engineer_extract.response}
-          --- END action list ---
-        style: bullet_points
-        target_words: 250
+        --- BEGIN engineer-extracted action list ---
+        ${engineer_extract.response}
+        --- END action list ---
 
   - id: architect_priority
-    tool: delegate.v1
+    tool: text_summarize.v1
     args:
-      target_instance_id: ${inputs.architect_instance_id}
-      skill_name: text_summarize
-      skill_version: '1'
-      reason: "wiring_audit_triage step 3: prioritize remediation order"
-      allow_out_of_lineage: true
-      inputs:
-        text: |
-          You are the system-architect in the Triune-Main work cell.
-          Produce a PRIORITIZED REMEDIATION ORDER from the
-          severity-ranked list below. Consider dependencies:
-            - Chain-break fixes BEFORE anything else (downstream
-              audits unreliable until chain is verified).
-            - Skill-missing handoffs BEFORE orphan-tool retirement
-              (broken handoffs are user-visible; orphan tools just
-              clutter the catalog).
-            - Within same severity, alphabetical OR by domain
-              clustering (e.g., all d3 fixes together).
+      style: paragraph
+      target_words: 400
+      text: |
+        You are the system-architect in the Triune-Main work cell.
+        Produce a PRIORITIZED REMEDIATION ORDER from the
+        severity-ranked list below. Consider dependencies:
+          - Chain-break fixes BEFORE anything else (downstream
+            audits unreliable until chain is verified).
+          - Skill-missing handoffs BEFORE orphan-tool retirement
+            (broken handoffs are user-visible; orphan tools just
+            clutter the catalog).
+          - Within same severity, alphabetical OR by domain
+            clustering (e.g., all d3 fixes together).
 
-          Output:
-            1. Numbered list (1..N) of items in execution order.
-            2. One-line dependency rationale per item.
-            3. Closing sentence: "Estimated total burst count: <N>"
-               (where N is your guess at the operator-burst count
-               to resolve everything).
+        Output:
+          1. Numbered list (1..N) of items in execution order.
+          2. One-line dependency rationale per item.
+          3. Closing sentence: "Estimated total burst count: <N>"
+             (where N is your guess at the operator-burst count
+             to resolve everything).
 
-          --- BEGIN severity-ranked list ---
-          ${reviewer_rank.response}
-          --- END ranked list ---
-        style: paragraph
-        target_words: 400
+        --- BEGIN severity-ranked list ---
+        ${reviewer_rank.response}
+        --- END ranked list ---
 
   - id: record
     tool: memory_write.v1
