@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Reviewer-Main weekly Monday 8am code_review_quick. Install:
+       cp dev-tools/launchd/dev.forest.reviewer-review.plist.template \
+          ~/Library/LaunchAgents/dev.forest.reviewer-review.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.forest.reviewer-review.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.forest.reviewer-review</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/llm01/Forest-Soul-Forge/dev-tools/run-reviewer-review.command</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/llm01/Forest-Soul-Forge</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key><string>/Users/llm01</string>
+  </dict>
+  <!-- Monday = Weekday 1 (Sun=0..Sat=6) per launchd convention.
+       8:00am picks an hour after the daily changelog at 6am, so
+       review reads against fresh weekly state without racing the
+       morning brief. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>1</integer>
+    <key>Hour</key><integer>8</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/tmp/forest-reviewer-review.out.log</string>
+  <key>StandardErrorPath</key><string>/tmp/forest-reviewer-review.err.log</string>
+</dict>
+</plist>

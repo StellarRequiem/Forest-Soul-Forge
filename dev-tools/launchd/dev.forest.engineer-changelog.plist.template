@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Engineer-Main daily 6am commit_changelog. Install:
+       cp dev-tools/launchd/dev.forest.engineer-changelog.plist.template \
+          ~/Library/LaunchAgents/dev.forest.engineer-changelog.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.forest.engineer-changelog.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.forest.engineer-changelog</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/llm01/Forest-Soul-Forge/dev-tools/run-engineer-changelog.command</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/llm01/Forest-Soul-Forge</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key><string>/Users/llm01</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>6</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/tmp/forest-engineer-changelog.out.log</string>
+  <key>StandardErrorPath</key><string>/tmp/forest-engineer-changelog.err.log</string>
+</dict>
+</plist>
