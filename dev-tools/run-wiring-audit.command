@@ -34,6 +34,19 @@ echo "ADR-0081 T5 — scheduled wiring audit"
 echo "  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "=========================================================="
 
+# Ensure the skill manifest is installed where /skills/run looks for
+# it (data/forge/skills/installed/). examples/skills/ is the source-
+# of-truth manifest (git-tracked); installed/ is gitignored per-host
+# state. Self-heal: if the manifest is missing from installed/, copy
+# it from examples/ — happens once per fresh checkout.
+SKILL_SRC="$REPO_ROOT/examples/skills/wiring_audit.v1.yaml"
+SKILL_DST="$REPO_ROOT/data/forge/skills/installed/wiring_audit.v1.yaml"
+if [ ! -f "$SKILL_DST" ] && [ -f "$SKILL_SRC" ]; then
+  echo "[0/3] Installing wiring_audit.v1 to data/forge/skills/installed/"
+  mkdir -p "$(dirname "$SKILL_DST")"
+  cp "$SKILL_SRC" "$SKILL_DST"
+fi
+
 echo
 echo "[1/3] Regenerating coverage.json via section-15-wiring-cross-check"
 bash "$REPO_ROOT/dev-tools/diagnostic/section-15-wiring-cross-check.command" \
@@ -82,16 +95,21 @@ print(json.dumps(payload))
 PYEOF
 )
 
-DISPATCH_RESP=$(curl -s --max-time 60 "${DAEMON}/agents/${SENTINEL_ID}/skills/call" \
+# Endpoint is /agents/<id>/skills/run (ADR-0031 T2b), NOT /skills/call.
+# /skills/call is for individual tool dispatch (ToolCallRequest); skills
+# use the run pathway which loads the manifest from
+# data/forge/skills/installed/<name>.v<version>.yaml.
+DISPATCH_RESP=$(curl -s --max-time 60 "${DAEMON}/agents/${SENTINEL_ID}/skills/run" \
   -H "X-FSF-Token: $TOKEN" \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD" 2>&1)
 echo "      Skill response (truncated):"
 echo "$DISPATCH_RESP" | python3 -m json.tool 2>/dev/null | head -40 || echo "$DISPATCH_RESP" | head -40
 
-OK=$(echo "$DISPATCH_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ok', 'False'))" 2>/dev/null || echo "False")
-if [ "$OK" != "True" ]; then
-  echo "ERROR: wiring_audit.v1 dispatch failed."
+# SkillRunResponse uses `status` (succeeded|failed|...) not `ok` (bool).
+STATUS=$(echo "$DISPATCH_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status', 'unknown'))" 2>/dev/null || echo "unknown")
+if [ "$STATUS" != "succeeded" ]; then
+  echo "ERROR: wiring_audit.v1 dispatch returned status=$STATUS (expected 'succeeded')."
   exit 4
 fi
 
