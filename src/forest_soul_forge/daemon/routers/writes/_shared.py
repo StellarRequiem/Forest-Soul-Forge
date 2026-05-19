@@ -29,6 +29,7 @@ What's NOT here:
 from __future__ import annotations
 
 import asyncio
+from typing import Callable
 
 from fastapi import HTTPException, Response, status
 
@@ -51,12 +52,37 @@ def _maybe_replay_cached(
     key: str | None,
     endpoint: str,
     request_hash: str,
+    *,
+    is_still_valid: Callable[[bytes], bool] | None = None,
 ) -> Response | None:
     """Return a cached response if this key was already served; else None.
 
     Caller is responsible for holding the daemon's write lock before
     invoking this — the lookup + subsequent handler execution must be
     atomic so two concurrent replays can't both run the write path.
+
+    ADR-0083 (Burst 426): the optional ``is_still_valid`` callback
+    makes replay lifecycle-aware. The cache stores responses captured
+    at the moment the original write succeeded. For endpoints whose
+    cached response refers to a registry row whose lifecycle may have
+    transitioned since (e.g. /birth → response carries an
+    instance_id whose status can later flip to ``archived``), the
+    cached body is no longer a truthful reflection of reality.
+    Replaying it would mislead the operator into thinking a new
+    write succeeded when it didn't.
+
+    When a caller passes ``is_still_valid``:
+      - On a cache hit, the callback is invoked with the cached
+        response body (raw bytes — same JSON the cache stored).
+      - True → replay as normal.
+      - False → return None (treat as cache miss). The caller then
+        processes the request fresh, producing a new write with new
+        cached state.
+
+    The check is opt-in per call site to keep _shared.py
+    general-purpose: endpoints whose response semantics don't depend
+    on lifecycle state (e.g. /archive, /regenerate-voice) skip the
+    cost. See ADR-0083 for the full rationale.
     """
     if key is None:
         return None
@@ -67,6 +93,12 @@ def _maybe_replay_cached(
     if hit is None:
         return None
     cached_status, cached_json = hit
+    if is_still_valid is not None and not is_still_valid(cached_json):
+        # ADR-0083: the cached state has been superseded by a
+        # lifecycle transition (e.g. the agent the cache references
+        # has been archived). Process this request fresh so the
+        # operator gets a real write + a real audit event.
+        return None
     return Response(
         content=cached_json,
         status_code=cached_status,

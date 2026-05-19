@@ -542,12 +542,52 @@ def _perform_create(
         genre_engine=genre_engine,
     )
 
+    # ADR-0083 (Burst 426): lifecycle-aware idempotency replay. The
+    # cached response was captured at the moment of the original birth
+    # (status=active, fresh sibling_index, fresh constitution_hash). If
+    # the agent that response describes has since been archived, the
+    # cached body lies about current reality. Replaying it would tell
+    # the operator "born: X" without minting a fresh row in the
+    # registry — the wedge case that caused B416/B420's Reviewer-Main
+    # to be archived without a working replacement.
+    #
+    # On replay-time check: if the cached instance_id is still active,
+    # cache replay proceeds as before (retries within a single
+    # lifecycle work). If the cached instance_id has transitioned to
+    # archived, return None (cache miss) so the request processes
+    # fresh — next_sibling_index() will see the archived predecessor
+    # and bump to the next slot naturally.
+    def _birth_cache_still_valid(cached_json: bytes) -> bool:
+        try:
+            import json as _json
+
+            cached = _json.loads(cached_json)
+        except (ValueError, TypeError):
+            # Unparseable cache entry — replay it; downstream handles
+            # the malformed-response case better than we can here.
+            return True
+        cached_instance_id = cached.get("instance_id")
+        if not cached_instance_id:
+            return True
+        try:
+            row = registry.get_agent(cached_instance_id)
+        except Exception:
+            # UnknownAgentError or DB error — fall back to replay
+            # (safer default than skipping the cache and re-writing).
+            return True
+        return getattr(row, "status", None) == "active"
+
     with lock:
         # Idempotency check is the *first* thing inside the lock so two
         # concurrent requests with the same key can't both execute the
-        # write path. On hit: return the cached response verbatim.
+        # write path. On hit: return the cached response verbatim —
+        # unless the cached agent has since been archived (ADR-0083).
         cached = _maybe_replay_cached(
-            registry, idempotency_key, endpoint, request_hash
+            registry,
+            idempotency_key,
+            endpoint,
+            request_hash,
+            is_still_valid=_birth_cache_still_valid,
         )
         if cached is not None:
             return cached
