@@ -1,0 +1,149 @@
+schema_version: 1
+name: wiring_audit
+version: '1'
+description: |
+  WiringSentinel's signature skill. ADR-0081 T4 (B397). Runs on a
+  4-hour cadence (ADR-0081 D7) against section-15's coverage.json
+  output. The scheduled task wrapper (forest-soul-forge-wiring-audit,
+  T5) reads coverage.json from disk and passes the structured
+  findings in as `inputs.coverage`; the skill itself is daemon-
+  internal and reads no disk.
+
+  Steps:
+    verify_chain   - audit_chain_verify.v1 walks the chain. Per
+                     ADR-0081 require_chain_verify_before_audit
+                     policy, a broken chain aborts the audit.
+    recall_prior   - memory_recall.v1 pulls prior wiring_audit
+                     outcomes from lineage so the summary can
+                     diff (new gaps, resolved gaps, persisting).
+    summarize      - text_summarize.v1 compacts the coverage block
+                     into operator-readable severity-tagged punch
+                     list.
+    record         - memory_write.v1 persists the audit outcome
+                     (severity, gap counts, summary) to lineage
+                     memory so the next run can diff.
+
+  Outputs gap_count + severity. The scheduled task wrapper reads
+  these to decide whether to surface a notification.
+
+requires:
+  - audit_chain_verify.v1
+  - memory_recall.v1
+  - text_summarize.v1
+  - memory_write.v1
+
+inputs:
+  type: object
+  required: [coverage]
+  properties:
+    coverage:
+      type: object
+      description: |
+        Full coverage.json contents from section-15-wiring-cross-check.
+        Includes summary (tools_total, tools_orphan, skills_*,
+        handoffs_*, broken_constitutions), orphan_tools list,
+        skills_unresolvable, skills_no_carrier, handoffs_broken,
+        tool_carriers matrix.
+    severity_threshold:
+      type: string
+      enum: [info, low, medium, high]
+      default: medium
+      description: |
+        Per ADR-0081 D7 - only gaps at this severity OR above land
+        as a delegate-queued escalation. Below-threshold gaps still
+        record to lineage memory but do not page the operator.
+    triggered_by:
+      type: string
+      default: scheduled
+      description: |
+        scheduled | manual | post-burst — operator-visible context
+        on what kicked this audit. The scheduled task wrapper passes
+        'scheduled'; ad-hoc runs from the CLI pass 'manual'.
+
+steps:
+  - id: verify_chain
+    tool: audit_chain_verify.v1
+    args:
+      offset: 0
+      limit: 100000
+
+  - id: recall_prior
+    tool: memory_recall.v1
+    args:
+      tags:
+        - wiring_audit
+        - wiring_sentinel
+      limit: 5
+
+  - id: summarize
+    tool: text_summarize.v1
+    args:
+      style: punch_list
+      target_length: 800
+      text: |
+        Substrate wiring coverage audit (wiring_audit.v1, ADR-0081).
+
+        Triggered: ${inputs.triggered_by}
+        Chain verified: ${verify_chain.ok}
+        Prior audits recalled: ${recall_prior.entries}
+
+        Current coverage summary (from section-15):
+          tools_total:           ${inputs.coverage.summary.tools_total}
+          tools_orphan:          ${inputs.coverage.summary.tools_orphan}
+          tools_kit_no_agent:    ${inputs.coverage.summary.tools_kit_no_agent}
+          skills_total:          ${inputs.coverage.summary.skills_total}
+          skills_unresolvable:   ${inputs.coverage.summary.skills_unresolvable}
+          skills_no_carrier:     ${inputs.coverage.summary.skills_no_carrier}
+          handoffs_total:        ${inputs.coverage.summary.handoffs_total}
+          handoffs_broken:       ${inputs.coverage.summary.handoffs_broken}
+          broken_constitutions:  ${inputs.coverage.summary.broken_constitutions}
+
+        Orphan tools (cataloged, zero carriers):
+          ${inputs.coverage.orphan_tools}
+
+        Skills with no carrier archetype:
+          ${inputs.coverage.skills_no_carrier}
+
+        Broken handoff routes:
+          ${inputs.coverage.handoffs_broken}
+
+        Produce a severity-tagged operator-readable punch list.
+        Severity mapping (ADR-0081 §"severity"):
+          high   - any handoff entry_agents resolve to nothing,
+                   any chain break,
+                   any constitution refuses to parse.
+          medium - orphan_tools > 0,
+                   skills_unresolvable > 0,
+                   handoffs_broken > 0 (other than entry_agents
+                   blank).
+          low    - tools_kit_no_agent > 0 (normal during rollouts).
+          info   - all green, only freshness notes.
+
+  - id: record
+    tool: memory_write.v1
+    args:
+      layer: episodic
+      scope: lineage
+      tags:
+        - wiring_audit
+        - wiring_sentinel
+      content:
+        kind: wiring_audit_outcome
+        triggered_by: ${inputs.triggered_by}
+        chain_ok: ${verify_chain.ok}
+        chain_entries_checked: ${verify_chain.entries_checked}
+        coverage_summary: ${inputs.coverage.summary}
+        orphan_tools: ${inputs.coverage.orphan_tools}
+        handoffs_broken_count: ${inputs.coverage.summary.handoffs_broken}
+        skills_unresolvable_count: ${inputs.coverage.summary.skills_unresolvable}
+        skills_no_carrier_count: ${inputs.coverage.summary.skills_no_carrier}
+        summary_text: ${summarize.summary}
+
+output:
+  chain_ok: ${verify_chain.ok}
+  chain_entries_checked: ${verify_chain.entries_checked}
+  orphan_tools_count: ${inputs.coverage.summary.tools_orphan}
+  handoffs_broken_count: ${inputs.coverage.summary.handoffs_broken}
+  skills_unresolvable_count: ${inputs.coverage.summary.skills_unresolvable}
+  summary_text: ${summarize.summary}
+  prior_audits_recalled: ${recall_prior.entries}
