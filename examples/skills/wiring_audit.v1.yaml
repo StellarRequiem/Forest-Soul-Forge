@@ -78,7 +78,10 @@ steps:
   - id: summarize
     tool: text_summarize.v1
     args:
-      style: punch_list
+      # text_summarize.v1 accepts {bullet_points, paragraph, tldr}.
+      # bullet_points is closest to the severity-tagged punch list
+      # the prompt asks the LLM to produce.
+      style: bullet_points
       target_length: 800
       text: |
         Substrate wiring coverage audit (wiring_audit.v1, ADR-0081).
