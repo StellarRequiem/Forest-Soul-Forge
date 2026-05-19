@@ -130,17 +130,12 @@ steps:
       tags:
         - wiring_audit
         - wiring_sentinel
-      content:
-        kind: wiring_audit_outcome
-        triggered_by: ${inputs.triggered_by}
-        chain_ok: ${verify_chain.ok}
-        chain_entries_checked: ${verify_chain.entries_checked}
-        coverage_summary: ${inputs.coverage.summary}
-        orphan_tools: ${inputs.coverage.orphan_tools}
-        handoffs_broken_count: ${inputs.coverage.summary.handoffs_broken}
-        skills_unresolvable_count: ${inputs.coverage.summary.skills_unresolvable}
-        skills_no_carrier_count: ${inputs.coverage.summary.skills_no_carrier}
-        summary_text: ${summarize.summary}
+      # memory_write.v1's content arg is typed {type: string} —
+      # serialize the outcome shape as a colon-delimited summary
+      # the operator can grep, with the LLM summary appended.
+      # Structured drilldown lives in coverage.json on disk; the
+      # memory entry is the lineage-trackable receipt.
+      content: "wiring_audit_outcome: triggered_by=${inputs.triggered_by} chain_ok=${verify_chain.ok} chain_entries=${verify_chain.entries_verified} orphan_tools=${inputs.coverage.summary.tools_orphan} handoffs_broken=${inputs.coverage.summary.handoffs_broken} skills_unresolvable=${inputs.coverage.summary.skills_unresolvable} skills_no_carrier=${inputs.coverage.summary.skills_no_carrier} | summary: ${summarize.summary}"
 
 output:
   chain_ok: ${verify_chain.ok}
