@@ -1,7 +1,7 @@
 # ADR-0081 — Substrate wiring coverage + wiring_sentinel
 
-**Status:** Proposed
-**Date:** 2026-05-18
+**Status:** Accepted
+**Date:** 2026-05-18 (proposed B393; T1-T5 shipped B394-B398; CLOSE B399)
 **Tracks:** Observability / Substrate hygiene
 **Supersedes:** none (extends ADR-0079 diagnostic harness)
 **Builds on:** ADR-0079 (the 14-section harness), ADR-0080 (the
