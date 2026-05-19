@@ -22,25 +22,36 @@
 schema_version: 1
 
 default_skill_per_capability:
+  # B415: `future_skill: true` marks a route as intentionally
+  # declared ahead of the skill artifact. The dispatcher returns
+  # a clean 'skill not found' error until the skill lands. ADR-0081
+  # section-15 surfaces these as INFO not FAIL; without the marker
+  # the cross-check can't distinguish 'forward intent' from
+  # 'missing-and-forgotten' wiring.
+  #
   # D2 Daily Life OS
   - domain: d2_daily_life_os
     capability: reminder
     skill_name: schedule_reminder
     skill_version: "1"
+    future_skill: true
   - domain: d2_daily_life_os
     capability: morning_briefing
     skill_name: generate_briefing
     skill_version: "1"
+    future_skill: true
 
   # D3 Local SOC
   - domain: d3_local_soc
     capability: incident_summary
     skill_name: summarize_recent_incidents
     skill_version: "1"
+    future_skill: true
   - domain: d3_local_soc
     capability: incident_response
     skill_name: respond_to_incident
     skill_version: "1"
+    future_skill: true
   # ADR-0078 Phase A — forensic_archive maps to archive_evidence.v1.
   # The skill itself ships in B346 (T4); this mapping declares intent
   # so route_to_domain.v1 can resolve the (domain, capability) pair
@@ -78,10 +89,12 @@ default_skill_per_capability:
     capability: review_signoff
     skill_name: review_pr
     skill_version: "1"
+    future_skill: true
   - domain: d4_code_review
     capability: implementation
     skill_name: implement_feature
     skill_version: "1"
+    future_skill: true
   # ADR-0077 advanced rollout — three new capabilities. The skills
   # themselves (propose_tests.v1 / safe_migration.v1 /
   # release_check.v1) ship in T4 (B335-B337); these mappings define
@@ -106,6 +119,7 @@ default_skill_per_capability:
     capability: compliance_scan
     skill_name: scan_for_compliance
     skill_version: "1"
+    future_skill: true
 
 # Cascade rules — engineer-defined, code-reviewed via PR.
 #

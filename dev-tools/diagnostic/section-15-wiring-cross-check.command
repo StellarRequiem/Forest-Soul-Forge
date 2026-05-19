@@ -107,6 +107,27 @@ genre_defaults: dict[str, set[str]] = {
     for name, tools in (catalog.get("genre_default_tools") or {}).items()
 }
 
+# B415: constitution_templates allowed_tools is ALSO a carrier source.
+# tool_catalog.archetypes.<X>.standard_tools is the kit; but
+# constitution_templates.role_base.<X>.allowed_tools widens the per-
+# role allowance (used by domain_orchestrator + companion roles that
+# don't carry the tool in their standard kit but DO permit it at the
+# constitution layer). Without this carrier source, decompose_intent.v1
+# / route_to_domain.v1 / operator_profile_*.v1 show as orphan even
+# though they're operationally wired into domain_orchestrator's
+# constitution.
+template_allows: dict[str, set[str]] = defaultdict(set)
+try:
+    ct_doc = _load_yaml(REPO / "config" / "constitution_templates.yaml")
+    rb = (ct_doc.get("role_base") or {}) if isinstance(ct_doc, dict) else {}
+    for role_name, role_body in rb.items():
+        if not isinstance(role_body, dict):
+            continue
+        for tool_key in role_body.get("allowed_tools") or []:
+            template_allows[str(tool_key)].add(role_name)
+except Exception:
+    pass
+
 # Agent constitutions: soul_generated/*.constitution.yaml carries a
 # `tools:` list of {name, version, ...}. Build a map of
 # tool_key -> set(agent_name) so we can report carriers per tool.
@@ -172,6 +193,12 @@ for name, tools in archetype_kits.items():
 for name, tools in genre_defaults.items():
     for t in tools:
         all_carrier_archetypes[t].add(f"(genre:{name})")
+# B415: constitution_templates allowed_tools count too. Domain
+# orchestrator and similar roles permit tools at the constitution
+# layer without including them in their standard archetype kit.
+for tool_key, roles in template_allows.items():
+    for r in roles:
+        all_carrier_archetypes[tool_key].add(f"(allowed:{r})")
 
 for tool_key in sorted(cataloged_tools):
     in_kit = tool_key in all_carrier_archetypes
@@ -257,7 +284,12 @@ else:
 
 
 # 3. Handoff resolution: skill exists + entry_agents carry required tools.
+# B415: handoffs.yaml routes can carry `future_skill: true` to mark
+# a route as intentionally-declared-ahead-of-skill. Those are not
+# broken — the dispatcher returns a clean 'skill not found' until
+# the skill lands. We bucket them as INFO not FAIL.
 handoff_broken: list[tuple[str, str, str]] = []  # domain, capability, reason
+handoff_future: list[tuple[str, str, str]] = []  # routes intentionally ahead of skill
 
 # Load each domain's entry_agents from config/domains/.
 domain_dir = REPO / "config" / "domains"
@@ -286,10 +318,18 @@ for route in handoff_routes:
     skill_key = f"{skill_name}.v{skill_ver}"
     sd = skills.get(skill_key)
     if not sd:
-        handoff_broken.append((
-            domain, cap,
-            f"skill {skill_key} not in examples/skills/"
-        ))
+        # B415: future_skill: true means operator declared the route
+        # ahead of the skill artifact landing. Surface as INFO not FAIL.
+        if route.get("future_skill") is True:
+            handoff_future.append((
+                domain, cap,
+                f"skill {skill_key} intentionally ahead of artifact"
+            ))
+        else:
+            handoff_broken.append((
+                domain, cap,
+                f"skill {skill_key} not in examples/skills/"
+            ))
         continue
     # Find an entry_agent role that carries all required tools.
     entry_roles = domain_entry_agents.get(domain, [])
