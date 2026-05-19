@@ -30,6 +30,7 @@ description: |
 
 requires:
   - text_summarize.v1
+  - delegate.v1
   - memory_write.v1
 
 inputs:
@@ -80,67 +81,82 @@ steps:
         ${inputs.recent_outcome}
         --- END wiring_audit_outcome ---
 
-  # NOTE on architecture: a future revision will use delegate.v1 to
-  # fan out to Reviewer-Main + Architect-Main. That requires a generic
-  # llm_pass.v1 single-step skill wrapper (not yet built). For now the
-  # triune is logical/persona-based — Engineer-Main runs all three
-  # text_summarize calls with explicit persona prompts. Real LLM output,
-  # real multi-perspective synthesis. The reviewer_instance_id +
-  # architect_instance_id inputs are recorded in the final memory
-  # write as attribution.
+  # B410: real triune via delegate.v1 -> llm_pass.v1. Reviewer-Main
+  # and Architect-Main actually run skill steps on their own identity;
+  # skill_invoked / skill_completed audit events attribute the LLM
+  # passes to the right agent. Lineage memory writes inside llm_pass
+  # (none in v1) would land on the target's chain, not the caller's.
+  #
+  # The wrapper passes reviewer_instance_id + architect_instance_id
+  # as inputs; this skill resolves them at dispatch time.
+  #
+  # delegate.v1 returns {status, output, ...}; the target skill's
+  # `response` lives at output.response on the delegate result.
 
   - id: reviewer_rank
-    tool: text_summarize.v1
+    tool: delegate.v1
     args:
-      style: bullet_points
-      target_words: 250
-      text: |
-        You are the code-reviewer in the Triune-Main work cell.
-        RANK each item below by operator-impact severity per ADR-0081
-        §severity:
+      target_instance_id: ${inputs.reviewer_instance_id}
+      skill_name: llm_pass
+      skill_version: '1'
+      reason: "wiring_audit_triage step 2: severity-rank gaps"
+      allow_out_of_lineage: true
+      inputs:
+        style: bullet_points
+        target_words: 250
+        text: |
+          You are the code-reviewer in the Triune-Main work cell.
+          RANK each item below by operator-impact severity per ADR-0081
+          §severity:
 
-          high   - any handoff entry_agents resolve to nothing,
-                   chain break, constitution parse failure.
-          medium - orphan_tools > 0, skills_unresolvable > 0,
-                   broken handoffs with the skill manifest missing.
-          low    - tools_kit_no_agent > 0 (normal during rollouts).
-          info   - freshness notes only.
+            high   - any handoff entry_agents resolve to nothing,
+                     chain break, constitution parse failure.
+            medium - orphan_tools > 0, skills_unresolvable > 0,
+                     broken handoffs with the skill manifest missing.
+            low    - tools_kit_no_agent > 0 (normal during rollouts).
+            info   - freshness notes only.
 
-        Output the SAME list, but prefix each item with [HIGH] /
-        [MEDIUM] / [LOW] / [INFO]. Add one short sentence per item
-        explaining the severity choice.
+          Output the SAME list, but prefix each item with [HIGH] /
+          [MEDIUM] / [LOW] / [INFO]. Add one short sentence per item
+          explaining the severity choice.
 
-        --- BEGIN engineer-extracted action list ---
-        ${engineer_extract.response}
-        --- END action list ---
+          --- BEGIN engineer-extracted action list ---
+          ${engineer_extract.response}
+          --- END action list ---
 
   - id: architect_priority
-    tool: text_summarize.v1
+    tool: delegate.v1
     args:
-      style: paragraph
-      target_words: 400
-      text: |
-        You are the system-architect in the Triune-Main work cell.
-        Produce a PRIORITIZED REMEDIATION ORDER from the
-        severity-ranked list below. Consider dependencies:
-          - Chain-break fixes BEFORE anything else (downstream
-            audits unreliable until chain is verified).
-          - Skill-missing handoffs BEFORE orphan-tool retirement
-            (broken handoffs are user-visible; orphan tools just
-            clutter the catalog).
-          - Within same severity, alphabetical OR by domain
-            clustering (e.g., all d3 fixes together).
+      target_instance_id: ${inputs.architect_instance_id}
+      skill_name: llm_pass
+      skill_version: '1'
+      reason: "wiring_audit_triage step 3: prioritize remediation order"
+      allow_out_of_lineage: true
+      inputs:
+        style: paragraph
+        target_words: 400
+        text: |
+          You are the system-architect in the Triune-Main work cell.
+          Produce a PRIORITIZED REMEDIATION ORDER from the
+          severity-ranked list below. Consider dependencies:
+            - Chain-break fixes BEFORE anything else (downstream
+              audits unreliable until chain is verified).
+            - Skill-missing handoffs BEFORE orphan-tool retirement
+              (broken handoffs are user-visible; orphan tools just
+              clutter the catalog).
+            - Within same severity, alphabetical OR by domain
+              clustering (e.g., all d3 fixes together).
 
-        Output:
-          1. Numbered list (1..N) of items in execution order.
-          2. One-line dependency rationale per item.
-          3. Closing sentence: "Estimated total burst count: <N>"
-             (where N is your guess at the operator-burst count
-             to resolve everything).
+          Output:
+            1. Numbered list (1..N) of items in execution order.
+            2. One-line dependency rationale per item.
+            3. Closing sentence: "Estimated total burst count: <N>"
+               (where N is your guess at the operator-burst count
+               to resolve everything).
 
-        --- BEGIN severity-ranked list ---
-        ${reviewer_rank.response}
-        --- END ranked list ---
+          --- BEGIN severity-ranked list ---
+          ${reviewer_rank.output.response}
+          --- END ranked list ---
 
   - id: record
     tool: memory_write.v1
@@ -150,10 +166,16 @@ steps:
       tags:
         - wiring_audit_triage
         - triune_main
-      content: "triune_main_wiring_triage: triggered_by=${inputs.triggered_by} reviewer=${inputs.reviewer_instance_id} architect=${inputs.architect_instance_id} | extracted: ${engineer_extract.response} | ranked: ${reviewer_rank.response} | prioritized: ${architect_priority.response}"
+      # delegate.v1 returns {status, target_instance_id, skill_name,
+      # skill_version, invoked_seq, completed_seq, output, ...}.
+      # The target llm_pass.v1 skill's `response` lives at
+      # .output.response on the delegate result.
+      content: "triune_main_wiring_triage: triggered_by=${inputs.triggered_by} reviewer=${inputs.reviewer_instance_id} architect=${inputs.architect_instance_id} | extracted: ${engineer_extract.response} | ranked: ${reviewer_rank.output.response} | prioritized: ${architect_priority.output.response}"
 
 output:
   extracted: ${engineer_extract.response}
-  ranked: ${reviewer_rank.response}
-  prioritized: ${architect_priority.response}
+  ranked: ${reviewer_rank.output.response}
+  prioritized: ${architect_priority.output.response}
   triggered_by: ${inputs.triggered_by}
+  reviewer_invoked_seq: ${reviewer_rank.invoked_seq}
+  architect_invoked_seq: ${architect_priority.invoked_seq}

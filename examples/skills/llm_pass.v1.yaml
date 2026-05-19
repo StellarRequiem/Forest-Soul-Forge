@@ -1,0 +1,59 @@
+schema_version: 1
+name: llm_pass
+version: '1'
+description: |
+  Generic single-step skill wrapping text_summarize.v1. Exists so
+  delegate.v1 has a real skill target on sister agents — delegate
+  invokes skills (not tools), and we don't want every triune
+  participant to need a bespoke skill manifest.
+
+  Use this skill as the delegate target when one agent needs to
+  ask another to "run an LLM pass with this prompt and these
+  knobs." The prompt is the `text` input; style + target_words
+  pass through unchanged.
+
+  Single step, no memory writes, no chain branches. The caller
+  (typically Engineer-Main in the Triune-Main work cell) is
+  responsible for capturing the response and deciding what to do
+  with it.
+
+requires:
+  - text_summarize.v1
+
+inputs:
+  type: object
+  required: [text]
+  properties:
+    text:
+      type: string
+      minLength: 1
+      description: |
+        The full prompt to feed to text_summarize.v1. Includes
+        whatever persona framing + instructions + source material
+        the caller wants the target agent to process.
+    style:
+      type: string
+      enum: [bullet_points, paragraph, tldr]
+      default: bullet_points
+    target_words:
+      type: integer
+      minimum: 10
+      maximum: 1500
+      default: 300
+
+steps:
+  - id: pass
+    tool: text_summarize.v1
+    args:
+      text: ${inputs.text}
+      style: ${inputs.style}
+      target_words: ${inputs.target_words}
+
+output:
+  # Surface the wrapped tool's output verbatim so the caller can
+  # interpolate ${delegate_step.output.response} just like a
+  # direct text_summarize call.
+  response: ${pass.response}
+  model: ${pass.model}
+  task_kind: ${pass.task_kind}
+  elapsed_ms: ${pass.elapsed_ms}
