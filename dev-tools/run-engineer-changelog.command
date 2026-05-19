@@ -50,7 +50,9 @@ echo "[2/3] Building diff for last 24h"
 # the messages and the size of each change. Keep size bounded;
 # input to commit_changelog is the diff field which is descriptive
 # text, not literal patch bytes.
-DIFF=$(cd "$REPO_ROOT" && git log --since='24 hours ago' --pretty=format:'== %h %s%n%b' --shortstat 2>/dev/null | head -c 30000)
+# commit_message.v1 caps input at 16000 chars. Stay under by a
+# comfortable margin so a wide commit doesn't trip the gate.
+DIFF=$(cd "$REPO_ROOT" && git log --since='24 hours ago' --pretty=format:'== %h %s%n%b' --shortstat 2>/dev/null | head -c 14000)
 if [ -z "$DIFF" ]; then
   echo "      No commits in last 24h. Nothing to summarize. Exiting clean."
   exit 0
