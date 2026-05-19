@@ -107,14 +107,27 @@ steps:
         prompt: |
           You are the code-reviewer in the Triune-Main work cell.
           RANK each item below by operator-impact severity per ADR-0081
-          §severity:
+          §severity. KNOWN HISTORICAL CONTEXT:
+            - Chain break at any of seqs {3728, 3735-3738, 3740,
+              7695-7703} is a documented pre-B199 write race (May 8
+              + May 11 episodes); audit docs disposition them as
+              INFO not HIGH. Only a chain break at an UNKNOWN seq
+              counts as HIGH.
+            - Routes marked future_skill=true in handoffs.yaml are
+              forward-intent declarations, NOT broken handoffs. The
+              section-15 INFO bucket captures these; don't elevate
+              them to MEDIUM.
 
+          Severity mapping:
             high   - any handoff entry_agents resolve to nothing,
-                     chain break, constitution parse failure.
+                     chain break at UNKNOWN seq, constitution
+                     parse failure.
             medium - orphan_tools > 0, skills_unresolvable > 0,
-                     broken handoffs with the skill manifest missing.
+                     broken handoffs (NOT future_skill) with the
+                     skill manifest missing.
             low    - tools_kit_no_agent > 0 (normal during rollouts).
-            info   - freshness notes only.
+            info   - freshness notes, future_skill declarations,
+                     chain break at documented historical fork seq.
 
           Output the SAME list, but prefix each item with [HIGH] /
           [MEDIUM] / [LOW] / [INFO]. Add one short sentence per item

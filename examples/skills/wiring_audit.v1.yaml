@@ -112,17 +112,29 @@ steps:
         Broken handoff routes:
           ${inputs.coverage.handoffs_broken}
 
+        NOTE on chain_ok=False:
+          The audit chain has two documented pre-B199 write-race
+          episodes (May 8 + May 11 2026) that produce duplicate-seq
+          entries at known seqs: {3728, 3735-3738, 3740, 7695-7703}.
+          See docs/audits/2026-05-17-audit-chain-seq-3728-fork.md
+          and docs/audits/2026-05-19-audit-chain-may11-race.md for
+          the disposition. If verify_chain.broken_at_seq is in that
+          set, treat as INFO (documented historical) not HIGH.
+          Only a chain break at an UNKNOWN seq is a real high-
+          severity finding.
+
         Produce a severity-tagged operator-readable punch list.
         Severity mapping (ADR-0081 §"severity"):
           high   - any handoff entry_agents resolve to nothing,
-                   any chain break,
+                   chain break at an UNKNOWN seq (post-B199),
                    any constitution refuses to parse.
           medium - orphan_tools > 0,
                    skills_unresolvable > 0,
                    handoffs_broken > 0 (other than entry_agents
-                   blank).
+                   blank or future_skill).
           low    - tools_kit_no_agent > 0 (normal during rollouts).
-          info   - all green, only freshness notes.
+          info   - all green, only freshness notes, OR chain break
+                   at a documented historical fork seq.
 
   - id: record
     tool: memory_write.v1
