@@ -73,7 +73,16 @@ results: list[tuple[str, str, str]] = []
 # present-day corruption - they are tracked, named, and immutable
 # per the append-only invariant. The harness should distinguish
 # these from genuinely-new chain breaks.
-KNOWN_HISTORICAL_FORKS = {3728, 3735, 3736, 3737, 3738, 3740}
+# B417: extended to cover the 2026-05-11 race episode (seqs
+# 7695-7703). Same root cause as the May 8 set (pre-B199 mutex
+# fix); separate write-race incident. Audit doc:
+# docs/audits/2026-05-19-audit-chain-may11-race.md.
+KNOWN_HISTORICAL_FORKS = {
+    # May 8 race (B364 / 2026-05-17 audit doc)
+    3728, 3735, 3736, 3737, 3738, 3740,
+    # May 11 race (B417 / 2026-05-19 audit doc)
+    7695, 7696, 7697, 7698, 7699, 7700, 7701, 7702, 7703,
+}
 
 try:
     from forest_soul_forge.core.audit_chain import AuditChain
