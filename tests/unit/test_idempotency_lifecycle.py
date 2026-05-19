@@ -46,9 +46,13 @@ def _seed_cache_entry(
     public API (which couples to the writes router) — pure
     test-fixture utility.
     """
+    # Schema (see registry/schema.py): key (PK), endpoint, request_hash,
+    # status_code, response_json, created_at. B426 commit script test
+    # run surfaced a column-name drift in this fixture — column names
+    # corrected here in B427 follow-up.
     registry._conn.execute(
         "INSERT INTO idempotency_keys (key, endpoint, request_hash, "
-        "response_status, response_body, created_at) "
+        "status_code, response_json, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?)",
         (
             key,
