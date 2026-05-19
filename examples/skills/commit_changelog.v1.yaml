@@ -55,11 +55,11 @@ steps:
         Audience: ${inputs.audience}
 
         Source commit message:
-        ${cm.out.response}
+        ${cm.response}
 
         Summarize for the audience above. The audience defines what
         level of detail survives.
 
 output:
-  conventional_commit: ${cm.out.response}
-  changelog_entry: ${summarize_for_audience.out.response}
+  conventional_commit: ${cm.response}
+  changelog_entry: ${summarize_for_audience.response}

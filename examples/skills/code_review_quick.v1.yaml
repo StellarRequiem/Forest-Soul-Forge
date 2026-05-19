@@ -48,7 +48,7 @@ steps:
   - id: explain
     tool: code_explain.v1
     args:
-      code: ${read_file.out.content}
+      code: ${read_file.content}
       language: ${inputs.language}
 
   - id: critic
@@ -58,7 +58,7 @@ steps:
         You are reviewing the file at ${inputs.file_path}.
 
         Plain-English explanation of the code:
-        ${explain.out.response}
+        ${explain.response}
 
         Your job: flag SPECIFIC concerns about this code — bugs,
         missing edge cases, performance gotchas, security issues,
@@ -74,6 +74,6 @@ steps:
         ≤80 chars, followed by an "Overall:" one-line verdict.
 
 output:
-  explanation: ${explain.out.response}
-  concerns: ${critic.out.response}
+  explanation: ${explain.response}
+  concerns: ${critic.response}
   file_path: ${inputs.file_path}
