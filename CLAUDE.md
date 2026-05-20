@@ -137,6 +137,53 @@ If the fixture deviates from source, the test passes locally but
 errors at setup; the test was never actually validating contract.
 That's worse than no test — it's a green light on a red runway.
 
+**§5 Per-repo `.git/config` overrides silently beat global — B435 lesson:**
+
+When a global git-config change (e.g. enabling commit signing) is
+declared "done," always check the repo-local `.git/config` for an
+override BEFORE declaring it live. Per git's precedence rules,
+repo `.git/config` wins over `~/.gitconfig` wins over `/etc/gitconfig`.
+A `~/.gitconfig` setting can promise behavior that the repo's
+`.git/config` silently revokes.
+
+**B435 — first-signed-commit landed UNSIGNED.** ADR-0084 Tier 1
+hardening configured global signing:
+
+```
+[gpg]      format = ssh
+[user]     signingkey = ~/.ssh/id_ed25519.pub
+[commit]   gpgsign = true
+[tag]      gpgsign = true
+```
+
+But the repo's `.git/config` carried a stale `[commit] gpgsign = false`
+from an earlier burst. The B435 commit landed unsigned. The push of
+the unsigned B435 then succeeded against origin/main (ruleset
+propagation race or first-create implicit bypass) — by the time we
+tried to amend a signature on, local + remote had diverged and the
+new ruleset's Block-force-pushes rule made the amend unpushable.
+Recovery required `git reset --mixed origin/main` + a fresh signed
+B436 on top of the unsigned B435.
+
+**How to apply when verifying a global-config change:**
+
+1. **Grep the repo's `.git/config`** for the setting you just wrote
+   globally. If the repo has its own value, that's what wins —
+   resolve which one is intended.
+   ```
+   git config --local --get commit.gpgsign
+   git config --global --get commit.gpgsign
+   git config --get commit.gpgsign    # resolved value
+   ```
+2. **Use the live verification** as the proof step. For signing,
+   that's a real commit followed by `git log --format='%G?' -1`.
+   For other settings, the equivalent: do the thing, observe the
+   thing, don't trust the config file alone.
+3. **Time-of-check vs time-of-use:** propagation lags exist on
+   GitHub-side rules too. A freshly-created ruleset may not enforce
+   immediately for the user who created it. Live verification per
+   point 2 catches both classes of failure.
+
 ## Verification discipline
 
 - After every code change: run the relevant test file

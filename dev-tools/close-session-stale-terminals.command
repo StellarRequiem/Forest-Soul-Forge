@@ -57,6 +57,21 @@ tell application "Terminal"
             if wName contains "diag-import" then set isStale to true
             if wName contains "fix-multipart-dep" then set isStale to true
             if wName contains "generate-sbom" then set isStale to true
+            -- 2026-05-18 ADR-0081 session additions:
+            if wName contains "birth-detection-engineer" then set isStale to true
+            if wName contains "birth-telemetry-steward" then set isStale to true
+            if wName contains "birth-threat-intel-curator" then set isStale to true
+            if wName contains "birth-forensic-archivist" then set isStale to true
+            if wName contains "birth-smith" then set isStale to true
+            if wName contains "birth-wiring-sentinel" then set isStale to true
+            if wName contains "diagnostic-all" then set isStale to true
+            if wName contains "section-" then set isStale to true
+            if wName contains "probe-tool-runtime" then set isStale to true
+            if wName contains "check-frontier-provider" then set isStale to true
+            if wName contains "fix-frontier-base-url" then set isStale to true
+            if wName contains "diag-b" then set isStale to true
+            if wName contains "finish-d4-rollout" then set isStale to true
+            if wName contains "run-wiring-audit" then set isStale to true
             if wName contains "force-restart-daemon" and (id of w) is not keepId then
                 set isStale to true
             end if

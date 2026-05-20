@@ -3083,6 +3083,7 @@ archetypes:
       - delegate.v1             # escalate medium+ gaps to operator queue
       - text_summarize.v1       # compact long coverage.json into operator-readable summary
       - git_local_scan.v1       # ADR-0084 / B432 — local-git posture telemetry (secrets / signing / sync / gitignore). Read-only; designed for this exact 4-hour scheduled-task pattern per its catalog description.
+      - security_scan.v1        # ADR-0062 supply-chain IoC scanner. Sibling to git_local_scan.v1 — same WiringSentinel read-only IoC pattern. Reads config/security_iocs.yaml (the v2 catalog with 21 rules covering Shai-Hulud / MCP-STDIO-RCE / LiteLLM / Axios / Grafana / MoneyForward / TeamPCP).
 
   # ---- v0.6 role expansion (Burst 124, ADR-0044 §"role inventory") ------
   # 24 roles fleshing out the 8 remaining genre buckets with kits sized
@@ -3290,6 +3291,7 @@ archetypes:
       - memory_recall.v1
       - memory_write.v1
       - timestamp_window.v1
+      - personal_recall.v1      # ADR-0076 T4 — hybrid (BM25+cosine) retrieval over operator's personal_index. Genre-gated to {companion, assistant, operator_steward, domain_orchestrator}; assistant is the first kit on that gate-list to land in catalog.
 
   learning_partner:
     standard_tools:
