@@ -41,6 +41,54 @@ let state = {
 // ---------------------------------------------------------------------------
 
 const TOURS = {
+  // B449 (Phase II UI refresh follow-on): the first-visit tour. Orients
+  // a new operator to the vertical sidebar layout introduced in B448
+  // (Build / Run / Observe / Govern) before dropping them into the
+  // Forge tour. Anchors point at the group-title labels in the sidebar
+  // so the spotlight tracks the actual sidebar geography.
+  welcome: {
+    id: "welcome",
+    label: "Welcome tour",
+    tabName: "forge",
+    steps: [
+      {
+        // No anchor → centers tooltip in viewport (engine fallback).
+        title: "Welcome to your operator console",
+        body: "Forest is a local-first agent governance kernel. Every agent has a signed identity, a constitutional rulebook compiled from sliders you set, and a tamper-evident audit chain. The left sidebar is your home base — let me walk you through it.",
+      },
+      {
+        anchor: '.tabs__group[data-group="build"] .tabs__group-title',
+        title: "BUILD — forge new things",
+        body: "Forge is where you birth agents. Skills are the multi-step recipes those agents run. Tools are the primitives (read a file, dispatch an LLM call, write to memory). Marketplace is where you install plugins from outside the kernel.",
+      },
+      {
+        anchor: '.tabs__group[data-group="run"] .tabs__group-title',
+        title: "RUN — interact with live agents",
+        body: "Agents is the registry of every born agent. Approvals is your queue — every human-approval-gated tool call lands here before it executes. Chat is multi-turn conversation. Voice is push-to-talk + TTS.",
+      },
+      {
+        anchor: '.tabs__group[data-group="observe"] .tabs__group-title',
+        title: "OBSERVE — understand what's happening",
+        body: "Audit is the hash-chained event log. Memory is the agent's persistent state. Provenance shows which precedence layer decided each behavior. Capabilities is the per-agent tool + skill + plugin tree.",
+      },
+      {
+        anchor: '.tabs__group[data-group="govern"] .tabs__group-title',
+        title: "GOVERN — safety surfaces",
+        body: "Security runs the supply-chain scanner. Reality is ground-truth verification. Orchestrator is cross-domain routing. Operator wires per-domain connector consents. Everything here is read-only or operator-gated.",
+      },
+      {
+        anchor: "#statusbar",
+        title: "Bottom strip — always live",
+        body: "Daemon health, agent count, audit chain head, last-activity timestamp. If something stalls or the daemon crashes, this strip tells you first. The diagnostics button on the right pops a full per-component status.",
+      },
+      {
+        anchor: '.tab[data-tab="forge"]',
+        title: "Ready? Click Forge",
+        body: "The first thing an operator does is birth an agent. Click Forge in the BUILD group of the sidebar — or click the ? tour button in the top bar to take the Forge-specific walkthrough next.",
+      },
+    ],
+  },
+
   forge: {
     id: "forge",
     label: "Forge tour",
@@ -142,18 +190,16 @@ export function start() {
     });
   }
 
-  // Auto-show the forge tour on first visit (one-shot per browser).
-  if (!hasSeen("forge")) {
-    // Defer so the rest of the app finishes booting first — sliders + tools
-    // panel render asynchronously and we want their anchors to exist.
+  // B449: auto-show the WELCOME tour (sidebar orientation) on first
+  // visit, not the forge tour. Once the operator has been oriented to
+  // the layout, they can re-launch the per-tab tours via the "? tour"
+  // button. Auto-launches only when both welcome-banner is dismissed
+  // AND the welcome tour hasn't been seen yet — respects user intent.
+  if (!hasSeen("welcome")) {
     setTimeout(() => {
-      // Only if the welcome banner is dismissed AND we're still on the
-      // forge tab. Otherwise the user has already moved on; respect that.
-      const welcome = document.getElementById("welcome");
-      const onForge =
-        document.querySelector(".tab[data-tab='forge'][aria-selected='true']");
-      if (onForge && (!welcome || welcome.hidden)) {
-        launch("forge");
+      const welcomeBanner = document.getElementById("welcome");
+      if (!welcomeBanner || welcomeBanner.hidden) {
+        launch("welcome");
       }
     }, 1500);
   }
