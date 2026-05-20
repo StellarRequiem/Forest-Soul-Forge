@@ -99,6 +99,44 @@ when adding a new builtin tool. The diagnostic harness section 04
 catches this drift automatically; if you see a tool_runtime
 warning after adding a new tool, this is the first thing to check.
 
+**§4 Test-fixture dataclass field verification — B427/B429/B434 lesson:**
+
+When a test fixture constructs a kernel dataclass (`ToolContext`,
+`TraitEngine`, idempotency-row dicts, anything with a fixed shape),
+verify the field/method list against source BEFORE the burst commits.
+Three hotfixes in one session (2026-05-19/20) all had the same root
+cause — fixture API drift:
+
+1. **B427** — test fixture used `response_status`/`response_body` for
+   the `idempotency_keys` table; actual columns are `status_code` and
+   `response_json`. 6 of 6 tests errored on insert.
+2. **B429** — fixture used `TraitEngine.from_yaml` + `.profile_for`;
+   real API is the constructor + `.build_profile`. 5 of 5 tests errored.
+3. **B434** — fixture passed `constitution_path=` as a `ToolContext`
+   kwarg; no such field (constitution path lives on the agent row, not
+   the per-call context). 6 of 8 tests errored at fixture setup.
+
+The fix in every case is one-line and the substrate code is sound —
+but each surfaced AFTER the burst commit ran the tests in the
+post-commit verification step. Each hotfix burned a follow-up commit
+(B427, B429, B434) that should have been folded into the original.
+
+**How to apply when writing or editing a fixture:**
+
+1. **Grep the dataclass** before you reach for memory:
+   `grep -n '^class ToolContext' src/...` then read the `@dataclass`
+   body. Fields you can pass: only those listed.
+2. **Grep the column names** for any sqlite/orm fixture row:
+   `sqlite3 data/registry.sqlite '.schema idempotency_keys'`
+   or read the relevant `CREATE TABLE` in `daemon/registry/schema.py`.
+3. **Grep the factory/method names** for any class construction:
+   `grep -n 'def from_yaml\|def build_profile' src/...` — confirm the
+   method exists, isn't deprecated, and takes the args you intend.
+
+If the fixture deviates from source, the test passes locally but
+errors at setup; the test was never actually validating contract.
+That's worse than no test — it's a green light on a red runway.
+
 ## Verification discipline
 
 - After every code change: run the relevant test file

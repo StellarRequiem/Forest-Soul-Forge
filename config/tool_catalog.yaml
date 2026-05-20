@@ -3082,6 +3082,7 @@ archetypes:
       - llm_think.v1            # summarize gap severity + draft punch list
       - delegate.v1             # escalate medium+ gaps to operator queue
       - text_summarize.v1       # compact long coverage.json into operator-readable summary
+      - git_local_scan.v1       # ADR-0084 / B432 — local-git posture telemetry (secrets / signing / sync / gitignore). Read-only; designed for this exact 4-hour scheduled-task pattern per its catalog description.
 
   # ---- v0.6 role expansion (Burst 124, ADR-0044 §"role inventory") ------
   # 24 roles fleshing out the 8 remaining genre buckets with kits sized
