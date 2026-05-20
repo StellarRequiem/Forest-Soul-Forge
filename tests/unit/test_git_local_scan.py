@@ -59,13 +59,7 @@ def _ctx_for(repo: Path) -> ToolContext:
         role="software_engineer",
         genre="actuator",
         session_id="t",
-        constitution_path="/tmp/x.yaml",
         constraints={"allowed_paths": [str(repo)]},
-        provider=None,
-        logger=None,
-        memory=None,
-        delegate=None,
-        priv_client=None,
     )
 
 
@@ -178,13 +172,7 @@ def test_execute_refuses_path_outside_allowed_paths(tmp_path):
         role="x",
         genre="x",
         session_id="t",
-        constitution_path="/tmp/x.yaml",
         constraints={"allowed_paths": [str(repo)]},  # only repo allowed
-        provider=None,
-        logger=None,
-        memory=None,
-        delegate=None,
-        priv_client=None,
     )
     tool = GitLocalScanTool()
     with pytest.raises(ToolValidationError):
@@ -201,13 +189,7 @@ def test_execute_refuses_non_git_dir(tmp_path):
         role="x",
         genre="x",
         session_id="t",
-        constitution_path="/tmp/x.yaml",
         constraints={"allowed_paths": [str(not_a_repo)]},
-        provider=None,
-        logger=None,
-        memory=None,
-        delegate=None,
-        priv_client=None,
     )
     tool = GitLocalScanTool()
     with pytest.raises(ToolValidationError):
