@@ -76,22 +76,38 @@ but the role-fit decision is non-trivial:
   for `operator_companion` would constrain future ADR-0068 T4-T6
   work.
 
-**Disposition: DEFERRED.** Leaving `operator_profile_write.v1`
-orphan in the catalog until the operator decides which archetype
-should own operator-truth write. Section-15 will continue to
-flag this as FAIL — that's the correct signal until disposition.
+**Disposition: RESOLVED in B438 (2026-05-20).** Operator picked
+the "new operator_companion kit" option. B438 adds the
+`operator_companion` archetype kit to `config/tool_catalog.yaml`
+with the canonical operator-companion surface (memory + llm_think +
+personal_recall + operator_profile_read/write + delegate +
+timestamp_window + text_summarize). `operator_profile_write.v1`
+lives in this kit; the `requires_human_approval=True` gate provides
+per-call safety. Companion-genre ceiling (max_side_effects=network)
+accommodates the tool's `side_effects=filesystem` cleanly.
 
-## Post-B437 expected state
+**Section-15 expected outcome:** orphan count goes 1 → 0; all
+three of the previously-orphan tools now have archetype kit
+carriers. The kit shapes operator-truth write into a role that
+exists in `trait_tree.yaml` already (genre: companion). Existing
+live `operator_companion_40ceaf894e87` agent keeps its current
+constitution-direct tool grants per ADR-0044 layered-config
+semantics; the new kit applies to future operator_companion
+births only.
 
-After B437 lands:
+## Post-B437 + B438 final state
+
+After B437 (the first wiring pass) and B438 (which resolves the
+deferred third tool):
 
 | Tool | Carrier | Section-15 |
 |---|---|---|
-| `personal_recall.v1` | `assistant` kit | resolved → INFO (in kit but no alive agent yet, since no `assistant`-role agent is born) |
-| `security_scan.v1` | `wiring_sentinel` kit | resolved → INFO (in kit, no alive WiringSentinel-D5 yet) |
-| `operator_profile_write.v1` | none (deferred) | continues to FAIL |
+| `personal_recall.v1` | `assistant` kit (B437) + `operator_companion` kit (B438) | resolved → INFO (in kit but no alive agent of those roles yet — except the live operator_companion agent uses constitution-direct grants, not kit composition) |
+| `security_scan.v1` | `wiring_sentinel` kit (B437) | resolved → INFO (in kit, no alive WiringSentinel-D5 yet) |
+| `operator_profile_write.v1` | `operator_companion` kit (B438) | resolved → INFO (live operator_companion agent uses constitution-direct grants; the kit applies to future births) |
 
-Section-15 orphan count narrows 3 → 1 (the deferred one).
+Section-15 orphan count narrows 3 → 0. ADR-0081 wiring-coverage
+sentinel can stop flagging this surface.
 
 ## What would change this disposition
 

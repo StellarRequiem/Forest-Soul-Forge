@@ -1,6 +1,7 @@
 # ADR-0050 — Encryption at Rest (Registry + Audit Chain + Memory)
 
-**Status:** Proposed (2026-05-05). Phase 4 of the security-hardening
+**Status:** Accepted (2026-05-05). **All 8 tranches shipped (B281-B330,
+closed 2026-05-15 per Phase α).** Phase 4 of the security-hardening
 arc. Pairs with ADR-0049 (per-event signatures). ADR-0049 stops
 forgery; ADR-0050 stops disclosure. Both close the audit-chain-on-
 disk concern from the 2026-05-05 outside review.

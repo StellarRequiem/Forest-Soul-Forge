@@ -1,6 +1,6 @@
 # ADR-0079 — Diagnostic harness
 
-**Status:** Proposed
+**Status:** Accepted (2026-05-17, B351-B357). All 7 tranches + umbrella shipped; 15 sections live; daily 8am scheduled-task armed. See `docs/runbooks/diagnostic-harness.md`.
 **Date:** 2026-05-17
 **Tracks:** Observability / Substrate hygiene
 **Supersedes:** none

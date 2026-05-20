@@ -3293,6 +3293,36 @@ archetypes:
       - timestamp_window.v1
       - personal_recall.v1      # ADR-0076 T4 — hybrid (BM25+cosine) retrieval over operator's personal_index. Genre-gated to {companion, assistant, operator_steward, domain_orchestrator}; assistant is the first kit on that gate-list to land in catalog.
 
+  operator_companion:
+    # B438 (2026-05-20) — kit for the operator_companion role.
+    # The live operator_companion agent already exists with
+    # constitution-direct tool grants; this kit codifies the
+    # canonical surface for FUTURE births. Existing agents keep
+    # their current tools per ADR-0044 layered-config semantics.
+    #
+    # operator_profile_write.v1 lives here (not in assistant) because
+    # operator_companion is the role that owns operator-truth mutation.
+    # The tool's requires_human_approval=True gate is the per-call
+    # safety regardless of kit placement; the kit decision is about
+    # which role IS responsible for mutating operator identity facts,
+    # not whether the call is safe. See
+    # docs/audits/2026-05-20-orphan-tool-disposition.md.
+    #
+    # Companion genre ceiling: max_side_effects=network,
+    # provider_constraint=local_only, memory_ceiling=private.
+    # operator_profile_write.v1 is side_effects=filesystem (under
+    # the ceiling); no genre violation.
+    standard_tools:
+      - llm_think.v1             # operator-facing reasoning
+      - memory_recall.v1         # query agent + personal memory
+      - memory_write.v1          # log operator-companion observations
+      - timestamp_window.v1      # timing context for "what did we discuss yesterday"
+      - text_summarize.v1        # condense for operator brevity
+      - personal_recall.v1       # ADR-0076 T4 — hybrid retrieval; genre-gated to {companion, assistant, operator_steward, domain_orchestrator}; operator_companion is on the gate-list
+      - operator_profile_read.v1 # ADR-0068 — read operator-truth (name, work_hours, etc.)
+      - operator_profile_write.v1 # ADR-0068 T2 — mutate operator-truth. requires_human_approval=True gates every call through tool_call_pending_approvals
+      - delegate.v1              # hand off specialist work to domain agents
+
   learning_partner:
     standard_tools:
       - llm_think.v1

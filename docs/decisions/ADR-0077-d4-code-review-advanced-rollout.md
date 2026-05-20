@@ -1,6 +1,6 @@
 # ADR-0077 — D4 Code Review domain: advanced rollout
 
-**Status:** Proposed
+**Status:** Accepted (2026-05-16, B331-B340). All 6 tranches shipped; TestAuthor-D4 + MigrationPilot-D4 + ReleaseGatekeeper-D4 live; D4 Code Review domain CLOSED end-to-end.
 **Date:** 2026-05-15
 **Tracks:** Phase α tail / Domain Rollout
 **Supersedes:** none

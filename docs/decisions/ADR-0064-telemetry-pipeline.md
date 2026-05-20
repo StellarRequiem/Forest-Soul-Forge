@@ -1,6 +1,6 @@
 # ADR-0064 — Telemetry pipeline
 
-**Status:** Proposed
+**Status:** Accepted (2026-05-17, B348-B385). All 6 tranches shipped; D3 Phase B closed; threat_intel_curator + telemetry_steward roles live. See `docs/runbooks/telemetry-pipeline.md`.
 **Date:** 2026-05-17
 **Tracks:** Security / D3 Local SOC Phase B substrate
 **Supersedes:** none
