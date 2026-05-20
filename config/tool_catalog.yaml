@@ -1702,6 +1702,44 @@ tools:
     side_effects: read_only
     archetype_tags: [observer, guardian, researcher, software_engineer]
 
+  git_local_scan.v1:
+    name: git_local_scan
+    version: "1"
+    description: |
+      Scan local git checkout against ADR-0084 posture rules. Four
+      dimensions: (1) committed-secret detection via ADR-0062 IoC
+      catalog v2+ token-prefix patterns + an inline floor of GitHub
+      PAT prefixes, SSH/PGP private-key headers, OpenAI sk- tokens,
+      and AWS AKIA keys, (2) signed-commit verification on the last
+      N commits via `git log --format=%G?` parsing G/B/U/N status
+      codes, (3) sync state vs upstream tracking branch (ahead/behind
+      counts; read-only, does NOT fetch), (4) .gitignore coverage of
+      operator-secret-bearing patterns (.env, *.pem, *.key, id_rsa,
+      id_ed25519, .streamlit/secrets.toml, credentials*). Returns
+      severity-bucketed findings + ok flag. Designed for the
+      WiringSentinel-style scheduled-task pattern: hourly local-git
+      posture telemetry without third-party feed dependencies.
+      Read-only: subprocess `git ls-files`, `git log`, `git rev-list`,
+      `git rev-parse` — all inspection.
+    input_schema:
+      type: object
+      properties:
+        repo_path:
+          type: string
+          description: "Absolute path to repo root. Defaults to agent's first allowed_paths entry."
+        max_commits:
+          type: integer
+          minimum: 1
+          maximum: 500
+          description: "Recent commits to check for signature status. Default 50."
+        max_files:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: "Cap on tracked files scanned for secrets. Default 5000."
+    side_effects: read_only
+    archetype_tags: [guardian, observer, security_low, wiring_sentinel, software_engineer]
+
   git_diff_read.v1:
     name: git_diff_read
     version: "1"

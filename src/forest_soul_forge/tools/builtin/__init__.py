@@ -20,6 +20,7 @@ from forest_soul_forge.tools.builtin.dynamic_policy import DynamicPolicyTool
 from forest_soul_forge.tools.builtin.evidence_collect import EvidenceCollectTool
 from forest_soul_forge.tools.builtin.git_blame_read import GitBlameReadTool
 from forest_soul_forge.tools.builtin.git_diff_read import GitDiffReadTool
+from forest_soul_forge.tools.builtin.git_local_scan import GitLocalScanTool
 from forest_soul_forge.tools.builtin.git_log_read import GitLogReadTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
@@ -101,6 +102,7 @@ __all__ = [
     "GitLogReadTool",
     "GitDiffReadTool",
     "GitBlameReadTool",
+    "GitLocalScanTool",
     "MypyTypecheckTool",
     "SemgrepScanTool",
     "SecurityScanTool",
@@ -301,6 +303,14 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # SW-track Reviewer is the primary consumer — diffing a feature
     # branch against main is the canonical entry point of code review.
     registry.register(GitDiffReadTool())
+    # ADR-0084 + B432 — git_local_scan.v1. Read-only posture scanner
+    # covering committed-secret detection, signed-commit verification,
+    # origin-sync state, and .gitignore coverage. Consumer of ADR-0062
+    # IoC catalog v2+ patterns. Periodic dispatch via WiringSentinel-
+    # adjacent scheduled task gives the operator continuous local-git
+    # posture telemetry without depending on a third-party threat-intel
+    # feed.
+    registry.register(GitLocalScanTool())
     # Phase G.1.A — git_blame_read.v1 (Burst 57). Read-only subprocess
     # invocation of `git blame --porcelain` with per-line attribution
     # (sha + author + date + summary + content). Optional line_range

@@ -23,8 +23,14 @@
 # Add new rules at the bottom and bump the version comment
 # header so operators can diff catalogs.
 
-catalog_version: 1
-catalog_updated: "2026-05-12"
+catalog_version: 2
+catalog_updated: "2026-05-19"
+# v2 (B430, 2026-05-19): added five rules covering the May 2026
+# GitHub-incident wave — Grafana Labs `pull_request_target`
+# misconfiguration (5/16), MoneyForward hardcoded-secrets-in-repo
+# (5/01), TeamPCP Checkmarx Actions CI-credential theft (3/2026).
+# Also CVE-2026-3854 awareness rule (GitHub server-side patched
+# 4/28 with no exploitation in wild — informational only).
 
 rules:
   # ============================================================
@@ -238,3 +244,106 @@ rules:
     rationale: "Unpinned dependency — vulnerable to upstream compromise replaying as a 'fix'"
     references:
       - "https://unit42.paloaltonetworks.com/monitoring-npm-supply-chain-attacks/"
+
+  # ============================================================
+  # CATALOG v2 — May 2026 GitHub-incident wave (B430)
+  #
+  # The May 2026 wave of GitHub-related incidents (Grafana Labs
+  # 5/16, MoneyForward 5/01, TeamPCP attack on Checkmarx 3/2026,
+  # plus CVE-2026-3854 GitHub server-side RCE patched 4/28) all
+  # share one root: the GitHub Actions workflow surface and its
+  # interaction with public forks + privileged tokens.
+  #
+  # FSF intentionally has NO GitHub Actions workflows (see
+  # ADR-0084). These rules exist so the IoC scanner refuses any
+  # PR that introduces them without explicit ADR. The same
+  # ADR-0082 freeze discipline applies: a Forest distribution
+  # that DOES want CI must file an ADR with the threat model.
+  # ============================================================
+
+  - id: github_actions_pull_request_target
+    severity: CRITICAL
+    # Match `on: pull_request_target` or `on:` block with
+    # pull_request_target as a key. This is the Grafana Labs
+    # vector: pull_request_target runs in the BASE repo context
+    # with secrets available, executing code from the FORK.
+    # Almost always a misconfiguration unless paired with
+    # extremely careful checkout restrictions.
+    pattern: '(?m)^\s*(?:pull_request_target\s*:|on\s*:\s*(?:\[[^\]]*pull_request_target|.*\n(?:\s*-\s*)?pull_request_target))'
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+    rationale: "GitHub Actions pull_request_target — Grafana Labs 5/2026 codebase-theft vector"
+    references:
+      - "https://thehackernews.com/2026/05/grafana-github-token-breach-led-to.html"
+      - "https://gbhackers.com/grafana-labs-confirms-security-incident-github-codebase-access/"
+      - "https://github.blog/2020-08-15-securing-your-github-actions/"
+
+  - id: github_actions_env_dump_curl
+    severity: CRITICAL
+    # Match curl uploading env vars to external endpoint — the
+    # Grafana Labs exfil pattern. The attacker dumped env to
+    # a file, encrypted with their private key, then curl
+    # uploaded. Also catches simpler `env | curl` or
+    # `printenv | curl` patterns.
+    pattern: '(?mi)(?:env(?:iron)?\s*(?:\||;)\s*.*curl|curl.*--data[- ]?(?:binary|raw|urlencode)?.*\$(?:\{|\()(?:GITHUB_|RUNNER_|ACTIONS_))'
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - "*.sh"
+      - "*.bash"
+    rationale: "Env-dump-to-curl pattern — Grafana Labs token exfil signature 5/2026"
+    references:
+      - "https://thehackernews.com/2026/05/grafana-github-token-breach-led-to.html"
+      - "https://aviatrix.ai/threat-research-center/grafana-github-token-breach-2026/"
+
+  - id: github_actions_run_from_fork_unchecked
+    severity: HIGH
+    # Match `actions/checkout` with `ref: ${{ github.event.pull_request.head.sha }}`
+    # in workflows that ALSO have privileged events. The unsafe
+    # combination is checkout-from-fork + privileged context;
+    # checkout-from-fork alone in a sandbox `pull_request` is safe.
+    pattern: '(?m)ref\s*:\s*\$\{\{\s*github\.event\.pull_request\.head\.(?:sha|ref)'
+    applies_to:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+    rationale: "Fork SHA checkout — safe only with pull_request event, not pull_request_target"
+    references:
+      - "https://github.blog/2020-08-15-securing-your-github-actions/"
+      - "https://securitylab.github.com/research/github-actions-untrusted-input/"
+
+  - id: github_pat_or_app_token_committed
+    severity: CRITICAL
+    # GitHub personal access tokens and app/installation tokens
+    # have stable prefixes. MoneyForward 5/2026 surfaced this as
+    # the hardcoded-secret risk. ghp_ = classic PAT, gho_ = OAuth,
+    # ghs_ = server-to-server, ghu_ = user-to-server, github_pat_
+    # = fine-grained PAT.
+    pattern: '(?:ghp_|gho_|ghs_|ghu_|github_pat_)[A-Za-z0-9_]{20,}'
+    applies_to: []  # all files
+    rationale: "GitHub token prefix in committed file — MoneyForward 5/2026 pattern"
+    references:
+      - "https://pasqualepillitteri.it/en/news/1842/moneyforward-github-data-breach-2026"
+      - "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github"
+
+  - id: cve_2026_3854_awareness
+    severity: INFO
+    # CVE-2026-3854: GitHub server-side RCE via `git push`. Patched
+    # by GitHub in <2 hours after bug-bounty report. Forensic
+    # investigation confirmed no exploitation in the wild. No
+    # exploitable signature exists in operator-side code — this
+    # rule is INFORMATIONAL only, intended to surface in section-15
+    # diagnostic reports as a reminder that "git push to GitHub"
+    # crossed an active CVE window in April 2026. Pattern matches
+    # any commit-script that pushes to github.com via HTTPS so
+    # an operator audit can pair them with PAT-rotation events.
+    pattern: '(?mi)git\s+push\s+(?:[^\n]*\s+)?(?:origin|github\.com)'
+    applies_to:
+      - "*.command"
+      - "*.sh"
+      - "*.bash"
+    rationale: "Push-to-GitHub script — INFO marker (CVE-2026-3854 awareness; patched)"
+    references:
+      - "https://www.securityweek.com/critical-github-vulnerability-exposed-millions-of-repositories/"
+      - "https://github.blog/security/securing-the-git-push-pipeline-responding-to-a-critical-remote-code-execution-vulnerability/"
+      - "https://www.wiz.io/blog/github-rce-vulnerability-cve-2026-3854"
