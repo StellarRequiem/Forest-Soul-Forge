@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  B450 — host-side stale-git-lock watcher.
+
+  Fires when .git/index.lock is created or modified (sandbox-side git
+  operations leave the lock behind; host needs to clean up via FUSE
+  mount permissions). Runs dev-tools/git-lock-watcher.command which
+  sleeps 15s and then unlinks the lock if it's still stale.
+
+  WatchPaths semantics: launchd fires the program every time the
+  watched path is created, modified, or deleted. The watcher script
+  is idempotent + tolerant of multiple concurrent fires.
+
+  Install:
+    cp dev-tools/launchd/dev.forest.git-lock-watcher.plist.template \
+       ~/Library/LaunchAgents/dev.forest.git-lock-watcher.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.forest.git-lock-watcher.plist
+
+  Disable temporarily (during known long host git operations):
+    launchctl bootout gui/$(id -u)/dev.forest.git-lock-watcher
+
+  Tail the log:
+    tail -f /Users/llm01/Forest-Soul-Forge/.run/git-lock-watcher.log
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.forest.git-lock-watcher</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/llm01/Forest-Soul-Forge/dev-tools/git-lock-watcher.command</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/llm01/Forest-Soul-Forge</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>/Users/llm01</string>
+  </dict>
+
+  <!-- Fire whenever index.lock is touched. HEAD.lock could also be
+       watched but a single-path WatchPaths simplifies the plist;
+       the watcher script checks both locks each time anyway. -->
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/llm01/Forest-Soul-Forge/.git/index.lock</string>
+  </array>
+
+  <!-- Don't run on load — wait for the first sandbox stale-lock event.
+       launchd treats WatchPaths fires as the trigger. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <!-- No KeepAlive: the watcher script runs once per fire then exits.
+       launchd re-launches on the next WatchPaths event. -->
+
+  <key>StandardOutPath</key>
+  <string>/tmp/forest-git-lock-watcher.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/forest-git-lock-watcher.err.log</string>
+</dict>
+</plist>
