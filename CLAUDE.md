@@ -184,6 +184,55 @@ B436 on top of the unsigned B435.
    immediately for the user who created it. Live verification per
    point 2 catches both classes of failure.
 
+**§6 Read the ADR before assuming what its MVP is — B440 lesson:**
+
+When a proposed ADR has been sitting in `docs/decisions/` for a
+while and an external critique flags it, do NOT assume the MVP
+shape from the ADR's title or one-line summary. Open the ADR
+body and read what it actually specs.
+
+**B440 — substrate-perf benchmark MVP, almost wrong scope.**
+ChatGPT critique flagged "ADR-0023 Benchmark Suite proposed since
+v0.1, never shipped." I proposed a cheap MVP: dispatch latency
+p50/p95/p99 + chain throughput + registry write rate. Three
+HTTP-timing benchmarks. Small. Userspace.
+
+Reading ADR-0023 revealed it specs something different:
+**per-genre quality batteries** — `POST /agents/{id}/benchmark`
+HTTP endpoint + four new audit-chain event types
+(`benchmark_run_started`, `benchmark_fixture_complete`,
+`benchmark_run_complete`, `benchmark_run_aborted`) + a new
+registry table (`agent_benchmark_results`) + a fixture YAML
+schema + rubric scoring with LLM-as-judge + tool catalog entry
+(`benchmark_run.v1`) + character sheet integration. 10 tranches.
+Multi-burst kernel work per ADR-0082's freeze posture.
+
+My "cheap MVP" wasn't ADR-0023 — it was a *complementary*
+substrate-perf measurement tool. They occupy different scope.
+Shipping mine as "ADR-0023 MVP" would have set the wrong
+status header on ADR-0023 and confused future sessions about
+what was/wasn't built.
+
+**How to apply when implementing a proposed ADR:**
+
+1. **Read the full ADR body.** Status header + Date + Tracks +
+   Decision section + Implementation tranches. Don't infer scope
+   from the title; ADR titles are short and lossy.
+2. **Distinguish "this ADR's scope" from "an adjacent scope the
+   ADR mentions."** ADR-0023 *mentions* per-event timing budgets
+   (in `performance_budget`); it isn't *about* substrate-perf
+   timing. Adjacent != same.
+3. **If you're shipping something adjacent, ship it as its own
+   thing and leave the original ADR's status untouched.**
+   Document the scope distinction explicitly — commit body +
+   README + audit doc. The B440 commit's README and audit doc
+   both lead with the scope clarification.
+4. **Be willing to abandon a proposed scope mid-turn.** If reading
+   the ADR reveals the work is much bigger than the long-turn
+   budget, say so out loud and pick a smaller adjacent deliverable.
+   That's a respectful read of the ADR author's intent, not a
+   retreat.
+
 ## Verification discipline
 
 - After every code change: run the relevant test file
