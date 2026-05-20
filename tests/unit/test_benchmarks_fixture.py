@@ -256,3 +256,99 @@ def test_load_fixtures_from_dir_strict_false_skips_bad_files(tmp_path: Path) -> 
     # bad file silently skipped; good file loaded
     assert "signal_detection.v1" in fixtures
     assert len(fixtures) == 1
+
+
+# ──────────────────────────────────────────────────────────────────────
+# T1.1 (B446): higher_is_better=False support
+# ──────────────────────────────────────────────────────────────────────
+
+LOWER_IS_BETTER_YAML = textwrap.dedent(
+    """\
+    fixture_id: false_positive_rate.v1
+    genre: observer
+    name: false_positive_rate
+    version: "1"
+    description: |
+      Lower false-positive rate is better.
+    inputs:
+      - type: traffic_replay
+        source: fixtures/observer/clean.pcap
+    scoring:
+      type: numerical
+      function: false_positive_rate
+      higher_is_better: false
+      threshold:
+        excellent: 0.05
+        pass: 0.20
+    """
+)
+
+
+def test_higher_is_better_default_true(tmp_path: Path) -> None:
+    """Fixtures that don't specify higher_is_better default to True."""
+    fixture = load_fixture(_write(tmp_path, "f.yaml", GOOD_FIXTURE_YAML))
+    assert fixture.scoring.higher_is_better is True
+
+
+def test_higher_is_better_false_loads_with_inverted_thresholds(tmp_path: Path) -> None:
+    fixture = load_fixture(_write(tmp_path, "f.yaml", LOWER_IS_BETTER_YAML))
+    assert fixture.scoring.higher_is_better is False
+    assert fixture.scoring.threshold_pass == pytest.approx(0.20)
+    assert fixture.scoring.threshold_excellent == pytest.approx(0.05)
+
+
+def test_higher_is_better_false_requires_excellent_lt_pass() -> None:
+    """When direction is False, pass must be > excellent (tighter is
+    excellent). Validator must reject ordering that's correct under
+    True but wrong under False."""
+    import yaml as _yaml
+    data = _yaml.safe_load(LOWER_IS_BETTER_YAML)
+    # Restore the True-direction ordering (pass < excellent); validator
+    # should reject when higher_is_better is False.
+    data["scoring"]["threshold"]["pass"] = 0.05
+    data["scoring"]["threshold"]["excellent"] = 0.20
+    with pytest.raises(FixtureValidationError, match="when higher_is_better=False"):
+        validate_fixture(data)
+
+
+def test_higher_is_better_true_still_requires_pass_lt_excellent() -> None:
+    """When direction is True (default), pass must be < excellent.
+    Flipped ordering is rejected — same as before T1.1."""
+    import yaml as _yaml
+    data = _yaml.safe_load(GOOD_FIXTURE_YAML)
+    data["scoring"]["threshold"]["pass"] = 0.9
+    data["scoring"]["threshold"]["excellent"] = 0.7
+    with pytest.raises(FixtureValidationError, match="when higher_is_better=True"):
+        validate_fixture(data)
+
+
+def test_higher_is_better_must_be_bool() -> None:
+    import yaml as _yaml
+    data = _yaml.safe_load(LOWER_IS_BETTER_YAML)
+    data["scoring"]["higher_is_better"] = "false"  # string, not bool
+    with pytest.raises(FixtureValidationError, match="must be bool"):
+        validate_fixture(data)
+
+
+def test_score_fixture_lower_is_better_excellent(tmp_path: Path) -> None:
+    fixture = load_fixture(_write(tmp_path, "f.yaml", LOWER_IS_BETTER_YAML))
+    # 3% fpr is BELOW the 5% excellent cutoff -> excellent
+    res = score_fixture(fixture, {"false_positives": 3, "total_negatives": 100})
+    assert res.score == pytest.approx(0.03)
+    assert res.pass_flag == PASS_FLAG_EXCELLENT
+
+
+def test_score_fixture_lower_is_better_pass(tmp_path: Path) -> None:
+    fixture = load_fixture(_write(tmp_path, "f.yaml", LOWER_IS_BETTER_YAML))
+    # 15% fpr is above excellent (5%) but at-or-below pass (20%) -> pass
+    res = score_fixture(fixture, {"false_positives": 15, "total_negatives": 100})
+    assert res.score == pytest.approx(0.15)
+    assert res.pass_flag == PASS_FLAG_PASS
+
+
+def test_score_fixture_lower_is_better_fail(tmp_path: Path) -> None:
+    fixture = load_fixture(_write(tmp_path, "f.yaml", LOWER_IS_BETTER_YAML))
+    # 40% fpr is above pass (20%) -> fail
+    res = score_fixture(fixture, {"false_positives": 40, "total_negatives": 100})
+    assert res.score == pytest.approx(0.40)
+    assert res.pass_flag == PASS_FLAG_FAIL

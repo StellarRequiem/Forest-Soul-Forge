@@ -1,7 +1,7 @@
 # ADR-0023 — Benchmark Suite
 
-- **Status:** Partially Accepted — **T1 shipped 2026-05-20 (B444)**. Fixture YAML schema + loader + validator + numerical scoring functions module + 45 unit tests live at `src/forest_soul_forge/benchmarks/`. First seeded fixture: `benchmarks/observer/signal_detection.v1.yaml`. **T2-T10 remain Proposed.** T2 (HTTP endpoint + audit chain events + registry table) requires ADR-0082 unfreeze trigger; T3-T10 build on T2.
-- **Date:** 2026-04-25 (proposed) / 2026-05-20 (T1 accepted)
+- **Status:** Partially Accepted — **T1 shipped 2026-05-20 (B444). T1.1 shipped 2026-05-20 (B446)**: `scoring.higher_is_better` flag (default True) closes the "lower is better" metric gap surfaced by the false_positive_rate fixture authoring attempt. Threshold semantics invert when False (excellent < pass). 53 unit tests pin the surface. T5 started (B445+B446): 4 fixtures across 2 genres (observer×3, investigator×1). **T2-T10 remain Proposed.** T2 (HTTP endpoint + audit chain events + registry table) requires ADR-0082 unfreeze trigger.
+- **Date:** 2026-04-25 (proposed) / 2026-05-20 (T1 + T1.1 accepted)
 - **Supersedes:** —
 - **Related:** ADR-0005 (audit chain — benchmark events live here), ADR-0006 (registry as derived index over canonical artifacts), ADR-0008 (local-first model provider — benchmarks must be comparable across backends), ADR-0017 (LLM voice — quality over time becomes measurable), ADR-0018 (tool catalog — `benchmark_run.v1` joins it), ADR-0020 (character sheet `benchmarks` section), ADR-0021 (genres carry per-genre battery), ADR-0022 (memory — benchmarks don't pollute working memory).
 

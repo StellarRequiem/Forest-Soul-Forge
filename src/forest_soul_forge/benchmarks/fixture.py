@@ -74,11 +74,22 @@ class FixtureScoring:
     ``rubric`` / ``composite`` types the loader accepts the field as
     a string (T4 will resolve rubric functions; T1 just validates
     shape).
+
+    ``higher_is_better`` (T1.1, B446): controls pass-flag direction.
+    Default True matches detection-rate / accuracy-style metrics
+    where score >= threshold = better. Set False for "lower is
+    better" metrics (false_positive_rate, latency_ms-as-score) so
+    pass flag fires when score <= threshold. Threshold semantics
+    invert: when ``higher_is_better=False`` the loader requires
+    ``threshold.excellent < threshold.pass`` (excellent is the
+    TIGHTER cutoff). Surfaced as a T1.1 follow-up by the
+    false_positive_rate fixture authoring attempt in B445.
     """
     type: str
     function: str
     threshold_pass: float
     threshold_excellent: float
+    higher_is_better: bool = True
 
 
 @dataclass(frozen=True)
@@ -183,11 +194,27 @@ def validate_fixture(data: dict[str, Any], *, fixture_label: str = "<unknown>") 
         label,
         "scoring.threshold.excellent must be numeric",
     )
+    # T1.1 (B446): threshold ordering depends on direction.
+    # higher_is_better (default True): pass < excellent
+    # higher_is_better False:           excellent < pass (tighter is lower)
+    higher_is_better = scoring.get("higher_is_better", True)
     _require(
-        threshold["pass"] < threshold["excellent"],
+        isinstance(higher_is_better, bool),
         label,
-        f"scoring.threshold.pass ({threshold['pass']}) must be < threshold.excellent ({threshold['excellent']})",
+        f"scoring.higher_is_better must be bool, got {type(higher_is_better).__name__}",
     )
+    if higher_is_better:
+        _require(
+            threshold["pass"] < threshold["excellent"],
+            label,
+            f"scoring.threshold.pass ({threshold['pass']}) must be < threshold.excellent ({threshold['excellent']}) when higher_is_better=True",
+        )
+    else:
+        _require(
+            threshold["excellent"] < threshold["pass"],
+            label,
+            f"scoring.threshold.excellent ({threshold['excellent']}) must be < threshold.pass ({threshold['pass']}) when higher_is_better=False",
+        )
 
     # Numerical scoring functions must resolve against the catalog;
     # rubric/composite scoring is shape-validated only (T4+ resolves).
@@ -220,6 +247,7 @@ def _build_fixture(data: dict[str, Any]) -> Fixture:
         function=scoring_data["function"],
         threshold_pass=float(scoring_data["threshold"]["pass"]),
         threshold_excellent=float(scoring_data["threshold"]["excellent"]),
+        higher_is_better=bool(scoring_data.get("higher_is_better", True)),
     )
     return Fixture(
         fixture_id=data["fixture_id"],
@@ -262,12 +290,22 @@ def score_fixture(fixture: Fixture, scoring_inputs: dict[str, Any]) -> ScoringRe
 
         fn = SCORING_FUNCTIONS[fixture.scoring.function]
         score = float(fn(scoring_inputs))
-        if score >= fixture.scoring.threshold_excellent:
-            flag = PASS_FLAG_EXCELLENT
-        elif score >= fixture.scoring.threshold_pass:
-            flag = PASS_FLAG_PASS
+        # T1.1 (B446): direction-aware pass-flag logic.
+        if fixture.scoring.higher_is_better:
+            if score >= fixture.scoring.threshold_excellent:
+                flag = PASS_FLAG_EXCELLENT
+            elif score >= fixture.scoring.threshold_pass:
+                flag = PASS_FLAG_PASS
+            else:
+                flag = PASS_FLAG_FAIL
         else:
-            flag = PASS_FLAG_FAIL
+            # "Lower is better": tighter cutoff (excellent) is the smaller number.
+            if score <= fixture.scoring.threshold_excellent:
+                flag = PASS_FLAG_EXCELLENT
+            elif score <= fixture.scoring.threshold_pass:
+                flag = PASS_FLAG_PASS
+            else:
+                flag = PASS_FLAG_FAIL
         return ScoringResult(score=score, pass_flag=flag)
 
     raise NotImplementedError(

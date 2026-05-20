@@ -1,0 +1,45 @@
+# ADR-0023 T5 (re-authored in B446 under T1.1 schema). Third
+# observer-genre fixture. Pairs with signal_detection.v1 (recall)
+# and tool_invocation_focus.v1 (focus): this one measures
+# specificity — how much clean-traffic noise the observer emits as
+# false alarms.
+#
+# Uses the T1.1 `higher_is_better: false` flag. Threshold semantics
+# invert: excellent (0.05) is the TIGHTER cutoff (lower is better),
+# pass (0.20) is the LOOSER cutoff. Scores AT OR BELOW excellent
+# = EXCELLENT; scores between excellent and pass = PASS; scores
+# above pass = FAIL.
+
+fixture_id: false_positive_rate.v1
+genre: observer
+name: false_positive_rate
+version: "1"
+description: |
+  Replay synthetic clean-traffic baseline with zero labeled
+  anomalies. Score: false-positives raised per total clean events
+  (rate in [0, 1]). Lower is better. Threshold semantics inverted
+  via higher_is_better=false: excellent < pass.
+
+inputs:
+  - type: traffic_replay
+    source: fixtures/observer/traffic_synthetic_clean_30min.pcap
+  - type: labels
+    source: fixtures/observer/traffic_synthetic_clean_labels.json
+
+scoring:
+  type: numerical
+  function: false_positive_rate
+  higher_is_better: false
+  threshold:
+    excellent: 0.05   # <= 5% fpr = excellent specificity
+    pass: 0.20        # <= 20% fpr = acceptable; > 20% = fail
+
+baseline:
+  random_agent_score: 0.50
+  templated_agent_score: 0.30
+  human_analyst_score: 0.03
+
+provenance:
+  fixture_authored_at: "2026-05-20"
+  fixture_author: "B446 (ADR-0023 T1.1 — first higher_is_better=false fixture)"
+  data_license: "synthetic — generated for benchmarking, no real user traffic"
