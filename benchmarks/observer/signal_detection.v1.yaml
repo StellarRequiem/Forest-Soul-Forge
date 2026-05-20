@@ -1,0 +1,36 @@
+# ADR-0023 T1 — first seeded fixture. Synthetic example for the
+# observer genre's signal-detection battery. Real input data lands
+# in T5 (per-genre batteries fixture authoring); this file pins the
+# schema shape so the loader has something to round-trip.
+
+fixture_id: signal_detection.v1
+genre: observer
+name: signal_detection
+version: "1"
+description: |
+  Replay synthetic network traffic with N labeled anomalies. Score:
+  detection rate (true positives / total positives) over the agent's
+  emitted findings. Synthetic data only — no real user traffic.
+
+inputs:
+  - type: traffic_replay
+    source: fixtures/observer/traffic_synthetic_50min.pcap
+  - type: labels
+    source: fixtures/observer/traffic_synthetic_50min_labels.json
+
+scoring:
+  type: numerical
+  function: detection_rate
+  threshold:
+    pass: 0.7
+    excellent: 0.9
+
+baseline:
+  random_agent_score: 0.05
+  templated_agent_score: 0.40
+  human_analyst_score: 0.85
+
+provenance:
+  fixture_authored_at: "2026-05-20"
+  fixture_author: "B444 (ADR-0023 T1 seed)"
+  data_license: "synthetic — generated for benchmarking, no real user traffic"
