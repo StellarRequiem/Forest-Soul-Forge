@@ -1,0 +1,43 @@
+# ADR-0023 T5 seed — second observer-genre fixture. Pairs with
+# signal_detection.v1: that one measures recall (anomalies caught);
+# this one measures focus (tool calls that were relevant to the
+# signal vs. tool calls that were irrelevant noise). High focus
+# means the observer dispatches tools at the right targets, not
+# the everything-look-everywhere reflex.
+
+fixture_id: tool_invocation_focus.v1
+genre: observer
+name: tool_invocation_focus
+version: "1"
+description: |
+  Replay synthetic network traffic with N labeled anomalies. Score:
+  fraction of the agent's tool invocations that targeted the
+  labeled-anomaly windows vs. baseline clean-traffic windows.
+  Higher = better focus. Reuses detection_rate semantics:
+  true_positives = relevant tool calls; total_positives = total
+  tool calls dispatched during the fixture run.
+
+inputs:
+  - type: traffic_replay
+    source: fixtures/observer/traffic_synthetic_50min.pcap
+  - type: labels
+    source: fixtures/observer/traffic_synthetic_50min_labels.json
+  - type: tool_call_log
+    source: runtime/observer_tool_calls.jsonl
+
+scoring:
+  type: numerical
+  function: detection_rate
+  threshold:
+    pass: 0.6
+    excellent: 0.85
+
+baseline:
+  random_agent_score: 0.20
+  templated_agent_score: 0.45
+  human_analyst_score: 0.80
+
+provenance:
+  fixture_authored_at: "2026-05-20"
+  fixture_author: "B445 (ADR-0023 T5 second-observer-fixture)"
+  data_license: "synthetic — generated for benchmarking, no real user traffic"

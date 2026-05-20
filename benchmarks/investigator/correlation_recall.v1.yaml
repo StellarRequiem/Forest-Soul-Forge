@@ -1,0 +1,39 @@
+# ADR-0023 T5 seed — first investigator-genre fixture. Cross-genre
+# proof: T1's load_fixtures_from_dir handles multiple genre dirs
+# without code changes. Uses the same detection_rate scoring function
+# as observer's signal_detection — recall is semantically TP/total
+# regardless of whether the "positives" are network anomalies or
+# correlated event clusters.
+
+fixture_id: correlation_recall.v1
+genre: investigator
+name: correlation_recall
+version: "1"
+description: |
+  Present a set of N events known to correlate (synthetic incident
+  timelines with planted causal chains). The investigator under test
+  is asked to identify which subsets correlate. Score: K of N
+  correlated subsets recovered, recall metric.
+
+inputs:
+  - type: event_timeline
+    source: fixtures/investigator/timeline_synthetic_30events.json
+  - type: ground_truth_correlations
+    source: fixtures/investigator/timeline_synthetic_correlations.json
+
+scoring:
+  type: numerical
+  function: detection_rate
+  threshold:
+    pass: 0.6
+    excellent: 0.85
+
+baseline:
+  random_agent_score: 0.10
+  templated_agent_score: 0.30
+  human_analyst_score: 0.80
+
+provenance:
+  fixture_authored_at: "2026-05-20"
+  fixture_author: "B445 (ADR-0023 T5 first-investigator-fixture)"
+  data_license: "synthetic — generated for benchmarking, no real incident data"
