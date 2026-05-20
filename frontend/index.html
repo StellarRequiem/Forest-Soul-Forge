@@ -64,99 +64,107 @@
   </div>
 
   <main class="app">
-    <nav class="tabs" role="tablist">
-      <!-- SVG tab icons (P1 #13) — keep stroke-only so they pick up
-           color via currentColor + the .tab[aria-selected] rule. -->
-      <button class="tab" data-tab="forge" role="tab" aria-selected="true">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 14 L6 10 M9 3 L13 7 L7 13 L3 9 Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Forge
-      </button>
-      <button class="tab" data-tab="agents" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="6" r="2.2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="11" cy="6" r="2.2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M1.5 13 C1.5 10.5 3.5 9.5 5 9.5 C6.5 9.5 8.5 10.5 8.5 13 M7.5 13 C7.5 10.5 9.5 9.5 11 9.5 C12.5 9.5 14.5 10.5 14.5 13" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
-        Agents
-      </button>
-      <button class="tab" data-tab="pending" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2 H13 V14 H3 Z M5 5 H11 M5 8 H11 M5 11 H9" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Approvals
-        <span class="tab__badge" id="pending-badge" hidden></span>
-      </button>
-      <button class="tab" data-tab="skills" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2 H13 V14 H3 Z M3 5 H13 M6 8 H11 M6 11 H10" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
-        Skills
-      </button>
-      <button class="tab" data-tab="tool-registry" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M11 3 L13 5 L8 10 L7 13 L4 10 L9 5 Z M3 13 L4 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>
-        Tools
-      </button>
-      <!-- ADR-0055 M4 (B228): Marketplace tab — browse + install plugins -->
-      <button class="tab" data-tab="marketplace" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5 H14 L13 12 H3 Z M5 5 V3 H11 V5 M6 8 H10" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>
-        Marketplace
-      </button>
-      <button class="tab" data-tab="memory" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3 C3 3 2 5 2 7 C2 8 2.5 9 3 9.5 C3 11 4 13 6 13 L10 13 C12 13 13 11 13 9.5 C13.5 9 14 8 14 7 C14 5 13 3 11 3 Z M8 3 V13" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
-        Memory
-      </button>
-      <button class="tab" data-tab="audit" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="5" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="11" cy="11" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.4 6.4 L9.6 9.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
-        Audit
-      </button>
-      <!-- ADR-0063 T7 (B256) — Reality Anchor pane. Operator view of
-           ground truth + recent contradictions + repeat offenders. -->
-      <button class="tab" data-tab="reality-anchor" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 L8 15 M3 5 L13 5 M2 8 C2 11 5 13 8 13 C11 13 14 11 14 8" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
-        Reality
-      </button>
-      <!-- ADR-0062 T6 (B258) — Security pane. IoC rule catalog +
-           recent scan events + quarantined proposals. -->
-      <button class="tab" data-tab="security" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 L13 4 L13 9 C13 12 8 15 8 15 C8 15 3 12 3 9 L3 4 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
-        Security
-      </button>
-      <!-- ADR-0067 T7 (B299) — Orchestrator pane. Domain registry
-           status, manifest table, recent routing activity. The
-           operator's window into "who routes where, what's
-           dispatchable today, what's been firing in the last 24h." -->
-      <button class="tab" data-tab="orchestrator" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.5 6.5 L4 4 M9.5 6.5 L12 4 M6.5 9.5 L4 12 M9.5 9.5 L12 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
-        Orchestrator
-      </button>
-      <!-- ADR-0068 T7b (B318) — Operator-context wizard pane.
-           Walks the operator through per-domain connector
-           consent decisions. Reads /orchestrator/domains for
-           the declared connectors per domain + /operator/profile/
-           connectors for current consent state; POSTs choices
-           through /operator/connectors/{domain}/{connector}. -->
-      <button class="tab" data-tab="operator-wizard" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7 L7 10 L12 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
-        Operator
-      </button>
-      <!-- ADR-003Y Y6 — Chat tab. Multi-turn conversations with agents. -->
-      <button class="tab" data-tab="chat" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4 H14 V11 H8 L5 14 V11 H2 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
-        Chat
-      </button>
-      <!-- ADR-0070 T3 (B326) — Voice tab. Push-to-talk + TTS playback. -->
-      <button class="tab" data-tab="voice" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 C6.5 1 5.5 2 5.5 3.5 V8.5 C5.5 10 6.5 11 8 11 C9.5 11 10.5 10 10.5 8.5 V3.5 C10.5 2 9.5 1 8 1 Z M3 7 V8.5 C3 11 5 13 8 13 C11 13 13 11 13 8.5 V7 M8 13 V15" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
-        Voice
-      </button>
-      <!-- ADR-0072 T5 (B330) — Provenance pane. Shows the four-layer
-           precedence ladder + active/pending learned rules + preferences.
-           Closes Phase α 10/10. -->
-      <button class="tab" data-tab="provenance" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2 H13 V14 H3 Z M5 5 H11 M5 8 H11 M5 11 H9" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
-        Provenance
-      </button>
-      <!-- ADR-0080 T2 (B381) — Agent Capabilities. Per-agent
-           dependency-tree view of effective tools + skills +
-           MCP plugins. Three states (live / broken / in_progress)
-           and two binding modes (hard_wired / operator_toggleable).
-           Backed by GET /agents/{id}/capability-tree. -->
-      <button class="tab" data-tab="capabilities" role="tab" aria-selected="false">
-        <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M8 4.5 L3 9.5 M8 4.5 L8 9.5 M8 4.5 L13 9.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
-        Capabilities
-      </button>
+    <!--
+      B448 (Phase I UI refresh, Candidate B positioning): vertical
+      sidebar grouped by operator workflow — Build (forge new things)
+      / Run (interact with running agents) / Observe (understand
+      what's happening) / Govern (control + safety surfaces).
+      Each group is a <div class="tabs__group"> with a header label.
+      data-tab attributes UNCHANGED so all JS keeps working.
+    -->
+    <nav class="tabs" role="tablist" aria-label="Forest Soul Forge navigation">
+
+      <div class="tabs__group" data-group="build">
+        <div class="tabs__group-title">Build</div>
+        <button class="tab" data-tab="forge" role="tab" aria-selected="true">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 14 L6 10 M9 3 L13 7 L7 13 L3 9 Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="tab__label">Forge</span>
+        </button>
+        <button class="tab" data-tab="skills" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2 H13 V14 H3 Z M3 5 H13 M6 8 H11 M6 11 H10" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          <span class="tab__label">Skills</span>
+        </button>
+        <button class="tab" data-tab="tool-registry" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M11 3 L13 5 L8 10 L7 13 L4 10 L9 5 Z M3 13 L4 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>
+          <span class="tab__label">Tools</span>
+        </button>
+        <!-- ADR-0055 M4 (B228): Marketplace tab — browse + install plugins -->
+        <button class="tab" data-tab="marketplace" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5 H14 L13 12 H3 Z M5 5 V3 H11 V5 M6 8 H10" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/></svg>
+          <span class="tab__label">Marketplace</span>
+        </button>
+      </div>
+
+      <div class="tabs__group" data-group="run">
+        <div class="tabs__group-title">Run</div>
+        <button class="tab" data-tab="agents" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="6" r="2.2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="11" cy="6" r="2.2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M1.5 13 C1.5 10.5 3.5 9.5 5 9.5 C6.5 9.5 8.5 10.5 8.5 13 M7.5 13 C7.5 10.5 9.5 9.5 11 9.5 C12.5 9.5 14.5 10.5 14.5 13" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          <span class="tab__label">Agents</span>
+        </button>
+        <button class="tab" data-tab="pending" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2 H13 V14 H3 Z M5 5 H11 M5 8 H11 M5 11 H9" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="tab__label">Approvals</span>
+          <span class="tab__badge" id="pending-badge" hidden></span>
+        </button>
+        <!-- ADR-003Y Y6 — Chat tab. Multi-turn conversations with agents. -->
+        <button class="tab" data-tab="chat" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4 H14 V11 H8 L5 14 V11 H2 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
+          <span class="tab__label">Chat</span>
+        </button>
+        <!-- ADR-0070 T3 (B326) — Voice tab. Push-to-talk + TTS playback. -->
+        <button class="tab" data-tab="voice" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 C6.5 1 5.5 2 5.5 3.5 V8.5 C5.5 10 6.5 11 8 11 C9.5 11 10.5 10 10.5 8.5 V3.5 C10.5 2 9.5 1 8 1 Z M3 7 V8.5 C3 11 5 13 8 13 C11 13 13 11 13 8.5 V7 M8 13 V15" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          <span class="tab__label">Voice</span>
+        </button>
+      </div>
+
+      <div class="tabs__group" data-group="observe">
+        <div class="tabs__group-title">Observe</div>
+        <button class="tab" data-tab="audit" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="5" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="11" cy="11" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.4 6.4 L9.6 9.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          <span class="tab__label">Audit</span>
+        </button>
+        <button class="tab" data-tab="memory" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3 C3 3 2 5 2 7 C2 8 2.5 9 3 9.5 C3 11 4 13 6 13 L10 13 C12 13 13 11 13 9.5 C13.5 9 14 8 14 7 C14 5 13 3 11 3 Z M8 3 V13" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
+          <span class="tab__label">Memory</span>
+        </button>
+        <!-- ADR-0072 T5 (B330) — Provenance pane. -->
+        <button class="tab" data-tab="provenance" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2 H13 V14 H3 Z M5 5 H11 M5 8 H11 M5 11 H9" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          <span class="tab__label">Provenance</span>
+        </button>
+        <!-- ADR-0080 T2 (B381) — Agent Capabilities. Per-agent
+             dependency-tree view of effective tools + skills + MCP plugins. -->
+        <button class="tab" data-tab="capabilities" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="11" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M8 4.5 L3 9.5 M8 4.5 L8 9.5 M8 4.5 L13 9.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          <span class="tab__label">Capabilities</span>
+        </button>
+      </div>
+
+      <div class="tabs__group" data-group="govern">
+        <div class="tabs__group-title">Govern</div>
+        <!-- ADR-0062 T6 (B258) — Security pane. -->
+        <button class="tab" data-tab="security" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 L13 4 L13 9 C13 12 8 15 8 15 C8 15 3 12 3 9 L3 4 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
+          <span class="tab__label">Security</span>
+        </button>
+        <!-- ADR-0063 T7 (B256) — Reality Anchor pane. -->
+        <button class="tab" data-tab="reality-anchor" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 L8 15 M3 5 L13 5 M2 8 C2 11 5 13 8 13 C11 13 14 11 14 8" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          <span class="tab__label">Reality</span>
+        </button>
+        <!-- ADR-0067 T7 (B299) — Orchestrator pane. -->
+        <button class="tab" data-tab="orchestrator" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.5 6.5 L4 4 M9.5 6.5 L12 4 M6.5 9.5 L4 12 M9.5 9.5 L12 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          <span class="tab__label">Orchestrator</span>
+        </button>
+        <!-- ADR-0068 T7b (B318) — Operator-context wizard pane. -->
+        <button class="tab" data-tab="operator-wizard" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7 L7 10 L12 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          <span class="tab__label">Operator</span>
+        </button>
+      </div>
+
     </nav>
 
     <!-- ========================================================== -->

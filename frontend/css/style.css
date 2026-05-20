@@ -172,46 +172,131 @@ body {
 
 /* ------------------------------------------------------------- */
 /* Main layout + tabs                                             */
+/*                                                                 */
+/* B448 (Phase I UI refresh, Candidate B positioning): vertical    */
+/* sidebar grouped by operator workflow. .app becomes a 2-column   */
+/* grid (sidebar + main); .tabs becomes a flex column with         */
+/* labelled groups; .tab buttons go full-width with left-aligned   */
+/* labels; active state moves from border-bottom to border-left.   */
+/* Mobile (< 720px) collapses back to horizontal scrollable tabs   */
+/* — same visual footprint as pre-B448 so small viewports stay     */
+/* usable.                                                          */
 /* ------------------------------------------------------------- */
 .app {
-  max-width: 1400px;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--sp-5);
+  max-width: 1600px;
   margin: 0 auto;
   padding: var(--sp-5);
+  align-items: start;
 }
 .tabs {
   display: flex;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-4);
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  gap: var(--sp-4);
+  /* Sidebar is sticky so long content scrolls underneath it. */
+  position: sticky;
+  top: var(--sp-4);
+  /* Top-bar (header) is ~52px; subtract that + a bit of breathing
+     room so the sidebar sits at the visual top of the content. */
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  padding-right: var(--sp-2);
+}
+.tabs__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tabs__group-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+  padding: var(--sp-1) var(--sp-3);
+  opacity: 0.7;
 }
 .tab {
   background: transparent;
   border: none;
   color: var(--fg-muted);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
   cursor: pointer;
   font: inherit;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  /* Icon + label sit side-by-side. Demo-friction audit P1 #13. */
-  display: inline-flex;
+  font-size: 0.95rem;
+  /* Full-width, left-aligned button. Active state uses a left border
+     so the eye snaps to which tab is current without redrawing the
+     whole sidebar. */
+  display: flex;
   align-items: center;
   gap: var(--sp-2);
-  white-space: nowrap;     /* P1 #12: stop "Approvals" header text wrap */
+  width: 100%;
+  text-align: left;
+  border-left: 3px solid transparent;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease, border-left-color 120ms ease;
 }
-.tab:hover { color: var(--fg); }
+.tab:hover {
+  color: var(--fg);
+  background: var(--bg-raised);
+}
 .tab[aria-selected="true"] {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--bg-raised);
 }
 .tab__icon {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
-  /* Selected tab tint inherits via currentColor — no extra rule needed. */
+}
+.tab__label {
+  flex: 1;
 }
 
 .tab-panel[hidden] { display: none !important; }
+
+/* Collapse to top-horizontal scroller on small viewports so the
+   sidebar doesn't eat half the screen on phones / narrow windows. */
+@media (max-width: 720px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+  .tabs {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: visible;
+    position: static;
+    max-height: none;
+    padding-right: 0;
+    margin-bottom: var(--sp-3);
+    gap: var(--sp-3);
+  }
+  .tabs__group {
+    flex-direction: row;
+    flex-shrink: 0;
+    gap: 2px;
+    border-right: 1px solid var(--border);
+    padding-right: var(--sp-3);
+  }
+  .tabs__group:last-child { border-right: none; padding-right: 0; }
+  .tabs__group-title { display: none; }
+  .tab {
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: var(--sp-2);
+  }
+  .tab[aria-selected="true"] {
+    border-left: none;
+    border-bottom-color: var(--accent);
+    background: transparent;
+  }
+}
 
 /* ------------------------------------------------------------- */
 /* Panels                                                         */
