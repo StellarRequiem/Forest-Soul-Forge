@@ -553,7 +553,7 @@ def test_migration_output_passes_verify_sealed_segments(tmp_path):
 # ---------------------------------------------------------------------------
 
 import asyncio
-from datetime import timezone
+from datetime import datetime, timezone
 
 from forest_soul_forge.core.audit_chain_segments import (
     SealRunResult,
