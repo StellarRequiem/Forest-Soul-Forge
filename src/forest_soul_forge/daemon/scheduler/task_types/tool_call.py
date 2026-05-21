@@ -156,6 +156,16 @@ async def tool_call_runner(
     # state (counters, pending_approvals, tool_calls); we hold the
     # write_lock for the duration of the dispatch, same as every HTTP
     # write path.
+    #
+    # B451 — we ALSO thread the lock object into ``dispatch`` itself.
+    # A scheduled ``llm_think`` task spends ~11s inside the LLM
+    # inference; holding the write_lock for that whole window starved
+    # every HTTP writer. The dispatcher now releases the lock across the
+    # inference (a provably write-free leg) and re-acquires it for the
+    # write-back — see ``_LOCK_FREE_EXECUTE_TOOLS`` in dispatcher.py.
+    # The ``with write_lock`` below is unchanged: the dispatcher
+    # release-then-reacquires within it and always returns with the
+    # lock held.
     write_lock = getattr(app.state, "write_lock", None)
     if write_lock is None:
         return {
@@ -185,6 +195,9 @@ async def tool_call_runner(
                 args=args,
                 provider=provider,
                 task_caps=task_caps,
+                # B451 — let the dispatcher narrow the lock around the
+                # LLM inference leg (see comment above the with-block).
+                write_lock=write_lock,
             )
     except Exception as e:  # pragma: no cover — dispatcher catches its own
         logger.exception("scheduler tool_call dispatch raised")

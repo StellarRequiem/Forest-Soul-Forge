@@ -15,6 +15,7 @@ lifespan.
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 
 import pytest
@@ -1546,3 +1547,258 @@ class TestSandboxModeFromEnv:
             if e.event_type == EVENT_SUCCEEDED
         ][-1]
         assert succeeded.event_data["sandbox_mode"] == "off"
+
+
+# ---------------------------------------------------------------------------
+# B451 — write-lock narrowing across LLM inference
+# ---------------------------------------------------------------------------
+class _ControlledTool:
+    """Fake tool whose ``execute`` parks on an ``asyncio.Event`` so the
+    test can inspect lock state while the execute leg is in flight —
+    stands in for an ``llm_think`` call blocked on multi-second model
+    inference."""
+
+    version = "1"
+
+    def __init__(
+        self,
+        name: str,
+        side_effects: str,
+        started: asyncio.Event,
+        release: asyncio.Event,
+    ) -> None:
+        self.name = name
+        self.side_effects = side_effects
+        self._started = started
+        self._release = release
+
+    def validate(self, args: dict) -> None:
+        pass
+
+    async def execute(self, args: dict, ctx) -> ToolResult:
+        self._started.set()
+        await self._release.wait()
+        return ToolResult(
+            output={"response": "ok"},
+            metadata={},
+            tokens_used=7,
+            cost_usd=None,
+            side_effect_summary="controlled fake",
+        )
+
+
+class _RaisingLLMTool:
+    """Fake tool that raises mid-execute — exercises the re-acquire
+    path so a failed dispatch still hands the lock back balanced."""
+
+    version = "1"
+    side_effects = "read_only"
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def validate(self, args: dict) -> None:
+        pass
+
+    async def execute(self, args: dict, ctx) -> ToolResult:
+        await asyncio.sleep(0)  # yield once so it's a real await point
+        raise ToolError("simulated provider failure")
+
+
+def _acquire_from_other_thread(lock, timeout: float) -> bool:
+    """Try to acquire ``lock`` from a fresh OS thread; return True iff
+    it was acquired within ``timeout`` seconds. Releases immediately on
+    success.
+
+    A separate thread is essential: the dispatch coroutine and the test
+    coroutine share the event-loop thread, and ``threading.RLock`` is
+    reentrant *per thread* — a same-thread acquire always succeeds and
+    proves nothing. Only a different thread genuinely contends.
+    """
+    result: dict[str, bool] = {}
+
+    def worker() -> None:
+        got = lock.acquire(timeout=timeout)
+        result["got"] = got
+        if got:
+            lock.release()
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    return result.get("got", False)
+
+
+class TestWriteLockNarrowing:
+    """B451 — when the caller threads its ``write_lock`` into
+    ``dispatch``, the dispatcher releases it across an LLM-bound
+    ``read_only`` tool's execute leg so concurrent SQLite writers are
+    not starved for the full multi-second inference."""
+
+    def _build_dispatcher(self, tmp_path, tool) -> ToolDispatcher:
+        chain = AuditChain(tmp_path / "audit/chain.jsonl")
+        counters: dict[tuple[str, str], int] = {}
+
+        def get_count(instance_id: str, session_id: str) -> int:
+            return counters.get((instance_id, session_id), 0)
+
+        def inc_count(instance_id: str, session_id: str, when: str) -> int:
+            key = (instance_id, session_id)
+            counters[key] = counters.get(key, 0) + 1
+            return counters[key]
+
+        registry = ToolRegistry()
+        registry.register(tool)
+        return ToolDispatcher(
+            registry=registry,
+            audit=chain,
+            counter_get=get_count,
+            counter_inc=inc_count,
+        )
+
+    def test_llm_think_releases_lock_during_inference(self, tmp_path):
+        """The headline guarantee: while an ``llm_think`` dispatch is
+        parked inside execute, a separate thread can grab the write_lock
+        without waiting out the whole inference."""
+        async def scenario():
+            started = asyncio.Event()
+            release = asyncio.Event()
+            tool = _ControlledTool("llm_think", "read_only", started, release)
+            dispatcher = self._build_dispatcher(tmp_path, tool)
+            constitution = tmp_path / "constitution.yaml"
+            _write_constitution(constitution, tool_name="llm_think")
+            lock = threading.RLock()
+
+            async def caller():
+                # Mirrors the production contract: the caller holds the
+                # lock with a `with` block AND threads it into dispatch.
+                with lock:
+                    return await dispatcher.dispatch(
+                        instance_id="i1", agent_dna="d" * 12,
+                        role="network_watcher", genre=None,
+                        session_id="s1", constitution_path=constitution,
+                        tool_name="llm_think", tool_version="1",
+                        args={"prompt": "hello"},
+                        write_lock=lock,
+                    )
+
+            task = asyncio.ensure_future(caller())
+            # Wait until dispatch is parked inside the execute leg.
+            await asyncio.wait_for(started.wait(), timeout=3.0)
+            # The lock must be free RIGHT NOW — proving the dispatcher
+            # released it for the duration of "inference".
+            acquired = await asyncio.to_thread(
+                _acquire_from_other_thread, lock, 2.0,
+            )
+            assert acquired is True, (
+                "write_lock was still held during llm_think inference — "
+                "the B451 narrowing failed to release it"
+            )
+            # Let the fake inference finish — dispatch re-acquires the
+            # lock for the write-back and returns normally.
+            release.set()
+            outcome = await asyncio.wait_for(task, timeout=3.0)
+            assert isinstance(outcome, DispatchSucceeded)
+            assert outcome.tool_key == "llm_think.v1"
+            # Lock handed back balanced: a fresh thread can take it.
+            assert _acquire_from_other_thread(lock, 1.0) is True
+
+        _run(scenario())
+
+    def test_non_allowlisted_tool_holds_lock_across_execute(self, tmp_path):
+        """Control: a tool NOT in ``_LOCK_FREE_EXECUTE_TOOLS`` keeps the
+        lock held across execute even when write_lock is threaded in —
+        the narrowing is deliberately scoped to LLM-bound tools."""
+        async def scenario():
+            started = asyncio.Event()
+            release = asyncio.Event()
+            # timestamp_window is read_only but not LLM-bound → excluded.
+            tool = _ControlledTool(
+                "timestamp_window", "read_only", started, release,
+            )
+            dispatcher = self._build_dispatcher(tmp_path, tool)
+            constitution = tmp_path / "constitution.yaml"
+            _write_constitution(constitution, tool_name="timestamp_window")
+            lock = threading.RLock()
+
+            async def caller():
+                with lock:
+                    return await dispatcher.dispatch(
+                        instance_id="i1", agent_dna="d" * 12,
+                        role="network_watcher", genre=None,
+                        session_id="s1", constitution_path=constitution,
+                        tool_name="timestamp_window", tool_version="1",
+                        args={"expression": "last 1 minutes"},
+                        write_lock=lock,
+                    )
+
+            task = asyncio.ensure_future(caller())
+            await asyncio.wait_for(started.wait(), timeout=3.0)
+            # Lock is held by the caller — a separate thread is blocked.
+            acquired = await asyncio.to_thread(
+                _acquire_from_other_thread, lock, 0.5,
+            )
+            assert acquired is False, (
+                "write_lock was released for a non-allowlisted tool — "
+                "narrowing must stay scoped to _LOCK_FREE_EXECUTE_TOOLS"
+            )
+            release.set()
+            outcome = await asyncio.wait_for(task, timeout=3.0)
+            assert isinstance(outcome, DispatchSucceeded)
+
+        _run(scenario())
+
+    def test_lock_reacquired_when_inference_raises(self, tmp_path):
+        """If the tool raises mid-execute, the inner finally must still
+        re-acquire the lock — otherwise the caller's enclosing
+        ``with write_lock`` blows up on an un-acquired release."""
+        async def scenario():
+            tool = _RaisingLLMTool("llm_think")
+            dispatcher = self._build_dispatcher(tmp_path, tool)
+            constitution = tmp_path / "constitution.yaml"
+            _write_constitution(constitution, tool_name="llm_think")
+            lock = threading.RLock()
+
+            async def caller():
+                with lock:
+                    out = await dispatcher.dispatch(
+                        instance_id="i1", agent_dna="d" * 12,
+                        role="network_watcher", genre=None,
+                        session_id="s1", constitution_path=constitution,
+                        tool_name="llm_think", tool_version="1",
+                        args={"prompt": "hello"},
+                        write_lock=lock,
+                    )
+                # Reaching here at all proves the `with` exit did not
+                # raise RuntimeError("cannot release un-acquired lock").
+                return out
+
+            outcome = await asyncio.wait_for(caller(), timeout=3.0)
+            assert isinstance(outcome, DispatchFailed)
+            # Lock fully released — a fresh thread can take it.
+            assert _acquire_from_other_thread(lock, 1.0) is True
+
+        _run(scenario())
+
+    def test_legacy_no_write_lock_arg_still_dispatches(self, tmp_path):
+        """Omitting ``write_lock`` preserves pre-B451 behavior: dispatch
+        does no lock management at all and still completes."""
+        async def scenario():
+            started = asyncio.Event()
+            release = asyncio.Event()
+            release.set()  # don't actually block
+            tool = _ControlledTool("llm_think", "read_only", started, release)
+            dispatcher = self._build_dispatcher(tmp_path, tool)
+            constitution = tmp_path / "constitution.yaml"
+            _write_constitution(constitution, tool_name="llm_think")
+
+            outcome = await dispatcher.dispatch(
+                instance_id="i1", agent_dna="d" * 12,
+                role="network_watcher", genre=None,
+                session_id="s1", constitution_path=constitution,
+                tool_name="llm_think", tool_version="1",
+                args={"prompt": "hello"},
+            )
+            assert isinstance(outcome, DispatchSucceeded)
+
+        _run(scenario())

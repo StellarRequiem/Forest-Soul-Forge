@@ -448,6 +448,33 @@ def _sandbox_meta(
     return out
 
 
+# B451 — write-lock narrowing. Tools whose ``execute`` leg is provably
+# write-free AND latency-dominated by an external model call. When the
+# caller threads its ``write_lock`` into :meth:`ToolDispatcher.dispatch`,
+# the dispatcher releases that lock for the duration of these tools'
+# execute leg so a multi-second inference doesn't block every other
+# SQLite writer (see ``dispatch`` for the release-one-level discipline).
+#
+# Membership criteria — ALL must hold:
+#   1. ``execute()`` performs NO state mutation: no audit append, no
+#      registry / memory / counter write, no nested ``dispatch()``.
+#   2. ``side_effects == "read_only"``. The dispatcher re-checks the
+#      *resolved* side_effects before releasing, so a reclassification
+#      auto-disables the optimization (defense in depth).
+#   3. Latency is dominated by a remote / model call — i.e. holding the
+#      lock here is the contention problem actually worth solving.
+#
+# ``llm_think.v1`` qualifies: its ``execute()`` only calls
+# ``provider.complete()`` and builds a ``ToolResult`` — verified
+# write-free 2026-05-21.
+#
+# Deliberately EXCLUDED: ``delegate.v1`` (``read_only`` for the dispatch
+# itself, but its execute spawns a nested ``dispatch()`` that writes
+# counters + audit events), and anything with ``network`` / ``filesystem``
+# / ``external`` side effects.
+_LOCK_FREE_EXECUTE_TOOLS: frozenset[str] = frozenset({"llm_think"})
+
+
 @dataclass
 class ToolDispatcher:
     """Fast-path dispatch coordinator.
@@ -787,6 +814,7 @@ class ToolDispatcher:
         args: dict[str, Any],
         provider: Any = None,
         task_caps: dict[str, Any] | None = None,
+        write_lock: Any = None,
     ) -> DispatchSucceeded | DispatchRefused | DispatchPendingApproval | DispatchFailed:
         """One round-trip through the runtime. Caller holds the write lock.
 
@@ -801,6 +829,18 @@ class ToolDispatcher:
         body below is the orchestrator: build the call-scoped context,
         run the pipeline, branch on the result, and on GO continue
         into the execute leg.
+
+        B451 — ``write_lock`` (optional). The caller still holds
+        ``app.state.write_lock`` across this call exactly as before; the
+        contract is unchanged. When the caller ALSO threads the same
+        lock object in here, the dispatcher releases it for the duration
+        of an LLM-bound read_only tool's execute leg (see
+        :data:`_LOCK_FREE_EXECUTE_TOOLS`) and re-acquires it before any
+        write-back. This stops a multi-second ``llm_think`` inference
+        from blocking every other SQLite writer for the whole dispatch.
+        ``None`` (the default) preserves the legacy behavior bit-for-bit
+        — the lock is held start-to-finish — so test contexts and
+        callers that have not opted in are unaffected.
         """
         # ---- pipeline pre-execute checks --------------------------------
         # Hardware quarantine, task_usage_cap, lookup, validate,
@@ -1025,14 +1065,52 @@ class ToolDispatcher:
         # identical to ``await tool.execute(args, ctx)`` plus a meta
         # dict; the in-process path stays the hot path. Strict/permissive
         # modes branch through the sandbox.
+        # B451 — write-lock narrowing. The pre-execute writes above
+        # (counter increment + EVENT_DISPATCHED) are done; the next
+        # write is the EVENT_SUCCEEDED / EVENT_FAILED pair AFTER execute.
+        # For an LLM-bound read_only tool the execute leg itself mutates
+        # nothing, so release the caller's write_lock across it and
+        # re-acquire before the write-back.
+        #
+        # release-one-level discipline: we release exactly ONE RLock
+        # level. Non-nested callers (HTTP call_tool, scheduler
+        # tool_call) hold recursion count 1 — releasing one level frees
+        # the lock and other writers proceed. A nested caller (count > 1,
+        # e.g. a delegate chain) keeps the lock held after a single
+        # release — no concurrency win there, but single-writer
+        # discipline stays intact. Releasing one level is therefore
+        # always correctness-preserving; worst case it is a speedup
+        # no-op. The inner try/finally guarantees re-acquire on every
+        # exit path so the caller's enclosing ``with write_lock`` always
+        # finds the lock held when dispatch returns.
+        execute_side_effects = resolved.side_effects or tool.side_effects
+        _release_for_execute = (
+            write_lock is not None
+            and tool_name in _LOCK_FREE_EXECUTE_TOOLS
+            and execute_side_effects == "read_only"
+        )
+        _lock_released = False
         try:
-            outcome = await self._execute_tool_maybe_sandboxed(
-                tool=tool,
-                args=args,
-                ctx=ctx,
-                side_effects=(resolved.side_effects or tool.side_effects),
-                tool_key=key,
-            )
+            if _release_for_execute:
+                write_lock.release()
+                _lock_released = True
+            try:
+                outcome = await self._execute_tool_maybe_sandboxed(
+                    tool=tool,
+                    args=args,
+                    ctx=ctx,
+                    side_effects=execute_side_effects,
+                    tool_key=key,
+                )
+            finally:
+                # Re-acquire BEFORE any write-back runs. On the success
+                # path the EVENT_SUCCEEDED append below needs the lock;
+                # on a raise, the outer except branches append
+                # EVENT_FAILED + mirror the call — finally runs before
+                # those except bodies, so they too execute serialized.
+                if _lock_released:
+                    write_lock.acquire()
+                    _lock_released = False
             result = outcome.result
             sandbox_meta = _sandbox_meta(
                 mode=outcome.sandbox_mode,
