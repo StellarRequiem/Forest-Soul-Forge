@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  dev.forest.scheduled-checks — B452.
+
+  Runs fsf-scheduled-checks.command every 6 hours on the host. This is
+  the host-side replacement for the scheduled Claude tasks that failed
+  because they ran in a Linux harness sandbox with no route to the
+  local daemon / Ollama and no launchctl.
+
+  Install / verify / uninstall: see the header of
+  fsf-scheduled-checks.command.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.forest.scheduled-checks</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/llm01/Forest-Soul-Forge/fsf-scheduled-checks.command</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>21600</integer>
+    <key>WorkingDirectory</key>
+    <string>/Users/llm01/Forest-Soul-Forge</string>
+    <key>StandardOutPath</key>
+    <string>/Users/llm01/Forest-Soul-Forge/data/scheduled-checks-logs/launchd-scheduled-checks.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/llm01/Forest-Soul-Forge/data/scheduled-checks-logs/launchd-scheduled-checks.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <key>TZ</key>
+        <string>America/Los_Angeles</string>
+    </dict>
+</dict>
+</plist>
