@@ -85,7 +85,7 @@ def test_seal_segment_allocates_new_tail_for_next_month(tmp_path):
     segment for next_month with the right seq_start + filename."""
     seg_file = "audit_chain_2026-05.jsonl"
     seg_path = tmp_path / seg_file
-    _write_segment(seg_path, [{"seq": 42, "entry_hash": "x" * 64}])
+    _write_segment(seg_path, [{"seq": 42, "entry_hash": "e" * 64}])
     idx = _tail_index(seg_file, "2026-05", seq_start=42)
 
     outcome = seal_segment(
@@ -151,7 +151,7 @@ def test_seal_segment_preserves_already_sealed_segments(tmp_path):
     )
     # Active tail.
     tail_file = "audit_chain_2026-05.jsonl"
-    _write_segment(tmp_path / tail_file, [{"seq": 100, "entry_hash": "z" * 64}])
+    _write_segment(tmp_path / tail_file, [{"seq": 100, "entry_hash": "e" * 64}])
     tail = SegmentMeta(
         seq_start=100, seq_end=None, file=tail_file,
         month="2026-05", sealed=False, merkle_root=None,
@@ -362,7 +362,7 @@ def test_verify_sealed_segments_reports_all_issues_in_one_pass(tmp_path):
         ),
         SegmentMeta(
             seq_start=2, seq_end=3, file=f2, month="2026-02",
-            sealed=True, merkle_root=merkle_root(["x" * 64, "y" * 64]),  # wrong
+            sealed=True, merkle_root=merkle_root(["e" * 64, "f" * 64]),  # wrong
         ),
     ))
 
