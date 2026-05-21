@@ -1,87 +1,122 @@
 #!/bin/bash
 set -euo pipefail
 export TZ="America/Los_Angeles"
-# reality-anchor-check.sh — Integrity check for reality anchor files
+# reality-anchor-check.sh — audit-chain reality-anchor event monitor
 # Schedule: daily at 10:30 AM via launchd
-# Computes SHA256 hashes of all .yaml/.json files in the reality_anchors
-# directory and compares against a stored manifest. Reports new, removed,
-# or changed files.
+# Scans the live audit chain for reality_anchor_flagged and
+# reality_anchor_repeat_offender events, and alerts on any that are
+# new since the last run (tracked by audit-chain seq in a state file).
 # Writes to monitor-logs/reality-anchor.log
+#
+# The Reality Anchor (ADR-0063) records contradictions of operator
+# ground truth as chain events — there is no data/reality_anchors/
+# directory of files to hash. The live chain is a single append-only
+# JSONL file; per daemon/config.py the default audit_chain_path
+# points at examples/ (CLAUDE.md: "Live audit chain is at
+# examples/audit_chain.jsonl").
 
 LOG_DIR="/Users/llm01/Forest-Soul-Forge/data/monitor-logs"
 LOG_FILE="${LOG_DIR}/reality-anchor.log"
 ALERT_FILE="${LOG_DIR}/ALERTS.log"
-ANCHOR_DIR="/Users/llm01/Forest-Soul-Forge/data/reality_anchors"
-MANIFEST="${LOG_DIR}/.reality-anchor-hashes"
+CHAIN_FILE="/Users/llm01/Forest-Soul-Forge/examples/audit_chain.jsonl"
+# Highest reality-anchor seq seen on the previous run. Diffing on
+# seq (append-only, monotonic) means each flag alerts exactly once.
+STATE_FILE="${LOG_DIR}/.reality-anchor-seq"
 TIMESTAMP=$(date +"%Y-%m-%d %I:%M:%S %p %Z")
 
 mkdir -p "${LOG_DIR}"
 
 echo "=== reality-anchor-check ${TIMESTAMP} ===" >> "${LOG_FILE}"
 
-if [ ! -d "${ANCHOR_DIR}" ]; then
-    echo "  reality_anchors directory not found at ${ANCHOR_DIR}" >> "${LOG_FILE}"
+if [ ! -f "${CHAIN_FILE}" ]; then
+    echo "  audit chain not found at ${CHAIN_FILE}" >> "${LOG_FILE}"
     echo "  skipping — nothing to check" >> "${LOG_FILE}"
     echo "" >> "${LOG_FILE}"
     exit 0
 fi
 
-# Build current hash map: "hash  relative_path"
-current_hashes=$(mktemp)
-find "${ANCHOR_DIR}" \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' \) -type f 2>/dev/null | sort | while IFS= read -r filepath; do
-    relpath="${filepath#${ANCHOR_DIR}/}"
-    hash=$(shasum -a 256 "${filepath}" 2>/dev/null | cut -d' ' -f1)
-    echo "${hash}  ${relpath}"
-done > "${current_hashes}"
+last_seq=0
+if [ -f "${STATE_FILE}" ]; then
+    last_seq=$(tr -dc '0-9' < "${STATE_FILE}" 2>/dev/null || echo "")
+    last_seq="${last_seq:-0}"
+fi
 
-file_count=$(wc -l < "${current_hashes}" | tr -d ' ')
-echo "  files scanned: ${file_count}" >> "${LOG_FILE}"
+# Grep the two reality-anchor event types, then let python count
+# them, list the events newer than last_seq, and report the highest
+# seq seen. `|| true` keeps a no-match (grep exit 1) from aborting
+# the script under `set -o pipefail`.
+report=$(grep -E '"event_type":"reality_anchor_(flagged|repeat_offender)"' "${CHAIN_FILE}" 2>/dev/null \
+  | LAST_SEQ="${last_seq}" python3 -c '
+import sys, os, json
+last_seq = int(os.environ.get("LAST_SEQ", "0") or "0")
+flagged = repeat = 0
+max_seq = last_seq
+new_lines = []
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    et = obj.get("event_type")
+    if et == "reality_anchor_flagged":
+        flagged += 1
+    elif et == "reality_anchor_repeat_offender":
+        repeat += 1
+    else:
+        continue
+    try:
+        seq = int(obj.get("seq", 0))
+    except (TypeError, ValueError):
+        seq = 0
+    max_seq = max(max_seq, seq)
+    if seq > last_seq:
+        d = obj.get("event_data") or {}
+        extra = ""
+        if et == "reality_anchor_repeat_offender":
+            extra = " repetition=%s decision=%s" % (
+                d.get("repetition_count", "?"), d.get("decision", "?"))
+        new_lines.append(
+            "  NEW %s seq=%s fact=%s%s"
+            % (et, seq, d.get("fact_id", "?"), extra)
+        )
+print("COUNTS %d %d" % (flagged, repeat))
+for ln in new_lines:
+    print(ln)
+print("SUMMARY %d %d" % (max_seq, len(new_lines)))
+' || true)
 
-if [ ! -f "${MANIFEST}" ]; then
-    # First run — create manifest
-    cp "${current_hashes}" "${MANIFEST}"
-    echo "  first run — manifest created with ${file_count} file(s)" >> "${LOG_FILE}"
+counts_line=$(printf '%s\n' "${report}" | grep '^COUNTS ' || true)
+summary_line=$(printf '%s\n' "${report}" | grep '^SUMMARY ' || true)
+flagged=$(printf '%s\n' "${counts_line}" | cut -d' ' -f2)
+repeat=$(printf '%s\n' "${counts_line}" | cut -d' ' -f3)
+max_seq=$(printf '%s\n' "${summary_line}" | cut -d' ' -f2)
+new_count=$(printf '%s\n' "${summary_line}" | cut -d' ' -f3)
+flagged="${flagged:-0}"
+repeat="${repeat:-0}"
+max_seq="${max_seq:-${last_seq}}"
+new_count="${new_count:-0}"
+
+echo "  reality_anchor_flagged events:         ${flagged}" >> "${LOG_FILE}"
+echo "  reality_anchor_repeat_offender events: ${repeat}" >> "${LOG_FILE}"
+
+if [ ! -f "${STATE_FILE}" ]; then
+    # First run — record the baseline seq, don't alert on history.
+    echo "${max_seq}" > "${STATE_FILE}"
+    echo "  first run — baseline recorded at seq ${max_seq}" >> "${LOG_FILE}"
     echo "" >> "${LOG_FILE}"
-    rm -f "${current_hashes}"
     exit 0
 fi
 
-# Compare against stored manifest
-changes_found=false
-
-# Check for changed or new files
-while IFS= read -r line; do
-    hash=$(echo "${line}" | cut -d' ' -f1)
-    relpath=$(echo "${line}" | cut -d' ' -f3-)
-    old_hash=$(grep "  ${relpath}$" "${MANIFEST}" 2>/dev/null | cut -d' ' -f1 || echo "")
-
-    if [ -z "${old_hash}" ]; then
-        echo "  NEW: ${relpath}" >> "${LOG_FILE}"
-        changes_found=true
-    elif [ "${hash}" != "${old_hash}" ]; then
-        echo "  CHANGED: ${relpath}" >> "${LOG_FILE}"
-        echo "    was: ${old_hash}" >> "${LOG_FILE}"
-        echo "    now: ${hash}" >> "${LOG_FILE}"
-        changes_found=true
-    fi
-done < "${current_hashes}"
-
-# Check for removed files
-while IFS= read -r line; do
-    relpath=$(echo "${line}" | cut -d' ' -f3-)
-    if ! grep -q "  ${relpath}$" "${current_hashes}" 2>/dev/null; then
-        echo "  REMOVED: ${relpath}" >> "${LOG_FILE}"
-        changes_found=true
-    fi
-done < "${MANIFEST}"
-
-if [ "${changes_found}" = true ]; then
-    echo "  STATUS: changes detected — updating manifest" >> "${LOG_FILE}"
-    echo "[ALERT] ${TIMESTAMP} reality-anchor-check: reality anchor files changed — see reality-anchor.log" >> "${ALERT_FILE}"
-    cp "${current_hashes}" "${MANIFEST}"
+if [ "${new_count}" -gt 0 ]; then
+    echo "  ${new_count} new reality-anchor event(s) since seq ${last_seq}:" >> "${LOG_FILE}"
+    printf '%s\n' "${report}" | grep '^  NEW ' >> "${LOG_FILE}" || true
+    echo "[ALERT] ${TIMESTAMP} reality-anchor-check: ${new_count} new reality-anchor event(s) — see reality-anchor.log" >> "${ALERT_FILE}"
+    echo "${max_seq}" > "${STATE_FILE}"
 else
-    echo "  STATUS: no changes — all anchors intact" >> "${LOG_FILE}"
+    echo "  STATUS: no new reality-anchor events since seq ${last_seq}" >> "${LOG_FILE}"
 fi
 
-rm -f "${current_hashes}"
 echo "" >> "${LOG_FILE}"

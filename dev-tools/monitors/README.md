@@ -12,7 +12,7 @@ Claude scheduled tasks that exceeded the 15/day routine cap.
 | `docker-stack-health.sh` | `dev.forest.monitor.docker-health` | Every 4 hours | Docker container status + memory usage vs limits |
 | `disk-memory-audit.sh` | `dev.forest.monitor.disk-memory` | Daily 11:00 AM | Disk, Ollama models, Docker disk, audit chain size, system memory |
 | `stale-process-cleanup.sh` | `dev.forest.monitor.stale-processes` | Daily 12:00 PM | Detects orphan/zombie processes (report only, no auto-kill) |
-| `reality-anchor-check.sh` | `dev.forest.monitor.reality-anchor` | Daily 10:30 AM | SHA256 integrity check of reality anchor files |
+| `reality-anchor-check.sh` | `dev.forest.monitor.reality-anchor` | Daily 10:30 AM | Scans audit chain for `reality_anchor_flagged` / `reality_anchor_repeat_offender` events |
 
 ## Log files
 
@@ -21,7 +21,7 @@ All output goes to `data/monitor-logs/`:
 - `health-pulse.log`, `scheduler-lag.log`, etc. — per-monitor append logs
 - `ALERTS.log` — consolidated alert file (anything that needs attention)
 - `launchd-*.out.log` / `launchd-*.err.log` — launchd stdout/stderr capture
-- `.reality-anchor-hashes` — stored manifest (hidden file, not a log)
+- `.reality-anchor-seq` — last reality-anchor audit-chain seq seen (hidden state file, not a log)
 
 ## Installation
 
@@ -80,8 +80,9 @@ done
   processes but never kills anything — review `stale-processes.log` and
   act manually.
 - `ALERTS.log` is append-only. Rotate or truncate it periodically.
-- The `reality-anchor-check` creates its hash manifest on first run.
-  Subsequent runs diff against it and update on change.
+- The `reality-anchor-check` records a baseline audit-chain seq on
+  first run. Subsequent runs alert only on reality-anchor events
+  newer than that seq, then advance it — each flag alerts once.
 - All scripts handle missing directories/commands gracefully (skip with
   a log message rather than crash).
 - The `PATH` in each plist includes `/opt/homebrew/bin` for Apple Silicon
