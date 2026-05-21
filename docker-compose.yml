@@ -74,6 +74,10 @@ services:
       # on the host instead, override this in .env to
       # http://host.docker.internal:11434 (macOS/Windows) or the host IP.
       FSF_LOCAL_BASE_URL: http://ollama:11434
+      # Local model tag — must match a model pulled into the ollama
+      # service (or your host Ollama). Kept in sync with the
+      # config.py default and .env.example.
+      FSF_LOCAL_MODEL: "qwen3:8b"
       # CORS: the config.py default already covers the frontend's published
       # origin (http://127.0.0.1:5173 + http://localhost:5173). Override
       # in .env only if you serve the UI from somewhere else.
