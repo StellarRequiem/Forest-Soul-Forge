@@ -51,7 +51,7 @@ check_process() {
 }
 
 # Endpoint checks
-check_endpoint "daemon-api" "http://localhost:7423/api/health"
+check_endpoint "daemon-api" "http://127.0.0.1:7423/healthz"
 check_endpoint "frontend-ui" "http://localhost:5173"
 check_endpoint "ollama"      "http://localhost:11434/api/tags"
 
