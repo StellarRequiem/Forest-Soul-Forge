@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.forest.monitor.docker-health</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/llm01/Forest-Soul-Forge/dev-tools/monitors/docker-stack-health.sh</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>14400</integer>
+    <key>WorkingDirectory</key>
+    <string>/Users/llm01/Forest-Soul-Forge</string>
+    <key>StandardOutPath</key>
+    <string>/Users/llm01/Forest-Soul-Forge/data/monitor-logs/launchd-docker-health.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/llm01/Forest-Soul-Forge/data/monitor-logs/launchd-docker-health.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <key>TZ</key>
+        <string>America/Los_Angeles</string>
+    </dict>
+</dict>
+</plist>

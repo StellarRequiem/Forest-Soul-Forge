@@ -17,7 +17,8 @@
         UI, not 24/7 critical)
 
   EnvironmentVariables baked in:
-    FSF_LOCAL_MODEL=qwen2.5-coder:7b — daemon's default model
+    FSF_LOCAL_MODEL=qwen3:8b          — daemon's default model
+    TZ=America/Los_Angeles            — all timestamps in Pacific
     PATH                              — needed to find subprocesses
 
   KeepAlive=true restarts the daemon if it crashes.
@@ -43,7 +44,9 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>FSF_LOCAL_MODEL</key>
-    <string>qwen2.5-coder:7b</string>
+    <string>qwen3:8b</string>
+    <key>TZ</key>
+    <string>America/Los_Angeles</string>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>HOME</key>

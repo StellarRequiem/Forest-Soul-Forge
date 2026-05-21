@@ -1,3 +1,5 @@
+/Users/llm01/.pypirc
+
 # 🌲 Forest Soul Forge
 
 > ⚠️ **Experimental software — operator responsibility notice.** Forest Soul Forge is in active development and is provided for research, experimentation, and personal use. **The operator is responsible for every action committed by the agents they configure and run** — including financial, legal, communicative, irreversible, or otherwise consequential outcomes. Every tool invocation, skill execution, scheduled-task firing, and delegate-chain hop runs under the operator's identity and on the operator's hardware. The audit chain makes every action traceable; it does not absolve the operator of its consequences. **No warranty is provided.** See [`ADR-0046`](docs/decisions/ADR-0046-license-and-governance.md) for licensing terms.
