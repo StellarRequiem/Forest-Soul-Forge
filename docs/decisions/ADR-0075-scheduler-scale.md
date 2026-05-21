@@ -5,6 +5,11 @@ for the hundreds of recurring tasks the ten-domain platform will
 spawn (per-domain heartbeats, observer polls, weekly digests,
 maintenance cycles).
 
+**Amended 2026-05-21 (B451):** Decision 3's `tick_over_budget`
+measurement was respecified — the budget measures scheduler
+*overhead*, not raw tick wall-clock. See "## Amendment — B451"
+below.
+
 ## Context
 
 ADR-0041's set-and-forget scheduler (Bursts 86-92) ships:
@@ -117,9 +122,12 @@ work):
 
 - A specific task's `budget_per_minute` gets enforced (operator
   visibility into "this task wanted to fire but was rate-limited").
-- The dispatch loop's wall-clock per tick exceeds a configurable
+- The dispatch loop's per-tick *overhead* exceeds a configurable
   threshold (default 500ms — operator visibility into "scheduler
-  can't keep up").
+  can't keep up"). Note: the original B295 implementation measured
+  raw tick wall-clock here, which conflated scheduler overhead with
+  task-runner execution; corrected in B451 — see the Amendment
+  section below.
 
 Event payload shape (locked in this ADR so T2/T3 can target it):
 
@@ -197,6 +205,76 @@ Total: 4 bursts.
   semantics layer that on top via task tags.
 - **Does not move dispatch onto SQL.** The index supports such a
   refactor; deciding when to do it is out of scope for ADR-0075.
+
+## Amendment — B451 (2026-05-21): tick budget measures scheduler overhead
+
+**Problem.** T2 (B295) implemented Decision 3's tick-over-budget
+check by measuring raw tick wall-clock: `_tick()` timed from loop
+entry to loop exit, and the loop body `await _dispatch()` blocks on
+`await runner(...)`. Every scheduled `tool_call` task running
+`llm_think.v1` does a synchronous LLM inference of several seconds;
+that runner time landed inside the measured region, so the tick
+"duration" was dominated by task execution, not scheduler work.
+
+Result: the 500ms budget was tripped by every single `llm_think`
+dispatch. The live `examples/audit_chain.jsonl` accumulated **1,559
+`scheduler_lag(reason="tick_over_budget")` events**, with
+`tick_duration_ms` ranging 511ms–42,431ms — each one a normal
+LLM-bound dispatch mislabeled as scheduler lag. The signal the
+event exists to carry ("is the scheduler keeping up?") was drowned
+in false positives.
+
+The Context section of this ADR already states the premise the fix
+restores: *"the in-memory iteration itself is still microseconds."*
+The scheduler's own per-tick overhead is small; the wall-clock
+measurement was a spec error that conflated it with task execution.
+
+**Decision.** The tick budget measures **scheduler overhead only**
+— the task scan, `due()` / `_consume_budget` checks, audit emits,
+and state persistence. Task-runner execution (`await runner(...)`)
+is measured separately and excluded. `Scheduler._dispatch()`
+returns the wall-clock ms spent inside the runner; `_tick()` sums
+those and subtracts them from total wall-clock.
+`overhead_ms = wall_clock_ms - runner_total_ms` is the figure
+compared to `tick_budget_ms`.
+
+**Payload.** The locked shape from Decision 3 is preserved. The
+previously-unused `details` field now carries the breakdown for
+`tick_over_budget` events:
+
+```json
+{
+  "reason": "tick_over_budget",
+  "tick_duration_ms": "<scheduler overhead ms — compared to budget>",
+  "tick_budget_ms": 500.0,
+  "dispatches_in_tick": "<n>",
+  "details": {
+    "wall_clock_ms": "<total tick wall-clock incl. runner time>",
+    "runner_total_ms": "<summed runner execution this tick>"
+  }
+}
+```
+
+`tick_duration_ms` is now the overhead figure (the quantity
+actually compared to the budget); operators who want total
+wall-clock read `details.wall_clock_ms`.
+
+**Scope note.** This amendment is a measurement correction; it does
+not change the dispatch model (still serial within a tick, per
+"What this ADR does NOT do"). Two adjacent issues surfaced during
+the B451 investigation and are left for operator decision, since
+both are architecture changes rather than measurement fixes:
+
+1. The `tool_call` runner holds `app.state.write_lock` for the
+   full `await dispatcher.dispatch()` — including the LLM call — so
+   a slow scheduled task blocks every HTTP writer for its whole
+   duration. The scheduler's own `_dispatch` is careful *not* to
+   hold the lock across the runner (B199 comment); the runner
+   re-acquires it, defeating that intent.
+2. Moving runner execution off the tick loop into background
+   `asyncio` tasks would stop a slow task from blocking the loop
+   and let independent tasks overlap — at the cost of the serial,
+   easy-to-audit dispatch model this ADR deliberately keeps.
 
 ## See Also
 
