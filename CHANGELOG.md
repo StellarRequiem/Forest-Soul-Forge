@@ -38,6 +38,23 @@ is now the overhead figure (the quantity compared to the budget).
 Amends ADR-0075 Decision 3. See
 `docs/audits/2026-05-21-scheduler-tick-budget-measurement.md`.
 
+### Memory consolidation scheduler hook (ADR-0074 T4, 2026-05-21)
+
+- **Fixed:** `core/memory_consolidation.run_consolidation_pass()` had
+  no scheduler hook — ADR-0074 queued the wiring for T2-T5 but it was
+  never landed, so the consolidation runner had zero callers in
+  `src/`. A new `memory_consolidation` scheduler task type now wraps
+  it; operators schedule a pass via `scheduled_tasks.yaml`
+  (`type: memory_consolidation`).
+- **Added:**
+  `daemon/scheduler/task_types/memory_consolidation.py` — runner that
+  resolves the registry connection, active provider, and write lock
+  from the scheduler context, then runs one consolidation pass under
+  the single-writer lock (same posture as `tool_call_runner`).
+  Optional config knobs map to `ConsolidationPolicy`
+  (`min_age_days`, `max_batch_size`, `eligible_layers`,
+  `eligible_claim_types`); all default to the ADR-0074 policy.
+
 ### ADR-0043 follow-ups (Bursts 111, 112, 113a, 113b)
 
 - **#1 Per-tool requires_human_approval mirroring** (Burst 111).

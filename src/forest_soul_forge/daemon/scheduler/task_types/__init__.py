@@ -19,12 +19,13 @@ Each runner is an async callable matching :data:`Scheduler.TaskRunner`::
 Task types currently registered:
 
 * ``tool_call`` — dispatch one tool call against an existing agent.
-  ADR-0036 T4 verifier scans use this. Closes the original deferral.
-
-Future task types (per ADR-0041):
-
-* ``scenario`` — multi-step birth + seed + iterate + archive
-  scenario. Lands in Burst 90.
+  ADR-0036 T4 verifier scans use this.
+* ``scenario`` — multi-step birth + seed + iterate + archive workflow.
+* ``learned_rule_ra_pass`` — ADR-0072 T3 Reality-Anchor pass over
+  pending learned rules.
+* ``memory_consolidation`` — ADR-0074 T4 memory-consolidation pass:
+  fold aged-out pending memory entries into per-(agent, layer)
+  summaries.
 """
 from forest_soul_forge.daemon.scheduler.task_types.scenario import (
     scenario_runner,
@@ -35,9 +36,13 @@ from forest_soul_forge.daemon.scheduler.task_types.tool_call import (
 from forest_soul_forge.daemon.scheduler.task_types.learned_rule_ra_pass import (
     learned_rule_ra_pass_runner,
 )
+from forest_soul_forge.daemon.scheduler.task_types.memory_consolidation import (
+    memory_consolidation_runner,
+)
 
 __all__ = [
     "scenario_runner",
     "tool_call_runner",
     "learned_rule_ra_pass_runner",
+    "memory_consolidation_runner",
 ]

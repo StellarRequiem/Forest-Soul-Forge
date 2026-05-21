@@ -867,6 +867,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         )
         from forest_soul_forge.daemon.scheduler.task_types import (
             learned_rule_ra_pass_runner,
+            memory_consolidation_runner,
             scenario_runner,
             tool_call_runner,
         )
@@ -918,6 +919,16 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         # to the operator with the RA verdict pre-attached.
         scheduler.register_task_type(
             "learned_rule_ra_pass", learned_rule_ra_pass_runner,
+        )
+        # ADR-0074 T4: memory-consolidation pass. Folds aged-out
+        # pending memory entries into per-(agent, layer) summaries.
+        # The runner end-to-end (run_consolidation_pass) had no
+        # scheduler hook — ADR-0074 queued the wiring for T2-T5; this
+        # registers it. Operators schedule it via scheduled_tasks.yaml
+        # (type: memory_consolidation); the ADR-0075 budget cap keeps
+        # one pass bounded.
+        scheduler.register_task_type(
+            "memory_consolidation", memory_consolidation_runner,
         )
         # Optional config file load — silent skip if absent.
         scheduler_config_path = settings.scheduled_tasks_path
