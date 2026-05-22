@@ -21,7 +21,7 @@ from forest_soul_forge.daemon.providers import TaskKind
 # Default local model — a solid consumer-hardware workhorse. Every
 # task_kind defaults to the same tag for simplicity; set
 # ``FSF_LOCAL_MODEL_CLASSIFY`` etc. to override per-task.
-_DEFAULT_LOCAL_MODEL = "llama3.1:8b"
+_DEFAULT_LOCAL_MODEL = "qwen3:8b"
 
 
 class DaemonSettings(BaseSettings):

@@ -40,6 +40,7 @@ matches; never writes.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -252,6 +253,36 @@ class VerifyClaimTool:
 # ---- internals -----------------------------------------------------------
 
 
+@lru_cache(maxsize=512)
+def _term_pattern(term: str) -> re.Pattern[str]:
+    r"""Compile a token-boundary matcher for one ground-truth term.
+
+    Plain ``in`` substring matching let short terms collide with
+    longer words: the license fact's forbidden term ``"mit"``
+    matched ``"commit"`` / ``"permit"`` and ``"mpl"`` matched
+    ``"template"`` / ``"implement"``, firing false HIGH-severity
+    contradictions on any in-scope claim.
+
+    The fix guards each EDGE of the term that is itself a word
+    character with a ``\w`` look-around — that is the only edge a
+    surrounding word can swallow the term through. An edge that is
+    already punctuation (e.g. the forbidden term ``"/anthropic/"``)
+    gets no guard, so punctuation-bounded terms keep matching where
+    a hard ``\b`` anchor would have broken them. Interior
+    characters are matched literally, so operator-curated
+    multi-word phrases like ``"open source"`` are unaffected.
+    """
+    core = re.escape(term)
+    left = r"(?<!\w)" if re.match(r"\w", term) else ""
+    right = r"(?!\w)" if re.search(r"\w\Z", term) else ""
+    return re.compile(left + core + right)
+
+
+def _term_in(term: str, text: str) -> bool:
+    """True when ``term`` occurs in ``text`` at token boundaries."""
+    return _term_pattern(term).search(text) is not None
+
+
 def _evaluate_fact(
     claim_lower: str, fact: Fact,
 ) -> tuple[str | None, list[str], list[str]]:
@@ -267,22 +298,22 @@ def _evaluate_fact(
         (so an operator debugging "why did this fire?" sees
         the trigger)
 
-    Matching is whole-substring lowercase. We deliberately use
-    plain ``in`` rather than word-boundary regex: ground-truth
-    keywords are operator-curated phrases like ``"audit chain
-    path"`` or ``"sqlite version"`` that aren't always whole-
-    word-bounded. Operators who need stricter matching add
-    word-boundary characters to their canonical_terms.
+    Matching is token-boundary aware (see :func:`_term_pattern`).
+    A term hits only when it is not embedded inside a longer word,
+    so the license fact's ``"mit"`` / ``"mpl"`` forbidden terms no
+    longer collide with ``"commit"`` / ``"template"``. Multi-word
+    operator phrases like ``"open source"`` still match — only the
+    term's outer word-char edges are boundary-guarded.
     """
-    domain_hits = [k for k in fact.domain_keywords if k in claim_lower]
+    domain_hits = [k for k in fact.domain_keywords if _term_in(k, claim_lower)]
     if not domain_hits:
         return None, [], []
 
-    canonical_hits = [t for t in fact.canonical_terms if t in claim_lower]
+    canonical_hits = [t for t in fact.canonical_terms if _term_in(t, claim_lower)]
     if canonical_hits:
         return VERDICT_CONFIRMED, canonical_hits, domain_hits
 
-    forbidden_hits = [t for t in fact.forbidden_terms if t in claim_lower]
+    forbidden_hits = [t for t in fact.forbidden_terms if _term_in(t, claim_lower)]
     if forbidden_hits:
         return VERDICT_CONTRADICTED, forbidden_hits, domain_hits
 

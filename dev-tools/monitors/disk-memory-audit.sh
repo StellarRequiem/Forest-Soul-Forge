@@ -9,7 +9,11 @@ export TZ="America/Los_Angeles"
 
 LOG_DIR="/Users/llm01/Forest-Soul-Forge/data/monitor-logs"
 LOG_FILE="${LOG_DIR}/disk-memory.log"
-CHAIN_DIR="/Users/llm01/Forest-Soul-Forge/data/audit_chain_segments"
+# The live audit chain is a single append-only JSONL file — per
+# daemon/config.py the default audit_chain_path points at examples/
+# (CLAUDE.md: "Live audit chain is at examples/audit_chain.jsonl").
+# The old data/audit_chain_segments/ directory never existed.
+CHAIN_FILE="/Users/llm01/Forest-Soul-Forge/examples/audit_chain.jsonl"
 TIMESTAMP=$(date +"%Y-%m-%d %I:%M:%S %p %Z")
 
 mkdir -p "${LOG_DIR}"
@@ -42,13 +46,13 @@ else
 fi
 
 # 4. Audit chain size
-echo "  --- audit chain segments ---" >> "${LOG_FILE}"
-if [ -d "${CHAIN_DIR}" ]; then
-    chain_size=$(du -sh "${CHAIN_DIR}" 2>/dev/null | cut -f1)
-    chain_count=$(find "${CHAIN_DIR}" -type f 2>/dev/null | wc -l | tr -d ' ')
-    echo "  ${CHAIN_DIR}: ${chain_size} (${chain_count} files)" >> "${LOG_FILE}"
+echo "  --- audit chain ---" >> "${LOG_FILE}"
+if [ -f "${CHAIN_FILE}" ]; then
+    chain_size=$(du -h "${CHAIN_FILE}" 2>/dev/null | cut -f1)
+    chain_entries=$(wc -l < "${CHAIN_FILE}" 2>/dev/null | tr -d ' ')
+    echo "  ${CHAIN_FILE}: ${chain_size} (${chain_entries} entries)" >> "${LOG_FILE}"
 else
-    echo "  audit chain segments directory not found" >> "${LOG_FILE}"
+    echo "  audit chain not found at ${CHAIN_FILE}" >> "${LOG_FILE}"
 fi
 
 # 5. System memory (vm_stat parsed)
@@ -99,8 +103,11 @@ fi
 
 # 6. Top 5 memory consumers
 echo "  --- top 5 memory consumers ---" >> "${LOG_FILE}"
-# macOS ps doesn't support --sort, use sort command instead
-ps aux 2>/dev/null | sort -nrk 4 | head -5 | while IFS= read -r line; do
+# macOS ps has no --sort, so pipe through sort. Take the first five
+# with `sed`, not `head -5`: head closes the pipe after line 5,
+# which under `set -o pipefail` makes sort exit on SIGPIPE (141)
+# and aborts the whole script. sed drains stdin, so sort completes.
+ps aux 2>/dev/null | sort -nrk 4 | sed -n '1,5p' | while IFS= read -r line; do
     echo "  ${line}" >> "${LOG_FILE}"
 done
 

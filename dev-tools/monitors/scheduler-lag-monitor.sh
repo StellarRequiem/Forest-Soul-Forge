@@ -1,87 +1,91 @@
 #!/bin/bash
 set -euo pipefail
 export TZ="America/Los_Angeles"
-# scheduler-lag-monitor.sh — Audit chain scheduler event lag checker
+# scheduler-lag-monitor.sh — audit-chain scheduler-lag checker
 # Schedule: every hour via launchd
-# Reads recent audit chain segments for scheduler events with high tick durations.
-# Falls back to counting events in the last hour if no timing data found.
+# Scans the live audit chain for scheduler_lag events in the last
+# hour and flags any whose tick_duration_ms exceeded 2000ms.
 # Writes to monitor-logs/scheduler-lag.log
+#
+# The daemon emits one scheduler_lag event per over-budget tick
+# (event_data carries tick_duration_ms + tick_budget_ms). The live
+# chain is a single append-only JSONL file — per daemon/config.py
+# the default audit_chain_path points at examples/ (CLAUDE.md:
+# "Live audit chain is at examples/audit_chain.jsonl"). The old
+# data/audit_chain_segments/ directory never existed.
 
 LOG_DIR="/Users/llm01/Forest-Soul-Forge/data/monitor-logs"
 LOG_FILE="${LOG_DIR}/scheduler-lag.log"
 ALERT_FILE="${LOG_DIR}/ALERTS.log"
-CHAIN_DIR="/Users/llm01/Forest-Soul-Forge/data/audit_chain_segments"
+CHAIN_FILE="/Users/llm01/Forest-Soul-Forge/examples/audit_chain.jsonl"
+SLOW_TICK_MS=2000
 TIMESTAMP=$(date +"%Y-%m-%d %I:%M:%S %p %Z")
-ONE_HOUR_AGO=$(date -v-1H +"%Y-%m-%d %I:%M:%S %p %Z" 2>/dev/null || date -d '1 hour ago' +"%Y-%m-%d %I:%M:%S %p %Z" 2>/dev/null || echo "")
+# Chain timestamps are ISO-8601 UTC ("...Z"), which sort lexically,
+# so the cutoff is computed in the same shape — a string compare is
+# then a chronological one.
+CUTOFF_UTC=$(date -u -v-1H +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+    || date -u -d '1 hour ago' +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
 
 mkdir -p "${LOG_DIR}"
 
 echo "=== scheduler-lag ${TIMESTAMP} ===" >> "${LOG_FILE}"
 
-if [ ! -d "${CHAIN_DIR}" ]; then
-    echo "  audit_chain_segments directory not found at ${CHAIN_DIR}" >> "${LOG_FILE}"
+if [ ! -f "${CHAIN_FILE}" ]; then
+    echo "  audit chain not found at ${CHAIN_FILE}" >> "${LOG_FILE}"
     echo "  skipping — no data to analyze" >> "${LOG_FILE}"
     echo "" >> "${LOG_FILE}"
     exit 0
 fi
 
-# Find the most recent segment files (last 5 by modification time)
-recent_files=$(find "${CHAIN_DIR}" -name '*.jsonl' -o -name '*.json' 2>/dev/null | xargs ls -t 2>/dev/null | head -5)
+# Grep the scheduler_lag event type, then let python apply the
+# one-hour timestamp window and tally slow ticks. grep is a cheap
+# prefilter; python re-checks event_type so a stray substring match
+# can't skew the count. `|| true` keeps a no-match (grep exit 1)
+# from aborting the script under `set -o pipefail`.
+stats=$(grep -F '"event_type":"scheduler_lag"' "${CHAIN_FILE}" 2>/dev/null \
+  | CUTOFF="${CUTOFF_UTC}" SLOW_MS="${SLOW_TICK_MS}" python3 -c '
+import sys, os, json
+cutoff = os.environ.get("CUTOFF", "")
+slow_ms = float(os.environ.get("SLOW_MS", "2000"))
+total = slow = 0
+worst = 0.0
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    if obj.get("event_type") != "scheduler_lag":
+        continue
+    if cutoff and obj.get("timestamp", "") < cutoff:
+        continue
+    total += 1
+    dur = (obj.get("event_data") or {}).get("tick_duration_ms")
+    try:
+        dur = float(dur)
+    except (TypeError, ValueError):
+        continue
+    worst = max(worst, dur)
+    if dur > slow_ms:
+        slow += 1
+print(total, slow, round(worst, 2))
+' || true)
 
-if [ -z "${recent_files}" ]; then
-    echo "  no audit chain segment files found" >> "${LOG_FILE}"
-    echo "" >> "${LOG_FILE}"
-    exit 0
-fi
+total=$(printf '%s\n' "${stats}" | cut -d' ' -f1)
+slow=$(printf '%s\n' "${stats}" | cut -d' ' -f2)
+worst=$(printf '%s\n' "${stats}" | cut -d' ' -f3)
+total="${total:-0}"
+slow="${slow:-0}"
+worst="${worst:-0}"
 
-# Look for scheduler events with high tick durations
-slow_ticks=0
-total_scheduler_events=0
-has_timing_data=false
+echo "  window: events at or after ${CUTOFF_UTC:-<all>} (UTC)" >> "${LOG_FILE}"
+echo "  scheduler_lag events in window: ${total}" >> "${LOG_FILE}"
+echo "  slow ticks (>${SLOW_TICK_MS}ms): ${slow} (worst ${worst}ms)" >> "${LOG_FILE}"
 
-for f in ${recent_files}; do
-    while IFS= read -r line; do
-        # Check if line contains scheduler event
-        if echo "${line}" | grep -q '"scheduler"' 2>/dev/null; then
-            total_scheduler_events=$((total_scheduler_events + 1))
-
-            # Check for tick_duration_ms > 2000
-            duration=$(echo "${line}" | python3 -c "
-import sys, json
-try:
-    obj = json.loads(sys.stdin.read())
-    for key in ('tick_duration_ms', 'duration_ms', 'elapsed_ms'):
-        if key in obj:
-            print(obj[key])
-            break
-        if 'data' in obj and isinstance(obj['data'], dict) and key in obj['data']:
-            print(obj['data'][key])
-            break
-    else:
-        print('')
-except:
-    print('')
-" 2>/dev/null)
-
-            if [ -n "${duration}" ] && [ "${duration}" != "" ]; then
-                has_timing_data=true
-                if [ "$(echo "${duration} > 2000" | bc 2>/dev/null || python3 -c "print(1 if float('${duration}') > 2000 else 0)")" = "1" ]; then
-                    slow_ticks=$((slow_ticks + 1))
-                fi
-            fi
-        fi
-    done < "${f}"
-done
-
-if [ "${has_timing_data}" = true ]; then
-    echo "  scheduler events found: ${total_scheduler_events}" >> "${LOG_FILE}"
-    echo "  slow ticks (>2000ms): ${slow_ticks}" >> "${LOG_FILE}"
-    if [ "${slow_ticks}" -gt 0 ]; then
-        echo "[ALERT] ${TIMESTAMP} scheduler-lag: ${slow_ticks} scheduler tick(s) exceeded 2000ms" >> "${ALERT_FILE}"
-    fi
-else
-    echo "  scheduler events in recent segments: ${total_scheduler_events}" >> "${LOG_FILE}"
-    echo "  (no structured timing data found — event count only)" >> "${LOG_FILE}"
+if [ "${slow}" -gt 0 ]; then
+    echo "[ALERT] ${TIMESTAMP} scheduler-lag: ${slow} scheduler tick(s) exceeded ${SLOW_TICK_MS}ms (worst ${worst}ms)" >> "${ALERT_FILE}"
 fi
 
 echo "" >> "${LOG_FILE}"

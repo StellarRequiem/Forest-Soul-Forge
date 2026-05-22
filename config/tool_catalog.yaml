@@ -3308,10 +3308,13 @@ archetypes:
     # not whether the call is safe. See
     # docs/audits/2026-05-20-orphan-tool-disposition.md.
     #
-    # Companion genre ceiling: max_side_effects=network,
+    # Companion genre ceiling: max_side_effects=filesystem,
     # provider_constraint=local_only, memory_ceiling=private.
-    # operator_profile_write.v1 is side_effects=filesystem (under
-    # the ceiling); no genre violation.
+    # operator_profile_write.v1 is side_effects=filesystem — it sits
+    # AT the ceiling, not under it. The companion ceiling was raised
+    # network → filesystem precisely so operator_companion can host
+    # operator-truth mutation; see config/genres.yaml companion
+    # risk_profile for the rationale. No genre violation.
     standard_tools:
       - llm_think.v1             # operator-facing reasoning
       - memory_recall.v1         # query agent + personal memory

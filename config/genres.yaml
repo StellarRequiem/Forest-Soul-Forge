@@ -230,7 +230,15 @@ genres:
       policies. Highest privacy floor: local-only providers required for
       any session involving user state. NEVER spawns out-of-genre.
     risk_profile:
-      max_side_effects: network
+      # B438 follow-up — raised network → filesystem so the
+      # operator_companion role can host operator-truth mutation
+      # (operator_profile_write.v1, side_effects=filesystem, an
+      # atomic write to data/operator/profile.yaml). The privacy
+      # floor is unchanged: provider_constraint=local_only +
+      # memory_ceiling=private still bind. Filesystem-tier here is
+      # human-gated per-tool (requires_human_approval=True), not a
+      # blanket grant — it raises the ceiling, kits decide the floor.
+      max_side_effects: filesystem
       provider_constraint: local_only
       memory_ceiling: private   # ADR-0027 §5: Companion identity, non-overridable
       # ADR-0021-amendment §3 — reactive default; suggestion ceiling. Higher
