@@ -71,6 +71,14 @@ entry_agents:
   # version-controlled, operator-reviewed playbooks.
   - role: playbook_pilot
     capability: playbook_orchestration
+  # ADR-0066 Phase D (B457) — purple-team adversary simulator.
+  # Researcher kit; runs synthetic scenarios against the SOC's
+  # detection coverage. Distinct from deception_duke's
+  # deception_management: deception_duke lays canaries + watches
+  # the red rail continuously; purple_pete runs scheduled,
+  # measured, synthetic exercises and reports coverage gaps.
+  - role: purple_pete
+    capability: adversary_emulation
 
 capabilities:
   - incident_response
@@ -82,6 +90,7 @@ capabilities:
   - threat_intel_curation  # ADR-0064 T6 (B385) — D3 Phase B
   - detection_authoring    # ADR-0065 T3 (B391) — D3 Phase C
   - playbook_orchestration # ADR-0066 (B456) — D3 Phase D
+  - adversary_emulation    # ADR-0066 (B457) — D3 Phase D
   - vulnerability_check
   - access_audit
   - deception_management

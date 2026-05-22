@@ -1,0 +1,190 @@
+schema_version: 1
+name: purple_team_brief
+version: '1'
+description: |
+  purple_pete's signature skill. Produces an operator-readable brief
+  on the SOC's detection coverage based on purple_team_run_completed
+  event_data pulled from the audit chain.
+
+  ADR-0066 §3 names this skill explicitly as purple_pete's coverage-
+  gap surface, parallel to telemetry_steward_brief. It is read-only:
+  the ScenarioRunner substrate runs the synthetic exercises; this
+  skill looks back over what they recorded and tells the operator
+  which ATT&CK techniques the SOC caught and which it missed.
+
+  Pipeline:
+    1. prior_briefs — memory_recall scope=private for prior purple-
+       team briefs (so the new brief can note coverage trends).
+    2. verify_chain_integrity — audit_chain_verify confirms the
+       chain itself is hash-linked end-to-end before drawing any
+       conclusions from purple_team_run_completed entries.
+    3. summarize_coverage — llm_think reviews the operator-supplied
+       recent_purple_team_runs list (each entry is a
+       purple_team_run_completed event_data dict: scenario_id,
+       technique, detected, coverage_gap, detected_rule_ids,
+       time_to_detect_ms, responded) and emits a structured brief.
+       Flags include:
+         - coverage_gap: a scenario whose expected detection did
+           NOT fire — a real hole in the rule set.
+         - never_responded: a technique was detected but no
+           playbook resolved a response.
+         - slow_detect: time_to_detect_ms unusually high vs prior
+           briefs (operator judgment; the runner's TTD measures
+           engine latency, not real dwell time).
+         - regression: a technique detected in a prior brief that
+           is a coverage_gap now (a rule was removed or broke).
+    4. write_brief — memory_write scope=private records the brief
+       with tags so future briefs can be queried by date.
+
+  purple_pete NEVER acts on findings — a coverage gap is routed to
+  detection_engineer (who authors a rule) by the operator. The
+  brief is observational.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - text_summarize.v1
+
+inputs:
+  type: object
+  required: [recent_purple_team_runs]
+  properties:
+    recent_purple_team_runs:
+      type: array
+      description: >
+        List of recent purple_team_run_completed event_data dicts
+        to review. Each item must include scenario_id, technique,
+        detected, coverage_gap (i.e. the shape
+        ScenarioRunner._emit_run_completed writes into the chain
+        entry). The operator (or a substrate query) supplies the
+        list — the skill itself does not pull from the chain
+        directly today, exactly as noted for telemetry_steward_brief.
+      items:
+        type: object
+        required: [scenario_id, technique, detected, coverage_gap]
+        properties:
+          scenario_id:         {type: string}
+          technique:           {type: string}
+          detected:            {type: boolean}
+          coverage_gap:        {type: boolean}
+          detected_rule_ids:   {type: array}
+          time_to_detect_ms:   {type: [integer, "null"]}
+          responded:           {type: boolean}
+    window_label:
+      type: string
+      default: ""
+      description: >
+        Optional human label for the window the brief covers
+        (e.g., "last weekly exercise"). Included verbatim in the
+        brief output.
+    operator_focus:
+      type: string
+      default: ""
+      description: >
+        Optional emphasis hint (e.g., "credential-access
+        techniques", "T1059").
+
+steps:
+  - id: prior_briefs
+    tool: memory_recall.v1
+    args:
+      query: "purple_team_brief"
+      mode: private
+      limit: 7
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: summarize_coverage
+    tool: llm_think.v1
+    args:
+      task_kind: classify
+      prompt: |
+        You are purple_pete, the SOC's adversary-simulation
+        researcher. Produce an operator-readable brief on the
+        SOC's detection coverage.
+
+        Window: ${inputs.window_label}
+        Operator focus: ${inputs.operator_focus}
+
+        Audit chain integrity (verify_chain_integrity output):
+          status: ${verify_chain_integrity.out.status}
+          reason: ${verify_chain_integrity.out.reason}
+
+        Prior briefs (most recent first; may be empty for the
+        first run):
+        ${prior_briefs.out.entries}
+
+        Recent purple-team runs to review
+        (purple_team_run_completed entries):
+        ${inputs.recent_purple_team_runs}
+
+        Apply these rules IN ORDER. Emit a single brief at the end.
+
+        1. If audit chain status != "ok":
+             Output: HALT — chain_broken. Coverage conclusions
+             drawn from an unverified chain would themselves be
+             untrustworthy. The operator must repair the chain
+             before the next brief.
+             Stop here.
+
+        2. Partition the runs into:
+             - covered:  detected == true AND coverage_gap == false
+             - gaps:     coverage_gap == true
+           Report the count of each.
+
+        3. List every coverage_gap individually — name the
+           scenario_id and technique. These are the operator's
+           action items: route each to detection_engineer to
+           author a detection rule.
+
+        4. For covered techniques where responded == false, flag
+           never_responded — the SOC saw it but no playbook
+           resolved a response. Suggest the operator author a
+           playbook for that detection.
+
+        5. Compare against prior briefs. A technique that was
+           covered in a prior brief and is a gap now → flag
+           regression (a rule was removed or broke).
+
+        6. Emit the brief as a structured markdown block:
+             ## Purple Team Brief
+             window: ${inputs.window_label}
+             chain_status: ok
+             ### Coverage summary
+             - covered: N techniques
+             - gaps: N techniques
+             ### Coverage gaps (operator action items)
+             - <scenario_id>: technique <technique> NOT detected
+             ### Flags
+             - never_responded: <technique> detected, no playbook
+             - regression: <technique> covered before, gap now
+             ### Recommendation
+             <one operator-actionable sentence>
+
+        Recommendations are observational ("operator should route
+        the T1003 gap to detection_engineer"); purple_pete never
+        authors a rule or dispatches a response itself.
+
+  - id: write_brief
+    tool: memory_write.v1
+    args:
+      content: ${summarize_coverage.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "purple_team_brief"
+        - "window:${inputs.window_label}"
+        - "attestor:purple_pete"
+
+output:
+  window_label: ${inputs.window_label}
+  chain_status: ${verify_chain_integrity.out.status}
+  brief: ${summarize_coverage.out.response}
+  brief_entry_id: ${write_brief.out.entry_id}
+  # Operator reads brief; queries memory_recall by
+  # 'purple_team_brief' to walk historical coverage trends.

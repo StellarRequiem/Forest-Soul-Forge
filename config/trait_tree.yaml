@@ -712,6 +712,25 @@ roles:
       emotional: 0.4
       embodiment: 1.8   # the action surface — dispatches response steps
 
+  # ---- ADR-0066 (B457) D3 Local SOC Phase D — purple-team simulator -----
+  # purple_pete: adversary simulation. Runs synthetic attack
+  # scenarios against the SOC, measures detection coverage,
+  # surfaces gaps. Researcher genre (ADR-0066 §3): allowlisted
+  # external reach for ATT&CK reference; NO production-state
+  # mutation — writes only the simulation telemetry store. ADR-0078's
+  # table preliminarily said actuator; ADR-0066 §3 refined it to
+  # researcher with rationale (no real action surface), the same
+  # correction B386 applied to threat_intel_curator.
+  purple_pete:
+    description: "Adversary-simulation researcher. Runs synthetic attack scenarios (config/purple_pete_scenarios/) into an isolated simulation telemetry store, replays them through the production DetectionEngine in simulation mode, measures detection coverage, surfaces gaps via purple_team_brief.v1. NEVER emits into the production telemetry store, NEVER dispatches a real response. Genre: researcher (ADR-0066 §3). ADR-0066 Phase D."
+    domain_weights:
+      security: 2.4     # SOC role; adversary emulation is security signal
+      audit: 2.2        # every run → a purple_team_run_completed entry
+      cognitive: 2.2    # scenario design + coverage-gap analysis
+      communication: 1.6 # operator-facing coverage briefs
+      emotional: 0.4
+      embodiment: 1.4   # emits synthetic events — but only to the sandbox store
+
   # ---- ADR-0077 (B331-B333) D4 advanced rollout roles --------------------
   # Three new agents that round out the SW-track triune:
   #   - test_author        — researcher genre; tests-first discipline.

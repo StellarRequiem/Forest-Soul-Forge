@@ -94,6 +94,14 @@ default_skill_per_capability:
     capability: playbook_orchestration
     skill_name: playbook_run_review
     skill_version: "1"
+  # ADR-0066 Phase D (B457) — adversary_emulation maps to
+  # purple_team_brief.v1. purple_pete runs synthetic scenarios
+  # against the SOC's rule set; the brief summarizes coverage gaps
+  # for the operator (parallel to telemetry_steward_brief).
+  - domain: d3_local_soc
+    capability: adversary_emulation
+    skill_name: purple_team_brief
+    skill_version: "1"
 
   # D4 Code Review
   - domain: d4_code_review

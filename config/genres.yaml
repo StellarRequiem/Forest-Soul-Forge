@@ -222,6 +222,7 @@ genres:
       - test_author              # ADR-0077 (B331-B333) — D4 advanced rollout
       - threat_intel_curator     # ADR-0064 T6 / B386 — D3 Phase B; B341 pattern (kit needs network -> move to genre that allows it; advisory stance enforced via constitution policies)
       - detection_engineer       # ADR-0065 T3 (B391) — D3 Phase C rule authoring; same researcher pattern as threat_intel_curator (LLM synthesis + ATT&CK ref reads; no action surface)
+      - purple_pete              # ADR-0066 (B457) — D3 Phase D adversary simulation; researcher per ADR-0066 §3 (no real action surface; writes only the simulation store) — ADR-0078's table said actuator, refined here like threat_intel_curator's B386 move
 
   companion:
     description: |

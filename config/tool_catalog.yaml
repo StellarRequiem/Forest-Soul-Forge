@@ -3028,6 +3028,24 @@ archetypes:
       - audit_chain_verify.v1   # chain integrity before drawing run trends
       - text_summarize.v1       # condense playbook_executed step histories
 
+  # ADR-0066 Phase D (B457) — purple_pete archetype kit.
+  # Researcher genre; allowed network reach for ATT&CK reference
+  # pulls when designing scenarios (operator-allowlisted, same as
+  # detection_engineer). No production-state mutation: the
+  # ScenarioRunner writes synthetic events only to the simulation
+  # telemetry store, and the purple_team_brief.v1 skill is read-only.
+  # NO shell_exec / code_edit / isolate_process — purple_pete
+  # measures coverage, it never dispatches a real response.
+  purple_pete:
+    standard_tools:
+      - llm_think.v1            # scenario-coverage judgment + brief synthesis
+      - memory_recall.v1        # walk prior purple-team briefs for trending
+      - memory_write.v1         # record briefs in private memory
+      - delegate.v1             # route coverage gaps to detection_engineer
+      - audit_chain_verify.v1   # chain integrity before drawing coverage trends
+      - text_summarize.v1       # condense purple_team_run_completed histories
+      - web_fetch.v1            # ATT&CK technique catalog (operator-allowlisted)
+
   # ADR-0064 T6 (B385) — threat_intel_curator archetype kit.
   # All read_only. Curator pulls intel via web_fetch (allowlisted
   # to operator-configured intel sources), verifies + tags +

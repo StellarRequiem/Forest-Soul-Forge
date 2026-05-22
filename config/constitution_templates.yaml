@@ -967,6 +967,46 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  purple_pete:
+    # ADR-0066 §3 (B457) — adversary-simulation researcher.
+    # Researcher genre, network ceiling (allowlisted ATT&CK
+    # reference reads). purple_pete measures whether the SOC WOULD
+    # detect + respond; it has NO real action surface. The three
+    # policies enforce the simulation boundary: synthetic events go
+    # only to the simulation store, no real response is dispatched,
+    # and every synthetic artifact is provenance-stamped so a
+    # reviewer can always tell simulation from reality.
+    policies:
+      - id: forbid_production_telemetry_emit
+        rule: forbid
+        triggers: [emit_to_production_telemetry_store, ingest_production_batch, write_production_event]
+        rationale: "purple_pete writes synthetic events ONLY to the simulation telemetry store (data/telemetry_simulation.sqlite). A synthetic event in the production store would pollute every real detection scan and invalidate every Phase A/B/C audit property (ADR-0066 D3). The store separation is load-bearing."
+      - id: forbid_real_response_dispatch
+        rule: forbid
+        triggers: [invoke_playbook_pilot, dispatch_real_response, isolate_process, trigger_production_playbook]
+        rationale: "purple_pete measures whether the SOC WOULD detect + respond; it never triggers a real response. Detection replay runs against a simulation path (DetectionEngine with audit_chain=None); invoking playbook_pilot's live action surface would turn a coverage exercise into a real incident."
+      - id: require_scenario_provenance
+        rule: require
+        triggers: [emit_synthetic_event, run_scenario]
+        rationale: "Every synthetic event carries purple_team_run_id + scenario_id in its payload, and every purple_team_run_completed chain entry records simulation=true. Reviewers MUST be able to tell synthetic activity from real — provenance is mandatory, not optional (ADR-0066 D3)."
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - emit_to_production_telemetry_store
+      - dispatch_real_response
+      - invoke_playbook_pilot
+      - isolate_process
+    operator_duties:
+      - "Author + review every scenario in config/purple_pete_scenarios/. A scenario is synthetic attack content; a careless scenario that targets the wrong store is an operator bug."
+      - "Review coverage gaps from purple_team_brief. A flagged 'technique NOT detected' is a real hole in the SOC's rule set — route it to detection_engineer for a new rule."
+      - "Promote posture to GREEN only after reviewing the first few exercise reports (ADR-0078 Decision 5). RED is automatic if a scenario ever targets a real system outside the sandbox."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   threat_intel_curator:
     # ADR-0064 T6 (B385) — external threat-intel feed curator.
     # Guardian genre, read-only ceiling. Pulls from operator-
