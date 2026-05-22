@@ -195,6 +195,12 @@ async def call_tool(
     # window). The write lock is a threading.Lock; FastAPI runs sync
     # endpoints on a threadpool but this is an async endpoint, so we
     # acquire the lock manually rather than via Depends.
+    #
+    # B451 — the lock object is also threaded into ``dispatch`` so it
+    # can release it across an ``llm_think`` LLM inference (a write-free
+    # leg) instead of starving every other writer for the multi-second
+    # call. The ``with write_lock`` stays: dispatch release-then-
+    # reacquires within it and always returns with the lock held.
     # T2.2b — extract operator-supplied per-task caps. None means no cap.
     task_caps_dict: dict | None = None
     if payload.task_caps is not None:
@@ -233,6 +239,8 @@ async def call_tool(
             # operator didn't set any; dispatcher treats absence as
             # "no per-task limit" (constitution + genre floor still apply).
             task_caps=task_caps_dict,
+            # B451 — narrow the lock around the LLM inference leg.
+            write_lock=write_lock,
         )
 
     if isinstance(outcome, DispatchSucceeded):
