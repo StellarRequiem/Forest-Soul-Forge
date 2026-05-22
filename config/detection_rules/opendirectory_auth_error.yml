@@ -1,0 +1,29 @@
+# ADR-0065 detection-as-code — starter rule library.
+id: opendirectory_auth_error
+title: OpenDirectory authentication error
+description: |
+  Flags an auth_event from com.apple.opendirectoryd carrying a
+  message_type of Error — the unified-log signal for a failed local
+  authentication. A single failure is normal user friction; the
+  security signal is VOLUME (many in one window) or SEQUENCE (a
+  failure burst followed by a success). The v1 Sigma subset is
+  within-batch only, so this rule fires per-event at `low` — the
+  operator pairs it with batch-volume review until cross-batch
+  correlation lands (ADR-0065 v2).
+
+  LIVE — matches the shipped macos_unified_log adapter's payload
+  shape directly (subsystem + message_type are top-level payload
+  keys). Active as soon as that adapter is enabled in
+  config/telemetry_sources.yaml.
+level: low
+tags:
+  - attack.T1110.001      # Brute Force: Password Guessing
+logsource:
+  source: macos_unified_log
+  event_type: auth_event
+detection:
+  origin:
+    subsystem: com.apple.opendirectoryd
+  failure:
+    message_type: Error
+  condition: origin and failure

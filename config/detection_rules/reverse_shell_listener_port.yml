@@ -1,0 +1,30 @@
+# ADR-0065 detection-as-code — starter rule library.
+# One rule per file; the filename matches `id`. See the operator
+# runbook docs/runbooks/detection-as-code.md for authoring + tuning.
+id: reverse_shell_listener_port
+title: Outbound connection to a common reverse-shell / C2 port
+description: |
+  Flags an outbound network_connection whose destination port is a
+  well-known reverse-shell or C2 handler default (4444 = Metasploit
+  multi/handler, 5555 = frequent alternate). A legitimate process
+  rarely dials these ports outbound; treat a match as a lead to
+  investigate, not a verdict.
+
+  STARTER TEMPLATE — activates once an adapter feeding
+  network_connection events is wired. The shipped macos_unified_log
+  adapter emits only auth_event + log_line, so this rule is inert
+  until an endpoint/network adapter lands. Tune the port set to your
+  environment before promoting past `low`.
+level: high
+tags:
+  - attack.T1571          # Non-Standard Port
+logsource:
+  event_type: network_connection
+detection:
+  msf_default:
+    network.direction: outbound
+    network.destination_port: 4444
+  alt_default:
+    network.direction: outbound
+    network.destination_port: 5555
+  condition: msf_default or alt_default

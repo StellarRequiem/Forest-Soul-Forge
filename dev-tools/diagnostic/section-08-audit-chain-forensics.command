@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # ADR-0079 section 08 — audit chain forensics.
 #
-# Three checks against the live chain:
+# Four checks against the live chain:
 #   1. audit_chain_verify end-to-end (catches the known seq gap
 #      at 3728->3729 if still present)
 #   2. signature coverage spot-check (sample N entries, confirm
 #      sig present + non-empty)
 #   3. body_hash present on summarizable event types (post-Y7
 #      lazy summarization preserves body_hash for tamper-evidence)
+#   4. detection_fired events well-formed (ADR-0065 D6 — rule_id +
+#      rule_version + batch_id + technique + severity +
+#      matched_event_ids on every detection-as-code chain entry)
 #
 # Reads the chain file directly from disk. The canonical path
 # per CLAUDE.md is examples/audit_chain.jsonl (NOT data/);
@@ -237,6 +240,49 @@ try:
                         f"{missing_bh}/{turn_events} turn events missing body_hash"))
 except Exception as e:
     results.append(("FAIL", "body_hash on turn events",
+                    f"{type(e).__name__}: {e}"))
+
+# ---- 4. detection_fired events well-formed (ADR-0065 T4) -----------------
+# ADR-0065 D6: detection_fired events are first-class chain entries.
+# Each (rule, batch) match the DetectionEngine scores emits one
+# entry carrying rule_id + rule_version + batch_id + technique +
+# severity + matched_event_ids. Section-08 confirms that shape on
+# disk so a malformed emitter is caught here, not downstream when
+# anomaly_ace's LLM follow-up trips over a missing field. No
+# detection_fired events yet (engine idle / no matches) is a valid
+# state — PASS-skipped, same posture as the body_hash check above.
+try:
+    sample = lines[-2000:] if n_total > 2000 else lines
+    REQUIRED = ("rule_id", "rule_version", "batch_id", "technique",
+                "severity", "matched_event_ids")
+    fired = 0
+    malformed: list[str] = []
+    for line in sample:
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("event_type") != "detection_fired":
+            continue
+        fired += 1
+        ed = e.get("event_data") or e.get("payload") or {}
+        missing = [k for k in REQUIRED if k not in ed]
+        if missing:
+            malformed.append(f"seq={e.get('seq')}: missing {missing}")
+    if fired == 0:
+        results.append(("PASS", "detection_fired events well-formed",
+                        "no detection_fired events in sample window "
+                        "(engine idle or no matches yet — skipped)"))
+    elif not malformed:
+        results.append(("PASS", "detection_fired events well-formed",
+                        f"{fired}/{fired} detection_fired entries carry the "
+                        f"ADR-0065 D6 event_data shape"))
+    else:
+        results.append(("FAIL", "detection_fired events well-formed",
+                        f"{len(malformed)}/{fired} malformed: "
+                        + "; ".join(malformed[:5])))
+except Exception as e:
+    results.append(("FAIL", "detection_fired events well-formed",
                     f"{type(e).__name__}: {e}"))
 
 # ---- emit -----------------------------------------------------------------

@@ -11,6 +11,9 @@
 #   - handoffs.yaml: every (domain, capability) target exists;
 #     cascade rules reference real domains
 #   - domain manifests: entry_agents reference real roles
+#   - config/detection_rules/*.yml: every rule parses via the
+#     Sigma-subset parser (ADR-0065 D7 — one bad rule halts the
+#     DetectionEngine; the harness catches it before runtime)
 #
 # Reads no daemon — pure on-disk verification. Foundation section;
 # every later section assumes this passes.
@@ -243,6 +246,37 @@ def _():
     # expected pre-rollout state. The check exists to keep the
     # operator's mental model honest (here is what's queued).
     return f"{len(planned)} planned domain(s) with deferred wiring: {'; '.join(planned) if planned else 'none'}"
+
+
+# ---- detection rules (ADR-0065 T4) ----------------------------------------
+# Per ADR-0065 D7, the DetectionEngine refuses to come up if ANY
+# rule in config/detection_rules/ fails to parse — a single broken
+# rule blocks the whole engine. Section-01 runs the exact same
+# parse the daemon's lifespan loader runs, so the operator gets the
+# full punch list of bad rules from the harness BEFORE they hit
+# the failure at runtime. parse_rules_from_dir handles a missing
+# directory gracefully (returns empty) — an idle engine with no
+# rules is a valid state, not a failure.
+@check("config/detection_rules/*.yml all parse via the Sigma-subset parser")
+def _():
+    from forest_soul_forge.security.detection import parse_rules_from_dir
+    rules_dir = REPO / "config" / "detection_rules"
+    if not rules_dir.exists():
+        return "no config/detection_rules/ directory — engine idle (no rules to scan)"
+    parsed, failed = parse_rules_from_dir(rules_dir)
+    assert not failed, (
+        "rule parse failures (engine refuses to run per ADR-0065 D7): "
+        + "; ".join(
+            f"{p.name or '(duplicate-id)'}: {e}" for p, e in failed[:5]
+        )
+    )
+    # ATT&CK technique coverage is the operator-facing signal — the
+    # same coverage view the steward summarizes against the matrix.
+    techniques = sorted({t for r in parsed for t in r.tags})
+    return (
+        f"{len(parsed)} rule(s) parsed clean; "
+        f"ATT&CK tags: {', '.join(techniques) if techniques else 'none'}"
+    )
 
 
 # ---- emit report ----------------------------------------------------------

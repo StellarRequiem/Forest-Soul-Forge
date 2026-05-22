@@ -1,6 +1,6 @@
 # ADR-0065 — Detection-as-code + detection_engineer
 
-**Status:** Proposed
+**Status:** Accepted (2026-05-22, B389-B392). All 6 tranches shipped; D3 Phase C closed; detection_engineer role live (DetectionEngineer-D3). See `docs/runbooks/detection-as-code.md`.
 **Date:** 2026-05-18
 **Tracks:** D3 Local SOC Phase C
 **Supersedes:** none

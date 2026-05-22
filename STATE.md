@@ -32,7 +32,7 @@ A self-contained snapshot for a developer joining the project. What's implemente
 
 **Domain rollouts (per ADR-0067 dependency order D4 → D3 → D8 → D1 → D2 → D7 → D9 → D10 → D5 → D6):**
 - **D4 Code Review** — CLOSED (ADR-0077, Bursts 331-340). TestAuthor-D4, MigrationPilot-D4, ReleaseGatekeeper-D4 alive.
-- **D3 Local SOC** — Phase A CLOSED (ADR-0078, Bursts 342-347; ForensicArchivist-D3 alive). Phase B telemetry pipeline (ADR-0064) CLOSED Bursts 348-386. Phase C detection-as-code (ADR-0065) in flight; Phase D SOAR playbooks (ADR-0066) proposed.
+- **D3 Local SOC** — Phase A CLOSED (ADR-0078, Bursts 342-347; ForensicArchivist-D3 alive). Phase B telemetry pipeline (ADR-0064) CLOSED Bursts 348-386. Phase C detection-as-code (ADR-0065) CLOSED Bursts 389-392 — DetectionEngineer-D3 alive; Sigma-subset rule engine + per-batch scan hook + 8-rule starter library; runbook `docs/runbooks/detection-as-code.md`. Phase D SOAR playbooks (ADR-0066) proposed.
 - **D8/D1/D2/D7/D9/D10/D5/D6** — upstream; not started.
 
 **Tooling discipline closed since B258:** ADR-0079 diagnostic harness (15 sections, daily 8am scheduled task), ADR-0080 capability tree UI, ADR-0081 substrate wiring coverage (WiringSentinel + 4-hour cadence). Latest diagnostic-all run (2026-05-19T18:41:29Z) reports **14 PASS / 1 FAIL** — single FAIL is 3 orphan tools in section-15, down from 6 in May-19 morning. Triune-Main (Engineer-Main + Reviewer-Main + Architect-Main) live-verified with real multi-agent delegate chain.
