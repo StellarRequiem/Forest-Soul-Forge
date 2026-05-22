@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ADR-0079 section 08 — audit chain forensics.
 #
-# Four checks against the live chain:
+# Six checks against the live chain:
 #   1. audit_chain_verify end-to-end (catches the known seq gap
 #      at 3728->3729 if still present)
 #   2. signature coverage spot-check (sample N entries, confirm
@@ -11,6 +11,11 @@
 #   4. detection_fired events well-formed (ADR-0065 D6 — rule_id +
 #      rule_version + batch_id + technique + severity +
 #      matched_event_ids on every detection-as-code chain entry)
+#   5. playbook_executed events well-formed (ADR-0066 D5 —
+#      playbook_id + playbook_version + trigger_detection_id +
+#      steps + outcome on every SOAR playbook chain entry)
+#   6. purple_team_run_completed events carry simulation provenance
+#      (ADR-0066 D3 — simulation flag + scenario_id + technique)
 #
 # Reads the chain file directly from disk. The canonical path
 # per CLAUDE.md is examples/audit_chain.jsonl (NOT data/);
@@ -283,6 +288,88 @@ try:
                         + "; ".join(malformed[:5])))
 except Exception as e:
     results.append(("FAIL", "detection_fired events well-formed",
+                    f"{type(e).__name__}: {e}"))
+
+# ---- 5. playbook_executed events well-formed (ADR-0066 T6) ---------------
+# ADR-0066 D5: playbook_executed events are first-class chain
+# entries. The PlaybookEngine emits one per fired playbook carrying
+# playbook_id + playbook_version + trigger_detection_id + steps +
+# outcome. Section-08 confirms that shape on disk so a malformed
+# emitter is caught here. No playbook_executed events yet (engine
+# idle / no detections fired a playbook) is a valid state —
+# PASS-skipped, same posture as the detection_fired check above.
+try:
+    sample = lines[-2000:] if n_total > 2000 else lines
+    REQUIRED = ("playbook_id", "playbook_version", "trigger_detection_id",
+                "steps", "outcome")
+    ran = 0
+    malformed: list[str] = []
+    for line in sample:
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("event_type") != "playbook_executed":
+            continue
+        ran += 1
+        ed = e.get("event_data") or e.get("payload") or {}
+        missing = [k for k in REQUIRED if k not in ed]
+        if missing:
+            malformed.append(f"seq={e.get('seq')}: missing {missing}")
+    if ran == 0:
+        results.append(("PASS", "playbook_executed events well-formed",
+                        "no playbook_executed events in sample window "
+                        "(no playbook fired yet — skipped)"))
+    elif not malformed:
+        results.append(("PASS", "playbook_executed events well-formed",
+                        f"{ran}/{ran} playbook_executed entries carry the "
+                        f"ADR-0066 D5 event_data shape"))
+    else:
+        results.append(("FAIL", "playbook_executed events well-formed",
+                        f"{len(malformed)}/{ran} malformed: "
+                        + "; ".join(malformed[:5])))
+except Exception as e:
+    results.append(("FAIL", "playbook_executed events well-formed",
+                    f"{type(e).__name__}: {e}"))
+
+# ---- 6. purple_team_run_completed carries simulation provenance ----------
+# ADR-0066 D3: every purple_team_run_completed event carries
+# simulation=true + scenario_id + technique so a reviewer can always
+# tell synthetic activity from real SOC activity. A purple-team
+# event WITHOUT the simulation flag is a provenance break — the most
+# important property the substrate has to preserve.
+try:
+    sample = lines[-2000:] if n_total > 2000 else lines
+    runs = 0
+    malformed: list[str] = []
+    for line in sample:
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("event_type") != "purple_team_run_completed":
+            continue
+        runs += 1
+        ed = e.get("event_data") or e.get("payload") or {}
+        missing = [k for k in ("scenario_id", "technique") if k not in ed]
+        if ed.get("simulation") is not True:
+            missing.append("simulation!=true")
+        if missing:
+            malformed.append(f"seq={e.get('seq')}: {missing}")
+    if runs == 0:
+        results.append(("PASS", "purple_team_run_completed provenance",
+                        "no purple_team_run_completed events in sample "
+                        "window (no exercise run yet — skipped)"))
+    elif not malformed:
+        results.append(("PASS", "purple_team_run_completed provenance",
+                        f"{runs}/{runs} purple-team entries carry "
+                        f"simulation=true + scenario provenance"))
+    else:
+        results.append(("FAIL", "purple_team_run_completed provenance",
+                        f"{len(malformed)}/{runs} broken: "
+                        + "; ".join(malformed[:5])))
+except Exception as e:
+    results.append(("FAIL", "purple_team_run_completed provenance",
                     f"{type(e).__name__}: {e}"))
 
 # ---- emit -----------------------------------------------------------------

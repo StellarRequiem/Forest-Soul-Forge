@@ -279,6 +279,51 @@ def _():
     )
 
 
+# ADR-0066 Phase D (B459) — the SOAR playbook + purple-team scenario
+# libraries get the same static-parse gate as the detection rules.
+# Per ADR-0066 D7 a single bad playbook blocks the PlaybookEngine;
+# section-01 runs the exact parse the daemon's loader runs so the
+# operator gets the full punch list from the harness before runtime.
+@check("config/playbooks/*.yml all parse via the SOAR playbook parser")
+def _():
+    from forest_soul_forge.security.playbook import parse_playbooks_from_dir
+    pb_dir = REPO / "config" / "playbooks"
+    if not pb_dir.exists():
+        return "no config/playbooks/ directory — PlaybookEngine idle (no playbooks)"
+    parsed, failed = parse_playbooks_from_dir(pb_dir)
+    assert not failed, (
+        "playbook parse failures (engine refuses to run per ADR-0066 D7): "
+        + "; ".join(
+            f"{p.name or '(duplicate-id)'}: {e}" for p, e in failed[:5]
+        )
+    )
+    rule_refs = sorted({r for pb in parsed for r in pb.trigger.detection_rule_ids})
+    return (
+        f"{len(parsed)} playbook(s) parsed clean; "
+        f"trigger rules: {', '.join(rule_refs) if rule_refs else 'none'}"
+    )
+
+
+@check("config/purple_pete_scenarios/*.yml all parse via the scenario parser")
+def _():
+    from forest_soul_forge.security.purple_team import parse_scenarios_from_dir
+    sc_dir = REPO / "config" / "purple_pete_scenarios"
+    if not sc_dir.exists():
+        return "no config/purple_pete_scenarios/ directory — purple_pete idle"
+    parsed, failed = parse_scenarios_from_dir(sc_dir)
+    assert not failed, (
+        "scenario parse failures: "
+        + "; ".join(
+            f"{p.name or '(duplicate-id)'}: {e}" for p, e in failed[:5]
+        )
+    )
+    techniques = sorted({s.technique for s in parsed})
+    return (
+        f"{len(parsed)} scenario(s) parsed clean; "
+        f"ATT&CK techniques: {', '.join(techniques) if techniques else 'none'}"
+    )
+
+
 # ---- emit report ----------------------------------------------------------
 passed = sum(1 for r in results if r[0] == "PASS")
 failed = sum(1 for r in results if r[0] == "FAIL")

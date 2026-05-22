@@ -1,6 +1,6 @@
 # ADR-0078 — D3 Local SOC domain: advanced rollout
 
-**Status:** Accepted (2026-05-17, B342-B347). Phase A CLOSED — ForensicArchivist-D3 born; archive_evidence.v1 live. Phases B/C/D gated on ADR-0064/0065/0066 (B: CLOSED; C: CLOSED — ADR-0065 all 6 tranches shipped B389-B392, DetectionEngineer-D3 live; D: queued).
+**Status:** Accepted (2026-05-17, B342-B347). Phase A CLOSED — ForensicArchivist-D3 born; archive_evidence.v1 live. Phases B/C/D gated on ADR-0064/0065/0066 (B: CLOSED; C: CLOSED — ADR-0065 all 6 tranches shipped B389-B392, DetectionEngineer-D3 live; D: CLOSED — ADR-0066 all 6 tranches shipped B454-B459, playbook_pilot + purple_pete live (PlaybookPilot-D3, PurplePete-D3)). **D3 Local SOC fully live — all 15 SOC agents alive (2026-05-22).**
 **Date:** 2026-05-16
 **Tracks:** Domain Rollout / Security
 **Supersedes:** none

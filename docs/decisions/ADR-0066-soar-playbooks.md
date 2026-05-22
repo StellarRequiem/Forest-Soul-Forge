@@ -1,6 +1,12 @@
 # ADR-0066 — SOAR playbooks + playbook_pilot + purple_pete
 
-**Status:** Proposed
+**Status:** Accepted (2026-05-22, B454-B459). All 6 tranches
+shipped; D3 Local SOC Phase D closed; playbook_pilot + purple_pete
+live (PlaybookPilot-D3, PurplePete-D3). The SOAR playbook substrate
++ purple-team simulation substrate ship under
+`src/forest_soul_forge/security/playbook/` and
+`.../purple_team/`. See `docs/runbooks/soar-playbooks.md`. This
+ADR closes D3 entirely — all 15 SOC agents alive.
 **Date:** 2026-05-18
 **Tracks:** D3 Local SOC Phase D
 **Supersedes:** none

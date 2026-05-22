@@ -407,6 +407,28 @@ KNOWN_EVENT_TYPES: frozenset[str] = frozenset({
     #   reason: str (operator-readable routing rationale),
     # }
     "domain_routed",
+    # ADR-0064 / ADR-0065 — D3 SOC pipeline events. detection_fired
+    # (DetectionEngine.scan, ADR-0065 T2) and telemetry_batch_ingested
+    # (telemetry ingestor, ADR-0064 T3) are emitted by shipped code
+    # but were never added to the allowlist — the same allowlist-drift
+    # the B199 block above fixed. Folded in here with the Phase D
+    # closure so the verifier stops flagging real D3 events as
+    # forward-compat warnings.
+    "telemetry_batch_ingested",
+    "detection_fired",
+    # ADR-0066 Phase D (B459) — SOAR substrate events.
+    #   - playbook_executed: PlaybookEngine resolved a fired
+    #     detection against a playbook. event_data carries
+    #     playbook_id, playbook_version (sha256 of the body),
+    #     trigger_detection_id, the per-step history with each
+    #     step's approval_state, and outcome ∈ {completed,
+    #     approval_pending, halted}.
+    #   - purple_team_run_completed: ScenarioRunner finished a
+    #     synthetic scenario. event_data carries scenario_id,
+    #     technique, detected, coverage_gap, timing, and
+    #     simulation=true so reviewers filter synthetic from real.
+    "playbook_executed",
+    "purple_team_run_completed",
 })
 
 

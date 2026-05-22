@@ -1,13 +1,16 @@
 # Domain D3 — Local SOC (Security Operations Center)
-# ADR-0067 T1 manifest. Status: partial — the 9-agent blue team
-# alive in the registry (log_lurker, anomaly_ace, response_rogue,
-# vault_warden, patch_patrol, gatekeeper, net_ninja, zero_zero,
-# deception_duke) handles baseline monitoring + triage. Full SOC
-# capabilities (telemetry streaming, detection-as-code, SOAR
-# playbooks) ship in ADR-0064 / 0065 / 0066.
+# ADR-0067 T1 manifest. Status: live (2026-05-22) — the full
+# 15-agent SOC is alive. The 9-agent blue team (log_lurker,
+# anomaly_ace, response_rogue, vault_warden, patch_patrol,
+# gatekeeper, net_ninja, zero_zero, deception_duke) handles
+# baseline monitoring + triage; the 6-agent advanced rollout
+# (ADR-0078) adds forensic_archivist (Phase A), telemetry_steward +
+# threat_intel_curator (Phase B), detection_engineer (Phase C), and
+# playbook_pilot + purple_pete (Phase D). The full Detect → Respond
+# → Test loop ships across ADR-0064 / 0065 / 0066.
 domain_id: d3_local_soc
 name: Local Security Operations Center
-status: partial
+status: live
 
 description: |
   Single-host, audit-grade, sovereign SOC. Continuous monitoring +
