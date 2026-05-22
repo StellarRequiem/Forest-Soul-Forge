@@ -693,6 +693,25 @@ roles:
       emotional: 0.4
       embodiment: 0.5
 
+  # ---- ADR-0066 (B456) D3 Local SOC Phase D — SOAR playbook pilot --------
+  # playbook_pilot: runs operator-authored SOAR playbooks against
+  # fired detections. Actuator genre — the role's purpose IS action.
+  # Discipline is enforced via constitution policy, not genre:
+  # acts ONLY on a detection-triggered playbook (never operator
+  # intent), never substitutes a step's tool at runtime, never
+  # authors playbook content. Distinct from response_rogue:
+  # response_rogue runs ad-hoc coded response paths; playbook_pilot
+  # runs codified, version-controlled, operator-reviewed playbooks.
+  playbook_pilot:
+    description: "SOAR playbook actuator. Consumes detection_fired events, resolves them against operator-authored playbooks (config/playbooks/), runs steps under explicit approval governance (default-deny; explicit allowlist), emits playbook_executed audit events. NEVER acts on operator-typed intent (response_rogue's lane), NEVER substitutes a step's tool at runtime, NEVER authors playbook content. Genre: actuator (external ceiling — same as response_rogue). ADR-0066 Phase D."
+    domain_weights:
+      security: 2.4     # SOC action role; response is security work
+      audit: 2.6        # every step → a playbook_executed chain entry
+      cognitive: 1.9    # trigger resolution + approval/cooldown reasoning
+      communication: 1.7 # operator-facing approval requests + run reviews
+      emotional: 0.4
+      embodiment: 1.8   # the action surface — dispatches response steps
+
   # ---- ADR-0077 (B331-B333) D4 advanced rollout roles --------------------
   # Three new agents that round out the SW-track triune:
   #   - test_author        — researcher genre; tests-first discipline.

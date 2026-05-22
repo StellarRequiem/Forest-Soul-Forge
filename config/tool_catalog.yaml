@@ -3010,6 +3010,24 @@ archetypes:
       # engineer's surface is read + propose; the rule file commit
       # is operator-driven.
 
+  # ADR-0066 Phase D (B456) — playbook_pilot archetype kit.
+  # Actuator genre, but the kit shipped in Phase D is the review-
+  # and-oversight surface: the PlaybookEngine substrate is the
+  # resolve-and-record action layer (live step dispatch is deferred,
+  # exactly as DetectionEngine's daemon-lifespan wiring is deferred).
+  # The pilot's signature skill playbook_run_review.v1 is read-only —
+  # it summarizes recent playbook_executed events for the operator.
+  # NO shell_exec / code_edit: the pilot never authors playbooks
+  # (forbid_playbook_authorship) and never edits source.
+  playbook_pilot:
+    standard_tools:
+      - llm_think.v1            # judgment over recent playbook runs
+      - memory_recall.v1        # walk prior run reviews for trending
+      - memory_write.v1         # record run reviews in private memory
+      - delegate.v1             # escalate approval-pending runs to operator
+      - audit_chain_verify.v1   # chain integrity before drawing run trends
+      - text_summarize.v1       # condense playbook_executed step histories
+
   # ADR-0064 T6 (B385) — threat_intel_curator archetype kit.
   # All read_only. Curator pulls intel via web_fetch (allowlisted
   # to operator-configured intel sources), verifies + tags +

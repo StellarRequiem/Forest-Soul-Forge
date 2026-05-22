@@ -63,6 +63,14 @@ entry_agents:
   # + proposes rules.
   - role: detection_engineer
     capability: detection_authoring
+  # ADR-0066 Phase D (B456) — SOAR playbook pilot. Actuator kit;
+  # consumes detection_fired events, runs operator-authored
+  # playbooks under approval governance. Distinct from
+  # response_rogue's incident_response: response_rogue runs ad-hoc
+  # coded response paths; playbook_pilot runs codified,
+  # version-controlled, operator-reviewed playbooks.
+  - role: playbook_pilot
+    capability: playbook_orchestration
 
 capabilities:
   - incident_response
@@ -73,6 +81,7 @@ capabilities:
   - telemetry_oversight    # ADR-0064 T4 (B379) — D3 Phase B
   - threat_intel_curation  # ADR-0064 T6 (B385) — D3 Phase B
   - detection_authoring    # ADR-0065 T3 (B391) — D3 Phase C
+  - playbook_orchestration # ADR-0066 (B456) — D3 Phase D
   - vulnerability_check
   - access_audit
   - deception_management

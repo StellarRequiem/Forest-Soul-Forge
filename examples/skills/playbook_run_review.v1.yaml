@@ -1,0 +1,200 @@
+schema_version: 1
+name: playbook_run_review
+version: '1'
+description: |
+  playbook_pilot's signature skill. Produces an operator-readable
+  review of recent SOAR playbook runs based on playbook_executed
+  event_data pulled from the audit chain.
+
+  This skill is read-only. The pilot's action surface is the
+  PlaybookEngine substrate (ADR-0066 T2) — which resolves fired
+  detections against playbooks and records the response plan. This
+  skill is the operator-facing OVERSIGHT half: it looks back over
+  what the engine recorded and tells the operator what fired, what
+  is waiting on their approval, and what looks off.
+
+  Pipeline:
+    1. prior_reviews — memory_recall scope=private for prior run
+       reviews (so the new review can note trends vs. the last one).
+    2. verify_chain_integrity — audit_chain_verify confirms the
+       chain itself is hash-linked end-to-end before we draw any
+       conclusions from playbook_executed entries. A review built
+       on an unverified chain would itself be untrustworthy.
+    3. summarize_runs — llm_think reviews the operator-supplied
+       recent_playbook_runs list (each entry is a playbook_executed
+       event_data dict: playbook_id, playbook_version,
+       trigger_detection_id, steps[], outcome) and emits a
+       structured review. Flags include:
+         - approval_pending: a run with steps still waiting on
+           operator approval in the Pending tab.
+         - cooldown_storm: the same playbook_id firing many times
+           in the window (a candidate for a longer cooldown).
+         - version_drift: the same playbook_id appearing under two
+           different playbook_version hashes (the playbook file
+           changed mid-window — confirm the change was intended).
+         - auto_approved_action: a state-changing step that ran
+           auto-approved — surfaced so the operator periodically
+           re-confirms the steps_auto_approved allowlist.
+    4. write_review — memory_write scope=private records the review
+       with tags so future reviews can be queried by date.
+
+  The pilot NEVER takes action from this skill — it reads + reviews.
+  Follow-ups (approving a pending step, tuning a cooldown, editing
+  a playbook) are operator-driven.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - text_summarize.v1
+
+inputs:
+  type: object
+  required: [recent_playbook_runs]
+  properties:
+    recent_playbook_runs:
+      type: array
+      description: >
+        List of recent playbook_executed event_data dicts to
+        review. Each item must include playbook_id,
+        playbook_version, trigger_detection_id, steps, outcome
+        (i.e. the shape PlaybookEngine._emit_playbook_executed
+        writes into the chain entry). The operator (or a substrate
+        query) supplies the list — the skill itself does not pull
+        from the chain directly today (a future scope_chain_query.v1
+        tool could change this, exactly as noted for
+        telemetry_steward_brief).
+      items:
+        type: object
+        required: [playbook_id, playbook_version, outcome, steps]
+        properties:
+          playbook_id:          {type: string}
+          playbook_version:     {type: string}
+          trigger_detection_id: {type: [integer, "null"]}
+          outcome:              {type: string}
+          steps:                {type: array}
+    window_label:
+      type: string
+      default: ""
+      description: >
+        Optional human label for the window the review covers
+        (e.g., "last 24h", "since 2026-05-21T00:00Z"). Included
+        verbatim in the review output for operator readability.
+    operator_focus:
+      type: string
+      default: ""
+      description: >
+        Optional emphasis hint. If set, the review prioritizes this
+        angle (e.g., "approval backlog", "isolate-and-collect").
+
+steps:
+  - id: prior_reviews
+    tool: memory_recall.v1
+    args:
+      query: "playbook_run_review"
+      mode: private
+      limit: 7
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: summarize_runs
+    tool: llm_think.v1
+    args:
+      task_kind: classify
+      prompt: |
+        You are playbook_pilot, the SOC's SOAR playbook actuator.
+        Produce an operator-readable review of recent playbook runs.
+
+        Window: ${inputs.window_label}
+        Operator focus: ${inputs.operator_focus}
+
+        Audit chain integrity (verify_chain_integrity output):
+          status: ${verify_chain_integrity.out.status}
+          reason: ${verify_chain_integrity.out.reason}
+
+        Prior reviews (most recent first; may be empty for the
+        first run):
+        ${prior_reviews.out.entries}
+
+        Recent playbook runs to review (playbook_executed entries):
+        ${inputs.recent_playbook_runs}
+
+        Apply these rules IN ORDER. Emit a single review at the end.
+
+        1. If audit chain status != "ok":
+             Output: HALT — chain_broken. Conclusions about
+             playbook activity drawn from an unverified chain
+             would themselves be untrustworthy. The operator must
+             repair the chain before the next review.
+             Stop here.
+
+        2. For each run, read `outcome`. Tally:
+             - completed         (all steps auto-approved)
+             - approval_pending  (≥1 step waiting on the operator)
+             - halted            (a resolve-time error)
+
+        3. Flag approval_pending runs individually — name the
+           playbook_id and the step ids whose approval_state is
+           "pending_approval". These are the operator's action
+           items.
+
+        4. Aggregate by playbook_id. If one playbook_id fired many
+           times in the window, flag cooldown_storm and suggest the
+           operator consider a longer trigger.cooldown_seconds.
+
+        5. If the same playbook_id appears under two different
+           playbook_version hashes, flag version_drift — the
+           playbook file changed mid-window; confirm it was
+           intended.
+
+        6. List every step that ran with approval_state
+           "auto_approved" and whose action is state-changing
+           (isolate_process, block_network, quarantine_artifact,
+           etc.) — flag auto_approved_action so the operator
+           periodically re-confirms the steps_auto_approved
+           allowlist.
+
+        7. Emit the review as a structured markdown block:
+             ## Playbook Run Review
+             window: ${inputs.window_label}
+             chain_status: ok
+             ### Outcome tally
+             - completed: N
+             - approval_pending: N
+             - halted: N
+             ### Operator action items
+             - approval_pending: <playbook_id> step <step_id>
+             ### Flags
+             - cooldown_storm: <playbook_id> fired N times
+             - version_drift: <playbook_id> ran under 2 versions
+             - auto_approved_action: <playbook_id> step <step_id>
+             ### Recommendation
+             <one operator-actionable sentence>
+
+        Recommendations are observational ("operator should review
+        the approval backlog for isolate-and-collect"); never
+        instructive about response itself — the pilot reviews its
+        own runs, it does not freelance new actions here.
+
+  - id: write_review
+    tool: memory_write.v1
+    args:
+      content: ${summarize_runs.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "playbook_run_review"
+        - "window:${inputs.window_label}"
+        - "attestor:playbook_pilot"
+
+output:
+  window_label: ${inputs.window_label}
+  chain_status: ${verify_chain_integrity.out.status}
+  review: ${summarize_runs.out.response}
+  review_entry_id: ${write_review.out.entry_id}
+  # Operator reads review; queries memory_recall by
+  # 'playbook_run_review' to walk historical reviews.

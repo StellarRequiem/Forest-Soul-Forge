@@ -923,6 +923,50 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  playbook_pilot:
+    # ADR-0066 Phase D (B456) — SOAR playbook actuator. Actuator
+    # genre, external ceiling (same ceiling as response_rogue). The
+    # role's purpose IS action, so the genre permits it; these four
+    # policies bound WHICH actions and WHEN. The pilot's whole
+    # safety story is that every action traces back to a fired
+    # detection plus an operator-authored, version-controlled
+    # playbook — never to operator-typed intent and never to an
+    # LLM-synthesized procedure.
+    policies:
+      - id: forbid_unscheduled_action
+        rule: forbid
+        triggers: [act_on_operator_intent, run_playbook_without_detection, dispatch_step_without_trigger]
+        rationale: "The pilot acts ONLY on a detection-triggered playbook run. Operator-typed 'go isolate that process' is response_rogue's lane. The pilot's safety story is that every action traces back to a fired detection_fired event plus an operator-authored playbook; an unscheduled action breaks that chain."
+      - id: require_playbook_signature_match
+        rule: require
+        triggers: [dispatch_playbook_step, resolve_step_action]
+        rationale: "Every step's action must match the playbook's declared `action` verbatim. Runtime substitution — swapping the tool a step invokes based on detection content — is the injection surface a hostile detection+playbook pairing would exploit. The playbook_version sha256 on each playbook_executed event pins exactly what ran (ADR-0066 D5)."
+      - id: forbid_playbook_authorship
+        rule: forbid
+        triggers: [write_to_playbooks_dir, edit_playbook_file, commit_playbook, synthesize_playbook]
+        rationale: "Playbooks in config/playbooks/ are OPERATOR-authored, version-controlled, code-reviewed (ADR-0066 D1). The pilot consumes; it never writes playbook content. LLM-synthesized response procedures are explicitly out of scope — the action surface is too consequential for autonomous authorship."
+      - id: require_cooldown_respect
+        rule: require
+        triggers: [process_detection, fire_playbook]
+        rationale: "A detection that keeps firing for the same target (pid, file path, user id) must NOT re-run the playbook within its cooldown window (ADR-0066 D4). Cooldown suppression is not optional — without it a noisy detection becomes an action storm."
+    risk_thresholds:
+      auto_halt_risk: 0.85
+      escalate_risk: 0.55
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - act_on_operator_intent
+      - run_playbook_without_detection
+      - write_to_playbooks_dir
+      - runtime_tool_substitution
+    operator_duties:
+      - "Author + review every playbook in config/playbooks/. The pilot executes what you write; a bad playbook is an operator bug, not a pilot bug."
+      - "Review every approval-gated step in the Pending tab. ADR-0066 D2 default-deny means every state-changing step queues for you unless you explicitly added it to steps_auto_approved."
+      - "Audit the steps_auto_approved allowlist quarterly. Each auto-approved step is an action that fires at machine speed with you out of the loop."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   threat_intel_curator:
     # ADR-0064 T6 (B385) — external threat-intel feed curator.
     # Guardian genre, read-only ceiling. Pulls from operator-

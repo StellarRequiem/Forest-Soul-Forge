@@ -83,6 +83,17 @@ default_skill_per_capability:
     capability: detection_authoring
     skill_name: propose_detection
     skill_version: "1"
+  # ADR-0066 Phase D (B456) — playbook_orchestration maps to
+  # playbook_run_review.v1. The pilot's operator-facing surface is
+  # a read-only review of recent playbook_executed events; the
+  # response actions themselves are playbook-driven, not handoff-
+  # driven (ADR-0066 D1: composition over nesting — the playbook IS
+  # the codified cascade, which is why no blanket d3 cascade_rules
+  # are added for Phase D).
+  - domain: d3_local_soc
+    capability: playbook_orchestration
+    skill_name: playbook_run_review
+    skill_version: "1"
 
   # D4 Code Review
   - domain: d4_code_review

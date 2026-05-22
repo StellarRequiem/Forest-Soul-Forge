@@ -130,6 +130,7 @@ genres:
       - experimenter             # ADR-0056 — Smith / sandbox self-improvement
       - migration_pilot          # ADR-0077 / B341 — moved from guardian
       - release_gatekeeper       # ADR-0077 / B341 — moved from guardian
+      - playbook_pilot           # ADR-0066 (B456) — D3 Phase D SOAR actuator; discipline via constitution policy, not genre
 
   guardian:
     description: |
