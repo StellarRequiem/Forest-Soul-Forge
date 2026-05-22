@@ -193,16 +193,20 @@ class Scheduler:
         don't care about restart-survival), state lives in-memory
         only and is lost on stop.
 
-        ``tick_budget_ms`` (ADR-0075 T2, B295) is the wall-clock
-        threshold above which a single tick triggers a
+        ``tick_budget_ms`` (ADR-0075 T2, B295) is the threshold
+        above which a single tick triggers a
         ``scheduler_lag(reason="tick_over_budget")`` audit event.
-        Default 500ms per ADR-0075 Decision 3. The check fires once
-        per tick that exceeds the budget AND dispatched at least
-        one task — an idle over-budget tick is almost certainly an
-        environment hiccup (GC pause, OS scheduling) rather than a
-        scheduler problem, so we don't spam the chain. Set to
-        ``float('inf')`` to disable the check (operators who want
-        the substrate latent until T3 lands).
+        Default 500ms per ADR-0075 Decision 3. B451: the threshold
+        is compared against the tick's *scheduler-overhead* time
+        (scan + due-checks + audit emits + persistence) — task
+        runner execution is measured separately and excluded, so a
+        slow ``llm_think`` task no longer mislabels itself as
+        scheduler lag. The check fires once per tick that exceeds
+        the budget AND dispatched at least one task — an idle
+        over-budget tick is almost certainly an environment hiccup
+        (GC pause, OS scheduling) rather than a scheduler problem,
+        so we don't spam the chain. Set to ``float('inf')`` to
+        disable the check.
         """
         self._poll_interval = poll_interval_seconds
         self._context: dict[str, Any] = dict(context or {})
@@ -399,10 +403,26 @@ class Scheduler:
         Monotonic clock (not wall clock) so a system-time jump
         mid-tick can't make the duration go negative or vault
         artificially over budget.
+
+        B451 measurement correction: the tick budget is a ceiling on
+        the scheduler's OWN per-tick overhead — the task scan, the
+        ``due()`` / ``_consume_budget`` checks, the audit emits, and
+        the state-persistence upsert. It is NOT a budget on task
+        execution. A scheduled ``llm_think`` task legitimately blocks
+        on a 10-second LLM inference; the original B295 code measured
+        raw wall-clock, so every such dispatch tripped the 500ms
+        budget and emitted ``scheduler_lag`` — 1,559 false positives
+        in the live chain, drowning the signal the event exists to
+        carry. ``_dispatch`` now returns the wall-clock it spent
+        inside the task runner so this method can subtract it:
+        ``overhead_ms`` is the figure compared to the budget;
+        ``wall_clock_ms`` and ``runner_total_ms`` ride along in
+        ``details`` for context.
         """
         tick_started = time.monotonic()
         now = datetime.now(timezone.utc)
         dispatches = 0
+        runner_total_ms = 0.0
         async with self._lock:
             tasks_snapshot = list(self._tasks.values())
         for task in tasks_snapshot:
@@ -414,23 +434,40 @@ class Scheduler:
             # forward + emitted scheduler_lag).
             if not self._consume_budget(task, now, time.monotonic()):
                 continue
-            await self._dispatch(task, now)
+            # _dispatch returns the wall-clock ms it spent inside the
+            # task runner — work the scheduler awaits but does not
+            # control. Accumulate it so it is excluded from the
+            # tick-budget comparison below.
+            runner_total_ms += await self._dispatch(task, now)
             dispatches += 1
-        tick_duration_ms = (time.monotonic() - tick_started) * 1000.0
-        if dispatches > 0 and tick_duration_ms > self._tick_budget_ms:
+        wall_clock_ms = (time.monotonic() - tick_started) * 1000.0
+        # Scheduler overhead = total wall-clock minus the time spent
+        # blocked inside task runners. max(0.0, …) guards the rare
+        # case where float rounding leaves the subtraction slightly
+        # negative.
+        overhead_ms = max(0.0, wall_clock_ms - runner_total_ms)
+        if dispatches > 0 and overhead_ms > self._tick_budget_ms:
             # Idle over-budget ticks (dispatches=0) are almost
             # certainly environment hiccups (GC, OS scheduler) and
             # would spam the chain — only emit when at least one
-            # task fired AND the tick blew the budget.
+            # task fired AND the scheduler's own overhead blew the
+            # budget. Runner execution is excluded by construction
+            # (see docstring): a slow task is not a slow scheduler.
             self._emit_audit("scheduler_lag", {
                 "reason":               "tick_over_budget",
                 "task_id":              None,
-                "tick_duration_ms":     round(tick_duration_ms, 2),
+                # tick_duration_ms carries the scheduler-overhead
+                # figure — the quantity actually compared to
+                # tick_budget_ms. wall-clock lives in details.
+                "tick_duration_ms":     round(overhead_ms, 2),
                 "tick_budget_ms":       self._tick_budget_ms,
                 "dispatches_in_tick":   dispatches,
                 "budget_per_minute":    None,
                 "dispatches_in_window": None,
-                "details":              None,
+                "details": {
+                    "wall_clock_ms":   round(wall_clock_ms, 2),
+                    "runner_total_ms": round(runner_total_ms, 2),
+                },
             })
 
     def _consume_budget(
@@ -510,10 +547,17 @@ class Scheduler:
         window.append(now_mono)
         return True
 
-    async def _dispatch(self, task: ScheduledTask, now: datetime) -> None:
+    async def _dispatch(self, task: ScheduledTask, now: datetime) -> float:
         """Dispatch one task. Records outcome; updates schedule;
         flips circuit breaker on consecutive failures; emits audit
         events for every state transition.
+
+        Returns the wall-clock milliseconds spent inside the task
+        runner (``await runner(...)``). :meth:`_tick` subtracts this
+        from the tick wall-clock so the tick-budget check measures
+        only scheduler overhead, not task execution (B451). Returns
+        ``0.0`` when no runner is registered for the task type. The
+        manual :meth:`trigger` path ignores the return value.
 
         Audit emit policy (Burst 89):
         * ``scheduled_task_dispatched`` — before runner invocation,
@@ -541,7 +585,7 @@ class Scheduler:
                 task.id,
                 task.task_type,
             )
-            return
+            return 0.0  # no runner ran → zero runner time
 
         # B199 (2026-05-08, audits/2026-05-08-chain-fork-incident.md):
         # the audit emits + scheduler-state upsert all need
@@ -588,6 +632,10 @@ class Scheduler:
             })
 
         # NO LOCK HELD during the runner call — release between sections.
+        # Time the runner so _tick can exclude it from the tick-budget
+        # comparison: runner execution is the task's wall-clock cost
+        # (e.g. a multi-second LLM inference), not scheduler overhead.
+        runner_started = time.monotonic()
         try:
             outcome = await runner(task.config, self._context)
             ok = bool(outcome.get("ok", True))
@@ -595,6 +643,7 @@ class Scheduler:
             ok = False
             outcome = {"ok": False, "error": f"{type(e).__name__}: {e}"}
             logger.exception("task %s runner raised", task.id)
+        runner_ms = (time.monotonic() - runner_started) * 1000.0
 
         # Re-acquire for the post-outcome emit + persist section.
         def _emit_outcome_and_persist() -> None:
@@ -653,6 +702,8 @@ class Scheduler:
                 _emit_outcome_and_persist()
         else:
             _emit_outcome_and_persist()
+
+        return runner_ms
 
     def _emit_audit(self, event_type: str, payload: dict[str, Any]) -> None:
         """Best-effort audit emit. Never raises out of the scheduler."""

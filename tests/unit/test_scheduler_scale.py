@@ -319,6 +319,28 @@ class _RecordingChain:
         self.events.append((event_type, dict(payload)))
 
 
+class _SlowChain(_RecordingChain):
+    """A chain whose ``append`` blocks — simulates genuine scheduler
+    overhead (slow disk, a contended write_lock holding up the audit
+    emit) so the tick-budget check has real overhead to measure.
+
+    B451: ``_dispatch`` does two audit emits per dispatch and _tick
+    measures them as scheduler overhead. A slow ``append`` is the
+    deterministic way to push that overhead over a tight budget
+    without involving the task runner.
+    """
+
+    def __init__(self, append_delay_ms: float):
+        super().__init__()
+        self._append_delay_s = append_delay_ms / 1000.0
+
+    def append(self, event_type, payload, *, agent_dna=None):
+        import time as _time
+
+        _time.sleep(self._append_delay_s)
+        super().append(event_type, payload, agent_dna=agent_dna)
+
+
 def _slow_task(task_id: str, sleep_ms: float) -> ScheduledTask:
     """Build a task whose runner deliberately sleeps `sleep_ms` ms."""
     return ScheduledTask(
@@ -356,23 +378,27 @@ def test_tick_under_budget_does_not_emit_scheduler_lag():
 
 
 def test_tick_over_budget_emits_scheduler_lag():
-    """When a dispatching tick exceeds the budget, exactly one
-    scheduler_lag(reason="tick_over_budget") event lands with the
-    expected payload shape."""
+    """When the scheduler's OWN per-tick overhead exceeds the budget,
+    exactly one scheduler_lag(reason="tick_over_budget") event lands
+    with the expected payload shape.
+
+    B451: overhead = the audit emits + persistence the scheduler does
+    around each dispatch. We simulate a slow audit chain to push that
+    overhead over a tight budget while keeping the runner fast — this
+    proves the budget tracks scheduler work, not task work."""
     async def run():
-        async def slow_runner(config, ctx):
-            sleep_ms = float(config.get("sleep_ms", 50))
-            await asyncio.sleep(sleep_ms / 1000.0)
+        async def fast_runner(config, ctx):
             return {"ok": True}
 
-        chain = _RecordingChain()
-        # 10ms budget; runner sleeps 80ms — guaranteed over-budget.
+        # _dispatch does two audit emits per dispatch; 40ms each ≈
+        # 80ms+ of scheduler overhead, comfortably over a 10ms budget.
+        chain = _SlowChain(append_delay_ms=40.0)
         sched = Scheduler(
             context={"audit_chain": chain},
             tick_budget_ms=10.0,
         )
-        sched.register_task_type("slow", slow_runner)
-        sched.add_task(_slow_task("t1", 80))
+        sched.register_task_type("slow", fast_runner)
+        sched.add_task(_slow_task("t1", 0))
         await sched._tick()
 
         lag_events = [e for e in chain.events if e[0] == "scheduler_lag"]
@@ -383,13 +409,53 @@ def test_tick_over_budget_emits_scheduler_lag():
         assert payload["reason"] == "tick_over_budget"
         assert payload["task_id"] is None
         assert payload["tick_budget_ms"] == 10.0
+        # tick_duration_ms now carries the scheduler-overhead figure —
+        # the quantity actually compared to the budget.
         assert payload["tick_duration_ms"] > 10.0
         assert payload["dispatches_in_tick"] == 1
-        # T3-only fields are present and null in T2 payloads — payload
-        # shape is locked across T2/T3 per ADR.
+        # T3-only fields are present and null in tick_over_budget
+        # payloads — payload shape is locked across T2/T3 per ADR.
         assert payload["budget_per_minute"] is None
         assert payload["dispatches_in_window"] is None
-        assert payload["details"] is None
+        # B451: details carries the wall-clock / runner-time split so
+        # the operator can still see total tick wall-clock.
+        assert isinstance(payload["details"], dict)
+        assert "wall_clock_ms" in payload["details"]
+        assert "runner_total_ms" in payload["details"]
+        assert payload["details"]["wall_clock_ms"] >= payload["tick_duration_ms"]
+
+    asyncio.run(run())
+
+
+def test_slow_runner_alone_does_not_emit_scheduler_lag():
+    """B451 regression guard. A task runner that blocks for 80ms —
+    e.g. an llm_think LLM inference — MUST NOT trip the tick budget.
+    Runner execution is the task's wall-clock cost, not scheduler
+    overhead.
+
+    The original B295 code measured raw wall-clock and emitted 1,559
+    false-positive scheduler_lag events in the live chain (every
+    scheduled llm_think dispatch tripped the 500ms budget). This pins
+    the fix: the budget tracks the scheduler, not the task."""
+    async def run():
+        async def slow_runner(config, ctx):
+            await asyncio.sleep(0.08)  # 80ms — well over the budget
+            return {"ok": True}
+
+        chain = _RecordingChain()
+        # 10ms budget; runner sleeps 80ms. Pre-B451 this emitted.
+        sched = Scheduler(
+            context={"audit_chain": chain},
+            tick_budget_ms=10.0,
+        )
+        sched.register_task_type("slow", slow_runner)
+        sched.add_task(_slow_task("t1", 80))
+        await sched._tick()
+
+        lag_events = [e for e in chain.events if e[0] == "scheduler_lag"]
+        assert lag_events == [], (
+            f"slow runner must not emit scheduler_lag, got {lag_events!r}"
+        )
 
     asyncio.run(run())
 

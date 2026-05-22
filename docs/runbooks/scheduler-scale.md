@@ -78,20 +78,34 @@ and `dispatches_in_window` populated.
 The tick budget is governed by `FSF_SCHEDULER_TICK_BUDGET_MS`.
 Default 500. `inf` disables the check entirely.
 
+**The budget measures scheduler overhead, not task execution
+(B451).** A tick's wall-clock has two parts: the scheduler's own
+bookkeeping (task scan, `due()` checks, budget accounting, audit
+emits, state persistence) and the time blocked inside task
+runners (`await runner(...)` — typically a multi-second
+`llm_think` LLM inference). Only the first part is compared to
+the budget. A scheduled task that legitimately runs for 11s does
+*not* trip a 500ms budget — runner time is measured separately
+and excluded. This corrects the original B295 behavior, which
+compared raw wall-clock and so emitted `scheduler_lag` on every
+scheduled `llm_think` dispatch (1,559 false positives in the
+live chain before the fix).
+
 When to raise the default:
 
-- The daemon runs on M-series hardware doing real work
-  (encryption, audit signing, large LLM responses). Some ticks
-  legitimately go past 500ms; raising the budget to e.g. 1500
-  is fine.
-- `scheduler_lag(reason="tick_over_budget")` events are firing
-  but the tick duration is bounded — i.e. the scheduler IS
-  keeping up, the budget is just too tight.
+- The daemon's own per-tick overhead genuinely exceeds 500ms —
+  e.g. the audit chain is on slow storage, or `write_lock` is so
+  contended that audit emits stall. Confirm via the
+  `details.wall_clock_ms` vs `tick_duration_ms` split (see
+  "Diagnosing" below) first: if `tick_duration_ms` (overhead) is
+  small but `wall_clock_ms` is large, the budget is fine — the
+  signal is a slow *task*, not a slow scheduler, and raising the
+  budget fixes nothing.
 
 When to lower the default:
 
-- Latency-sensitive deployment. You want to know about ticks
-  that go past 200ms so you can investigate.
+- Latency-sensitive deployment. You want to know when scheduler
+  overhead goes past e.g. 200ms so you can investigate.
 
 How to change without restart: not currently supported. The env
 var is read at scheduler construction (boot time). Restart the
@@ -141,14 +155,25 @@ curl -s http://127.0.0.1:7423/audit/tail?event_type=scheduler_lag&limit=50 | jq
 
 For `reason="tick_over_budget"`:
 
-- `tick_duration_ms` — actual wall-clock for the over-budget tick.
+- `tick_duration_ms` — the scheduler's own per-tick *overhead*
+  (B451): task scan + `due()` checks + budget accounting + audit
+  emits + state persistence. This is the figure compared to
+  `tick_budget_ms`; it excludes time blocked inside task runners.
 - `tick_budget_ms` — configured budget at the time of the event.
 - `dispatches_in_tick` — how many tasks the tick fired.
+- `details.wall_clock_ms` — total tick wall-clock, including
+  runner execution.
+- `details.runner_total_ms` — summed time spent inside task
+  runners this tick (`wall_clock_ms - runner_total_ms ≈
+  tick_duration_ms`).
 
-A `tick_duration_ms` consistently 2-3x the budget means the
-budget is too tight OR the daemon is genuinely overloaded.
-`dispatches_in_tick > task_count / 2` means many tasks came due
-simultaneously — consider staggering schedules.
+This event now means the scheduler *itself* is slow — investigate
+audit-chain storage latency or `write_lock` contention. A slow
+*task* (a long LLM call) no longer surfaces here: that is normal
+operation, and its timing is visible via the `scheduled_task_*` /
+`tool_call_*` event timestamps instead. `dispatches_in_tick >
+task_count / 2` means many tasks came due simultaneously —
+consider staggering schedules.
 
 For `reason="budget_enforced"`:
 

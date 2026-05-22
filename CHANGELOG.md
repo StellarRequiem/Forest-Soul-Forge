@@ -17,6 +17,27 @@ filed and implemented across 4 sub-tranches. Test count 2,289 →
 **3 new audit event types** (67 → 70): agent_plugin_granted,
 agent_plugin_revoked, agent_posture_changed.
 
+### B451 — scheduler tick budget measures overhead, not task execution (2026-05-21)
+
+**Fixed.** The scheduler's `tick_over_budget` check measured raw
+tick wall-clock, which includes `await runner(...)` — and every
+scheduled `tool_call` task runs `llm_think.v1`, a multi-second
+synchronous LLM inference. The 500ms budget therefore tripped on
+every normal LLM-bound dispatch; `examples/audit_chain.jsonl` had
+accumulated 1,559 false-positive `scheduler_lag(reason=
+"tick_over_budget")` events (durations 511ms–42,431ms).
+
+`Scheduler._dispatch()` now returns the wall-clock spent inside the
+task runner; `_tick()` subtracts it so the budget check measures
+only scheduler overhead (task scan, `due()` checks, audit emits,
+state persistence). The `scheduler_lag` payload's previously-unused
+`details` field now carries `{wall_clock_ms, runner_total_ms}` for
+`tick_over_budget` events. No event-schema change — `tick_duration_ms`
+is now the overhead figure (the quantity compared to the budget).
+
+Amends ADR-0075 Decision 3. See
+`docs/audits/2026-05-21-scheduler-tick-budget-measurement.md`.
+
 ### ADR-0043 follow-ups (Bursts 111, 112, 113a, 113b)
 
 - **#1 Per-tool requires_human_approval mirroring** (Burst 111).
