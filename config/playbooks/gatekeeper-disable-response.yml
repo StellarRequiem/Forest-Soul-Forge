@@ -1,0 +1,47 @@
+# ADR-0066 Phase D — SOAR playbook starter library.
+# One playbook per file. See docs/runbooks/soar-playbooks.md for the
+# DSL reference and the approval model.
+#
+# This playbook is a fully auto-approved response: both steps are
+# non-destructive (chain-of-custody preservation + an operator
+# notification), so neither needs a human in the loop. It is the
+# simplest playbook shape — a good template to clone.
+playbook_id: gatekeeper-disable-response
+version: '1'
+
+# Fires when the Gatekeeper assessment tool (spctl) is spawned — a
+# high-confidence Subvert-Trust-Controls lead (ATT&CK T1553.001).
+trigger:
+  detection_rule_ids: [gatekeeper_disable_attempt]
+  min_severity: high
+  cooldown_seconds: 300        # don't re-fire on the same target within 5m
+
+approval:
+  default: required_human
+  # Both steps below are non-destructive, so both are explicitly
+  # auto-approved. Removing a step from this list reverts it to the
+  # default-deny posture (operator approves each run).
+  steps_auto_approved:
+    - collect_forensics
+    - notify_operator
+
+steps:
+  - id: collect_forensics
+    action: archive_evidence       # maps to the archive_evidence.v1 skill
+    args:
+      artifact_id: "${detection.rule_id}:${detection.batch_id}"
+      # ${detection.evidence.*} resolves once detections carry an
+      # evidence block; until then the engine leaves it literal and
+      # the operator supplies the path at dispatch. See the runbook.
+      artifact_path: "${detection.evidence.artifact_path}"
+      transition_type: acquire
+      attestor_reason: "playbook ${playbook_id} fired on ${detection.rule_id} (${detection.technique})"
+
+  - id: notify_operator
+    action: delegate               # maps to the delegate.v1 tool
+    args:
+      to: operator
+      message: "SOAR ${playbook_id}: ${detection.rule_id} fired (severity ${detection.severity}, technique ${detection.technique})"
+
+postconditions:
+  audit_event_type: playbook_executed

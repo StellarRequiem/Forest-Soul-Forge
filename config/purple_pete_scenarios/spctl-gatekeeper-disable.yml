@@ -1,0 +1,25 @@
+# ADR-0066 Phase D — purple-team scenario starter library.
+# See docs/runbooks/soar-playbooks.md for the scenario DSL reference.
+#
+# This scenario emulates a Gatekeeper bypass attempt and expects the
+# gatekeeper_disable_attempt rule to catch it.
+scenario_id: spctl-gatekeeper-disable
+version: '1'
+description: |
+  Emulates an adversary spawning the Gatekeeper assessment tool
+  (/usr/sbin/spctl) to disable trust-control assessment so an
+  unsigned payload can execute. Exercises the
+  gatekeeper_disable_attempt detection rule.
+technique: attack.T1553.001      # Subvert Trust Controls: Gatekeeper Bypass
+
+events:
+  - source: endpoint_sensor
+    event_type: process_spawn
+    severity: warn
+    payload:
+      process:
+        image: /usr/sbin/spctl
+        argv: ["spctl", "--master-disable"]
+
+expect:
+  detection_rule_id: gatekeeper_disable_attempt

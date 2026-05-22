@@ -1,0 +1,54 @@
+# ADR-0066 Phase D — SOAR playbook starter library.
+# See docs/runbooks/soar-playbooks.md for the DSL reference.
+#
+# This playbook is the mixed-approval shape (the ADR-0066 Decision-
+# section example): a non-destructive forensic step runs auto, a
+# destructive containment step gates on the operator, a notification
+# runs auto. It is the canonical detect -> preserve -> contain ->
+# notify response.
+playbook_id: reverse-shell-contain
+version: '1'
+
+# Fires on an outbound connection to a common reverse-shell / C2
+# handler port — a high-severity Non-Standard-Port lead
+# (ATT&CK T1571).
+trigger:
+  detection_rule_ids: [reverse_shell_listener_port]
+  min_severity: high
+  cooldown_seconds: 600        # containment is heavy — wider window
+
+approval:
+  default: required_human
+  # collect_forensics is read-only chain-of-custody → auto-approved.
+  # isolate_process is destructive → NOT listed (default-deny), and
+  # additionally pinned with requires_human_approval: true below.
+  steps_auto_approved:
+    - collect_forensics
+
+steps:
+  - id: collect_forensics
+    action: archive_evidence       # maps to the archive_evidence.v1 skill
+    args:
+      artifact_id: "${detection.rule_id}:${detection.batch_id}"
+      artifact_path: "${detection.evidence.artifact_path}"
+      transition_type: acquire
+      attestor_reason: "playbook ${playbook_id} fired on ${detection.rule_id} (${detection.technique})"
+
+  - id: isolate_process
+    action: isolate_process        # maps to the isolate_process.v1 tool
+    args:
+      pid: "${detection.evidence.pid}"
+      reason: "SOAR ${playbook_id}: contain ${detection.technique} on ${detection.rule_id}"
+    # Destructive — kills a PID. Pinned to operator approval even if
+    # an operator ever adds it to steps_auto_approved by mistake.
+    requires_human_approval: true
+
+  - id: notify_operator
+    action: delegate               # maps to the delegate.v1 tool
+    args:
+      to: operator
+      message: "SOAR ${playbook_id}: ${detection.rule_id} fired; isolate_process queued for approval"
+    requires_human_approval: false
+
+postconditions:
+  audit_event_type: playbook_executed

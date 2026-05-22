@@ -1,0 +1,25 @@
+# ADR-0066 Phase D — purple-team scenario starter library.
+# One scenario per file. See docs/runbooks/soar-playbooks.md for
+# the scenario DSL reference.
+#
+# This scenario emulates AppleScript execution via osascript and
+# expects the SOC's osascript_interpreter_spawn rule to catch it.
+scenario_id: osascript-shell-spawn
+version: '1'
+description: |
+  Emulates an adversary spawning the AppleScript interpreter
+  (/usr/bin/osascript) for execution / UI scripting. Exercises the
+  osascript_interpreter_spawn detection rule.
+technique: attack.T1059.002      # Command and Scripting Interpreter: AppleScript
+
+events:
+  - source: endpoint_sensor
+    event_type: process_spawn
+    severity: warn
+    payload:
+      process:
+        image: /usr/bin/osascript
+        parent: /bin/zsh
+
+expect:
+  detection_rule_id: osascript_interpreter_spawn

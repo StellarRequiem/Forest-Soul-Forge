@@ -1,0 +1,52 @@
+# ADR-0066 Phase D — SOAR playbook starter library.
+# See docs/runbooks/soar-playbooks.md for the DSL reference.
+#
+# This playbook is a triage shape: preserve evidence + alert, but
+# do NOT auto-contain. A LaunchDaemon write is the canonical macOS
+# persistence move, but legitimate installers write here too — so
+# the operator decides, the playbook does not auto-kill.
+playbook_id: launchdaemon-persistence-triage
+version: '1'
+
+# Fires on a file write into a launchd persistence directory — a
+# high-severity Create-or-Modify-System-Process lead
+# (ATT&CK T1543.004).
+trigger:
+  detection_rule_ids: [launchdaemon_persistence_write]
+  min_severity: high
+  cooldown_seconds: 300
+
+approval:
+  default: required_human
+  # Evidence preservation + notification are non-destructive →
+  # auto. raise_for_review queues to the operator (default-deny)
+  # because it asks a human to make the keep/remove call.
+  steps_auto_approved:
+    - collect_forensics
+    - notify_operator
+
+steps:
+  - id: collect_forensics
+    action: archive_evidence       # maps to the archive_evidence.v1 skill
+    args:
+      artifact_id: "${detection.rule_id}:${detection.batch_id}"
+      artifact_path: "${detection.evidence.artifact_path}"
+      transition_type: acquire
+      attestor_reason: "playbook ${playbook_id} preserved the dropped plist for ${detection.rule_id}"
+
+  - id: notify_operator
+    action: delegate               # maps to the delegate.v1 tool
+    args:
+      to: operator
+      message: "SOAR ${playbook_id}: launchd persistence write detected (${detection.technique}) — evidence preserved, review pending"
+
+  - id: raise_for_review
+    action: delegate               # maps to the delegate.v1 tool
+    args:
+      to: forensic_archivist
+      message: "Persistence write ${detection.rule_id}: confirm whether this is an expected installer or a real persistence drop"
+    # Asks a human-routed judgement call — gated.
+    requires_human_approval: true
+
+postconditions:
+  audit_event_type: playbook_executed

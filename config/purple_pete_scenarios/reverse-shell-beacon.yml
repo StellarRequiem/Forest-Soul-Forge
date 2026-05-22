@@ -1,0 +1,25 @@
+# ADR-0066 Phase D — purple-team scenario starter library.
+# See docs/runbooks/soar-playbooks.md for the scenario DSL reference.
+#
+# This scenario emulates an outbound C2 beacon and expects the
+# reverse_shell_listener_port rule to catch it.
+scenario_id: reverse-shell-beacon
+version: '1'
+description: |
+  Emulates an outbound network connection to a common reverse-shell
+  / C2 handler port (4444, the Metasploit multi/handler default).
+  Exercises the reverse_shell_listener_port detection rule.
+technique: attack.T1571          # Non-Standard Port
+
+events:
+  - source: endpoint_sensor
+    event_type: network_connection
+    severity: warn
+    payload:
+      network:
+        direction: outbound
+        destination_port: 4444
+        destination_ip: 203.0.113.10
+
+expect:
+  detection_rule_id: reverse_shell_listener_port

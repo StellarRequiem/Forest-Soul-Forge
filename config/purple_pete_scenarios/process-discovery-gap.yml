@@ -1,0 +1,32 @@
+# ADR-0066 Phase D — purple-team scenario starter library.
+# See docs/runbooks/soar-playbooks.md for the scenario DSL reference.
+#
+# This scenario is a STANDING COVERAGE-GAP PROBE. It emulates a
+# technique the SOC's starter rule set does NOT yet cover, so
+# purple_team_brief will flag it as a coverage_gap on every run.
+# The flag is the point: the scenario is, in effect, the spec for a
+# detection rule that detection_engineer should author. Once a
+# `process_discovery_ps` rule lands, this scenario flips to
+# detected and the gap closes — the purple-team loop in miniature.
+scenario_id: process-discovery-gap
+version: '1'
+description: |
+  Emulates local process discovery via /bin/ps — a routine early
+  reconnaissance step. The 8-rule starter detection library has no
+  rule for it, so this scenario is a deliberate, recurring coverage
+  gap that purple_team_brief surfaces until a rule is authored.
+technique: attack.T1057          # Process Discovery
+
+events:
+  - source: endpoint_sensor
+    event_type: process_spawn
+    severity: info
+    payload:
+      process:
+        image: /bin/ps
+        argv: ["ps", "aux"]
+
+expect:
+  # No rule named process_discovery_ps exists yet — that is the
+  # gap. purple_team_brief routes it to detection_engineer.
+  detection_rule_id: process_discovery_ps
