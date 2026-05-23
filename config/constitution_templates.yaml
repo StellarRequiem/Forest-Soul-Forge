@@ -1935,6 +1935,132 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  writer:
+    # ADR-0088 Phase A — D7 Content Studio drafting researcher.
+    # Researcher genre, read_only ceiling. Composes long-form drafts
+    # (blog / newsletter / technical article) from research briefs +
+    # outlines. NEVER publishes — drafts are operator-reviewed and
+    # operator-published. NEVER adapts to non-primary formats — that's
+    # editor's lane. Same drafts-only pattern as inbox_triager but
+    # for long-form prose.
+    policies:
+      - id: forbid_publish
+        rule: forbid
+        triggers: [publish_post, send_message_external, post_to_external_service, schedule_publish]
+        rationale: |
+          The writer produces DRAFTS for the operator (or the
+          distribution_pilot in YELLOW posture) to publish. Actual
+          publish is explicitly outside the role's surface — the
+          draft is the deliverable. Same drafts-only pattern as
+          inbox_triager (drafts only; send is operator-driven).
+      - id: require_draft_attestation
+        rule: require
+        triggers: [emit_draft, finalize_draft]
+        rationale: |
+          Every draft emits a memory_write attestation with
+          (topic, format, source_brief_ids, word_count, attestor,
+          ts). Without the attestation, the editor + style_steward
+          can't pick up the draft cleanly + the operator can't
+          audit the draft's source provenance.
+      - id: forbid_format_adaptation
+        rule: forbid
+        triggers: [adapt_to_format, twitter_thread_split, linkedin_summarize]
+        rationale: |
+          The writer composes a single primary draft per dispatch.
+          Format adaptation (twitter_thread / linkedin / newsletter
+          variants) is the editor's lane (format_adapt.v1). Letting
+          the writer adapt would conflate composition with
+          transformation + invert the D7 separation of duties.
+      - id: require_chain_integrity_before_draft
+        rule: require
+        triggers: [emit_draft, finalize_draft]
+        rationale: |
+          The draft rests on memory + chain content (research briefs,
+          operator profile attestations, lineage drafts). A draft
+          composed against a broken chain inherits the brokenness +
+          its provenance can't be re-verified post-publish.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - publish_post
+      - send_message_external
+      - schedule_publish
+      - adapt_to_format
+      - modify_production_systems
+    operator_duties:
+      - "Review every draft — the writer composes; you (or the distribution_pilot) decide what publishes."
+      - "Audit draft attestations weekly — a draft that consistently misses operator-flagged research sources is a signal the content_researcher → writer handoff isn't firing."
+      - "Treat a chain_broken halt as an emergency — drafts derived from a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  content_researcher:
+    # ADR-0088 Phase A — D7 Content Studio content-sourcing researcher.
+    # Researcher genre, network ceiling. Pulls source material from
+    # operator-allowlisted sources + lineage memory (D1 catalog via
+    # delegate, prior D7 drafts); writes briefs to private memory
+    # tagged for writer pickup. NEVER drafts final articles
+    # (writer's lane); NEVER catalogs to public knowledge store
+    # (D1 librarian's lane). Same network-fetch posture as
+    # prospector-D1.
+    policies:
+      - id: require_source_allowlist_check
+        rule: require
+        triggers: [web_fetch, source_pull, fetch_external]
+        rationale: |
+          Every fetch must originate from an operator-allowlisted
+          source per the agent's constitutional kit (web_fetch.v1
+          enforces the allowlist at the tool layer). Out-of-allowlist
+          pulls forbidden — same posture as prospector-D1 +
+          threat_intel_curator.
+      - id: require_brief_attestation
+        rule: require
+        triggers: [emit_brief, finalize_research_brief]
+        rationale: |
+          Every brief emits a memory_write with (topic, source_urls,
+          source_excerpts, researcher_id, ts). Without the
+          attestation, the writer's draft can't trace claims back
+          to sources + the editor can't fact-check the claims.
+      - id: forbid_direct_drafting
+        rule: forbid
+        triggers: [emit_draft, compose_article, finalize_long_form]
+        rationale: |
+          The content_researcher's outputs are BRIEFS — structured
+          research summaries with extracted candidate claims +
+          source provenance. Long-form composition belongs to the
+          writer. Letting the researcher draft would conflate
+          sourcing with composition + bypass voice-profile
+          discipline (writer + style_steward).
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_message_external, post_brief_externally, share_brief_with_external_service]
+        rationale: |
+          Briefs are private/lineage scope. Operator-driven sharing
+          is a separate explicit action; the researcher never
+          crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.45
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - emit_draft
+      - compose_article
+      - modify_production_systems
+      - send_message_external
+      - share_brief_with_external_service
+    operator_duties:
+      - "Curate the source allowlist — the researcher pulls from what you configure; widening the allowlist is operator-side authorship."
+      - "Audit brief attestations weekly — a brief that consistently misses operator-flagged sources is a signal the allowlist needs widening."
+      - "Verify the researcher→writer handoff fires — if briefs accumulate without writer pickup, drafts won't reflect current sources."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

@@ -1,0 +1,170 @@
+schema_version: 1
+name: draft_writing
+version: '1'
+description: |
+  Writer-D7's primary skill. Composes a long-form draft (blog
+  post, newsletter, technical article) from a research brief +
+  topic + outline. Writes the draft to private memory tagged for
+  downstream editor + style_steward pickup.
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's areas_of_focus + timezone. Tone + framing source.
+    2. recall_research_brief — memory_recall scope=private +
+       lineage for content_researcher briefs tagged
+       content_research:${topic_slug}. The brief is the
+       writer's source-of-record; without one, the writer
+       refuses (no draft from thin air).
+    3. recall_voice_samples — memory_recall for any
+       voice_profile entry the operator has authored. When
+       absent, the writer falls back to a neutral tone but
+       flags it in the attestation so the operator + style_steward
+       can decide whether to fail-closed or proceed.
+    4. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. A draft attested on a
+       broken chain inherits the brokenness.
+    5. compose_draft — llm_think composes the draft from the
+       brief + voice samples + outline. The prompt explicitly
+       names the target format (default: blog post) and the
+       Pacific-time discipline.
+    6. write_draft_attestation — memory_write scope=private
+       records the draft with tags (draft:topic:${topic_slug},
+       format:${format}, attestor:Writer-D7) for downstream
+       editor + style_steward pickup.
+
+  NEVER publishes. forbid_publish + forbid_format_adaptation +
+  require_draft_attestation policies enforce this at governance
+  layer.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, outline]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this draft addresses. Convention: lowercase
+        kebab-case. Used to find the content_researcher's brief
+        + to tag the draft attestation.
+    outline:
+      type: string
+      description: >
+        Operator-provided outline. Bullet points or prose;
+        the writer composes from this skeleton. Keeping the
+        outline operator-authored is the load-bearing
+        discipline — the writer expands, never invents,
+        structure.
+    format:
+      type: string
+      enum: [blog_post, newsletter, technical_article]
+      default: blog_post
+      description: >
+        Primary format. Adaptation to twitter_thread / linkedin_post
+        is the editor's lane (format_adapt.v1 — D7 Phase C).
+    target_word_count:
+      type: integer
+      default: 1200
+      description: >
+        Target length in words. Default 1200 — typical
+        long-form blog post. Newsletter usually 600-800;
+        technical article 1500-3000.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the draft attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_research_brief
+    tool: memory_recall.v1
+    args:
+      query: "content_research:${inputs.topic_slug}"
+      mode: lineage
+      limit: 10
+
+  - id: recall_voice_samples
+    tool: memory_recall.v1
+    args:
+      query: "voice_profile"
+      mode: private
+      limit: 5
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_draft
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Writer-D7, the D7 Content Studio drafting agent.
+        Compose a ${inputs.format} on topic "${inputs.topic_slug}"
+        from the operator's outline + the research brief + the
+        operator's voice samples.
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Operator outline:
+        ${inputs.outline}
+
+        Research brief (lineage memory; content_researcher-D7):
+        ${recall_research_brief.out.entries}
+
+        Voice samples (operator-authored prior writing):
+        ${recall_voice_samples.out.entries}
+
+        Compose a ${inputs.format} draft of approximately
+        ${inputs.target_word_count} words. Expand the outline
+        faithfully — do NOT invent new structural sections.
+        Cite every load-bearing factual claim from the research
+        brief; flag any claim you can't back from the brief as
+        "[CLAIM: needs verification]" so the editor can fact-check.
+        Match the operator's voice — sentence rhythm, vocabulary,
+        hedging cadence — as seen in the voice samples. If no
+        voice samples are present, write in a neutral, direct
+        tone and flag the voice gap at the top of the draft.
+
+        Halt warning if chain status != "ok" — refuse to compose
+        the draft and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_draft_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_draft.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d7_draft"
+        - "draft:topic:${inputs.topic_slug}"
+        - "format:${inputs.format}"
+        - "attestor:Writer-D7"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  format: ${inputs.format}
+  draft_text: ${compose_draft.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  draft_entry_id: ${write_draft_attestation.out.entry_id}
+  research_brief_hits: ${recall_research_brief.out.count}
+  voice_sample_hits: ${recall_voice_samples.out.count}

@@ -1,0 +1,170 @@
+schema_version: 1
+name: content_research
+version: '1'
+description: |
+  ContentResearcher-D7's primary skill. Takes an operator-provided
+  topic + optional source URL, fetches the content via web_fetch
+  (operator-allowlisted), pulls related catalog entries from
+  lineage memory (D1 librarian's catalog via memory_recall), and
+  composes a structured research brief the writer + editor +
+  style_steward consume.
+
+  Sourcing + brief composition only — the content_researcher NEVER
+  drafts the final article (writer's lane). Brief attestations
+  land in private memory tagged for writer pickup
+  (content_research:${topic_slug}).
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's areas_of_focus + timezone. Lens for source
+       relevance scoring.
+    2. prior_brief_check — memory_recall scope=private for any
+       prior brief on this topic_slug. Recently-built briefs
+       (within 24h by default) are skipped + reported as
+       "already fresh"; the operator can override with
+       force_refresh=true.
+    3. fetch_source — web_fetch pulls the source_url if provided.
+       The per-(agent, tool) allowed_hosts constraint patched
+       at birth time enforces the operator allowlist
+       (require_source_allowlist_check policy enforces it at
+       governance layer too). When source_url is absent, the
+       skill skips this step and composes the brief purely
+       from lineage memory.
+    4. recall_lineage_catalog — memory_recall scope=lineage for
+       D1-catalog entries tagged topic:${topic_slug}. Bridges
+       the D1 → D7 cascade — the writer's draft inherits the
+       operator's curated knowledge surface.
+    5. compose_brief — llm_think composes a structured brief
+       with extracted candidate claims + per-claim source
+       provenance + an operator-action hint (proceed to draft
+       / surface for operator review / gap detected).
+    6. write_brief_attestation — memory_write scope=private
+       records the brief tagged for writer pickup
+       (content_research:${topic_slug} +
+       attestor:ContentResearcher-D7).
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - web_fetch.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this brief binds to. Convention: lowercase
+        kebab-case. Used as the content_research:${slug}
+        memory tag so the writer's draft picks it up.
+    source_url:
+      type: string
+      default: ""
+      description: >
+        Optional URL to fetch. Must resolve under the
+        operator-allowlisted host set (web_fetch enforces this
+        at the tool layer). When empty, the skill composes from
+        lineage memory only.
+    force_refresh:
+      type: boolean
+      default: false
+      description: >
+        If true, skip the prior_brief_check freshness gate +
+        always re-fetch. Used when the operator suspects the
+        source has been updated.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the brief attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: prior_brief_check
+    tool: memory_recall.v1
+    args:
+      query: "content_research:${inputs.topic_slug}"
+      mode: private
+      limit: 5
+
+  - id: fetch_source
+    tool: web_fetch.v1
+    args:
+      url: ${inputs.source_url}
+      method: GET
+
+  - id: recall_lineage_catalog
+    tool: memory_recall.v1
+    args:
+      query: "topic:${inputs.topic_slug}"
+      mode: lineage
+      limit: 20
+
+  - id: compose_brief
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are ContentResearcher-D7, the D7 Content Studio
+        sourcing agent. Compose a structured research brief on
+        topic "${inputs.topic_slug}" from the fetched source +
+        the D1 catalog (lineage memory) + the operator profile.
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+
+        Source URL: ${inputs.source_url}
+
+        Prior briefs on this topic (most recent first):
+        ${prior_brief_check.out.entries}
+
+        Fetched source content (truncated; empty when no URL):
+        ${fetch_source.out.body}
+
+        D1 lineage catalog entries on this topic:
+        ${recall_lineage_catalog.out.entries}
+
+        Produce a structured brief:
+        1. Topic framing — one paragraph of context the writer
+           needs to start composing.
+        2. Five to ten candidate claims, each one a single
+           coherent statement faithful to the sources. For each
+           claim, cite: (a) source_url + access_ts if from the
+           fetched source, OR (b) catalog_entry_id if from the
+           lineage catalog. Claims without provenance are
+           operator-action items, NOT brief content.
+        3. Recommended angle for the draft — what's the
+           operator's distinctive take here? Cross-reference
+           areas_of_focus.
+        4. Open questions the writer should flag for fact-checking
+           via the editor's verify_claim path.
+        5. Operator-action hint: proceed to draft / surface for
+           operator review / gap detected (insufficient sources).
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_brief_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_brief.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d7_research_brief"
+        - "content_research:${inputs.topic_slug}"
+        - "attestor:ContentResearcher-D7"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  brief_text: ${compose_brief.out.response}
+  source_status: ${fetch_source.out.status}
+  catalog_hits: ${recall_lineage_catalog.out.count}
+  brief_entry_id: ${write_brief_attestation.out.entry_id}

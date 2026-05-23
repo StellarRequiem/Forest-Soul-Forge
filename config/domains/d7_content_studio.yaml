@@ -20,7 +20,7 @@ description: |
 entry_agents:
   - role: writer
     capability: draft_writing
-  - role: researcher
+  - role: content_researcher              # renamed from manifest's bare "researcher" per ADR-0088 Decision 2 — avoids collision with the researcher genre name; same disambiguation as D1's verifier → knowledge_verifier
     capability: content_research
   - role: editor
     capability: editing

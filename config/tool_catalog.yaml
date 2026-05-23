@@ -3565,6 +3565,42 @@ archetypes:
       # No web_fetch. No shell_exec. No code_edit. Pure scheduling
       # action surface.
 
+  # ---- ADR-0088 Phase A — D7 Content Studio drafting foundation -------
+  # writer + content_researcher kits. Both reuse the existing builtin
+  # set — no new tools land in Phase A. writer is researcher-genre
+  # (read_only ceiling — drafts to private memory only; the editor +
+  # style_steward + distribution_pilot handle downstream); content_researcher
+  # is researcher-genre (network ceiling — operator-allowlisted source
+  # pulls). The pair pattern mirrors D1's prospector + librarian split
+  # but scoped to content production rather than personal knowledge.
+  writer:
+    standard_tools:
+      - llm_think.v1                  # the load-bearing tool — long-form composition
+      - memory_recall.v1              # walk research briefs + lineage drafts + voice samples
+      - memory_write.v1               # write draft attestations to private memory
+      - delegate.v1                   # hand off to editor / style_steward / content_researcher
+      - audit_chain_verify.v1         # chain integrity before publishing draft
+      - text_summarize.v1             # condense long research briefs into draft sections
+      - operator_profile_read.v1      # ADR-0068 — areas_of_focus + timezone inform tone
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      # No web_fetch (content_researcher's lane). No publish tools
+      # (distribution_pilot's lane). No format_adapt (editor's lane).
+      # Pure long-form composition kit.
+
+  content_researcher:
+    standard_tools:
+      - llm_think.v1                  # source synthesis + brief composition
+      - memory_recall.v1              # check for prior briefs against this topic
+      - memory_write.v1               # brief attestations tagged for writer pickup
+      - delegate.v1                   # hand off to writer / D1 librarian for catalog reads
+      - audit_chain_verify.v1         # chain integrity before publishing briefs
+      - text_summarize.v1             # condense fetched material into briefs
+      - web_fetch.v1                  # source pulls (gated by per-agent allowlist; ADR-0088 Phase A operator-allowlists arxiv / github / wikipedia / RFC editor by default)
+      - operator_profile_read.v1      # ADR-0068 — areas_of_focus drive source-selection
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval to surface D1 catalog reads
+      # No file_integrity. No shell_exec. No code_edit. No drafting
+      # tools (writer's lane). Sourcing + brief composition only.
+
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard
   # guardian read-only support set. The scanner reads framework
