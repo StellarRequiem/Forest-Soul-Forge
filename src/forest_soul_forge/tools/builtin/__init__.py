@@ -25,6 +25,9 @@ from forest_soul_forge.tools.builtin.git_log_read import GitLogReadTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
 from forest_soul_forge.tools.builtin.framework_check import FrameworkCheckTool
 from forest_soul_forge.tools.builtin.policy_lint import PolicyLintTool
+from forest_soul_forge.tools.builtin.audit_packet_generate import (
+    AuditPacketGenerateTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -417,3 +420,11 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # (YELLOW posture) consumes the proposals and surfaces them to
     # the operator for approval. Read-only.
     registry.register(PolicyLintTool())
+    # ADR-0085 Phase D — audit_packet_generate.v1. Bundles a window
+    # of audit-chain entries + compliance scans + evidence
+    # attestations into a single operator-readable packet. The
+    # load-bearing artifact for the "30-second-audit-packet" value
+    # prop. Read-only; report_generator's primary tool. Packet
+    # sha256 lets the operator verify the bundle hasn't drifted
+    # after generation.
+    registry.register(AuditPacketGenerateTool())

@@ -1,6 +1,12 @@
 # ADR-0085 — D8 Compliance Auditor domain: rollout
 
-**Status:** Proposed (2026-05-22). Phase A CLOSED (commit D8-A) — audit_archivist + evidence_collector roles + skills + birth scripts shipped; births operator-driven.
+**Status:** Accepted (2026-05-22). All four phases CLOSED — D8
+Compliance Auditor LIVE with all 5 agents alive (AuditArchivist-D8,
+EvidenceCollector-D8, ComplianceScanner-D8, PolicyEnforcer-D8,
+ReportGenerator-D8); 3 new builtin tools (framework_check.v1,
+policy_lint.v1, audit_packet_generate.v1) with 58 unit tests total;
+5 skills; SOC2 seed framework; umbrella birth script; cascade
+wiring d4→d8 + d3→d8 live.
 **Date:** 2026-05-22
 **Tracks:** Domain Rollout / Compliance
 **Supersedes:** none
@@ -245,7 +251,17 @@ Each phase follows the established template:
   file_max_age_days); skill manifest
   `examples/skills/policy_enforcement.v1.yaml`; birth script
   `dev-tools/birth-policy-enforcer.command`.
-- **Phase D** — reporting + cascade. Status: NOT STARTED.
+- **Phase D** — reporting + cascade. Status: CLOSED (2026-05-22).
+  Shipped: `report_generator` role (researcher genre, GREEN
+  posture) in trait_tree / genres / constitution_templates /
+  tool_catalog; new builtin tool `audit_packet_generate.v1` with
+  13 unit tests; skill manifest
+  `examples/skills/compliance_reporting.v1.yaml`; birth scripts
+  `dev-tools/birth-report-generator.command` +
+  umbrella `dev-tools/birth-d8-compliance.command`; cascade
+  entries in handoffs.yaml (d4→d8 + d3→d8 pre-existing, all 5
+  d8 capabilities now have live skills); `d8_compliance.yaml`
+  status flipped to `live`.
 
 ADR flips to **Accepted** when Phase D closes and
 `d8_compliance.yaml` status is updated to `live`.

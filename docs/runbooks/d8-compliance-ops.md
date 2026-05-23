@@ -13,7 +13,7 @@ that lands D8 Phase A (this runbook will grow as Phases B–D ship).
 | **A** | audit_archivist + evidence_collector | none — reuses file_integrity + audit_chain_verify | CLOSED |
 | **B** | compliance_scanner | framework_check.v1 | CLOSED |
 | **C** | policy_enforcer | policy_lint.v1 | CLOSED |
-| D | report_generator | audit_packet_generate.v1 | pending |
+| **D** | report_generator | audit_packet_generate.v1 | CLOSED |
 
 Each phase = one commit + one push, so the operator can verify
 phase N before phase N+1 fires.
@@ -331,7 +331,125 @@ just like the system-level `controls` section. Each rule:
 
 ---
 
-## Phase D (pending)
+## Phase D — reporting + cascade
 
-Phase D adds report_generator + audit_packet_generate.v1 +
-cascade wiring + the umbrella birth script.
+### What it adds
+
+- `report_generator` (researcher genre, GREEN posture): wraps
+  audit-chain entries + scan reports + evidence into a single
+  packet via `audit_packet_generate.v1`.
+- `audit_packet_generate.v1` builtin tool: walks the chain by
+  framework_tag, buckets entries by tag family (scan reports /
+  evidence / archive / remediation), produces a structured
+  packet with sha256 over its body. Read-only.
+- `compliance_reporting.v1` skill — five-step pipeline:
+  verify_chain → generate_packet → synthesize_narrative →
+  attest_packet → handoff_to_operator.
+- `dev-tools/birth-d8-compliance.command` — umbrella that
+  births all 5 D8 agents in order.
+- Cascade entries in `handoffs.yaml` for all 5 D8 capabilities
+  (compliance_scan, policy_enforcement, compliance_reporting,
+  evidence_collection, long_term_archival).
+
+### Umbrella birth
+
+After pulling D8-D, the umbrella births all 5 agents:
+
+```bash
+./dev-tools/birth-d8-compliance.command
+```
+
+Each child script restarts the daemon and is idempotent; if any
+agent already exists, the script skips its birth and proceeds.
+
+### First audit packet
+
+```
+POST /agents/<ReportGenerator-D8-id>/tools/call
+{
+  "tool_name": "skill_run",
+  "tool_version": "1",
+  "session_id": "<uuid>",
+  "args": {
+    "skill_name": "compliance_reporting",
+    "skill_version": "1",
+    "inputs": {
+      "framework_id": "soc2",
+      "window_days": 90,
+      "operator_reason": "first soc2 baseline packet"
+    }
+  }
+}
+```
+
+The skill verifies chain integrity, walks the chain for entries
+tagged `framework:soc2` within the window, produces a packet
+body with `packet_sha256`, synthesizes an operator-readable
+narrative header, attests the packet to private memory, and
+routes the finished bundle to the operator approval queue.
+
+### Cascades
+
+Two cascade rules in `handoffs.yaml`:
+
+```yaml
+- source_domain: d4_code_review
+  source_capability: review_signoff
+  target_domain: d8_compliance
+  target_capability: compliance_scan
+- source_domain: d3_local_soc
+  source_capability: incident_response
+  target_domain: d8_compliance
+  target_capability: compliance_scan
+```
+
+Every successful PR review fires a compliance scan; every
+incident response fires a compliance evidence capture. By the
+time the operator asks for an audit packet, the chain already
+has the data — that's how "30-second audit packet" actually
+works.
+
+### Verifying a packet
+
+The packet body includes a `packet_sha256` over its
+canonical-json serialization. Before sharing a packet with an
+external party:
+
+1. Recompute the sha256 over the body (excluding the
+   `packet_sha256` field itself).
+2. Verify it matches the recorded value.
+3. Verify the packet's `chain_status` is `ok`.
+
+A packet whose hash doesn't match its body has drifted post-
+generation; a packet whose chain_status is `broken` was generated
+against a tainted chain. Either case: do not share.
+
+---
+
+## D8 is LIVE
+
+All four phases closed. The 5 D8 agents + 3 new builtin tools +
+5 skills + cascade wiring form the full continuous-compliance
+loop:
+
+```
+    d4 PR review --cascade--> d8 compliance_scan
+    d3 incident   --cascade--> d8 compliance_scan
+                                |
+                                v
+                        evidence_collector
+                                |
+                                v
+                        audit_archivist
+                                |
+                                v
+                        report_generator -> 30-second audit packet
+                                |
+                                v
+                        policy_enforcer (operator-gated remediation)
+```
+
+Operator-on-demand audit packet generation is the value-prop
+demonstration. Adding ISO27001 / GDPR / HIPAA frameworks is
+operator-authorable via new yamls under
+`config/compliance_frameworks/` — no code change required.

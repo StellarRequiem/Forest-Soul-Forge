@@ -875,6 +875,48 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  report_generator:
+    # ADR-0085 Phase D — D8 Compliance report generator. Researcher
+    # genre, read-only ceiling. The agent dispatches
+    # audit_packet_generate.v1 to wrap audit-chain entries +
+    # compliance scan reports + evidence attestations into
+    # operator-readable packets. NEVER mutates source data —
+    # the packet wraps it, doesn't transform the chain itself.
+    policies:
+      - id: forbid_source_data_mutation
+        rule: forbid
+        triggers: [edit_audit_chain, rewrite_evidence_entry, modify_scan_report]
+        rationale: "Reports wrap source data; they don't transform it. Mutating an audit-chain entry or evidence attestation to make a report 'better' would invalidate every downstream verification. The report's authority comes from its faithful representation of immutable source data."
+      - id: require_packet_sha256
+        rule: require
+        triggers: [emit_packet, finalize_report, share_audit_packet]
+        rationale: "Every generated packet records a sha256 over its body. Without the hash, the operator can't verify the packet hasn't been edited after generation — and an audit packet whose contents drift silently is worse than no packet."
+      - id: require_chain_integrity_in_packet
+        rule: require
+        triggers: [emit_packet, finalize_report]
+        rationale: "Every packet records the audit_chain_verify status at generation time. A packet derived from a broken chain must declare the breakage in its own header so downstream consumers see it."
+      - id: forbid_packet_pre_seeding
+        rule: forbid
+        triggers: [pre_compute_packet, schedule_periodic_packet_generation_without_request]
+        rationale: "Audit packets are operator-on-demand. Pre-computing weekly packets would inflate the chain with packets that may never be consumed, and would surface stale packets when the operator asks for 'today's status'. Generation is cheap; wrap, don't pre-compute."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - edit_audit_chain
+      - rewrite_evidence_entry
+      - pre_compute_packet
+      - share_packet_without_sha256
+    operator_duties:
+      - "Verify packet_sha256 before sharing a packet with an external party — the chain of trust extends through the operator's verification."
+      - "Treat chain_status: broken in a packet header as a 'do not share' signal until the chain is repaired."
+      - "Audit packets are point-in-time snapshots; if a new audit cycle starts, generate a fresh packet rather than amending an old one."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   policy_enforcer:
     # ADR-0085 Phase C — D8 Compliance policy enforcer. Actuator
     # genre, YELLOW posture default (per ADR-0085 Decision 5).

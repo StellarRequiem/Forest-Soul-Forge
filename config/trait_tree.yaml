@@ -833,6 +833,23 @@ roles:
       emotional: 0.4
       embodiment: 1.6   # action surface — though every action operator-gated
 
+  # ---- ADR-0085 Phase D — D8 Compliance report generator ----------------
+  # report_generator: researcher genre. Synthesizes audit packets
+  # from the audit chain + evidence corpus + scan reports.
+  # Read-only by construction — wraps data into reports, never
+  # mutates source data. The packet IS the value-prop deliverable
+  # ("30-second audit packet"); the operator decides what to do
+  # with it (file with auditor / archive / share with stakeholders).
+  report_generator:
+    description: "Compliance report generator. Dispatches audit_packet_generate.v1 to wrap a window of audit-chain entries + compliance scan reports + evidence attestations into operator-readable packets. Read-only synthesis — never mutates source data. The packet IS the 30-second-audit-packet value-prop deliverable. Genre: researcher. ADR-0085 Phase D."
+    domain_weights:
+      security: 1.8     # reports are security-adjacent; not primary frame
+      audit: 2.7        # the load-bearing trait — synthesis from audit data
+      cognitive: 2.2    # packet synthesis + narrative reasoning
+      communication: 2.2 # operator-facing packet narratives are the deliverable
+      emotional: 0.4
+      embodiment: 0.6
+
   domain_orchestrator:
     description: "ADR-0067 T5 Cross-Domain Orchestrator. Singleton-per-forest router that decomposes operator utterances (via decompose_intent.v1) and routes each sub-intent to the right domain swarm (via route_to_domain.v1 + the resolve_route() engine). Sits behind the Persistent Assistant Chat (ADR-0047) so the operator talks to one front door while the orchestrator dispatches across ten domains. Genre: companion. Kit: decompose_intent.v1 + route_to_domain.v1 + operator_profile_read.v1 + llm_think.v1 + delegate.v1 + verify_claim.v1."
     domain_weights:

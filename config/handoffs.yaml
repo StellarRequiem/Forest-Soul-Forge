@@ -133,12 +133,28 @@ default_skill_per_capability:
     skill_name: release_check
     skill_version: "1"
 
-  # D8 Compliance Auditor
+  # D8 Compliance Auditor — ADR-0085 Phase D (2026-05-22).
+  # All 5 entry capabilities now have live skills:
   - domain: d8_compliance
     capability: compliance_scan
-    skill_name: scan_for_compliance
+    skill_name: compliance_scan
     skill_version: "1"
-    future_skill: true
+  - domain: d8_compliance
+    capability: policy_enforcement
+    skill_name: policy_enforcement
+    skill_version: "1"
+  - domain: d8_compliance
+    capability: compliance_reporting
+    skill_name: compliance_reporting
+    skill_version: "1"
+  - domain: d8_compliance
+    capability: evidence_collection
+    skill_name: evidence_collection
+    skill_version: "1"
+  - domain: d8_compliance
+    capability: long_term_archival
+    skill_name: long_term_archival
+    skill_version: "1"
 
 # Cascade rules — engineer-defined, code-reviewed via PR.
 #

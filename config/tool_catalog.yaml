@@ -629,6 +629,36 @@ tools:
     side_effects: read_only
     archetype_tags: [verifier, guardian, observer, security_low]
 
+  audit_packet_generate.v1:
+    name: audit_packet_generate
+    version: "1"
+    description: |
+      ADR-0085 Phase D audit packet builder. Walks the audit
+      chain within a time window, buckets entries tagged
+      framework:<framework_id> by family (scan reports, evidence,
+      archives, remediations), bundles them with per-control
+      summaries pulled from the framework yaml, and returns a
+      single packet with a sha256 over its body. Read-only;
+      report_generator's primary tool. The 30-second-audit-packet
+      value-prop deliverable.
+    input_schema:
+      type: object
+      required: [framework_id]
+      properties:
+        framework_id:
+          type: string
+          pattern: "^[a-zA-Z0-9_]+$"
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 730
+        framework_dir:
+          type: string
+        audit_chain_path:
+          type: string
+    side_effects: read_only
+    archetype_tags: [report_generator, researcher]
+
   policy_lint.v1:
     name: policy_lint
     version: "1"
@@ -3068,6 +3098,23 @@ archetypes:
       - text_summarize.v1       # produce capture-summary briefs
       # No shell_exec. No code_edit. No web_fetch. Passive evidence
       # capture; the corpus is local + private.
+
+  # ---- ADR-0085 Phase D — D8 Compliance report generator ----------------
+  # report_generator kit: audit_packet_generate.v1 + the standard
+  # researcher read-only support set. Reads chain + evidence +
+  # scan reports + framework yamls; writes packet attestations to
+  # private memory. NO shell_exec / code_edit / web_fetch — the
+  # report stays inside the audit chain's locality.
+  report_generator:
+    standard_tools:
+      - llm_think.v1            # packet narrative + per-control summary
+      - memory_write.v1         # packet attestations + audit-packet entries in private memory
+      - memory_recall.v1        # walk prior packets for trending + cross-period comparison
+      - delegate.v1             # route the finished packet to the operator for review
+      - audit_chain_verify.v1   # chain integrity attestation embedded in the packet
+      - text_summarize.v1       # condense long packets into operator-readable digests
+      - audit_packet_generate.v1 # ADR-0085 Phase D — the wrap-and-attest packet builder
+      - code_read.v1            # read framework yaml + evidence corpus
 
   # ---- ADR-0085 Phase C — D8 Compliance policy enforcer ----------------
   # policy_enforcer kit: policy_lint.v1 + the standard actuator

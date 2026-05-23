@@ -1,0 +1,153 @@
+schema_version: 1
+name: compliance_reporting
+version: '1'
+description: |
+  ReportGenerator-D8's primary audit-packet skill. Wraps a
+  window of audit-chain entries + compliance scan reports +
+  evidence attestations into an operator-readable packet via
+  audit_packet_generate.v1, verifies chain integrity, synthesizes
+  a narrative header, and writes a packet-attestation to private
+  memory.
+
+  Read-only end-to-end. The skill NEVER mutates source data; the
+  packet wraps it. ADR-0085 Phase D's design invariant: the
+  packet's authority comes from faithful representation of
+  immutable source data; transformation would invalidate it.
+
+  Five-step pipeline:
+    1. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. A packet derived from a
+       broken chain must declare the breakage in its header.
+    2. generate_packet — audit_packet_generate.v1 walks the
+       chain window, buckets entries by tag family, and emits
+       a structured packet body with sha256.
+    3. synthesize_narrative — llm_think produces an operator-
+       readable header: top-line verdict (CLEAN / GAPS /
+       BROKEN_CHAIN), per-control highlights, recommended
+       next steps. Halt if chain broken.
+    4. attest_packet — memory_write scope=private records a
+       packet_attested entry with framework_id + packet_sha256
+       + narrative; the packet itself stays in tool output.
+    5. handoff_to_operator — delegate routes the finished
+       packet + narrative to the operator. The operator
+       reviews + decides what to do (file with auditor /
+       archive / share with stakeholders).
+
+requires:
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - audit_packet_generate.v1
+  - llm_think.v1
+  - delegate.v1
+
+inputs:
+  type: object
+  required: [framework_id]
+  properties:
+    framework_id:
+      type: string
+    window_days:
+      type: integer
+      default: 90
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: generate_packet
+    tool: audit_packet_generate.v1
+    args:
+      framework_id: ${inputs.framework_id}
+      window_days:  ${inputs.window_days}
+
+  - id: synthesize_narrative
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are ReportGenerator-D8, the D8 Compliance audit-packet
+        narrator. Produce an operator-readable header for the
+        generated audit packet.
+
+        Framework: ${inputs.framework_id}
+        Window: ${inputs.window_days} days
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity at generation:
+          status: ${verify_chain_integrity.out.status}
+          broken_at: ${verify_chain_integrity.out.broken_at}
+
+        Packet metadata:
+          packet_sha256: ${generate_packet.out.packet_sha256}
+          generated_at:  ${generate_packet.out.generated_at}
+          chain_status:  ${generate_packet.out.chain_status}
+
+        Per-control summaries:
+        ${generate_packet.out.control_summaries}
+
+        Evidence entries: ${generate_packet.out.evidence_entries}
+        Archive entries:  ${generate_packet.out.archive_entries}
+        Scan reports:     ${generate_packet.out.scan_reports}
+        Remediation entries: ${generate_packet.out.remediation_entries}
+
+        Produce:
+        1. One-line top-line verdict:
+           CLEAN — all controls have recent evidence + clean scans
+           GAPS  — at least one control missing evidence / scan
+                   showed gaps
+           BROKEN_CHAIN — chain integrity check failed; the
+                   packet's authority is tainted; do not share
+        2. Per-control highlights — for each control with a
+           noteworthy state (failing scan / no evidence /
+           pending remediation), one line.
+        3. Recommended next steps (e.g., "route remediation X
+           through policy_enforcer", "capture missing evidence
+           Y via evidence_collector", "verify chain integrity").
+
+        Be concise; this header sits above a raw packet body.
+
+  - id: attest_packet
+    tool: memory_write.v1
+    args:
+      content: |
+        AUDIT_PACKET_ATTESTED
+        framework_id:   ${inputs.framework_id}
+        window_days:    ${inputs.window_days}
+        packet_sha256:  ${generate_packet.out.packet_sha256}
+        generated_at:   ${generate_packet.out.generated_at}
+        chain_status:   ${generate_packet.out.chain_status}
+        narrative:      ${synthesize_narrative.out.response}
+        attestor:       ReportGenerator-D8
+      layer: episodic
+      scope: private
+      tags:
+        - "audit_packet_attested"
+        - "framework:${inputs.framework_id}"
+        - "attestor:ReportGenerator-D8"
+
+  - id: handoff_to_operator
+    tool: delegate.v1
+    args:
+      target_role: operator
+      task_summary: |
+        Audit packet ready (framework=${inputs.framework_id},
+        sha256=${generate_packet.out.packet_sha256}):
+        ${synthesize_narrative.out.response}
+      reason: |
+        ADR-0085 Phase D — audit packets are operator-on-demand
+        artifacts. The operator decides whether to file with the
+        auditor, archive, or share with stakeholders.
+
+output:
+  framework_id: ${inputs.framework_id}
+  window_days: ${inputs.window_days}
+  packet_body: ${generate_packet.out}
+  packet_sha256: ${generate_packet.out.packet_sha256}
+  narrative: ${synthesize_narrative.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_entry_id: ${attest_packet.out.entry_id}
+  operator_handoff_id: ${handoff_to_operator.out.delegation_id}
