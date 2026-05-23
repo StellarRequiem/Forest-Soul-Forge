@@ -1,0 +1,172 @@
+schema_version: 1
+name: editing
+version: '1'
+description: |
+  Editor-D7's primary skill. Composes three deterministic checks
+  over a writer's primary draft: verify_claim (fact-check via
+  Reality Anchor; ADR-0063), voice_match_check (voice fidelity
+  gate; ADR-0088 Phase B), and an LLM narrative tying them
+  together into a single editorial verdict.
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's timezone for ts framing.
+    2. recall_draft — memory_recall scope=lineage for the
+       writer's primary draft (tag: draft:topic:${topic_slug}).
+       Refuses cleanly when no draft exists.
+    3. recall_voice_profile — memory_recall scope=private for
+       the most-recent voice_profile attestation. Voice gate
+       falls back to a "voice profile missing" verdict when
+       absent — the operator decides whether to proceed.
+    4. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end.
+    5. fact_check — verify_claim.v1 over the draft's
+       load-bearing claims (operator can scope via the
+       claims input; default is "extract from draft").
+    6. voice_check — voice_match_check.v1 scores the draft
+       against the operator voice profile.
+    7. narrate_verdict — llm_think wraps the deterministic
+       checks into operator-readable editorial prose with a
+       specific recommendation (approve / revise / reject).
+    8. write_verdict_attestation — memory_write scope=private
+       records the verdict tagged for downstream pickup
+       (editorial_verdict + verdict:${verdict} +
+       topic:${topic_slug} + attestor:Editor-D7).
+
+  NEVER mutates the source draft (forbid_source_draft_mutation).
+  NEVER publishes (forbid_publish — distribution_pilot's lane).
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - verify_claim.v1
+  - voice_match_check.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic of the draft being edited. Used to recall the
+        draft from lineage memory via the draft:topic:${slug}
+        tag.
+    claim:
+      type: string
+      default: ""
+      description: >
+        Optional explicit claim to fact-check. When empty, the
+        editor surfaces the draft as the claim corpus and
+        verify_claim walks the ground-truth catalog.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the verdict
+        attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_draft
+    tool: memory_recall.v1
+    args:
+      query: "draft:topic:${inputs.topic_slug}"
+      mode: lineage
+      limit: 3
+
+  - id: recall_voice_profile
+    tool: memory_recall.v1
+    args:
+      query: "voice_profile"
+      mode: lineage
+      limit: 3
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: fact_check
+    tool: verify_claim.v1
+    args:
+      claim: ${inputs.claim}
+
+  - id: voice_check
+    tool: voice_match_check.v1
+    args:
+      draft: ${recall_draft.out.entries}
+      profile: ${recall_voice_profile.out.entries}
+
+  - id: narrate_verdict
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Editor-D7, the D7 Content Studio editorial
+        guardian. Compose an editorial verdict over the
+        writer's primary draft.
+
+        Operator profile:
+          timezone: ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Reality Anchor fact-check (verify_claim.v1):
+          verdict: ${fact_check.out.verdict}
+          citations: ${fact_check.out.citations}
+
+        Voice match check (voice_match_check.v1):
+          verdict: ${voice_check.out.verdict}
+          composite_score: ${voice_check.out.composite_score}
+          flagged_features: ${voice_check.out.flagged_features}
+
+        Compose an editorial verdict:
+        1. Top-line verdict — approve / revise / reject.
+           Be specific about which gate (fact / voice / both)
+           drove the decision.
+        2. Per-gate summary — restate each deterministic check's
+           verdict in operator-readable terms.
+        3. Specific revision asks (when verdict = revise) —
+           cite voice spans + claim findings + suggested
+           corrective. Be concrete — "tighten paragraph 3"
+           beats "improve flow."
+        4. Operator-action recommendation — proceed to format
+           adaptation + distribution / send back to writer
+           with revisions / surface to operator for decision.
+        5. NEVER mutate the writer's source draft — your
+           verdict is a NEW artifact alongside.
+        6. Halt warning if chain status != "ok" — refuse to
+           publish the verdict.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_verdict_attestation
+    tool: memory_write.v1
+    args:
+      content: ${narrate_verdict.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "editorial_verdict"
+        - "topic:${inputs.topic_slug}"
+        - "voice_verdict:${voice_check.out.verdict}"
+        - "fact_verdict:${fact_check.out.verdict}"
+        - "attestor:Editor-D7"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  fact_verdict: ${fact_check.out.verdict}
+  voice_verdict: ${voice_check.out.verdict}
+  voice_composite_score: ${voice_check.out.composite_score}
+  narrative: ${narrate_verdict.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  verdict_entry_id: ${write_verdict_attestation.out.entry_id}

@@ -1,0 +1,160 @@
+schema_version: 1
+name: format_adaptation
+version: '1'
+description: |
+  Editor-D7's format-adaptation skill. Takes a writer's primary
+  draft and produces a NEW format-adapted artifact (twitter_thread,
+  linkedin_post, newsletter, or blog) via format_adapt.v1, then
+  layers an LLM-driven tone-polishing pass on top via llm_think.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's timezone for ts framing.
+    2. recall_draft — memory_recall scope=lineage for the
+       writer's primary draft (tag: draft:topic:${topic_slug}).
+       Refuses cleanly when no draft exists.
+    3. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end.
+    4. structural_adapt — format_adapt.v1 produces the
+       deterministic structural adaptation (segments + metrics
+       + overflow flag).
+    5. tone_polish — llm_think rewrites each segment for tone
+       fidelity to the target format (twitter punchier;
+       linkedin reflective; newsletter direct; blog as-is).
+       The structural skeleton from format_adapt is preserved;
+       only language tightens.
+    6. write_adapted_attestation — memory_write scope=private
+       records the adapted artifact tagged for downstream
+       distribution_pilot pickup
+       (d7_format_adapted + topic:${topic_slug} +
+       target_format:${target_format} + attestor:Editor-D7).
+
+  Read-only end-to-end. The source draft stays immutable
+  (forbid_source_draft_mutation policy). NEVER publishes
+  (distribution_pilot's lane in Phase D).
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - format_adapt.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, target_format]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic of the draft being adapted. Used to recall the
+        draft from lineage memory via the draft:topic:${slug}
+        tag.
+    target_format:
+      type: string
+      enum: [twitter_thread, linkedin_post, newsletter, blog]
+      description: >
+        Target format the draft is adapted to.
+    max_tweets:
+      type: integer
+      default: 25
+      description: >
+        Cap on tweet count for twitter_thread (max 50).
+        Truncates with a warning if exceeded.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the adapted-artifact
+        attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_draft
+    tool: memory_recall.v1
+    args:
+      query: "draft:topic:${inputs.topic_slug}"
+      mode: lineage
+      limit: 3
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: structural_adapt
+    tool: format_adapt.v1
+    args:
+      draft: ${recall_draft.out.entries}
+      target_format: ${inputs.target_format}
+      max_tweets: ${inputs.max_tweets}
+
+  - id: tone_polish
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Editor-D7, the D7 Content Studio editorial
+        guardian. Polish the deterministic format adaptation
+        for tone fidelity to the target format.
+
+        Operator profile:
+          timezone: ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Target format: ${inputs.target_format}
+
+        Structural adaptation (deterministic, from
+        format_adapt.v1; preserves segment skeleton):
+        ${structural_adapt.out.adapted_text}
+
+        Tonal targets by format:
+        - twitter_thread: punchier sentences, single thought
+          per tweet, lead with a strong opener.
+        - linkedin_post: reflective + first-person opener,
+          one clear payoff, soft CTA.
+        - newsletter: direct + scannable, lead with the
+          subject's promise, end with explicit asks.
+        - blog: minimal — the source format is already blog;
+          mostly tighten whitespace + ensure headers are
+          well-formed.
+
+        Polish each segment for the target format's tone WITHOUT
+        changing the structural skeleton (segment count + ordering
+        stays). Flag overflow if format_adapt reports
+        ${structural_adapt.out.metrics.overflow} = true — the
+        operator may need to send the draft back to the writer
+        for compression.
+
+        Halt warning if chain status != "ok" — refuse to publish
+        the adapted artifact.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_adapted_attestation
+    tool: memory_write.v1
+    args:
+      content: ${tone_polish.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d7_format_adapted"
+        - "topic:${inputs.topic_slug}"
+        - "target_format:${inputs.target_format}"
+        - "attestor:Editor-D7"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  target_format: ${inputs.target_format}
+  segment_count: ${structural_adapt.out.metrics.segment_count}
+  overflow: ${structural_adapt.out.metrics.overflow}
+  polished_text: ${tone_polish.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  artifact_entry_id: ${write_adapted_attestation.out.entry_id}

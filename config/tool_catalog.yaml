@@ -767,6 +767,34 @@ tools:
     side_effects: read_only
     archetype_tags: [style_steward]
 
+  format_adapt.v1:
+    name: format_adapt
+    version: "1"
+    description: |
+      ADR-0088 Phase C — D7 Content Studio format adapter.
+      Adapts a primary draft to one of four target formats:
+      twitter_thread (segments capped at 280 chars + numbered
+      thread suffix), linkedin_post (single post capped at 2,500
+      chars), newsletter (subject + TL;DR + body + asks
+      structure), blog (light normalization pass). Read-only +
+      deterministic — same draft + same target format always
+      produce the same adaptation. LLM-driven tone polishing
+      is layered separately via the format_adaptation.v1 skill.
+    input_schema:
+      type: object
+      required: [draft, target_format]
+      properties:
+        draft: {type: string}
+        target_format:
+          type: string
+          enum: [twitter_thread, linkedin_post, newsletter, blog]
+        max_tweets:
+          type: integer
+          minimum: 1
+          maximum: 50
+    side_effects: read_only
+    archetype_tags: [editor]
+
   voice_match_check.v1:
     name: voice_match_check
     version: "1"
@@ -3672,6 +3700,28 @@ archetypes:
       - voice_match_check.v1          # ADR-0088 Phase B — the deterministic matcher
       # No web_fetch. No shell_exec. No code_edit. No draft-mutation
       # tools (writer's lane). Pure voice-arbitration kit.
+
+  # ---- ADR-0088 Phase C — D7 Content Studio editing + format adaptation ----
+  # editor kit. Guardian genre, read_only ceiling. Composes
+  # verify_claim (fact-check; ADR-0063 Reality Anchor) +
+  # voice_match_check (voice gate; ADR-0088 Phase B) +
+  # format_adapt (target-format rewrite; ADR-0088 Phase C) over
+  # the writer's primary draft. NEVER mutates source draft —
+  # produces verdict + new format-adapted artifact alongside.
+  editor:
+    standard_tools:
+      - llm_think.v1                  # editorial narrative + revision suggestions
+      - memory_recall.v1              # walk writer drafts + voice profiles + claim ground-truth
+      - memory_write.v1               # editorial verdicts + format-adapted artifacts to private memory
+      - delegate.v1                   # escalate revise verdicts back to writer; route format-adapted artifacts to distribution_pilot (Phase D)
+      - audit_chain_verify.v1         # chain integrity before publishing verdicts
+      - text_summarize.v1             # condense long claim_findings into operator-readable digests
+      - operator_profile_read.v1      # ADR-0068 — operator timezone for ts framing
+      - verify_claim.v1               # ADR-0063 — pre-approve fact-check (load-bearing)
+      - voice_match_check.v1          # ADR-0088 Phase B — voice fidelity gate
+      - format_adapt.v1               # ADR-0088 Phase C — target-format rewrite
+      # No web_fetch. No shell_exec. No code_edit. No publish tools
+      # (distribution_pilot's lane). Pure editorial composition.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

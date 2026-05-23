@@ -1998,6 +1998,83 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  editor:
+    # ADR-0088 Phase C — D7 Content Studio editor. Guardian
+    # genre, read_only ceiling. The agent composes three
+    # deterministic checks (verify_claim for fact-check,
+    # voice_match_check for voice fidelity, format_adapt for
+    # target-format rewrite) into a single editing pass over the
+    # writer's primary draft. NEVER mutates the source draft —
+    # produces a NEW format-adapted artifact + a verdict
+    # alongside. Same flag-not-rewrite invariant as
+    # style_steward + knowledge_verifier (source-protection
+    # discipline, not the editor refusing to ever produce
+    # transformed text).
+    policies:
+      - id: forbid_source_draft_mutation
+        rule: forbid
+        triggers: [mutate_source_draft, overwrite_writer_draft, edit_writer_draft_content]
+        rationale: |
+          The editor's verdict + adapted artifact land in NEW
+          memory entries; the writer's primary draft stays
+          immutable so every editorial pass is auditable end-
+          to-end. Mutating the source draft would corrupt the
+          provenance chain at the origin.
+      - id: require_verdict_attestation
+        rule: require
+        triggers: [emit_editorial_verdict, finalize_edit_pass]
+        rationale: |
+          Every edit pass emits a memory_write attestation with
+          (source_draft_id, verdict, voice_verdict, claim_findings,
+          format_artifact_id, attestor, ts). Without the
+          attestation, the operator can't trace which checks fed
+          which verdict + can't audit edit-pass quality over time.
+      - id: require_fact_check_before_approve
+        rule: require
+        triggers: [approve_for_publish, emit_publish_ready_verdict]
+        rationale: |
+          The editor MUST run verify_claim.v1 over the draft's
+          factual claims before emitting an approve verdict.
+          Approving a draft without fact-checking would bypass
+          the Reality Anchor discipline + risk publishing
+          unverified claims. Same fact-checking-as-gate posture
+          as ADR-0063's verifier_loop.
+      - id: forbid_publish
+        rule: forbid
+        triggers: [publish_post, send_message_external, schedule_publish]
+        rationale: |
+          The editor produces verdicts + adapted artifacts; the
+          PUBLISH action belongs to distribution_pilot (D7 Phase
+          D, YELLOW posture). Same posture discipline as writer
+          (forbid_publish) — every layer of the pipeline declines
+          to be the actor that crosses external boundary.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_message_external, post_verdict_externally]
+        rationale: |
+          Editorial verdicts + format-adapted artifacts are
+          private/lineage scope. Operator-driven sharing is a
+          separate explicit action; the editor never crosses
+          the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - mutate_source_draft
+      - publish_post
+      - send_message_external
+      - schedule_publish
+      - modify_production_systems
+    operator_duties:
+      - "Sample-check editorial verdicts weekly — a consistent disagreement between the editor's approve verdict + your read of the draft means the voice profile or the verify_claim ground-truth set needs updating."
+      - "Treat fact-check failures as load-bearing — the editor's verify_claim findings catch the class of bug that ships unverified claims to readers."
+      - "Treat a chain_broken halt as an emergency — editorial verdicts attested on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   style_steward:
     # ADR-0088 Phase B — D7 Content Studio voice arbiter.
     # Guardian genre, read_only ceiling. The agent maintains a

@@ -1037,6 +1037,26 @@ roles:
       emotional: 0.9    # voice fidelity is a deeply human signal
       embodiment: 0.5
 
+  # ---- ADR-0088 Phase C — D7 Content Studio (editing + format adaptation) ----
+  # editor: guardian-genre review + format-adaptation role.
+  # Composes verify_claim.v1 (fact-check) + voice_match_check.v1
+  # (voice-fidelity gate) + format_adapt.v1 (target-format
+  # rewrite) into a single editing pass over the writer's primary
+  # draft. Read-only end-to-end — NEVER mutates the writer's
+  # draft; produces a NEW format-adapted artifact + a verdict
+  # alongside. Same flag-not-rewrite invariant for the source
+  # draft (the editor never mutates upstream content).
+  # GREEN posture per ADR-0088 Decision 1.
+  editor:
+    description: "Editing + format-adaptation guardian. Composes verify_claim.v1 (fact-check) + voice_match_check.v1 (voice gate) + format_adapt.v1 (target-format rewrite) over a writer's primary draft. Produces an editorial verdict (approve / revise / reject) + a format-adapted artifact (twitter_thread / linkedin_post / newsletter / blog). NEVER mutates the writer's primary draft — surfaces verdict + new artifact alongside. Genre: guardian. ADR-0088 Phase C."
+    domain_weights:
+      security: 1.0     # editorial content is private; verify_claim crosses ground-truth
+      audit: 2.5        # every editorial verdict attests to its inputs (draft + voice profile + claims)
+      cognitive: 2.4    # composition of three deterministic checks + an LLM revision narrative
+      communication: 2.0 # operator-facing verdicts + the format-adapted output
+      emotional: 0.7
+      embodiment: 0.5
+
   # content_researcher: researcher-genre sourcing role for D7. Pulls
   # source material the writer + editor + style_steward need;
   # writes briefs to private memory tagged for writer pickup.

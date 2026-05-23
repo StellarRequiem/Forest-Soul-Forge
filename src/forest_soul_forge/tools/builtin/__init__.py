@@ -53,6 +53,7 @@ from forest_soul_forge.tools.builtin.voice_profile_build import (
 from forest_soul_forge.tools.builtin.voice_match_check import (
     VoiceMatchCheckTool,
 )
+from forest_soul_forge.tools.builtin.format_adapt import FormatAdaptTool
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -514,3 +515,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # voice_matching.v1 skills (D7 Phases B + C) compose this
     # tool. Deterministic so the operator can audit + replay.
     registry.register(VoiceMatchCheckTool())
+    # ADR-0088 Phase C — format_adapt.v1. Adapts a primary draft
+    # to a target format (twitter_thread / linkedin_post /
+    # newsletter / blog) deterministically. Read-only; the
+    # format_adaptation.v1 skill layers LLM-driven tone polishing
+    # on top via llm_think. Editor agent's primary tool.
+    registry.register(FormatAdaptTool())

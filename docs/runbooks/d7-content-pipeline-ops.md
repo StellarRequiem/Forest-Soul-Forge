@@ -12,7 +12,7 @@ that lands D7 Phase A (this runbook will grow as Phases B–D ship).
 |---|---|---|---|
 | **A** | writer + content_researcher | none — reuses existing | CLOSED |
 | **B** | style_steward (GREEN) | voice_profile_build.v1 + voice_match_check.v1 | CLOSED |
-| **C** | editor (GREEN) | format_adapt.v1 | PENDING |
+| **C** | editor (GREEN) | format_adapt.v1 | CLOSED |
 | **D** | distribution_pilot (YELLOW) | publish_schedule.v1 | PENDING |
 
 Each phase = one commit + one push, so the operator can verify
@@ -278,12 +278,99 @@ flag-not-rewrite invariant enforced at governance layer.
   stale (operator's voice has shifted) OR the writer prompts
   need tuning. Surface the report to the operator for the call.
 
-## Phase C — editing + format adaptation (PENDING)
+## Phase C — editing + format adaptation
 
-Will document editor birth + the editing skill (composes
-verify_claim + voice_match_check + the source-claim fact-check
-loop) + the format_adapt dispatch (one draft → twitter_thread /
-linkedin / newsletter / blog variants).
+### 1. Restart the daemon
+
+The new role + new builtin tool land here, so a restart is
+required:
+
+```bash
+./dev-tools/force-restart-daemon.command
+```
+
+Verify `format_adapt.v1` appears in `/healthz`'s tool registry,
+and `editor` appears in `/genres` under the `guardian` genre.
+
+### 2. Birth the agent
+
+```bash
+./dev-tools/birth-editor.command
+```
+
+Idempotent. Sets posture GREEN per ADR-0088 Decision 1
+(editorial composition is read-only end-to-end;
+forbid_source_draft_mutation + forbid_publish policies
+enforce source-protection + no-publish invariants regardless
+of posture).
+
+### 3. Run the editorial gate
+
+The `editing` skill composes verify_claim (fact-check) +
+voice_match_check (voice gate) + an LLM narrative into a
+verdict (approve / revise / reject):
+
+```bash
+EDITOR_ID=...   # Editor-D7 instance_id
+curl -s --max-time 90 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${EDITOR_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "editing",
+    "skill_version": "1",
+    "tool_version": "1",
+    "session_id": "edit-trial-001",
+    "args": {
+      "topic_slug": "multi-agent-governance",
+      "operator_reason": "Pre-publish editorial gate."
+    }
+  }'
+```
+
+The verdict lands in private memory tagged `editorial_verdict`
++ `voice_verdict:${verdict}` + `fact_verdict:${verdict}` for
+downstream pickup.
+
+### 4. Adapt to a target format
+
+Once the editorial verdict is "approve", produce a
+format-adapted artifact:
+
+```bash
+curl -s --max-time 90 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${EDITOR_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "format_adaptation",
+    "skill_version": "1",
+    "tool_version": "1",
+    "session_id": "adapt-trial-001",
+    "args": {
+      "topic_slug": "multi-agent-governance",
+      "target_format": "twitter_thread",
+      "max_tweets": 12,
+      "operator_reason": "Adapt approved draft to Twitter thread."
+    }
+  }'
+```
+
+The adapted artifact lands in private memory tagged
+`d7_format_adapted` + `target_format:twitter_thread`. The
+source draft stays immutable.
+
+### 5. Recovery
+
+- **editing refuses with "no draft found"** → run Writer-D7's
+  `draft_writing` skill first. The editor requires a prior
+  `draft:topic:${topic_slug}` entry in lineage memory.
+- **format_adaptation overflow flag triggers** → the draft is
+  too long for the target format. Send back to the writer
+  with a compression ask, OR raise `max_tweets` (twitter only).
+- **fact-check verdict = contradicted** → the draft cites a
+  claim that contradicts the operator's ground-truth catalog.
+  Surface to operator for review before approve verdict.
 
 ## Phase D — distribution + cascade + umbrella (PENDING)
 
