@@ -10,8 +10,8 @@ that lands D7 Phase A (this runbook will grow as Phases B–D ship).
 
 | Phase | New agent(s) | New builtin tool | Status |
 |---|---|---|---|
-| **A** | writer + content_researcher | none — reuses existing | IN PROGRESS |
-| **B** | style_steward (GREEN) | voice_profile_build.v1 + voice_match_check.v1 | PENDING |
+| **A** | writer + content_researcher | none — reuses existing | CLOSED |
+| **B** | style_steward (GREEN) | voice_profile_build.v1 + voice_match_check.v1 | CLOSED |
 | **C** | editor (GREEN) | format_adapt.v1 | PENDING |
 | **D** | distribution_pilot (YELLOW) | publish_schedule.v1 | PENDING |
 
@@ -166,11 +166,117 @@ editor / style_steward review.
 
 ---
 
-## Phase B — voice profiling (PENDING)
+## Phase B — voice profiling
 
-Will document style_steward birth + voice_profile_build /
-voice_match_check dispatch + the operator voice-sample curation
-workflow.
+### 1. Restart the daemon
+
+The new role + new builtin tools land here, so a restart is
+required:
+
+```bash
+./dev-tools/force-restart-daemon.command
+```
+
+Verify `voice_profile_build.v1` + `voice_match_check.v1` appear
+in `/healthz`'s tool registry, and `style_steward` appears in
+`/genres` under the `guardian` genre.
+
+### 2. Curate voice samples
+
+Before birthing the steward, paste 3-10 prior operator writing
+samples into private memory tagged `voice_sample`. The
+stylometric features land deterministically — short / homogeneous
+sample sets produce thin profiles. Aim for 1,000+ total words.
+
+```bash
+# Example — operator pastes from prior blog posts / newsletters
+curl -s --max-time 30 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${OPERATOR_COMPANION_ID}/tools/call" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tool_name": "memory_write",
+    "tool_version": "1",
+    "session_id": "voice-curate-001",
+    "args": {
+      "content": "<paste prior writing here>",
+      "layer": "episodic",
+      "scope": "private",
+      "tags": ["voice_sample"]
+    }
+  }'
+```
+
+### 3. Birth the agent
+
+```bash
+./dev-tools/birth-style-steward.command
+```
+
+Idempotent. Sets posture GREEN per ADR-0088 Decision 1
+(voice arbitration is non-acting; flag-not-rewrite policy
+enforces the invariant regardless).
+
+### 4. Build the voice profile
+
+```bash
+STEWARD_ID=...   # StyleSteward-D7 instance_id
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${STEWARD_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "voice_profile_build",
+    "skill_version": "1",
+    "tool_version": "1",
+    "session_id": "voice-build-001",
+    "args": {
+      "sample_tag": "voice_sample",
+      "profile_label": "blog_2024_2025",
+      "operator_reason": "Initial voice profile from prior writing."
+    }
+  }'
+```
+
+The profile lands in private memory tagged
+`voice_profile` + `voice_profile_label:blog_2024_2025`.
+
+### 5. Score a draft against the profile
+
+After a Writer-D7 draft lands (Phase A), score it for voice
+fidelity:
+
+```bash
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${STEWARD_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "voice_matching",
+    "skill_version": "1",
+    "tool_version": "1",
+    "session_id": "voice-match-001",
+    "args": {
+      "topic_slug": "multi-agent-governance",
+      "operator_reason": "Voice fidelity check on first draft."
+    }
+  }'
+```
+
+The verdict surfaces as `match` / `drift_minor` / `drift_major`
++ a list of flagged_features + drift-pointer spans the operator
++ editor can review. The steward NEVER rewrites the draft —
+flag-not-rewrite invariant enforced at governance layer.
+
+### 6. Recovery
+
+- **voice_profile_build refuses with "total words < 50"** →
+  the curated voice samples are too short. Paste more.
+- **voice_matching refuses with "no profile found"** → run
+  voice_profile_build first. The profile is the prerequisite.
+- **Persistent drift_major verdicts** → either the samples are
+  stale (operator's voice has shifted) OR the writer prompts
+  need tuning. Surface the report to the operator for the call.
 
 ## Phase C — editing + format adaptation (PENDING)
 

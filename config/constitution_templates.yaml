@@ -1998,6 +1998,80 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  style_steward:
+    # ADR-0088 Phase B — D7 Content Studio voice arbiter.
+    # Guardian genre, read_only ceiling. The agent maintains a
+    # voice profile derived from operator writing samples, scores
+    # drafts against it, and surfaces drift spans. NEVER rewrites
+    # drafts (writer's lane); NEVER silently overrides the profile
+    # (operator-curated samples are the source of truth). Same
+    # flag-not-rewrite invariant as knowledge_verifier.
+    policies:
+      - id: forbid_draft_rewrite
+        rule: forbid
+        triggers: [rewrite_draft, mutate_draft, edit_draft_content]
+        rationale: |
+          The steward arbitrates voice; it doesn't rewrite. Drift
+          surfaces as a report with span pointers + a verdict; the
+          operator (or the editor in Phase C) decides whether to
+          rewrite. Letting the steward rewrite would conflate
+          arbitration with composition + bypass the writer's
+          voice-fidelity discipline.
+      - id: forbid_silent_profile_override
+        rule: forbid
+        triggers: [overwrite_voice_profile_without_operator_attestation, swap_profile_source]
+        rationale: |
+          The voice profile is derived from OPERATOR-CURATED
+          samples. Building a profile from a non-operator source
+          (e.g., a third-party writer's archive) or swapping the
+          sample set without operator attestation would corrupt
+          the voice discipline + produce drift reports that point
+          at the wrong direction.
+      - id: require_profile_attestation
+        rule: require
+        triggers: [emit_voice_profile, finalize_voice_profile, build_voice_profile]
+        rationale: |
+          Every voice profile build emits a memory_write
+          attestation with (sample_count, total_words, profile_label,
+          attestor, ts). Without the attestation, the writer +
+          editor can't pick the profile up + the operator can't
+          audit which sample set the profile rests on.
+      - id: require_match_check_attestation
+        rule: require
+        triggers: [emit_voice_match_report, finalize_voice_check]
+        rationale: |
+          Every voice-match check emits a memory_write
+          attestation with (verdict, composite_score, flagged_features,
+          draft_entry_id, attestor, ts). Without the attestation,
+          the editor can't trace which check fed its approve /
+          revise verdict + the operator can't audit drift over time.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_message_external, post_voice_report_externally]
+        rationale: |
+          Voice profile content + drift reports are private/lineage
+          scope. Operator-driven sharing is a separate explicit
+          action; the steward never crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - rewrite_draft
+      - mutate_draft
+      - overwrite_voice_profile_without_operator_attestation
+      - swap_profile_source
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Curate the voice sample set — the steward profiles what you provide; widening + tightening the sample set is operator-side authorship."
+      - "Sample-check drift reports — when the verdict is drift_minor on a draft you read as on-voice, the threshold may need tuning; when drift_major surfaces consistently on writer drafts, the voice samples may need refreshing."
+      - "Treat a chain_broken halt as an emergency — voice profiles + match checks attested on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   content_researcher:
     # ADR-0088 Phase A — D7 Content Studio content-sourcing researcher.
     # Researcher genre, network ceiling. Pulls source material from

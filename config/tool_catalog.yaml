@@ -738,6 +738,59 @@ tools:
     side_effects: read_only
     archetype_tags: [reflector]
 
+  voice_profile_build.v1:
+    name: voice_profile_build
+    version: "1"
+    description: |
+      ADR-0088 Phase B — D7 Content Studio voice profiler.
+      Derives a deterministic stylometric profile from operator
+      writing samples. Captures sentence-rhythm + vocabulary +
+      structural + punctuation fingerprints (mean / stdev
+      sentence length, word length, type-token ratio, comma /
+      semicolon / em-dash / hedging / first-person densities,
+      top function words). Read-only end-to-end; the
+      voice_profile_build.v1 skill wraps this with operator-
+      profile context + memory_write of the final attestation.
+      Deterministic so the operator can audit + replay; LLM-driven
+      voice modeling would be opaque + unrepeatable.
+    input_schema:
+      type: object
+      required: [samples]
+      properties:
+        samples:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: {type: string}
+        profile_label:
+          type: string
+    side_effects: read_only
+    archetype_tags: [style_steward]
+
+  voice_match_check.v1:
+    name: voice_match_check
+    version: "1"
+    description: |
+      ADR-0088 Phase B — D7 Content Studio voice matcher. Scores
+      a candidate draft against a previously-built voice profile
+      (from voice_profile_build.v1). Returns per-feature deltas,
+      a composite match score (0..1), a verdict
+      (match/drift_minor/drift_major), and up to three operator-
+      visible drift spans pointing at the sentences that
+      diverge. Read-only end-to-end; the editing.v1 +
+      voice_matching.v1 skills compose this tool. Deterministic
+      so the operator can audit + replay the comparison.
+    input_schema:
+      type: object
+      required: [draft, profile]
+      properties:
+        draft:
+          type: string
+        profile:
+          type: object
+    side_effects: read_only
+    archetype_tags: [style_steward, editor]
+
   task_rank.v1:
     name: task_rank
     version: "1"
@@ -3600,6 +3653,25 @@ archetypes:
       - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval to surface D1 catalog reads
       # No file_integrity. No shell_exec. No code_edit. No drafting
       # tools (writer's lane). Sourcing + brief composition only.
+
+  # ---- ADR-0088 Phase B — D7 Content Studio voice discipline ---------
+  # style_steward kit. Guardian genre, read_only ceiling. Maintains
+  # the operator voice profile (voice_profile_build.v1) + scores
+  # drafts against it (voice_match_check.v1). NEVER rewrites drafts.
+  # Same flag-not-rewrite invariant as knowledge_verifier.
+  style_steward:
+    standard_tools:
+      - llm_think.v1                  # narrative wrapping the deterministic match report
+      - memory_recall.v1              # walk operator-curated voice samples + prior profile builds
+      - memory_write.v1               # voice profile + match-check attestations to private memory
+      - delegate.v1                   # escalate drift_major verdicts to operator / editor
+      - audit_chain_verify.v1         # chain integrity before publishing reports
+      - text_summarize.v1             # condense drift reports into operator-readable summaries
+      - operator_profile_read.v1      # ADR-0068 — operator timezone for ts framing
+      - voice_profile_build.v1        # ADR-0088 Phase B — the deterministic profiler
+      - voice_match_check.v1          # ADR-0088 Phase B — the deterministic matcher
+      # No web_fetch. No shell_exec. No code_edit. No draft-mutation
+      # tools (writer's lane). Pure voice-arbitration kit.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

@@ -1,0 +1,105 @@
+schema_version: 1
+name: voice_profile_build
+version: '1'
+description: |
+  StyleSteward-D7's profile-build skill. Reads operator-curated
+  voice samples from private memory, derives a deterministic
+  stylometric profile via voice_profile_build.v1, and writes the
+  profile attestation tagged for writer + editor pickup.
+
+  Four-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's timezone for ts framing.
+    2. recall_voice_samples — memory_recall scope=private for
+       all operator-curated voice samples (tag: voice_sample).
+       The operator paste-curates these via a separate manual
+       workflow (or a future connector); the steward NEVER
+       generates samples from non-operator sources
+       (forbid_silent_profile_override policy).
+    3. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked end-to-end. A profile attested
+       on a broken chain inherits the brokenness.
+    4. build_profile — voice_profile_build.v1 derives the
+       stylometric profile from the sample texts.
+    5. write_profile_attestation — memory_write scope=private
+       records the profile with tags (voice_profile,
+       voice_profile_label:${profile_label}, attestor:
+       StyleSteward-D7) for downstream writer + editor pickup.
+
+  Deterministic — same sample set always produces the same
+  profile. The audit chain captures every rebuild so drift is
+  attributable.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - voice_profile_build.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  properties:
+    sample_tag:
+      type: string
+      default: "voice_sample"
+      description: >
+        Memory tag the operator pastes voice samples under.
+        Defaults to "voice_sample"; operator can swap (e.g.
+        "voice_sample:blog" vs. "voice_sample:newsletter") if
+        running parallel profiles.
+    profile_label:
+      type: string
+      default: ""
+      description: >
+        Operator-readable label for this profile (e.g.,
+        "blog_2024_2025"). Recorded as metadata only — does
+        not affect derivation.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the profile
+        attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_voice_samples
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.sample_tag}
+      mode: private
+      limit: 50
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: build_profile
+    tool: voice_profile_build.v1
+    args:
+      samples: ${recall_voice_samples.out.entries}
+      profile_label: ${inputs.profile_label}
+
+  - id: write_profile_attestation
+    tool: memory_write.v1
+    args:
+      content: ${build_profile.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "voice_profile"
+        - "voice_profile_label:${inputs.profile_label}"
+        - "attestor:StyleSteward-D7"
+
+output:
+  profile_label: ${inputs.profile_label}
+  sample_count: ${build_profile.out.sample_count}
+  total_words: ${build_profile.out.total_words}
+  chain_status: ${verify_chain_integrity.out.status}
+  profile_entry_id: ${write_profile_attestation.out.entry_id}
+  profile_artifact: ${build_profile.out.response}

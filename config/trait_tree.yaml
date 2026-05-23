@@ -1019,6 +1019,24 @@ roles:
       emotional: 1.2    # warmth + voice fidelity matters in long-form prose
       embodiment: 0.5
 
+  # ---- ADR-0088 Phase B — D7 Content Studio (voice discipline) -------
+  # style_steward: guardian-genre voice arbiter. Builds a voice
+  # profile from operator writing samples (voice_profile_build.v1),
+  # scores drafts against it (voice_match_check.v1), and surfaces
+  # drift with span pointers. NEVER rewrites — flags only. Same
+  # flag-not-rewrite invariant as knowledge_verifier. GREEN posture
+  # per ADR-0088 Decision 1 (read-only voice arbitration is
+  # non-acting).
+  style_steward:
+    description: "Voice discipline guardian. Dispatches voice_profile_build.v1 over operator-curated writing samples to maintain a stylometric profile; dispatches voice_match_check.v1 over candidate drafts to score voice fidelity + surface drift spans. Read-only end-to-end — NEVER rewrites drafts (writer's lane) + NEVER overrides the profile silently (operator-curated samples are the source of truth). Genre: guardian. ADR-0088 Phase B."
+    domain_weights:
+      security: 1.0     # voice profile artifacts are private; arbitration is content-only
+      audit: 2.4        # every profile build + match check attests to its inputs
+      cognitive: 2.2    # the load-bearing reasoning is voice-feature comparison
+      communication: 1.8 # operator-facing drift reports
+      emotional: 0.9    # voice fidelity is a deeply human signal
+      embodiment: 0.5
+
   # content_researcher: researcher-genre sourcing role for D7. Pulls
   # source material the writer + editor + style_steward need;
   # writes briefs to private memory tagged for writer pickup.

@@ -47,6 +47,12 @@ from forest_soul_forge.tools.builtin.task_rank import TaskRankTool
 from forest_soul_forge.tools.builtin.decision_journal_compile import (
     DecisionJournalCompileTool,
 )
+from forest_soul_forge.tools.builtin.voice_profile_build import (
+    VoiceProfileBuildTool,
+)
+from forest_soul_forge.tools.builtin.voice_match_check import (
+    VoiceMatchCheckTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -497,3 +503,14 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # digest for the Reflector-D2's evening sweep. Read-only;
     # the LLM narrative is layered by daily_reflection.v1 skill.
     registry.register(DecisionJournalCompileTool())
+    # ADR-0088 Phase B — voice_profile_build.v1. Deterministic
+    # stylometric profiler over operator writing samples.
+    # Read-only; the style_steward agent + the writer's
+    # draft_writing skill consume the profile artifact.
+    registry.register(VoiceProfileBuildTool())
+    # ADR-0088 Phase B — voice_match_check.v1. Scores a candidate
+    # draft against a built voice profile + flags per-feature
+    # drift with span pointers. Read-only; the editing.v1 +
+    # voice_matching.v1 skills (D7 Phases B + C) compose this
+    # tool. Deterministic so the operator can audit + replay.
+    registry.register(VoiceMatchCheckTool())

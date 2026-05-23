@@ -1,0 +1,156 @@
+schema_version: 1
+name: voice_matching
+version: '1'
+description: |
+  StyleSteward-D7's voice-match-check skill. Reads the most
+  recent voice profile + a candidate draft from private memory,
+  scores the draft against the profile via voice_match_check.v1,
+  narrates the verdict via llm_think, and writes the match
+  attestation tagged for editor pickup.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's timezone for ts framing.
+    2. recall_profile — memory_recall scope=private for the
+       most recent voice_profile attestation. Refuses cleanly
+       when no profile exists ("build the profile first via
+       voice_profile_build.v1").
+    3. recall_draft — memory_recall scope=private + lineage
+       for the candidate draft (tag: draft:topic:${topic_slug}
+       or operator-provided draft_entry_id).
+    4. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked end-to-end.
+    5. score_draft — voice_match_check.v1 produces per-feature
+       deltas + composite_score + verdict + spans.
+    6. narrate_verdict — llm_think wraps the deterministic
+       report into operator-readable prose, including a
+       specific recommendation (approve / send-back-to-writer-with-spans).
+    7. write_match_attestation — memory_write scope=private
+       records the verdict tagged for editor pickup
+       (voice_match_report + verdict:${verdict} +
+       attestor:StyleSteward-D7).
+
+  NEVER rewrites the draft — flags + spans only. The
+  forbid_draft_rewrite policy enforces this at governance layer.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - voice_match_check.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic of the draft being scored. Used to recall the
+        draft from memory via the draft:topic:${slug} tag.
+    profile_label:
+      type: string
+      default: ""
+      description: >
+        Optional voice profile label to match against. When
+        empty, the steward uses the most-recent voice_profile
+        attestation regardless of label.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the match
+        attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_profile
+    tool: memory_recall.v1
+    args:
+      query: "voice_profile"
+      mode: private
+      limit: 5
+
+  - id: recall_draft
+    tool: memory_recall.v1
+    args:
+      query: "draft:topic:${inputs.topic_slug}"
+      mode: lineage
+      limit: 3
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: score_draft
+    tool: voice_match_check.v1
+    args:
+      draft: ${recall_draft.out.entries}
+      profile: ${recall_profile.out.entries}
+
+  - id: narrate_verdict
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are StyleSteward-D7, the D7 Content Studio voice
+        arbiter. Wrap the deterministic voice-match report into
+        operator-readable prose.
+
+        Operator profile:
+          timezone: ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Voice-match report (deterministic, from voice_match_check.v1):
+          verdict:          ${score_draft.out.verdict}
+          composite_score:  ${score_draft.out.composite_score}
+          flagged_features: ${score_draft.out.flagged_features}
+          spans:            ${score_draft.out.spans}
+
+        Narrate the verdict:
+        1. One-sentence summary — does the draft match the
+           operator's voice? Be honest about drift_minor (close
+           but not exact) vs. drift_major (rewrite warranted).
+        2. Per-flagged-feature note — for each item in
+           flagged_features, name what's drifting + cite the
+           span excerpt + suggest the specific corrective.
+        3. Operator-action recommendation — approve / send back
+           to writer with these spans / re-curate the voice
+           samples (when drift_major is consistent across many
+           drafts).
+        4. NEVER rewrite the draft yourself — that's the writer's
+           lane. Surface + flag only.
+        5. Halt warning if chain status != "ok" — refuse to
+           publish the match report.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_match_attestation
+    tool: memory_write.v1
+    args:
+      content: ${narrate_verdict.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "voice_match_report"
+        - "verdict:${score_draft.out.verdict}"
+        - "topic:${inputs.topic_slug}"
+        - "attestor:StyleSteward-D7"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  verdict: ${score_draft.out.verdict}
+  composite_score: ${score_draft.out.composite_score}
+  flagged_features: ${score_draft.out.flagged_features}
+  narrative: ${narrate_verdict.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  report_entry_id: ${write_match_attestation.out.entry_id}
