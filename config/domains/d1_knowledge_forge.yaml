@@ -4,13 +4,14 @@
 # after Phase α substrate (orchestrator + voice + plugins + scale).
 domain_id: d1_knowledge_forge
 name: Personal Knowledge Forge
-# ADR-0086 Phase C closed (2026-05-23): knowledge_verifier role
-# (YELLOW posture) + birth script + knowledge_contradiction_scan.v1
-# tool (28 unit tests, single-agent scope per Decision 3) +
-# contradiction-flag skill shipped on top of Phase A+B. Phase D
-# queued (daily_knowledge_delta + cascade + umbrella). Flips to
-# "live" at Phase D close per ADR-0086 §Phase status footer.
-status: phase_c
+# ADR-0086 LIVE (2026-05-23): all 4 phases CLOSED. Roles
+# librarian + prospector + synthesizer + knowledge_verifier
+# alive. Three new builtin tools: topic_genealogy_build.v1,
+# knowledge_contradiction_scan.v1, daily_knowledge_delta.v1
+# (75 unit tests total). Six skill manifests. Cascade wiring
+# d8→d1 active; d1→d9/d10/d7/d2 declared inert until those
+# domains ship. Umbrella birth script + runbook live.
+status: live
 
 description: |
   Active personal knowledge curation. Not a passive note-store —
@@ -26,7 +27,12 @@ entry_agents:
     capability: research_gathering
   - role: synthesizer
     capability: knowledge_summarize
-  - role: verifier
+  # ADR-0086 Decision 2 — the manifest originally named the
+  # fourth role `verifier`; the rename to `knowledge_verifier`
+  # avoids collision with verifier_loop (ADR-0036 kernel
+  # singleton) + reality_anchor (ADR-0063 kernel singleton).
+  # The rename is mechanical — capability name unchanged.
+  - role: knowledge_verifier
     capability: knowledge_contradiction_flag
 
 capabilities:

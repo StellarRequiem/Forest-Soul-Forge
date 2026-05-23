@@ -1,9 +1,12 @@
 # ADR-0086 — D1 Personal Knowledge Forge: rollout
 
-**Status:** Proposed (2026-05-23). Phase A CLOSED 2026-05-23;
-phases B–D queued. ADR flips to **Accepted** when Phase D closes
-and `config/domains/d1_knowledge_forge.yaml` status is updated
-to `live`.
+**Status:** Accepted (2026-05-23). All four phases CLOSED —
+D1 Personal Knowledge Forge LIVE with all 4 agents alive
+(Librarian-D1, Prospector-D1, Synthesizer-D1,
+KnowledgeVerifier-D1); 3 new builtin tools
+(topic_genealogy_build.v1, knowledge_contradiction_scan.v1,
+daily_knowledge_delta.v1) with 75 unit tests total; 6 skill
+manifests; cascade wiring d8→d1 active.
 **Date:** 2026-05-23
 **Tracks:** Domain Rollout / Knowledge Curation
 **Supersedes:** none
@@ -271,13 +274,16 @@ and ADR-0085 (D8).
   single-agent scope gate; scope=cross_agent reserved for v0.4);
   skill manifest `examples/skills/knowledge_contradiction_flag.v1.yaml`;
   birth script `dev-tools/birth-knowledge-verifier.command`.
-- **Phase D** — delta + cascade + umbrella. Status: pending.
-  Ships: new builtin tool `daily_knowledge_delta.v1`; skill
-  manifest `examples/skills/daily_knowledge_delta.v1.yaml`;
-  cascade entries in handoffs.yaml; umbrella birth script
-  `dev-tools/birth-d1-knowledge-forge.command`; runbook final
-  section; diagnostic harness section-09 D1 extensions;
-  `d1_knowledge_forge.yaml` status flipped to `live`.
-
-ADR flips to **Accepted** when Phase D closes and
-`d1_knowledge_forge.yaml` status is updated to `live`.
+- **Phase D** — delta + cascade + umbrella. Status: CLOSED
+  (2026-05-23). Shipped: new builtin tool
+  `daily_knowledge_delta.v1` with 19 unit tests; skill manifest
+  `examples/skills/daily_knowledge_delta.v1.yaml`; cascade
+  entries in `config/handoffs.yaml` (d8.compliance_scan →
+  d1.knowledge_curation active; d1 → d9/d10/d7/d2 declared
+  inert via comment block until those domains ship); umbrella
+  birth script `dev-tools/birth-d1-knowledge-forge.command`;
+  runbook final Phase D section; manifest's bare `verifier`
+  entry_agent renamed to `knowledge_verifier` per Decision 2;
+  diagnostic section-09 passes 3/4 (1 info-only on
+  future-domain capabilities, unrelated to D1);
+  `d1_knowledge_forge.yaml` status flipped phase_c → `live`.

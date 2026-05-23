@@ -14,7 +14,7 @@ that lands D1 Phase A (this runbook will grow as Phases B–D ship).
 | **A** | librarian + prospector | none — reuses web_fetch + memory_write/recall + audit_chain_verify + personal_recall + llm_think | CLOSED |
 | **B** | synthesizer | topic_genealogy_build.v1 | CLOSED |
 | **C** | knowledge_verifier | knowledge_contradiction_scan.v1 | CLOSED |
-| **D** | (none — pure substrate phase) | daily_knowledge_delta.v1 | pending |
+| **D** | (none — pure substrate phase) | daily_knowledge_delta.v1 | CLOSED |
 
 Each phase = one commit + one push, so the operator can verify
 phase N before phase N+1 fires.
@@ -342,12 +342,95 @@ silent fallback), so the deferral is observable.
 
 ---
 
-## Phase D (pending)
+## Phase D — delta + cascade + umbrella
 
-This section will land at Phase D close. Tracking summary:
+### 1. Restart the daemon
 
-- **Phase D** — delta + cascade + umbrella. Will add:
-  `daily_knowledge_delta.v1` tool, `daily_knowledge_delta.v1`
-  skill, cascade wiring (d8→d1 active; d1→d9/d10/d7/d2 declared
-  inert), `birth-d1-knowledge-forge.command` umbrella script,
-  diagnostic harness extensions.
+```bash
+./dev-tools/force-restart-daemon.command
+```
+
+Verify `/tools/catalog` lists `daily_knowledge_delta.v1`.
+
+### 2. Umbrella birth — all four D1 agents at once
+
+After pulling D1-A through D1-D, the umbrella script births
+every D1 agent in order:
+
+```bash
+./dev-tools/birth-d1-knowledge-forge.command
+```
+
+It calls (in order) `birth-librarian` → `birth-prospector` →
+`birth-synthesizer` → `birth-knowledge-verifier`. Each child
+script is idempotent, so re-running the umbrella is safe.
+
+### 3. Pull a daily delta
+
+```
+POST /agents/<Synthesizer-D1-id>/tools/call
+{
+  "tool_name": "skill_run",
+  "tool_version": "1",
+  "session_id": "<uuid>",
+  "args": {
+    "skill_name": "daily_knowledge_delta",
+    "skill_version": "1",
+    "skill_args": {
+      "window_hours": 24,
+      "operator_reason": "morning briefing"
+    }
+  }
+}
+```
+
+Returns: a structured delta (catalog writes + prospector pulls
++ contradiction flags bucketed by topic) plus an operator
+narrative + a private-memory attestation tagged
+`daily_knowledge_delta_built`. Widen `window_hours` to 168
+(weekly) or 720 (monthly) for catch-up briefs after PTO.
+
+### 4. Cascade wiring
+
+Live cascade:
+- `d8_compliance.compliance_scan` → `d1_knowledge_forge.knowledge_curation`
+
+When the D8 compliance scanner surfaces a framework-rule change
+or control delta, the resolved route cascades into the
+librarian's catalog so the operator's personal knowledge corpus
+stays current. Audit-chain entries join the source +
+cascaded routes via `cascade_source_*` fields on the
+ResolvedRoute.
+
+Declared-INERT cascades (commented in `config/handoffs.yaml`):
+- `d1.knowledge_contradiction_flag` → `d9.curriculum_design`
+- `d1.knowledge_summarize` → `d10.deep_research`
+- `d1.knowledge_curation` → `d7.content_drafting`
+- `d1.daily_knowledge_delta` → `d2.morning_briefing`
+
+Each lands as a real cascade rule when its target domain ships
+per ADR-0067 rollout order (D2 → D7 → D9 → D10 still upstream).
+
+### 5. Diagnostic harness coverage
+
+`dev-tools/diagnostic/section-09-handoff-routing.command` is
+config-driven; it picks up D1 automatically from `handoffs.yaml`
++ `config/domains/d1_knowledge_forge.yaml`. Expected outcome at
+D1 close: 3/4 PASS + 1 INFO (the INFO is the long tail of
+future-domain capabilities without handoff mapping, unrelated
+to D1).
+
+### 6. Observation
+
+- **Daily deltas:** `GET /memory/<synthesizer_id>?tag=daily_knowledge_delta_built`
+- **Per-window deltas:** filter by `window:<N>h` tag.
+- **Full live status:** all 4 D1 agents alive + posture
+  (GREEN/GREEN/GREEN/YELLOW for librarian/prospector/synthesizer/
+  knowledge_verifier).
+
+---
+
+## D1 LIVE — 2026-05-23
+
+All four phases CLOSED. ADR-0086 Accepted.
+`config/domains/d1_knowledge_forge.yaml` status: `live`.

@@ -34,6 +34,9 @@ from forest_soul_forge.tools.builtin.topic_genealogy_build import (
 from forest_soul_forge.tools.builtin.knowledge_contradiction_scan import (
     KnowledgeContradictionScanTool,
 )
+from forest_soul_forge.tools.builtin.daily_knowledge_delta import (
+    DailyKnowledgeDeltaTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -452,3 +455,11 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # skill writes the actual flag via memory_flag_contradiction.v1
     # in a separate step.
     registry.register(KnowledgeContradictionScanTool())
+    # ADR-0086 Phase D — daily_knowledge_delta.v1. Walks the audit
+    # chain over an operator-named window (default 24h) and
+    # buckets D1-relevant memory writes (catalog entries,
+    # prospector inbox, contradiction flags) by topic into a
+    # daily delta report. Read-only; synthesizer's daily-sweep
+    # tool. The skill that wraps it persists the final delta
+    # artifact via memory_write.
+    registry.register(DailyKnowledgeDeltaTool())

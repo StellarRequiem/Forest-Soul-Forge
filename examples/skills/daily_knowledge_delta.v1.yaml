@@ -1,0 +1,151 @@
+schema_version: 1
+name: daily_knowledge_delta
+version: '1'
+description: |
+  Synthesizer-D1's daily-sweep skill. Walks the audit chain for
+  the operator-named window (default 24h), buckets D1-relevant
+  events by family (catalog writes, prospector pulls,
+  contradiction flags), condenses into an operator-readable
+  brief, and writes the delta artifact into private memory.
+
+  Read-only end-to-end. The synthesizer wraps the chain into
+  briefs; it never mutates the catalog. ADR-0086 Phase D's
+  design invariant. Constitutional policies enforce this at
+  governance layer (require_synthesis_attestation,
+  require_provenance_in_synthesis, forbid_external_disclosure).
+
+  Five-step pipeline:
+    1. prior_deltas — memory_recall scope=private for prior
+       daily_knowledge_delta_built attestations. Surfaces
+       what was reported yesterday so today's brief can
+       reference the prior delta (e.g., "you still have 2
+       contradiction flags from yesterday's review pending").
+    2. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked. A delta built from a broken
+       chain inherits the brokenness.
+    3. build_delta — daily_knowledge_delta.v1 walks the chain
+       over the window, returns the bucketed event families.
+    4. narrate — llm_think condenses the delta into an
+       operator brief: "yesterday you cataloged 7 entries
+       across 3 topics; the prospector pulled 5 new sources;
+       the verifier flagged 2 candidates on 'diffusion-models'
+       for review. Open items from prior days: ..."
+    5. write_delta — memory_write scope=private records the
+       daily_knowledge_delta_built attestation with the raw
+       bucket data + the narrative, tagged with the window
+       + attestor.
+
+  Output goes back to the operator. The delta artifact is
+  queryable per window via memory_recall + tag-scan.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - daily_knowledge_delta.v1
+  - llm_think.v1
+
+inputs:
+  type: object
+  properties:
+    window_hours:
+      type: integer
+      default: 24
+      description: >
+        How far back to walk. Default 24 (daily brief). Operators
+        can widen to 168 (weekly) or 720 (monthly) for catch-up
+        briefs after PTO.
+    topic_filter:
+      type: string
+      default: ""
+      description: >
+        Optional. If present, restrict the delta to one topic
+        slug. Default no filter — the brief covers every topic
+        that saw activity in the window.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the delta attestation.
+
+steps:
+  - id: prior_deltas
+    tool: memory_recall.v1
+    args:
+      query: "daily_knowledge_delta_built"
+      mode: private
+      limit: 5
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: build_delta
+    tool: daily_knowledge_delta.v1
+    args:
+      window_hours: ${inputs.window_hours}
+      topic_filter: ${inputs.topic_filter}
+
+  - id: narrate
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Synthesizer-D1, the D1 Knowledge Forge synthesis
+        agent. Produce an operator-readable daily-knowledge brief.
+
+        Window: ${inputs.window_hours} hours
+        Topic filter: ${inputs.topic_filter}
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Delta summary:
+          catalog_writes:      ${build_delta.out.summary.catalog_write_count}
+          prospector_pulls:    ${build_delta.out.summary.prospector_pull_count}
+          contradiction_flags: ${build_delta.out.summary.contradiction_flag_count}
+          topics_with_activity: ${build_delta.out.summary.topic_count}
+
+        Per-topic breakdown:
+          catalog: ${build_delta.out.catalog_writes}
+          inbox:   ${build_delta.out.prospector_pulls}
+          flags:   ${build_delta.out.contradiction_flags}
+
+        Prior daily-delta attestations (most recent first):
+        ${prior_deltas.out.entries}
+
+        Produce a structured brief:
+        1. Headline: "In the last X hours, you cataloged N
+           entries across M topics; the prospector pulled K
+           sources; the verifier flagged J candidates."
+        2. Per-topic detail (only for topics with activity):
+           topic slug + a one-line summary of what happened on
+           that topic in the window.
+        3. Open items from prior days that still need operator
+           review (drawn from prior_deltas — contradiction flags
+           that haven't been resolved, prospector inbox entries
+           the librarian hasn't picked up).
+        4. Halt warning if chain status != "ok".
+
+        Be concise; the operator reads the delta first thing
+        in the morning.
+
+  - id: write_delta
+    tool: memory_write.v1
+    args:
+      content: ${narrate.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "daily_knowledge_delta_built"
+        - "window:${inputs.window_hours}h"
+        - "attestor:Synthesizer-D1"
+
+output:
+  window_hours: ${inputs.window_hours}
+  topic_filter: ${inputs.topic_filter}
+  summary: ${build_delta.out.summary}
+  narrative: ${narrate.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  delta_entry_id: ${write_delta.out.entry_id}

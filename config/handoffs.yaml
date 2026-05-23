@@ -156,6 +156,33 @@ default_skill_per_capability:
     skill_name: long_term_archival
     skill_version: "1"
 
+  # D1 Personal Knowledge Forge — ADR-0086 Phase D (2026-05-23).
+  # All 6 entry capabilities now have live skills:
+  - domain: d1_knowledge_forge
+    capability: knowledge_curation
+    skill_name: knowledge_curation
+    skill_version: "1"
+  - domain: d1_knowledge_forge
+    capability: research_gathering
+    skill_name: research_gathering
+    skill_version: "1"
+  - domain: d1_knowledge_forge
+    capability: knowledge_summarize
+    skill_name: knowledge_summarize
+    skill_version: "1"
+  - domain: d1_knowledge_forge
+    capability: topic_genealogy
+    skill_name: topic_genealogy
+    skill_version: "1"
+  - domain: d1_knowledge_forge
+    capability: knowledge_contradiction_flag
+    skill_name: knowledge_contradiction_flag
+    skill_version: "1"
+  - domain: d1_knowledge_forge
+    capability: daily_knowledge_delta
+    skill_name: daily_knowledge_delta
+    skill_version: "1"
+
 # Cascade rules — engineer-defined, code-reviewed via PR.
 #
 # Each rule: when a route to (source_domain, source_capability)
@@ -183,6 +210,54 @@ cascade_rules:
     reason: |
       Every incident response triggers a compliance evidence
       capture — the SOC event becomes part of the audit packet.
+
+  # ADR-0086 Phase D — D1 Knowledge Forge cascades.
+  #
+  # ACTIVE cascade: d8 compliance regulation updates flow into
+  # the librarian's catalog so the operator's personal knowledge
+  # corpus stays current with the framework rules the operator
+  # is bound by. Mirrors the d4→d8 rail's "continuous discipline,
+  # not annual sweep" framing.
+  - source_domain: d8_compliance
+    source_capability: compliance_scan
+    target_domain: d1_knowledge_forge
+    target_capability: knowledge_curation
+    reason: |
+      Every compliance scan that surfaces a framework-rule
+      change or a control delta cascades into the librarian's
+      catalog. The operator's personal knowledge corpus stays
+      synced with the framework rules they're actually bound
+      by — no "we missed the SOC2 amendment" gaps.
+
+# ADR-0086 Phase D — INERT d1→downstream cascades.
+#
+# The D1 manifest at config/domains/d1_knowledge_forge.yaml
+# names four handoff_targets:
+#   d9_learning_coach   # gaps → curriculum
+#   d10_research_lab    # deep dives
+#   d7_content_studio   # source material for drafts
+#   d2_daily_life_os    # surfaces into morning briefing
+#
+# All four downstream domains are UPSTREAM of D1 in the rollout
+# order (D4→D3→D8→D1→D2→D7→D9→D10→D5→D6 per ADR-0067), so the
+# receiving roles don't exist yet. We DECLARE the cascade
+# intent here (so a future operator + a future maintainer can
+# see the planned wiring at a glance), but the cascade rules
+# themselves stay un-codified until the downstream rollouts
+# land. This mirrors the ADR-0078 Phase A pattern where the
+# d3 → forensic_archive cascade was deliberately deferred to
+# Phase D (SOAR playbooks).
+#
+# Pending cascades, declared inert:
+#   d1.knowledge_contradiction_flag → d9.curriculum_design
+#   d1.knowledge_summarize          → d10.deep_research
+#   d1.knowledge_curation           → d7.content_drafting
+#   d1.daily_knowledge_delta        → d2.morning_briefing
+#
+# Each pending cascade will land as a real cascade_rules entry
+# when its target domain ships. Until then they are
+# documentation, not configuration — the operator who wants
+# them earlier can opt in manually.
 
 # ADR-0078 Phase A — NO new cascade rules from forensic_archive.
 # Deliberate. The ADR's Decision 4 named three cascades on the
