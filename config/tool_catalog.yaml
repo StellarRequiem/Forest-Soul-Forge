@@ -629,6 +629,36 @@ tools:
     side_effects: read_only
     archetype_tags: [verifier, guardian, observer, security_low]
 
+  framework_check.v1:
+    name: framework_check
+    version: "1"
+    description: |
+      ADR-0085 Phase B compliance rule evaluator. Loads a
+      framework YAML from config/compliance_frameworks/ and
+      evaluates each rule against the live system. Rule kinds:
+      required_file (paths must exist), forbidden_pattern (regex
+      must not match), required_attestation (memory entry tagged
+      <tag> within window), audit_event_required (audit chain
+      entry of <event_type> within window). Returns per-rule
+      verdicts + control-level aggregates. Read-only;
+      compliance_scanner consumes via compliance_scan.v1.
+    input_schema:
+      type: object
+      required: [framework_id]
+      properties:
+        framework_id:
+          type: string
+          pattern: "^[a-zA-Z0-9_]+$"
+        framework_dir:
+          type: string
+        audit_chain_path:
+          type: string
+        control_ids:
+          type: array
+          items: {type: string}
+    side_effects: read_only
+    archetype_tags: [compliance_scanner, guardian]
+
   file_integrity.v1:
     name: file_integrity
     version: "1"
@@ -3007,6 +3037,24 @@ archetypes:
       - text_summarize.v1       # produce capture-summary briefs
       # No shell_exec. No code_edit. No web_fetch. Passive evidence
       # capture; the corpus is local + private.
+
+  # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
+  # compliance_scanner kit: framework_check.v1 + the standard
+  # guardian read-only support set. The scanner reads framework
+  # yamls, runs the rule evaluator, writes gap reports to private
+  # memory, escalates to operator via delegate. NO shell_exec /
+  # code_edit / file_integrity (the rule evaluator handles its own
+  # filesystem reads internally).
+  compliance_scanner:
+    standard_tools:
+      - llm_think.v1            # gap analysis + remediation reasoning
+      - memory_write.v1         # gap reports in private memory
+      - memory_recall.v1        # walk prior reports for trending
+      - delegate.v1             # escalate failing controls to operator
+      - audit_chain_verify.v1   # chain integrity before publishing report
+      - text_summarize.v1       # condense long rule_results into digests
+      - framework_check.v1      # ADR-0085 Phase B — the rule evaluator
+      - code_read.v1            # read framework yaml + evidence corpus
 
   # ADR-0064 T4 (B379) — telemetry_steward archetype kit.
   # All read_only. Steward reviews batch anchors + summarizes; never

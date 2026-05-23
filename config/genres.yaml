@@ -165,6 +165,7 @@ genres:
       - wiring_sentinel          # ADR-0081 T3 (B396) — substrate wiring coverage sentinel; read_only kit (memory_recall/write + audit_chain_verify + llm_think + delegate + text_summarize)
       - audit_archivist          # ADR-0085 Phase A — D8 compliance long-term archival (read_only kit; sibling of forensic_archivist for the compliance side)
       - evidence_collector       # ADR-0085 Phase A — D8 compliance evidence capture (read_only kit; passive snapshot harvester)
+      - compliance_scanner       # ADR-0085 Phase B — D8 compliance framework scanner (read_only kit; framework_check.v1 + memory recall/write)
       # NOTE — threat_intel_curator was originally placed here in B385
       # but its kit needs web_fetch (network) for feed pulls, which
       # exceeds guardian's read_only ceiling. B386 moved the role to

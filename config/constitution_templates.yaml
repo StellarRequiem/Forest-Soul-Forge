@@ -875,6 +875,48 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  compliance_scanner:
+    # ADR-0085 Phase B — D8 Compliance framework scanner. Guardian
+    # genre, read-only ceiling. The agent reads framework yamls +
+    # dispatches framework_check.v1 to evaluate rules; surfaces
+    # gaps via gap-report memory writes. NEVER acts on findings
+    # (policy_enforcer's lane in Phase C); NEVER mutates the
+    # framework yaml (operator-driven authorship).
+    policies:
+      - id: forbid_remediation_action
+        rule: forbid
+        triggers: [apply_remediation, edit_config_for_compliance, install_compliance_fix]
+        rationale: "Remediation is policy_enforcer's surface (Phase C). The scanner's value is the gap report; acting on findings would short-circuit the operator-gated remediation review."
+      - id: forbid_framework_yaml_mutation
+        rule: forbid
+        triggers: [edit_framework_yaml, write_framework_yaml, install_framework_rule]
+        rationale: "Framework yamls live in config/compliance_frameworks/ which the OPERATOR commits to via the proper workflow (review + git). The scanner reads + proposes via memory_write; the operator authors the yaml."
+      - id: require_framework_load_attestation
+        rule: require
+        triggers: [run_scan, evaluate_framework, propose_gap_report]
+        rationale: "Every scan emits an attestation of which framework yaml was loaded (path + sha256) so the gap report is reproducible. Without the attestation, a report's accuracy depends on the unverified state of the yaml at evaluation time."
+      - id: require_chain_integrity_before_report
+        rule: require
+        triggers: [emit_gap_report, propose_audit_packet_input]
+        rationale: "Before any gap report, audit_chain_verify must confirm the chain is hash-linked end-to-end. Gap-reports based on a broken chain inherit the chain's brokenness."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - apply_remediation
+      - edit_framework_yaml
+      - install_compliance_fix
+      - run_scan_without_attestation
+    operator_duties:
+      - "Review gap reports promptly — the scanner surfaces gaps, the operator decides whether to route remediation through policy_enforcer or accept a documented exception."
+      - "Curate framework yamls — adding new controls or relaxing rule severities is operator-side authorship; the scanner enforces what's configured."
+      - "Treat a chain_broken halt as an emergency — gap-reports written against a broken chain are themselves brokenness-tainted."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   forensic_archivist:
     # ADR-0078 Phase A (B342-B347) — chain-of-custody guardian for
     # SOC artifacts. Guardian genre, read-only ceiling. The agent

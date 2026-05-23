@@ -1,0 +1,144 @@
+schema_version: 1
+name: compliance_scan
+version: '1'
+description: |
+  ComplianceScanner-D8's primary compliance scan skill. Evaluates
+  a framework against the live system via framework_check.v1,
+  walks prior gap reports for trending, condenses the results
+  into an operator-readable summary, and writes a gap-report
+  attestation into private memory.
+
+  Read-only end-to-end. The scanner NEVER acts on findings
+  (policy_enforcer's lane in Phase C); it surfaces gaps + their
+  framework-supplied remediation hints, and the operator routes
+  remediation explicitly.
+
+  Five-step pipeline:
+    1. prior_context — memory_recall scope=private for prior gap
+       reports against this framework_id; surfaces trends (a
+       control that's been failing for weeks needs different
+       attention than a one-off blip).
+    2. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. A scan whose attestation
+       lands on a broken chain inherits the brokenness.
+    3. run_framework — framework_check.v1 evaluates each control
+       rule and returns per-rule verdicts + per-control aggregates.
+    4. synthesize_report — llm_think condenses the rule_results
+       into operator-readable prose: which controls failed, why,
+       what the framework's remediation hints suggest, and how
+       this run compares to recent prior runs.
+    5. write_report — memory_write scope=private records the
+       gap-report attestation, tagged with framework_tag +
+       per-control failing-rule ids so the report is queryable.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - framework_check.v1
+  - llm_think.v1
+
+inputs:
+  type: object
+  required: [framework_id]
+  properties:
+    framework_id:
+      type: string
+      description: >
+        Framework to evaluate. Must match a yaml file under
+        config/compliance_frameworks/ (e.g., "soc2").
+    control_ids:
+      type: array
+      items: {type: string}
+      default: []
+      description: >
+        Optional. If present, only these controls are evaluated.
+        Use for targeted re-scans after a remediation.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the gap report.
+
+steps:
+  - id: prior_context
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.framework_id}
+      mode: private
+      limit: 10
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: run_framework
+    tool: framework_check.v1
+    args:
+      framework_id: ${inputs.framework_id}
+      control_ids:  ${inputs.control_ids}
+
+  - id: synthesize_report
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are ComplianceScanner-D8, the D8 Compliance framework
+        scanner. Synthesize a gap report from the framework_check
+        run.
+
+        Framework: ${inputs.framework_id}
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status:    ${verify_chain_integrity.out.status}
+          broken_at: ${verify_chain_integrity.out.broken_at}
+
+        Per-rule results (from framework_check.v1):
+        ${run_framework.out.rule_results}
+
+        Aggregate:
+          controls_evaluated: ${run_framework.out.controls_evaluated}
+          controls_passing:   ${run_framework.out.controls_passing}
+          controls_failing:   ${run_framework.out.controls_failing}
+          controls_partial:   ${run_framework.out.controls_partial}
+
+        Prior gap reports for this framework (most recent first):
+        ${prior_context.out.entries}
+
+        Produce a structured gap report:
+        1. One-line overall verdict (PASS / FAIL / DEGRADED).
+        2. For each failing or partial control: control id, the
+           failing rule(s), the framework's remediation hint, and
+           a one-line operator action ("route to policy_enforcer
+           with payload X" / "operator accepts as documented
+           exception" / "investigate recent change to X").
+        3. Trend signal: any control that has been failing
+           consistently across prior reports gets flagged as
+           "chronic"; a control that just started failing gets
+           flagged as "regression".
+        4. Halt warning if audit chain status != "ok".
+
+        Be concise; the operator reads many reports.
+
+  - id: write_report
+    tool: memory_write.v1
+    args:
+      content: ${synthesize_report.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "compliance_gap_report"
+        - "framework:${inputs.framework_id}"
+        - "attestor:ComplianceScanner-D8"
+
+output:
+  framework_id: ${inputs.framework_id}
+  framework_name: ${run_framework.out.framework_name}
+  controls_passing: ${run_framework.out.controls_passing}
+  controls_failing: ${run_framework.out.controls_failing}
+  controls_partial: ${run_framework.out.controls_partial}
+  rule_results: ${run_framework.out.rule_results}
+  chain_status: ${verify_chain_integrity.out.status}
+  report_text: ${synthesize_report.out.response}
+  report_entry_id: ${write_report.out.entry_id}

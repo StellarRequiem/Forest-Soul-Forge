@@ -10,8 +10,8 @@ that lands D8 Phase A (this runbook will grow as Phases B–D ship).
 
 | Phase | New agent(s) | New builtin tool | Status |
 |---|---|---|---|
-| **A** | audit_archivist + evidence_collector | none — reuses file_integrity + audit_chain_verify | IN PROGRESS |
-| B | compliance_scanner | framework_check.v1 | pending |
+| **A** | audit_archivist + evidence_collector | none — reuses file_integrity + audit_chain_verify | CLOSED |
+| **B** | compliance_scanner | framework_check.v1 | CLOSED |
 | C | policy_enforcer | policy_lint.v1 | pending |
 | D | report_generator | audit_packet_generate.v1 | pending |
 
@@ -175,8 +175,74 @@ or archivist performs joins the chain via the standard
 
 ---
 
-## Phase B–D (pending)
+## Phase B — scanning surface
 
-This runbook will grow as Phases B / C / D ship. Each phase
+### What it adds
+
+- `compliance_scanner` (guardian, green): runs framework rule
+  evaluations, surfaces gaps, NEVER acts on findings.
+- `framework_check.v1` builtin tool: loads a framework yaml,
+  evaluates each rule (required_file, forbidden_pattern,
+  required_attestation, audit_event_required), returns per-rule
+  + per-control verdicts.
+- `config/compliance_frameworks/soc2.yaml` seed framework with
+  CC6.1 / CC7.2 / CC8.1 / A1.2 / C1.1 controls.
+- `compliance_scan.v1` skill — five-step pipeline: prior_context
+  → verify_chain → run_framework → synthesize_report →
+  write_report.
+
+### Birth the agent
+
+```bash
+./dev-tools/force-restart-daemon.command
+./dev-tools/birth-compliance-scanner.command
+```
+
+The daemon restart is required so it picks up the new
+`compliance_scanner` role + `framework_check.v1` registration.
+
+### First scan
+
+```
+POST /agents/<ComplianceScanner-D8-id>/tools/call
+{
+  "tool_name": "skill_run",
+  "tool_version": "1",
+  "session_id": "<uuid>",
+  "args": {
+    "skill_name": "compliance_scan",
+    "skill_version": "1",
+    "inputs": {
+      "framework_id": "soc2",
+      "operator_reason": "first SOC2 baseline scan"
+    }
+  }
+}
+```
+
+The skill returns rule_results + an operator-readable gap
+report; the gap report is written to private memory tagged
+`framework:soc2` for trending.
+
+### Adding frameworks
+
+The framework loader is YAML-driven. To add ISO27001 / GDPR /
+HIPAA / personal-policy, drop a `config/compliance_frameworks/
+<framework_id>.yaml` mirroring the schema of `soc2.yaml`. The
+scanner picks them up on next dispatch — no code change required.
+
+### Observation surface
+
+Per-framework reports: `memory_recall.v1` with
+`tags:[framework:<framework_id>]`.
+
+All gap reports: `memory_recall.v1` with
+`tags:[compliance_gap_report]`.
+
+---
+
+## Phase C–D (pending)
+
+This runbook will grow as Phases C / D ship. Each phase
 adds one role, one builtin tool, one skill, and one runbook
 section here.

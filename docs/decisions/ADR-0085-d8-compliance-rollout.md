@@ -228,7 +228,14 @@ Each phase follows the established template:
   `examples/skills/evidence_collection.v1.yaml` +
   `examples/skills/long_term_archival.v1.yaml`; operator runbook
   `docs/runbooks/d8-compliance-ops.md`. No new builtin tools.
-- **Phase B** — scanning surface. Status: NOT STARTED.
+- **Phase B** — scanning surface. Status: CLOSED (2026-05-22).
+  Shipped: `compliance_scanner` role in trait_tree / genres /
+  constitution_templates / tool_catalog; new builtin tool
+  `framework_check.v1` with 25 unit tests; SOC2 seed framework at
+  `config/compliance_frameworks/soc2.yaml` (5 controls covering
+  CC6.1/CC7.2/CC8.1/A1.2/C1.1); skill manifest
+  `examples/skills/compliance_scan.v1.yaml`; birth script
+  `dev-tools/birth-compliance-scanner.command`.
 - **Phase C** — enforcement. Status: NOT STARTED.
 - **Phase D** — reporting + cascade. Status: NOT STARTED.
 

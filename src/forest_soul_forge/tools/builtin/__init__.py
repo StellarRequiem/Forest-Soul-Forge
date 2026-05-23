@@ -23,6 +23,7 @@ from forest_soul_forge.tools.builtin.git_diff_read import GitDiffReadTool
 from forest_soul_forge.tools.builtin.git_local_scan import GitLocalScanTool
 from forest_soul_forge.tools.builtin.git_log_read import GitLogReadTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
+from forest_soul_forge.tools.builtin.framework_check import FrameworkCheckTool
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -403,3 +404,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # actuator in the G.1.A batch — completes the change loop after
     # code_edit + pytest_run. SW-track Engineer (Actuator L5) reaches.
     registry.register(PipInstallIsolatedTool())
+    # ADR-0085 Phase B — framework_check.v1. Loads a compliance
+    # framework YAML from config/compliance_frameworks/ and evaluates
+    # rule kinds (required_file, forbidden_pattern,
+    # required_attestation, audit_event_required) against the live
+    # system. Read-only; compliance_scanner is the primary consumer.
+    registry.register(FrameworkCheckTool())

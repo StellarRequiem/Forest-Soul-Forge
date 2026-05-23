@@ -1,0 +1,143 @@
+# ADR-0085 Phase B — SOC2 seed framework.
+#
+# Trust Service Criteria sample: Common Criteria (CC) + Security
+# (SEC) + Availability (AVA) + Confidentiality (CONF). The seed
+# library covers the most-frequently-checked controls — operators
+# extend by adding new entries here (or by adding a sibling YAML
+# like iso27001.yaml / gdpr.yaml).
+#
+# Schema:
+#   framework_id        unique slug for the framework
+#   framework_name      human-readable name
+#   version             version of the framework spec this expresses
+#   controls            list of controls, each with:
+#     id                control identifier (e.g. CC6.1)
+#     category          {security, availability, confidentiality, processing_integrity, privacy}
+#     title             one-line operator-readable title
+#     description       what this control requires
+#     rules             list of evaluable rules, each with:
+#       rule_id         unique within control
+#       kind            {required_file, forbidden_pattern, required_attestation, audit_event_required}
+#       params          rule-kind-specific parameters (see framework_check.v1 docstring)
+#       severity        {high, medium, low}
+#       remediation     operator-readable remediation hint
+
+framework_id: soc2
+framework_name: SOC 2 Type II
+version: "2017"
+
+controls:
+  - id: CC6.1
+    category: security
+    title: Logical and physical access controls
+    description: |
+      The entity implements logical access security software,
+      infrastructure, and architectures over protected information
+      assets to protect them from security events.
+    rules:
+      - rule_id: keyfile_present
+        kind: required_file
+        params:
+          paths: ["data/operator/profile.yaml"]
+        severity: medium
+        remediation: |
+          Operator profile yaml is the source of truth for the
+          operator's identity + ground-truth assertions; SOC2 CC6.1
+          requires a documented identity baseline.
+
+      - rule_id: env_secrets_not_committed
+        kind: forbidden_pattern
+        params:
+          pattern: "(?i)(api_key|secret_key|password)\\s*=\\s*['\"][a-zA-Z0-9_-]{16,}"
+          scan_paths: [".env.example", "config/"]
+        severity: high
+        remediation: |
+          Credentials must not be committed to the repo. Rotate
+          any committed secret immediately + move to the operator
+          keychain (~/.fsf/secrets) or a managed secret store.
+
+  - id: CC7.2
+    category: security
+    title: System monitoring
+    description: |
+      The entity monitors system components and the operation of
+      controls to detect anomalies that are indicative of
+      malicious acts, natural disasters, and errors affecting the
+      entity's ability to meet its objectives.
+    rules:
+      - rule_id: audit_chain_integrity
+        kind: required_attestation
+        params:
+          tag: "audit_chain_verified"
+          max_age_hours: 24
+        severity: high
+        remediation: |
+          The audit chain must be verified at least daily. Run
+          audit_chain_verify.v1 and emit a memory entry tagged
+          audit_chain_verified within the window.
+
+      - rule_id: detection_engine_active
+        kind: audit_event_required
+        params:
+          event_type: "detection_engine_scan_complete"
+          max_age_hours: 24
+        severity: medium
+        remediation: |
+          The detection engine should have completed at least
+          one scan in the last 24 hours. If not, the engine may
+          be paused or the daemon may not be running.
+
+  - id: CC8.1
+    category: security
+    title: Change management
+    description: |
+      The entity authorizes, designs, develops, configures,
+      documents, tests, approves, and implements changes to
+      infrastructure, data, software, and procedures.
+    rules:
+      - rule_id: code_review_attestation_present
+        kind: required_attestation
+        params:
+          tag: "code_review_complete"
+          max_age_hours: 168  # 7 days
+        severity: medium
+        remediation: |
+          Code review attestations should be present within the
+          last week. If absent, either the daemon hasn't fired
+          a review cascade or the Reviewer agent isn't running.
+
+  - id: A1.2
+    category: availability
+    title: System recovery
+    description: |
+      The entity authorizes, designs, develops or acquires,
+      implements, operates, approves, maintains, and monitors
+      environmental protections, software, data backup processes,
+      and recovery infrastructure to meet its objectives.
+    rules:
+      - rule_id: archive_attestation_recent
+        kind: required_attestation
+        params:
+          tag: "long_term_archival"
+          max_age_hours: 720  # 30 days
+        severity: medium
+        remediation: |
+          At least one long-term-archival attestation should land
+          monthly to demonstrate backup/recovery discipline.
+
+  - id: C1.1
+    category: confidentiality
+    title: Confidential information disposal
+    description: |
+      The entity identifies and maintains confidential information
+      to meet the entity's objectives related to confidentiality.
+    rules:
+      - rule_id: secrets_directory_present
+        kind: required_file
+        params:
+          paths: ["~/.fsf/secrets"]
+        severity: low
+        remediation: |
+          The operator-keychain secrets directory should exist
+          as the canonical store for sensitive material. Create
+          it (chmod 700) if absent.
