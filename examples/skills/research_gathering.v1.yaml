@@ -1,0 +1,140 @@
+schema_version: 1
+name: research_gathering
+version: '1'
+description: |
+  Prospector-D1's primary sourcing skill. Takes an operator-
+  provided source URL + topic slug, fetches the content via
+  web_fetch (operator-allowlisted), condenses into a brief,
+  and writes a fetch attestation into private memory tagged
+  for librarian pickup. Hands off to the librarian via
+  delegate.
+
+  Sourcing-only — the prospector NEVER writes to the operator-
+  visible catalog directly; the librarian's knowledge_curation
+  skill owns catalog discipline. Constitutional policies enforce
+  this at governance layer (forbid_direct_catalog_write,
+  require_fetch_attestation, require_source_allowlist_check).
+
+  Four-step pipeline:
+    1. prior_fetch_check — memory_recall scope=private for any
+       prior fetch of this source URL. Recently-fetched sources
+       (within 24h by default) are skipped + reported as
+       "already fresh"; the operator can override with
+       force_refetch=true.
+    2. fetch_source — web_fetch pulls the URL. The per-(agent,
+       tool) allowed_hosts constraint patched at birth time
+       enforces the operator allowlist (require_source_allowlist_check
+       policy enforces it at governance layer too).
+    3. brief_source — llm_think condenses the fetched content
+       into an operator-readable brief with the key claims
+       extracted as candidate catalog entries. Records source
+       provenance (url + access_ts + prospector_id) so the
+       librarian's handoff has everything it needs.
+    4. write_attestation — memory_write scope=private records
+       the fetch attestation tagged for librarian pickup
+       (knowledge_prospector_inbox + topic:<slug> +
+       attestor:Prospector-D1). The librarian's
+       knowledge_curation skill picks this up via memory_recall
+       on the knowledge_prospector_inbox tag.
+
+  Output goes back to the operator + the librarian handoff
+  fires implicitly via the inbox tag (the librarian's catalog
+  loop polls for new inbox entries).
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - web_fetch.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [source_url, topic_slug]
+  properties:
+    source_url:
+      type: string
+      description: >
+        URL to fetch. Must resolve under the operator-allowlisted
+        host set (web_fetch enforces this at the tool layer).
+    topic_slug:
+      type: string
+      description: >
+        Topic this source pulls binds to. Convention: lowercase
+        kebab-case. Used as the topic:<slug> memory tag so the
+        librarian's catalog write inherits it.
+    force_refetch:
+      type: boolean
+      default: false
+      description: >
+        If true, skip the prior_fetch_check freshness gate +
+        always re-fetch. Used when the operator suspects the
+        source has been updated.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the fetch attestation.
+
+steps:
+  - id: prior_fetch_check
+    tool: memory_recall.v1
+    args:
+      query: "provenance:${inputs.source_url}"
+      mode: private
+      limit: 5
+
+  - id: fetch_source
+    tool: web_fetch.v1
+    args:
+      url: ${inputs.source_url}
+      method: GET
+
+  - id: brief_source
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Prospector-D1, the D1 Knowledge Forge sourcing
+        agent. Condense the fetched source into an operator-
+        readable brief.
+
+        Topic: ${inputs.topic_slug}
+        Source URL: ${inputs.source_url}
+        Operator reason: ${inputs.operator_reason}
+
+        Prior fetches of this source (most recent first):
+        ${prior_fetch_check.out.entries}
+
+        Fetched content (truncated):
+        ${fetch_source.out.body}
+
+        Produce a structured brief:
+        1. Source title (extracted from the fetched content,
+           or the URL slug if no title is present).
+        2. Three to five candidate catalog claims, each one a
+           single coherent statement faithful to the source.
+        3. Confidence note: how strongly does the source
+           support each claim? Direct quote / paraphrase /
+           inference.
+        4. Operator-action hint: route to Librarian-D1 for
+           catalog write, or surface to operator for review
+           before catalog discipline.
+
+  - id: write_attestation
+    tool: memory_write.v1
+    args:
+      content: ${brief_source.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "knowledge_prospector_inbox"
+        - "topic:${inputs.topic_slug}"
+        - "provenance:${inputs.source_url}"
+        - "attestor:Prospector-D1"
+
+output:
+  source_url: ${inputs.source_url}
+  topic_slug: ${inputs.topic_slug}
+  brief_text: ${brief_source.out.response}
+  fetch_status: ${fetch_source.out.status}
+  attestation_id: ${write_attestation.out.entry_id}

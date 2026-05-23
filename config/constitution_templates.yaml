@@ -1002,6 +1002,174 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  librarian:
+    # ADR-0086 Phase A — D1 knowledge librarian. Guardian genre,
+    # read-only ceiling. The agent reads memory layers + the
+    # operator's catalog and writes catalog attestations + topic-
+    # tagged entries. NEVER mutates source data — the librarian
+    # curates, the prospector sources, the synthesizer wraps.
+    policies:
+      - id: require_provenance_per_fact
+        rule: require_metadata
+        triggers: [memory_write, catalog_attest, emit_topic_entry]
+        rationale: "Every catalog entry must record source provenance (url + access_ts + prospector_id when sourced via the prospector path, or operator_assertion + ts when sourced from the operator). A catalog without provenance can't be re-verified, and an unverified catalog poisons downstream synthesis."
+      - id: forbid_source_mutation
+        rule: forbid
+        triggers: [edit_source_note, rewrite_source_url, modify_browser_history]
+        rationale: "The librarian's catalog references sources; it doesn't author them. Mutating a source would corrupt the provenance chain at the origin."
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_message_external, post_to_external_service, share_catalog_externally]
+        rationale: "Catalog content is private-scope by default. The synthesizer (Phase B) handles operator-facing summaries with operator consent; direct disclosure from the librarian bypasses the synthesis-review gate."
+      - id: require_topic_tag_on_catalog_write
+        rule: require
+        triggers: [memory_write, catalog_attest]
+        rationale: "Every catalog write records at least one topic:<slug> tag so the synthesizer + knowledge_verifier can find related entries. A catalog write without a topic tag is operationally invisible to downstream synthesis."
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - modify_production_systems
+      - send_message_external
+      - share_catalog_externally
+      - edit_source_note
+      - rewrite_source_url
+    operator_duties:
+      - "Sample-check catalog entries for provenance accuracy weekly — the librarian enforces tag discipline; you verify the underlying source still says what the catalog claims."
+      - "Curate topic slugs — adding or merging topics is operator-side authorship; the librarian writes against the slug taxonomy you maintain."
+      - "Treat a chain_broken halt as an emergency — catalog writes against a broken chain inherit the brokenness + their provenance trail can't be re-verified."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  prospector:
+    # ADR-0086 Phase A — D1 knowledge prospector. Researcher genre,
+    # network ceiling. The agent pulls source material from
+    # allowlisted sources and hands off to the librarian for
+    # catalog discipline. NEVER persists to the operator-visible
+    # catalog directly — that's the librarian's lane. Prospector
+    # outputs land in private memory tagged for librarian pickup.
+    policies:
+      - id: require_source_allowlist_check
+        rule: require
+        triggers: [web_fetch, source_pull, fetch_external]
+        rationale: "Every fetch must originate from an operator-allowlisted source per the agent's constitutional kit (web_fetch.v1 enforces the allowlist at the tool layer). Prospector pulls outside the allowlist are forbidden — same posture as threat_intel_curator (B385)."
+      - id: require_fetch_attestation
+        rule: require
+        triggers: [web_fetch, source_pull, harvest_paper]
+        rationale: "Every fetch emits a memory_write with (source_url, access_ts, prospector_id, content_excerpt). Without the attestation, the librarian can't pick up the source for catalog discipline + the operator can't audit what the prospector actually pulled."
+      - id: forbid_direct_catalog_write
+        rule: forbid
+        triggers: [catalog_attest, emit_topic_entry, write_to_operator_catalog]
+        rationale: "The prospector's outputs land in private memory tagged for librarian pickup; the librarian owns catalog discipline. Direct catalog writes from the prospector bypass the provenance-validation step."
+      - id: forbid_external_mutation
+        rule: forbid
+        triggers: [modify_production_systems, send_message_external, post_to_source]
+        rationale: "Prospector is read-from-network only; never POSTs back to a source. Outreach + commenting belong to a communicator/actuator role, not the prospector."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.45
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - modify_production_systems
+      - send_message_external
+      - catalog_attest
+      - emit_topic_entry
+      - post_to_source
+    operator_duties:
+      - "Curate the source allowlist — the prospector pulls from what you configure; widening the allowlist is operator-side authorship."
+      - "Audit fetch attestations weekly — a window with no fetches against an active topic-of-focus is a signal the allowlist needs widening."
+      - "Verify the prospector→librarian handoff fires — if prospector writes accumulate without librarian pickup, the catalog isn't being kept current."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  synthesizer:
+    # ADR-0086 Phase B — D1 knowledge synthesizer. Researcher
+    # genre, read-only synthesis. Builds topic genealogies + daily
+    # knowledge deltas from the librarian's catalog. NEVER mutates
+    # source catalog — wraps it into operator-readable artifacts.
+    policies:
+      - id: forbid_catalog_mutation
+        rule: forbid
+        triggers: [edit_catalog_entry, rewrite_topic_entry, modify_provenance]
+        rationale: "Synthesis wraps the catalog; it doesn't transform it. Mutating a catalog entry would invalidate every downstream synthesis derived from prior versions of the entry."
+      - id: require_synthesis_attestation
+        rule: require
+        triggers: [emit_topic_graph, emit_daily_delta, finalize_synthesis]
+        rationale: "Every synthesis emits a memory_write with (artifact_type, window_or_topic, source_entry_ids, attestor, ts). Without the attestation, the synthesis can't be re-verified + the operator can't trace claims back to source catalog entries."
+      - id: require_provenance_in_synthesis
+        rule: require
+        triggers: [emit_topic_graph, emit_daily_delta]
+        rationale: "Every claim in a synthesis carries forward the source-entry provenance from the catalog. A synthesis that strips provenance is operationally indistinguishable from a synthesis that hallucinates."
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_message_external, post_synthesis_externally]
+        rationale: "Synthesis outputs are private/lineage scope; operator-driven sharing is a separate explicit action. Direct external posts bypass the operator-review gate."
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.45
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - modify_production_systems
+      - send_message_external
+      - edit_catalog_entry
+      - rewrite_topic_entry
+    operator_duties:
+      - "Sample-check synthesis artifacts (topic graphs + daily deltas) against the underlying catalog weekly — synthesis is wrapping, not authoring; any claim without traceable provenance is a regression."
+      - "Treat a chain_broken halt as an emergency — syntheses derived from a broken chain inherit the brokenness."
+      - "Configure the daily-delta window — the synthesizer wraps the window you configure; 24h is the default but operators can widen for catch-up after travel/PTO."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  knowledge_verifier:
+    # ADR-0086 Phase C — D1 knowledge contradiction auditor.
+    # Guardian genre, read-only ceiling, YELLOW posture default.
+    # Single-agent scope per ADR-0086 Decision 3 — walks the
+    # calling agent's own private + lineage memory for
+    # contradictions; flags via memory_flag_contradiction.v1
+    # (ADR-0036 T2); NEVER rewrites.
+    policies:
+      - id: forbid_contradiction_rewrite
+        rule: forbid
+        triggers: [edit_memory_entry, resolve_contradiction_silently, rewrite_flagged_claim]
+        rationale: "ADR-0036 §flag-not-rewrite invariant. A contradiction is a SIGNAL, not a fact to fix. Rewriting a flagged entry would erase the contradiction without operator review + would invalidate the audit trail. The knowledge_verifier flags + escalates; the operator decides whether one entry, the other, or both need amendment."
+      - id: require_contradiction_attestation
+        rule: require
+        triggers: [flag_contradiction, escalate_contradiction]
+        rationale: "Every flagged contradiction emits an audit attestation with (entry_id_a, entry_id_b, topic, verifier_id, ts, evidence_excerpt). Without the attestation, the operator can't reproduce the contradiction or audit the flag rate."
+      - id: forbid_cross_agent_scope
+        rule: forbid
+        triggers: [scan_other_agent_memory, walk_lineage_across_agents, cross_agent_contradiction_scan]
+        rationale: "ADR-0086 Decision 3 — D1 MVP is single-agent contradiction scope. Cross-agent scanning is deferred to v0.4 (the kernel-singleton verifier_loop's lane). A D1 knowledge_verifier reaching into other agents' memory would violate the memory-layer disclosure model (ADR-0027)."
+      - id: require_reality_anchor_check_before_flag
+        rule: require
+        triggers: [flag_contradiction, escalate_contradiction]
+        rationale: "Before a contradiction is escalated to the operator, verify_claim.v1 (ADR-0063 Reality Anchor) confirms both candidate entries against operator-asserted ground truth. A 'contradiction' where one side is operator-asserted truth and the other is a memory-layer guess is a knowledge gap, not a contradiction; surfacing it as a contradiction wastes operator review attention."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - edit_memory_entry
+      - resolve_contradiction_silently
+      - rewrite_flagged_claim
+      - scan_other_agent_memory
+      - cross_agent_contradiction_scan
+    operator_duties:
+      - "Review every flagged contradiction — the verifier surfaces; you decide whether one entry, the other, or both need amendment. Defer or accept-as-exception is also a valid resolution."
+      - "Move from YELLOW to GREEN posture only after the flag-quality bar is bedded in — false-positive contradictions waste review time; the YELLOW friction is the bedding-in step."
+      - "Treat a Reality Anchor mismatch as a higher-priority signal than a memory-vs-memory contradiction — the operator-asserted ground truth is the deeper authority."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   forensic_archivist:
     # ADR-0078 Phase A (B342-B347) — chain-of-custody guardian for
     # SOC artifacts. Guardian genre, read-only ceiling. The agent

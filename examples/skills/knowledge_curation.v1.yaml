@@ -1,0 +1,164 @@
+schema_version: 1
+name: knowledge_curation
+version: '1'
+description: |
+  Librarian-D1's primary catalog-discipline skill. Takes a
+  prospector inbox entry (or operator-provided fact) + a topic
+  slug, walks prior catalog entries for related provenance,
+  verifies audit chain integrity, then writes a catalog
+  attestation into private memory tagged with topic + source
+  provenance + librarian attestor.
+
+  Read-only on source data end-to-end. The librarian curates +
+  attests; the prospector sources; the synthesizer wraps. ADR-0086
+  Phase A's design invariant. Constitutional policies enforce
+  the discipline at governance layer (require_provenance_per_fact,
+  forbid_source_mutation, forbid_external_disclosure,
+  require_topic_tag_on_catalog_write).
+
+  Five-step pipeline:
+    1. prior_context — memory_recall scope=private for prior
+       catalog entries tagged topic:<slug>. Surfaces existing
+       claims about the topic so the librarian can decide
+       whether the new entry is a refinement, a confirmation,
+       a contradiction (flag handoff to knowledge_verifier in
+       Phase C), or genuinely new.
+    2. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked end-to-end. A catalog write
+       against a broken chain inherits the brokenness +
+       can't be re-verified later.
+    3. categorize — llm_think condenses the new entry + prior
+       context into a structured catalog block: topic slug,
+       claim text, source provenance (url + access_ts +
+       prospector_id), and the relationship to prior entries
+       ("new", "refines:<entry_id>", "potential_contradiction").
+    4. operator_focus_check — operator_profile_read fetches
+       the operator's stated areas of focus (ADR-0068). If
+       the topic is outside the focus set, the catalog write
+       records the off-focus flag so the operator can later
+       audit catalog drift.
+    5. write_catalog_entry — memory_write scope=private records
+       the catalog attestation with required tags (topic:<slug>,
+       provenance:source_url, attestor:Librarian-D1) so the
+       synthesizer can pick it up.
+
+  Output goes back to the operator. The catalog is queryable
+  per topic via memory_recall + tag-scan.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, claim_text, source_provenance]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this catalog entry binds to. Convention: lowercase
+        kebab-case (e.g., "diffusion-models",
+        "prompt-injection-defenses"). Used as the topic:<slug>
+        memory tag.
+    claim_text:
+      type: string
+      description: >
+        The factual claim being cataloged. Should be a single
+        coherent statement; multi-claim entries get split into
+        separate catalog writes.
+    source_provenance:
+      type: object
+      required: [source_url, access_ts]
+      properties:
+        source_url:
+          type: string
+          description: >
+            Where the claim was sourced from. Required by the
+            require_provenance_per_fact policy.
+        access_ts:
+          type: string
+          description: >
+            ISO-8601 timestamp when the source was accessed.
+        prospector_id:
+          type: string
+          description: >
+            Optional. If the entry came from a prospector
+            handoff, the prospector's instance_id. Empty when
+            the entry came from the operator directly.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the catalog entry.
+
+steps:
+  - id: prior_context
+    tool: memory_recall.v1
+    args:
+      query: "topic:${inputs.topic_slug}"
+      mode: private
+      limit: 20
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: categorize
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Librarian-D1, the D1 Knowledge Forge catalog
+        curator. Categorize the new entry against the prior
+        context.
+
+        Topic: ${inputs.topic_slug}
+        New claim: ${inputs.claim_text}
+        Source: ${inputs.source_provenance.source_url}
+        Access time: ${inputs.source_provenance.access_ts}
+        Prospector: ${inputs.source_provenance.prospector_id}
+        Operator reason: ${inputs.operator_reason}
+
+        Prior catalog entries for this topic (most recent first):
+        ${prior_context.out.entries}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Produce a structured catalog block:
+        1. Relationship: one of "new" /
+           "refines:<prior_entry_id>" / "confirms:<prior_entry_id>"
+           / "potential_contradiction:<prior_entry_id>".
+        2. Catalog text: the claim restated for catalog clarity
+           (one or two sentences, faithful to the source).
+        3. Refinement note (optional): if "refines" / "confirms",
+           one sentence on what's added vs. the prior entry.
+        4. Halt warning if chain status != "ok" — DO NOT write
+           the catalog entry; surface the chain breakage instead.
+
+  - id: operator_focus_check
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: write_catalog_entry
+    tool: memory_write.v1
+    args:
+      content: ${categorize.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "knowledge_catalog_entry"
+        - "topic:${inputs.topic_slug}"
+        - "provenance:${inputs.source_provenance.source_url}"
+        - "attestor:Librarian-D1"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  source_url: ${inputs.source_provenance.source_url}
+  catalog_block: ${categorize.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  operator_focus: ${operator_focus_check.out.areas_of_focus}
+  catalog_entry_id: ${write_catalog_entry.out.entry_id}

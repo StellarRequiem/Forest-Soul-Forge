@@ -167,6 +167,8 @@ genres:
       - audit_archivist          # ADR-0085 Phase A — D8 compliance long-term archival (read_only kit; sibling of forensic_archivist for the compliance side)
       - evidence_collector       # ADR-0085 Phase A — D8 compliance evidence capture (read_only kit; passive snapshot harvester)
       - compliance_scanner       # ADR-0085 Phase B — D8 compliance framework scanner (read_only kit; framework_check.v1 + memory recall/write)
+      - librarian                # ADR-0086 Phase A — D1 knowledge librarian; audit-emphasis curator with catalog-discipline read_only on memory layers (memory_recall/write + personal_recall + audit_chain_verify + llm_think + text_summarize)
+      - knowledge_verifier       # ADR-0086 Phase C — D1 single-agent contradiction auditor; YELLOW posture; read_only kit (memory_recall + memory_flag_contradiction + knowledge_contradiction_scan + audit_chain_verify + llm_think). Renamed from manifest "verifier" per ADR-0086 Decision 2 to avoid collision with verifier_loop + reality_anchor.
       # NOTE — threat_intel_curator was originally placed here in B385
       # but its kit needs web_fetch (network) for feed pulls, which
       # exceeds guardian's read_only ceiling. B386 moved the role to
@@ -228,6 +230,8 @@ genres:
       - detection_engineer       # ADR-0065 T3 (B391) — D3 Phase C rule authoring; same researcher pattern as threat_intel_curator (LLM synthesis + ATT&CK ref reads; no action surface)
       - purple_pete              # ADR-0066 (B457) — D3 Phase D adversary simulation; researcher per ADR-0066 §3 (no real action surface; writes only the simulation store) — ADR-0078's table said actuator, refined here like threat_intel_curator's B386 move
       - report_generator         # ADR-0085 Phase D — D8 compliance report generator; synthesizes audit packets from chain + evidence + scan history (read_only)
+      - prospector               # ADR-0086 Phase A — D1 knowledge prospector; allowlisted-network research role that pulls source material + hands off to librarian for catalog discipline (kit: web_fetch + llm_think + memory_recall/write + text_summarize + operator_profile_read)
+      - synthesizer              # ADR-0086 Phase B — D1 knowledge synthesizer; researcher-genre synthesis over the librarian's catalog (topic_genealogy_build.v1 + daily_knowledge_delta.v1 + memory_recall/write + llm_think + text_summarize + personal_recall)
 
   companion:
     description: |

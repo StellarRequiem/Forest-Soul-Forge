@@ -4,7 +4,11 @@
 # after Phase α substrate (orchestrator + voice + plugins + scale).
 domain_id: d1_knowledge_forge
 name: Personal Knowledge Forge
-status: planned
+# ADR-0086 Phase A in flight (2026-05-23): librarian + prospector
+# roles + birth scripts + skill manifests shipped; Phases B-D queued
+# (synthesizer, knowledge_verifier, daily_knowledge_delta + cascade).
+# Flips to "live" at Phase D close per ADR-0086 §Phase status footer.
+status: phase_a
 
 description: |
   Active personal knowledge curation. Not a passive note-store —

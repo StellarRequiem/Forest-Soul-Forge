@@ -3136,6 +3136,42 @@ archetypes:
       - policy_lint.v1          # ADR-0085 Phase C — the lint evaluator
       - code_read.v1            # read source configs targeted for lint
 
+  # ---- ADR-0086 Phase A — D1 Knowledge Forge intake ---------------------
+  # librarian + prospector kits. Mirror the existing
+  # knowledge_consolidator (researcher) / paper_summarizer (researcher)
+  # pattern but for sustained-curation + sustained-sourcing roles.
+  # librarian is guardian (read_only + catalog discipline);
+  # prospector is researcher (network ceiling for source pulls).
+  # NEVER shell_exec / code_edit on either — D1 stays read-from-
+  # source + write-to-memory only.
+  librarian:
+    standard_tools:
+      - llm_think.v1            # catalog reasoning + topic categorization
+      - memory_recall.v1        # walk prior catalog entries + private memory
+      - memory_write.v1         # catalog attestations + topic-tagged entries
+      - delegate.v1             # hand off to prospector / synthesizer / knowledge_verifier
+      - audit_chain_verify.v1   # chain integrity before catalog writes
+      - text_summarize.v1       # condense source briefs for catalog entries
+      - personal_recall.v1      # ADR-0076 T4 hybrid retrieval over the personal index
+      - operator_profile_read.v1 # ADR-0068 — operator areas-of-focus inform catalog scope
+      - code_read.v1            # read operator-stored notes when forest-files connector absent (graceful degradation per ADR-0086 Decision 4)
+      # No shell_exec. No code_edit. No web_fetch (prospector's lane).
+      # Read-only catalog discipline + memory writes.
+
+  prospector:
+    standard_tools:
+      - llm_think.v1            # source relevance judgment + brief synthesis
+      - memory_recall.v1        # check for prior fetches against this topic
+      - memory_write.v1         # fetch attestations + raw excerpts for librarian pickup
+      - delegate.v1             # hand off to librarian for catalog discipline
+      - audit_chain_verify.v1   # chain integrity before publishing fetch attestations
+      - text_summarize.v1       # condense fetched material into briefs
+      - web_fetch.v1            # source pulls (gated by per-agent allowlist; sources from config/knowledge_sources.yaml when that ships, otherwise operator-allowlisted at constitution patch time)
+      - operator_profile_read.v1 # ADR-0068 — areas-of-focus drive source-selection
+      # No file_integrity (prospector pulls live sources; integrity
+      # is the librarian + audit-chain combination's job).
+      # No shell_exec. No code_edit. No catalog writes (librarian's lane).
+
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard
   # guardian read-only support set. The scanner reads framework

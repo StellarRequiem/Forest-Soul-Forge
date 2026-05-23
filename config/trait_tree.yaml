@@ -850,6 +850,73 @@ roles:
       emotional: 0.4
       embodiment: 0.6
 
+  # ---- ADR-0086 Phase A — D1 Personal Knowledge Forge (intake) ---------
+  # Two intake roles that establish the curation + gathering pipeline:
+  #   - librarian:   audit-emphasis curator. Owns the operator's
+  #                  knowledge graph + per-fact provenance ledger;
+  #                  catalog-discipline read-only on memory layers.
+  #   - prospector:  researcher with allowlisted network reach.
+  #                  Pulls source material on operator request and
+  #                  hands off to the librarian via memory_write
+  #                  for catalog discipline at storage time.
+  # Both GREEN posture per ADR-0086 Decision 1. Sibling pattern to
+  # the existing knowledge_consolidator / paper_summarizer pair —
+  # librarian extends consolidator's catalog discipline into a
+  # full curation surface; prospector extends paper_summarizer's
+  # source-fetch shape into a sourcing role.
+  librarian:
+    description: "Knowledge librarian. Owns the operator's knowledge catalog + per-fact provenance ledger; reads memory layers (private + lineage + consented) and writes catalog attestations + topic-tagged entries. NEVER mutates source data — the librarian curates, the prospector sources, the synthesizer wraps. Distinct from knowledge_consolidator (which is the older single-shot consolidator role): librarian owns the persistent catalog discipline + provenance per fact, not one-off consolidation passes. Genre: guardian. ADR-0086 Phase A."
+    domain_weights:
+      security: 1.2     # catalog discipline is security-adjacent (provenance)
+      audit: 2.6        # the load-bearing trait — every catalog write is audit
+      cognitive: 2.0    # catalog reasoning + topic categorization
+      communication: 1.8 # operator-facing catalog surfaces (topic pages)
+      emotional: 0.5
+      embodiment: 0.6   # read-heavy + catalog writes to private memory
+
+  prospector:
+    description: "Knowledge prospector. Allowlisted-network research agent that pulls source material (papers, web pages, operator-tagged notes) and hands off to the librarian for catalog discipline. NEVER persists to operator-visible storage directly — the librarian owns catalog writes; the prospector's outputs land in private memory tagged for librarian pickup. Distinct from paper_summarizer (single-shot summarization): prospector is a sustained sourcing role bound to operator-stated areas of focus via the operator profile (ADR-0068). Genre: researcher. ADR-0086 Phase A."
+    domain_weights:
+      security: 1.4     # source allowlisting is security-adjacent
+      audit: 2.0        # every fetch attests source URL + access time
+      cognitive: 2.2    # source reasoning + relevance judgment
+      communication: 1.6 # operator-facing source briefs
+      emotional: 0.4
+      embodiment: 1.0   # network reach is the action surface
+
+  # ---- ADR-0086 Phase B — D1 Personal Knowledge Forge (synthesis) ------
+  # synthesizer: researcher-genre synthesis role. Builds topic
+  # genealogies + daily knowledge deltas from the librarian's
+  # catalog. Read-only by construction — wraps catalog data into
+  # operator-readable artifacts, never mutates the catalog.
+  synthesizer:
+    description: "Knowledge synthesizer. Reads the librarian's catalog + dispatches topic_genealogy_build.v1 to construct topic graphs from memory entries + their provenance. Produces daily-delta synthesis (via daily_knowledge_delta.v1 in Phase D) + topic-genealogy artifacts. Read-only synthesis — never mutates source catalog. Distinct from paper_summarizer: synthesizer operates across the full catalog over time, not a single paper. Genre: researcher. ADR-0086 Phase B."
+    domain_weights:
+      security: 1.0     # synthesis is not the primary security surface
+      audit: 2.4        # synthesis attestations need audit-chain anchoring
+      cognitive: 2.3    # topic-graph reasoning + delta narrative
+      communication: 2.2 # operator-facing topic pages + delta reports
+      emotional: 0.5
+      embodiment: 0.6
+
+  # ---- ADR-0086 Phase C — D1 Personal Knowledge Forge (verification) ---
+  # knowledge_verifier: guardian-genre single-agent contradiction
+  # auditor over the knowledge corpus. Sibling pattern to
+  # verifier_loop (ADR-0036 kernel-singleton) but D1-scoped + the
+  # rename avoids the collision with verifier_loop + reality_anchor
+  # per ADR-0086 Decision 2. YELLOW posture per Decision 1 — every
+  # flagged contradiction surfaces to the operator for review
+  # before propagating to downstream domains (D9 / D10 / D7).
+  knowledge_verifier:
+    description: "Knowledge contradiction auditor. Dispatches knowledge_contradiction_scan.v1 to walk the calling agent's private + lineage memory for statements contradicting a target topic; flags contradictions via memory_flag_contradiction.v1 (ADR-0036 T2 substrate); NEVER rewrites. Single-agent scope per ADR-0086 Decision 3 — cross-agent contradiction scanning is deferred to v0.4. Distinct from verifier_loop (kernel-singleton cross-cutting all domains) + reality_anchor (pre-action ground-truth gate): knowledge_verifier is D1-scoped + post-hoc audit. YELLOW posture forces operator review. Genre: guardian. ADR-0086 Phase C."
+    domain_weights:
+      security: 1.4     # contradiction-flag affects downstream trust
+      audit: 2.7        # the load-bearing trait — verification is audit
+      cognitive: 2.1    # contradiction reasoning + evidence comparison
+      communication: 1.8 # operator-facing contradiction surfaces
+      emotional: 0.5
+      embodiment: 0.6
+
   domain_orchestrator:
     description: "ADR-0067 T5 Cross-Domain Orchestrator. Singleton-per-forest router that decomposes operator utterances (via decompose_intent.v1) and routes each sub-intent to the right domain swarm (via route_to_domain.v1 + the resolve_route() engine). Sits behind the Persistent Assistant Chat (ADR-0047) so the operator talks to one front door while the orchestrator dispatches across ten domains. Genre: companion. Kit: decompose_intent.v1 + route_to_domain.v1 + operator_profile_read.v1 + llm_think.v1 + delegate.v1 + verify_claim.v1."
     domain_weights:
