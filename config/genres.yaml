@@ -136,6 +136,7 @@ genres:
       - policy_enforcer          # ADR-0085 Phase C — D8 compliance policy enforcer; YELLOW posture, every remediation operator-gated; constitution policies forbid silent application
       - time_steward             # ADR-0087 Phase B — D2 Daily Life OS scheduling + calendar actuator. YELLOW posture default; the only acting role in D2. Kit: schedule_reminder.v1 + calendar_block.v1 + memory_recall/write + audit_chain_verify + llm_think + text_summarize + operator_profile_read + delegate.
       - distribution_pilot       # ADR-0088 Phase D — D7 Content Studio publish actuator. YELLOW posture default; the only acting role in D7. Queues publishes via publish_schedule.v1 (external-class); NEVER publishes directly — queue → forest-publish connector handoff is the load-bearing separation. Kit: publish_schedule.v1 + memory_recall/write + audit_chain_verify + llm_think + text_summarize + operator_profile_read + delegate.
+      - spaced_repetition_pilot  # ADR-0089 Phase D — D9 Learning Coach review-queue actuator. YELLOW posture default; the only acting role in D9. Dispatches spaced_repetition_schedule.v1 (SM-2 interval computation + filesystem queue write to data/d9/review_queue.jsonl). NEVER fires reminders directly — queue → operator pickup OR composition with D2's schedule_reminder.v1 is the load-bearing separation. Kit: spaced_repetition_schedule.v1 + memory_recall/write + audit_chain_verify + llm_think + text_summarize + operator_profile_read + delegate.
 
   guardian:
     description: |

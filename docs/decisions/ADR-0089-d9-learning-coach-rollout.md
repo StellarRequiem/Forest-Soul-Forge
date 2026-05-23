@@ -1,9 +1,14 @@
 # ADR-0089 — D9 Learning Coach: rollout
 
-**Status:** Proposed (2026-05-23). Phase A in flight — mentor +
-curriculum_designer roles + curriculum_design.v1 builtin tool +
-coaching.v1 + curriculum_design.v1 skill manifests + birth scripts
-land in this phase. Phases B/C/D queued.
+**Status:** Accepted (2026-05-23). All four phases CLOSED —
+D9 Learning Coach LIVE with all 5 agents alive (Mentor-D9,
+CurriculumDesigner-D9, Assessor-D9 YELLOW, SocraticPartner-D9,
+SpacedRepetitionPilot-D9 YELLOW); 5 new builtin tools
+(curriculum_design.v1, knowledge_assessment.v1, assessment_score.v1,
+misconception_log.v1, spaced_repetition_schedule.v1) with 106
+unit tests total; 7 skill manifests; cascade wiring d1→d9
+knowledge_contradiction_flag + d7→d9 editing + d9→d2 spaced_repetition +
+d9→d2 curriculum_design ACTIVE; umbrella + runbook live.
 **Date:** 2026-05-23
 **Tracks:** Domain Rollout / Operator Learning Coach
 **Supersedes:** none

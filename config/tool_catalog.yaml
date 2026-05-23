@@ -899,6 +899,45 @@ tools:
     side_effects: filesystem
     archetype_tags: [assessor]
 
+  spaced_repetition_schedule.v1:
+    name: spaced_repetition_schedule
+    version: "1"
+    description: |
+      ADR-0089 Phase D — D9 Learning Coach SM-2 scheduler. Computes
+      the next review interval via the SM-2 spaced-repetition
+      algorithm given a recall quality grade [0..5], and appends a
+      queue record to data/d9/review_queue.jsonl. side_effects=
+      filesystem + every call operator-gated via the
+      ``filesystem_always_human_approval`` rule (load-bearing
+      regardless of agent posture). Composes with D2's
+      schedule_reminder.v1 for fire-time delivery: the operator
+      picks queue records up and dispatches a reminder via D2 if
+      they want a notification at fire_at. spaced_repetition_pilot
+      (YELLOW posture) is the only role with this in its kit.
+    input_schema:
+      type: object
+      required: [topic_slug, quality]
+      properties:
+        topic_slug: {type: string}
+        quality:
+          type: integer
+          minimum: 0
+          maximum: 5
+        prior_repetition:
+          type: integer
+          minimum: 0
+        prior_easiness:
+          type: number
+          minimum: 1.3
+        prior_interval_days:
+          type: integer
+          minimum: 0
+        reviewed_at: {type: string}
+        source_score_id: {type: string}
+        queue_path: {type: string}
+    side_effects: filesystem
+    archetype_tags: [spaced_repetition_pilot]
+
   curriculum_design.v1:
     name: curriculum_design
     version: "1"
@@ -3959,6 +3998,26 @@ archetypes:
       - curriculum_design.v1          # ADR-0089 Phase A — the deterministic DAG composer
       # No web_fetch. No shell_exec. No code_edit. No assessment
       # tools (assessor's lane, Phase B). Pure curriculum composition.
+
+  # ---- ADR-0089 Phase D — D9 Learning Coach spaced repetition ----
+  # spaced_repetition_pilot kit. Actuator genre, external ceiling.
+  # YELLOW posture default. spaced_repetition_schedule.v1 (filesystem;
+  # per-call operator-gated) is the load-bearing action surface.
+  # The pilot NEVER fires reminders directly — queue → operator
+  # pickup OR D2 schedule_reminder.v1 composition is the separation.
+  spaced_repetition_pilot:
+    standard_tools:
+      - llm_think.v1                       # reasoning over recall-quality + scheduling cadence
+      - memory_recall.v1                   # walk prior schedules + assessment results
+      - memory_write.v1                    # schedule attestations to private memory
+      - delegate.v1                        # route ambiguous schedules back to operator / route to D2 schedule_reminder for delivery
+      - audit_chain_verify.v1              # chain integrity before queueing schedules
+      - text_summarize.v1                  # condense long score histories into schedule briefs
+      - operator_profile_read.v1           # ADR-0068 — work_hours + timezone inform fire_at framing
+      - spaced_repetition_schedule.v1      # ADR-0089 Phase D — SM-2 scheduler
+      # No web_fetch. No shell_exec. No code_edit. No assessment
+      # tools (assessor's lane). No curriculum mutation tools
+      # (curriculum_designer's lane). Pure review-queue action.
 
   # ---- ADR-0089 Phase C — D9 Learning Coach Socratic dialogue ----
   # socratic_partner kit. Communicator genre, network ceiling but

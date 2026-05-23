@@ -2363,6 +2363,86 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  spaced_repetition_pilot:
+    # ADR-0089 Phase D — D9 Learning Coach spaced-repetition actuator.
+    # Actuator genre, external ceiling. YELLOW posture default per
+    # ADR-0089 Decision 3 — every dispatch beyond read_only queues
+    # for operator approval. spaced_repetition_schedule.v1 (filesystem-
+    # class) carries per-call approval gating via the
+    # ``filesystem_always_human_approval`` rule regardless of posture;
+    # YELLOW posture is the second discipline that pauses every
+    # other non-read-only dispatch the role can fire. Same two-
+    # layer pattern as time_steward (ADR-0087 Phase B) +
+    # distribution_pilot (ADR-0088 Phase D).
+    policies:
+      - id: forbid_silent_schedule
+        rule: forbid
+        triggers: [schedule_review_silent, dispatch_schedule_silent]
+        rationale: |
+          Every review schedule is operator-reviewed via the
+          approval queue. Silent action would bypass the YELLOW-
+          posture discipline + the filesystem-class per-call gate,
+          making the role indistinguishable from a runaway scheduler.
+          Both layers — posture + per-call gate — must fire on
+          every queued schedule.
+      - id: forbid_assessment
+        rule: forbid
+        triggers: [assess_operator_understanding, score_response, sign_off_mastery]
+        rationale: |
+          Assessment is the assessor's exclusive lane (D9 Phase B,
+          YELLOW posture). The pilot schedules the review based on
+          operator-supplied quality grades but NEVER measures the
+          response itself. Letting the pilot assess would conflate
+          scheduling with measurement + invert the D9 separation
+          of duties.
+      - id: forbid_direct_reminder
+        rule: forbid
+        triggers: [send_email, send_message_external, dispatch_email_direct]
+        rationale: |
+          The pilot NEVER fires reminders directly. The queue record
+          this pilot writes is operator-picked-up by a future
+          forest-review connector OR composed via D2's
+          schedule_reminder.v1 (which has its own per-call gating
+          + operator-driven dispatch). Calling a reminder API
+          directly would bypass the connector-handoff separation +
+          conflate scheduling with delivery.
+      - id: require_schedule_attestation
+        rule: require
+        triggers: [spaced_repetition_schedule, queue_review_request]
+        rationale: |
+          Every queued review emits a memory_write attestation
+          with (topic_slug, source_score_id, next_interval_days,
+          fire_at, attestor, ts). Without the attestation, the
+          operator can't audit the pilot's queue + can't reconcile
+          reviews that fired against reviews that were scheduled.
+      - id: forbid_chain_break_action
+        rule: require
+        triggers: [spaced_repetition_schedule]
+        rationale: |
+          Before any review queue action, the chain's
+          audit_chain_verify must confirm hash-linked integrity.
+          Schedules queued against a broken chain inherit the
+          brokenness + can't be reconciled.
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - send_email
+      - dispatch_email_direct
+      - schedule_review_silent
+      - assess_operator_understanding
+      - modify_production_systems
+    operator_duties:
+      - "Review every queued review via the approval queue. YELLOW posture means every non-read-only action queues — that's the bedding-in friction by design + the operator's last word on what lands in the review schedule."
+      - "Compose with D2 for fire-time delivery — dispatch D2's schedule_reminder.v1 with the queue record's fire_at + topic_slug to get a reminder notification at review time. The pilot writes the queue; the operator wires delivery."
+      - "Move from YELLOW to GREEN posture only after the proposal-quality bar is bedded in — operator-approved schedules matching what you'd have approved manually. Even after GREEN, per-call approval gates on spaced_repetition_schedule.v1 (filesystem) remain."
+      - "Treat a chain_broken halt as an emergency — schedules queued against a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   socratic_partner:
     # ADR-0089 Phase C — D9 Learning Coach Socratic-dialogue communicator.
     # Communicator genre, network ceiling (but the kit composition

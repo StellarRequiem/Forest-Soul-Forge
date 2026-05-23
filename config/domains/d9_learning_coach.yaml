@@ -1,10 +1,14 @@
 # Domain D9 — Learning & Skill Mastery Coach
-# ADR-0067 T1 manifest. Status: planned. Depends on D1 Knowledge
-# Forge for source material + topic graph; depends on D10 Research
-# Lab for deep dives when curiosity drives further.
+# ADR-0067 T1 manifest. Status: live (2026-05-23, ADR-0089 Phase D).
+# All five entry_agents shipped: mentor + curriculum_designer (Phase A,
+# researcher, GREEN), assessor (Phase B, guardian, YELLOW),
+# socratic_partner (Phase C, communicator, GREEN), spaced_repetition_pilot
+# (Phase D, actuator, YELLOW). Depends on D1 Knowledge Forge for source
+# material + topic graph; depends on D10 Research Lab for deep dives
+# (D10 not yet shipped — d9→d10 cascade declared INERT in handoffs.yaml).
 domain_id: d9_learning_coach
 name: Learning & Skill Mastery Coach
-status: planned
+status: live
 
 description: |
   Backward design from operator goals. "I want to read papers on

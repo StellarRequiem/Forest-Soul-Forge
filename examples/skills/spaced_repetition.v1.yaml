@@ -1,0 +1,148 @@
+schema_version: 1
+name: spaced_repetition
+version: '1'
+description: |
+  SpacedRepetitionPilot-D9's primary skill. Composes a single
+  SM-2 schedule update from an operator-acknowledged assessment
+  result (or operator-supplied recall quality), pulls the prior
+  schedule state for the topic, writes the new queue record +
+  attestation.
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read fetches timezone
+       (Pacific time framing).
+    2. recall_prior_schedule — memory_recall scope=lineage for the
+       most recent spaced_repetition_schedule attestation matching
+       topic_slug. Gives the SM-2 prior_repetition + prior_easiness
+       + prior_interval_days state. When absent, defaults apply
+       (first review).
+    3. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end.
+    4. compute_schedule — spaced_repetition_schedule.v1 fires the
+       SM-2 algorithm + writes the queue record (filesystem;
+       operator-gated per-call).
+    5. narrate_schedule — llm_think wraps the deterministic
+       schedule with an operator-facing narrative — "you graded
+       this 4/5; next review in N days; here's what that
+       cadence is optimizing for."
+    6. write_schedule_attestation — memory_write scope=private
+       records the schedule with tags (d9_review_schedule,
+       schedule:topic:${topic_slug}, attestor:SpacedRepetitionPilot-D9).
+
+  YELLOW posture by default — every dispatch queues for operator
+  approval. forbid_silent_schedule + require_schedule_attestation
+  policies enforce this at governance layer.
+
+requires:
+  - spaced_repetition_schedule.v1
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, quality]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic being scheduled. Matches a slug from a prior
+        assessment_score.v1 call.
+    quality:
+      type: integer
+      minimum: 0
+      maximum: 5
+      description: >
+        SM-2 recall quality grade. 5 = perfect, 0 = blackout.
+        Operator-supplied; the pilot doesn't compute this (that's
+        the assessor's lane).
+    source_score_id:
+      type: string
+      default: ""
+      description: >
+        The assessment_score memory entry_id that triggered this
+        schedule update. Lets the operator trace queue → score.
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_prior_schedule
+    tool: memory_recall.v1
+    args:
+      query: "schedule:topic:${inputs.topic_slug}"
+      mode: lineage
+      limit: 1
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compute_schedule
+    tool: spaced_repetition_schedule.v1
+    args:
+      topic_slug: ${inputs.topic_slug}
+      quality: ${inputs.quality}
+      source_score_id: ${inputs.source_score_id}
+
+  - id: narrate_schedule
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are SpacedRepetitionPilot-D9. Narrate the SM-2
+        schedule update you just produced.
+
+        Topic:               ${inputs.topic_slug}
+        Recall quality:      ${inputs.quality}/5
+        Operator reason:     ${inputs.operator_reason}
+        Operator timezone:   ${operator_context.out.timezone}
+
+        Audit chain status:  ${verify_chain_integrity.out.status}
+
+        Prior schedule (lineage memory):
+        ${recall_prior_schedule.out.entries}
+
+        New schedule:
+          next_repetition:    ${compute_schedule.out.next_repetition}
+          next_easiness:      ${compute_schedule.out.next_easiness}
+          next_interval_days: ${compute_schedule.out.next_interval_days}
+          fire_at:            ${compute_schedule.out.fire_at}
+
+        Surface a one-paragraph operator-readable narrative:
+        what the new interval is, why SM-2 chose it given the
+        grade + prior state, and what the next dispatch should
+        look like (compose with D2 schedule_reminder.v1 if the
+        operator wants a notification at fire_at).
+
+        NEVER grade the response — quality is operator-supplied.
+        NEVER fire a reminder directly. All timestamps Pacific time.
+
+        Halt warning if chain status != "ok".
+
+  - id: write_schedule_attestation
+    tool: memory_write.v1
+    args:
+      content: ${narrate_schedule.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d9_review_schedule"
+        - "schedule:topic:${inputs.topic_slug}"
+        - "quality:${inputs.quality}"
+        - "attestor:SpacedRepetitionPilot-D9"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  schedule_id: ${compute_schedule.out.schedule_id}
+  next_interval_days: ${compute_schedule.out.next_interval_days}
+  fire_at: ${compute_schedule.out.fire_at}
+  narration: ${narrate_schedule.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  schedule_entry_id: ${write_schedule_attestation.out.entry_id}

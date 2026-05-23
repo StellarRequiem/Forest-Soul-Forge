@@ -1167,6 +1167,25 @@ roles:
       emotional: 1.8    # Socratic questioning needs warmth + patience + empathy
       embodiment: 0.4
 
+  # ---- ADR-0089 Phase D — D9 Learning Coach (spaced repetition) ------
+  # spaced_repetition_pilot: actuator-genre review-queue role.
+  # Dispatches spaced_repetition_schedule.v1 (SM-2 interval
+  # computation + queue write to data/d9/review_queue.jsonl).
+  # YELLOW posture default per ADR-0089 Decision 3 — every
+  # non-read-only dispatch queues for operator approval. Composes
+  # with D2's schedule_reminder.v1 for fire-time delivery: the
+  # operator picks queue records up + dispatches a reminder via D2.
+  # Two-layer separation matches D7's distribution_pilot pattern.
+  spaced_repetition_pilot:
+    description: "Spaced-repetition actuator. Dispatches spaced_repetition_schedule.v1 (SM-2 interval computation + filesystem queue write) over operator-acknowledged assessment results. NEVER assesses (assessor's lane) + NEVER drafts curriculum (curriculum_designer's lane). Composes with D2's schedule_reminder.v1 for fire-time delivery — the queue record this pilot writes is operator-picked-up by a future forest-review connector OR by an operator-driven reminder dispatch. YELLOW posture default. Genre: actuator. ADR-0089 Phase D."
+    domain_weights:
+      security: 1.5     # queue records drive operator behavior; security posture matters
+      audit: 2.4        # every queued review attests to its source score + SM-2 inputs
+      cognitive: 1.7    # SM-2 reasoning + composition with D2 substrate
+      communication: 1.6 # operator-facing approval requests
+      emotional: 0.7
+      embodiment: 1.6   # the action surface — review queue
+
   # ---- ADR-0089 Phase B — D9 Learning Coach (assessment ledger) ------
   # assessor: guardian-genre measurement role. Composes knowledge_assessment.v1
   # (item generation) + assessment_score.v1 (response scoring) +

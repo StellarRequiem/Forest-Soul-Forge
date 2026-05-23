@@ -13,7 +13,7 @@ that lands D9 Phase A (this runbook will grow as Phases B–D ship).
 | **A** | mentor + curriculum_designer | curriculum_design.v1 | CLOSED |
 | **B** | assessor (YELLOW) | knowledge_assessment.v1 + assessment_score.v1 + misconception_log.v1 | CLOSED |
 | **C** | socratic_partner | none — reuses existing | CLOSED |
-| **D** | spaced_repetition_pilot (YELLOW) | spaced_repetition_schedule.v1 | queued |
+| **D** | spaced_repetition_pilot (YELLOW) | spaced_repetition_schedule.v1 | CLOSED |
 
 Each phase = one commit + one push, so the operator can verify
 phase N before phase N+1 fires.
@@ -349,9 +349,123 @@ required.
 | Partner rewrites curriculum | Same hallucination class | `forbid_curriculum_mutation` policy fires; same recovery. |
 | Dialogue ignores prior turns | memory_recall query mismatch | Verify `socratic:topic:${topic_slug}` tag is being written by every turn; if missing, the role's tag template drifted. |
 
-## Phase D — TBD
+## Phase D — spaced repetition + cascade + umbrella
 
-Section expands as Phase D ships.
+### 1. Restart the daemon + birth the pilot
+
+```bash
+./dev-tools/force-restart-daemon.command
+./dev-tools/birth-spaced-repetition-pilot.command
+```
+
+`spaced_repetition_pilot` role, `actuator` genre, **YELLOW**
+posture default. One new builtin tool lands:
+`spaced_repetition_schedule.v1` (filesystem-class; per-call
+operator-approval gate is load-bearing regardless of posture).
+
+### 2. SM-2 algorithm in one paragraph
+
+Given a recall quality grade `q ∈ [0..5]`:
+- Repetition counter `n` advances when `q >= 3`; resets to 0 when `q < 3`.
+- Easiness factor: `EF' = max(1.3, EF + 0.1 - (5-q) * (0.08 + (5-q) * 0.02))`.
+- Next interval (days): `n=0 → 1`, `n=1 → 6`, `n>=2 → round(prev_interval * EF')`.
+
+The tool returns the new `next_interval_days` + `fire_at` and
+appends a queue record to `data/d9/review_queue.jsonl`.
+
+### 3. First dispatch — schedule a review
+
+```bash
+PILOT_ID=...   # SpacedRepetitionPilot-D9 instance_id
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/agents/${PILOT_ID}/skills/dispatch" \
+  -H "X-FSF-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "spaced_repetition",
+    "skill_version": "1",
+    "inputs": {
+      "topic_slug": "diffusion-forward",
+      "quality": 4,
+      "source_score_id": "mem_xyz...",
+      "operator_reason": "weekly review check-in"
+    }
+  }'
+```
+
+The response carries `schedule_id`, `next_interval_days`,
+`fire_at`, and `schedule_entry_id`. Per
+`filesystem_always_human_approval`, the dispatch queues for
+approval before the queue record lands.
+
+### 4. Compose with D2 for fire-time delivery
+
+The pilot writes the queue record but doesn't fire reminders.
+The operator dispatches D2's `schedule_reminder.v1` with the
+queue record's `fire_at` + `topic_slug` to get a reminder
+notification:
+
+```bash
+TIME_STEWARD_ID=...   # Time-Steward-D2 instance_id
+curl -s --max-time 30 -X POST \
+  "http://127.0.0.1:7423/agents/${TIME_STEWARD_ID}/skills/dispatch" \
+  -H "X-FSF-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "schedule_reminder",
+    "skill_version": "1",
+    "inputs": {
+      "fire_at": "<from-d9-queue-record>",
+      "message": "Review: diffusion-forward",
+      "channel": "memory"
+    }
+  }'
+```
+
+This composition is the D9→D2 cascade described in
+`config/handoffs.yaml`.
+
+### 5. Umbrella birth
+
+After D9-A through D9-D land, the umbrella births all five
+agents in one go:
+
+```bash
+./dev-tools/birth-d9-learning-coach.command
+```
+
+The umbrella is idempotent — re-running skips agents that
+already exist.
+
+### 6. End-to-end flow (goal → mastery)
+
+1. **Plan** — `CurriculumDesigner-D9.curriculum_design` with a goal +
+   operator-curated catalog → deterministic learning path
+   attestation.
+2. **Coach** — `Mentor-D9.coaching` with topic_slug → operator-facing
+   coaching brief.
+3. **Dialogue** — `SocraticPartner-D9.socratic_dialogue` with
+   operator_input → multi-turn dialogue sessions surfacing gaps.
+4. **Measure** — `Assessor-D9.knowledge_assessment` (YELLOW) with
+   response + ground_truth → verdict (Reality Anchored). On
+   incorrect/partial → `misconception_tracking.v1` → operator
+   dispatches `misconception_log.v1` to commit.
+5. **Schedule** — `SpacedRepetitionPilot-D9.spaced_repetition`
+   (YELLOW) with topic_slug + quality grade → SM-2 next interval
+   + queue record. Operator dispatches D2's `schedule_reminder.v1`
+   for delivery.
+6. **Certify** — `Mentor-D9.skill_certification` wraps the
+   assessor's signed-off scores + review history into a
+   certification narrative.
+
+### 7. YELLOW posture promotion criteria
+
+Both `assessor` (Phase B) and `spaced_repetition_pilot` (Phase D)
+default YELLOW. Promote to GREEN only after the per-call gates
+have been confirmed reliable over at least two weeks of
+operator-approved dispatches; per-call gates on
+`misconception_log.v1` + `spaced_repetition_schedule.v1` remain
+load-bearing regardless.
 
 ### YELLOW posture promotion criteria (Phases B + D)
 

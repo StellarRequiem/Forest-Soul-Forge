@@ -69,6 +69,9 @@ from forest_soul_forge.tools.builtin.assessment_score import (
 from forest_soul_forge.tools.builtin.misconception_log import (
     MisconceptionLogTool,
 )
+from forest_soul_forge.tools.builtin.spaced_repetition_schedule import (
+    SpacedRepetitionScheduleTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -573,3 +576,12 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # YELLOW posture is the second discipline). The next assessment
     # session reads recent ledger entries to target the gap.
     registry.register(MisconceptionLogTool())
+    # ADR-0089 Phase D — spaced_repetition_schedule.v1. SM-2
+    # interval computation + queue write to data/d9/review_queue.jsonl.
+    # side_effects=filesystem; per-call human approval gate
+    # enforces operator review on every queue update (spaced_repetition_pilot
+    # YELLOW posture is the second discipline). Composes with D2's
+    # schedule_reminder.v1 for fire-time delivery — the operator
+    # picks queue records up and dispatches a reminder via D2 if
+    # they want a notification at fire_at.
+    registry.register(SpacedRepetitionScheduleTool())

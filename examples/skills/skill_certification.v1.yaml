@@ -1,0 +1,149 @@
+schema_version: 1
+name: skill_certification
+version: '1'
+description: |
+  Mentor-D9's certification-narrative skill. Composes an operator-
+  facing certification brief — a narrative that names what the
+  operator has demonstrated mastery on (based on the assessor's
+  signed-off scores + the spaced_repetition_pilot's review
+  history), what's solid, what's still pending. Does NOT certify
+  mastery on its own (that's the assessor's lane, YELLOW posture);
+  produces the narrative that wraps the assessor's signed-off
+  certifications for operator + downstream-domain consumption.
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read.
+    2. recall_curriculum — memory_recall scope=lineage for the
+       curriculum_designer attestation on goal_topic_slug.
+    3. recall_assessment_history — memory_recall for all
+       assessment:topic:${goal_topic_slug} entries with verdict
+       'correct' + Reality Anchor 'confirmed'.
+    4. recall_review_history — memory_recall for
+       schedule:topic:${goal_topic_slug} entries — how often
+       reviewed + with what quality grades.
+    5. verify_chain_integrity — audit_chain_verify.
+    6. compose_certification — llm_think composes the narrative
+       wrapping the signed-off scores + review history into a
+       certification brief. NEVER certifies new mastery — names
+       what the assessor has already signed off on.
+    7. write_certification_attestation — memory_write scope=private
+       records the brief with tags (d9_certification, goal_topic_slug,
+       attestor:Mentor-D9) for downstream pickup (e.g. D7 writer
+       composing a "what I learned" blog post — cascade declared
+       INERT until d9→d7 ships).
+
+  The mentor's certification brief is NARRATIVE, not certification —
+  the load-bearing mastery sign-off is the assessor's correct
+  verdict + Reality Anchor confirmation. Same pattern as D8's
+  report_generator wrapping the policy_enforcer's verdicts into
+  a single audit packet.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [goal_topic_slug]
+  properties:
+    goal_topic_slug:
+      type: string
+      description: >
+        kebab-case slug for the goal topic. Matches the
+        curriculum_designer's attestation tag.
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_curriculum
+    tool: memory_recall.v1
+    args:
+      query: "curriculum:topic:${inputs.goal_topic_slug}"
+      mode: lineage
+      limit: 5
+
+  - id: recall_assessment_history
+    tool: memory_recall.v1
+    args:
+      query: "assessment:topic:${inputs.goal_topic_slug}"
+      mode: lineage
+      limit: 50
+
+  - id: recall_review_history
+    tool: memory_recall.v1
+    args:
+      query: "schedule:topic:${inputs.goal_topic_slug}"
+      mode: lineage
+      limit: 50
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_certification
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Mentor-D9. Compose a certification narrative for
+        the operator on goal topic "${inputs.goal_topic_slug}".
+
+        Operator profile:
+          expertise:      ${operator_context.out.expertise_level}
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain status: ${verify_chain_integrity.out.status}
+
+        Curriculum (curriculum_designer-D9):
+        ${recall_curriculum.out.entries}
+
+        Assessment history (assessor-D9):
+        ${recall_assessment_history.out.entries}
+
+        Review schedule history (spaced_repetition_pilot-D9):
+        ${recall_review_history.out.entries}
+
+        Compose a narrative that names:
+          (a) what the assessor's signed off scores demonstrate
+              mastery on (filter to verdict=correct + Reality Anchor
+              confirmed);
+          (b) what topics in the curriculum DAG remain at partial
+              or incorrect verdicts (operator's bedding-in arc);
+          (c) the review cadence the spaced_repetition_pilot has
+              been holding.
+
+        NEVER certify new mastery — that's the assessor's lane.
+        Surface what the assessor already signed off on.
+
+        All timestamps are Pacific time. Halt if chain status
+        != "ok".
+
+  - id: write_certification_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_certification.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d9_certification"
+        - "certification:topic:${inputs.goal_topic_slug}"
+        - "attestor:Mentor-D9"
+
+output:
+  goal_topic_slug: ${inputs.goal_topic_slug}
+  certification_text: ${compose_certification.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  certification_entry_id: ${write_certification_attestation.out.entry_id}
+  assessment_hits: ${recall_assessment_history.out.count}
+  review_hits: ${recall_review_history.out.count}

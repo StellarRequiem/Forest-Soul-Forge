@@ -249,6 +249,47 @@ default_skill_per_capability:
     skill_name: daily_knowledge_delta
     skill_version: "1"
 
+  # D9 Learning Coach — ADR-0089 Phase D (2026-05-23).
+  # All entry capabilities have live skills.
+  - domain: d9_learning_coach
+    capability: coaching
+    skill_name: coaching
+    skill_version: "1"
+  - domain: d9_learning_coach
+    capability: curriculum_design
+    skill_name: curriculum_design
+    skill_version: "1"
+  - domain: d9_learning_coach
+    capability: knowledge_assessment
+    skill_name: knowledge_assessment
+    skill_version: "1"
+  - domain: d9_learning_coach
+    capability: misconception_tracking
+    skill_name: misconception_tracking
+    skill_version: "1"
+  - domain: d9_learning_coach
+    capability: socratic_dialogue
+    skill_name: socratic_dialogue
+    skill_version: "1"
+  - domain: d9_learning_coach
+    capability: spaced_repetition
+    skill_name: spaced_repetition
+    skill_version: "1"
+  - domain: d9_learning_coach
+    capability: skill_certification
+    skill_name: skill_certification
+    skill_version: "1"
+  # ADR-0089 Decision 4 — domain manifest capability names that
+  # map to canonical skills as aliases.
+  - domain: d9_learning_coach
+    capability: curriculum_module
+    skill_name: curriculum_design
+    skill_version: "1"
+  - domain: d9_learning_coach
+    capability: curriculum_gaps
+    skill_name: curriculum_design
+    skill_version: "1"
+
 # Cascade rules — engineer-defined, code-reviewed via PR.
 #
 # Each rule: when a route to (source_domain, source_capability)
@@ -328,6 +369,69 @@ cascade_rules:
       lineage memory as candidate content seeds. This was
       declared INERT in ADR-0087 Decision 4's downstream-cascade
       notes; activating now that D7 ships.
+
+  # ADR-0089 Phase D — D9 Learning Coach cascades.
+  #
+  # ACTIVATING the four cascades that were declared INERT in
+  # ADR-0086 + ADR-0088's downstream-cascade notes: D1's
+  # knowledge_contradiction_flag now flows into D9's curriculum_design
+  # so contradictions surface curriculum gaps the designer can fill;
+  # D7's editing now flows into D9's curriculum_module so polished
+  # drafts seed curriculum modules; D9's spaced_repetition now flows
+  # into D2's reminder so the operator's review queue gets reminder
+  # delivery; D9's curriculum_design now flows into D2's
+  # task_prioritization so curriculum study blocks land in the daily
+  # task ranking.
+  - source_domain: d1_knowledge_forge
+    source_capability: knowledge_contradiction_flag
+    target_domain: d9_learning_coach
+    target_capability: curriculum_design
+    reason: |
+      Every D1 contradiction flag cascades into a D9 curriculum
+      design trigger. CurriculumDesigner-D9 reads recent
+      knowledge_verifier flag attestations from lineage memory +
+      surfaces the contradiction as a curriculum gap (an unmet
+      prereq the catalog hasn't filled). This was declared INERT
+      in ADR-0086 Decision 4's downstream-cascade notes; activating
+      now that D9 ships.
+
+  - source_domain: d7_content_studio
+    source_capability: editing
+    target_domain: d9_learning_coach
+    target_capability: curriculum_module
+    reason: |
+      Every D7 editor approve verdict cascades into a D9 curriculum
+      module trigger. CurriculumDesigner-D9 reads recent editor-
+      approved drafts from lineage memory + surfaces them as
+      candidate curriculum entries (the operator's own polished
+      writing becomes their own learning material). This was
+      declared INERT in ADR-0088 Decision 4's downstream-cascade
+      notes; activating now that D9 ships.
+
+  - source_domain: d9_learning_coach
+    source_capability: spaced_repetition
+    target_domain: d2_daily_life_os
+    target_capability: reminder
+    reason: |
+      Every D9 spaced-repetition queue update cascades into a D2
+      reminder trigger. SpacedRepetitionPilot-D9's queue record
+      includes fire_at; Time-Steward-D2's schedule_reminder skill
+      picks the queue entry up + creates a reminder for the
+      operator. This is the composition the ADR-0089 design specs:
+      D9 schedules, D2 delivers.
+
+  - source_domain: d9_learning_coach
+    source_capability: curriculum_design
+    target_domain: d2_daily_life_os
+    target_capability: task_prioritization
+    reason: |
+      Every D9 curriculum attestation cascades into a D2 task
+      prioritization trigger. TaskPrioritizer-D2 reads recent
+      curriculum attestations from lineage memory + ranks the
+      next-N study blocks against the operator's other tasks.
+      Surfaces "study diffusion-forward today" alongside the
+      operator's other obligations rather than as a separate
+      stream.
 
   # ADR-0087 Phase D — D2 Daily Life OS cascades.
   #
@@ -441,6 +545,49 @@ cascade_rules:
 # when its target capability ships. Until then they are
 # documentation, not configuration — same INERT pattern as
 # ADR-0086 + ADR-0087's downstream-cascade notes.
+
+# ADR-0089 Phase D — INERT d9→downstream cascades.
+#
+# The D9 manifest at config/domains/d9_learning_coach.yaml names
+# four handoff_targets:
+#   d1_knowledge_forge   # gaps → catalog (assessment feedback path)
+#   d10_research_lab     # deep dives (D10 not yet shipped)
+#   d7_content_studio    # drafts operator can refine (certification → public draft)
+#   d2_daily_life_os     # scheduled study blocks (handled via d9→d2 active cascades above)
+#
+# d9 → d10 is straightforward — every operator-curiosity-driven
+# topic the assessor flags as "needs deeper than the curriculum can
+# offer" is a candidate D10 deep-research task — but D10 hasn't
+# shipped. Receiving capability doesn't exist; declare inert.
+#
+# d9 → d1 (assessment feedback → catalog) is an attractive cascade
+# — "the assessor's signed-off masteries become catalog confirmations
+# in the librarian's corpus" — but the d1 side ships
+# knowledge_curation expecting source-claim provenance from external
+# fetches (prospector / web_fetch). A "mastery-confirmation seed"
+# is a different shape; adding the cascade would require either:
+#   - a new d1 capability (mastery_seed_curation) wired to a new
+#     skill, OR
+#   - reusing knowledge_curation with a new content-type marker
+#     the librarian doesn't currently distinguish.
+# Either path is bigger than this phase's scope. Declare inert.
+#
+# d9 → d7 (certification → public draft) is similar — "the operator
+# certified mastery on diffusion models, so D7 can draft the
+# 'what I learned' blog post" — but it requires a new d7 capability
+# (certification_to_draft) the writer's draft_writing skill
+# doesn't currently distinguish from operator-authored outlines.
+# Declare inert.
+#
+# Pending cascades, declared inert:
+#   d9.assessment_feedback     → d1.knowledge_curation     (d1 side needs new content-type)
+#   d9.skill_certification     → d7.content_drafting       (d7 side needs new capability)
+#   d9.deep_research_request   → d10.research              (d10 not yet shipped)
+#
+# Each pending cascade will land as a real cascade_rules entry
+# when its target capability ships. Until then they are
+# documentation, not configuration — same INERT pattern as
+# ADR-0086 + ADR-0087 + ADR-0088's downstream-cascade notes.
 
 # ADR-0078 Phase A — NO new cascade rules from forensic_archive.
 # Deliberate. The ADR's Decision 4 named three cascades on the
