@@ -13,7 +13,7 @@ that lands D7 Phase A (this runbook will grow as Phases B–D ship).
 | **A** | writer + content_researcher | none — reuses existing | CLOSED |
 | **B** | style_steward (GREEN) | voice_profile_build.v1 + voice_match_check.v1 | CLOSED |
 | **C** | editor (GREEN) | format_adapt.v1 | CLOSED |
-| **D** | distribution_pilot (YELLOW) | publish_schedule.v1 | PENDING |
+| **D** | distribution_pilot (YELLOW) | publish_schedule.v1 | CLOSED |
 
 Each phase = one commit + one push, so the operator can verify
 phase N before phase N+1 fires.
@@ -372,10 +372,139 @@ source draft stays immutable.
   claim that contradicts the operator's ground-truth catalog.
   Surface to operator for review before approve verdict.
 
-## Phase D — distribution + cascade + umbrella (PENDING)
+## Phase D — distribution + cascade + umbrella
 
-Will document distribution_pilot birth (YELLOW posture by
-design — every queued publish gates on operator approval), the
-publish_schedule dispatch, and the cascade wiring
-(d1.knowledge_curation → d7.content_drafting active;
-d2.daily_reflection → d7.content_seed active).
+### 1. Restart the daemon
+
+The new role + new builtin tool land here, so a restart is
+required:
+
+```bash
+./dev-tools/force-restart-daemon.command
+```
+
+Verify `publish_schedule.v1` appears in `/healthz`'s tool
+registry, and `distribution_pilot` appears in `/genres` under
+the `actuator` genre.
+
+### 2. Birth the agent (or the whole domain)
+
+Single role:
+
+```bash
+./dev-tools/birth-distribution-pilot.command
+```
+
+Or the whole D7 umbrella at once (idempotent — re-running
+skips already-alive agents):
+
+```bash
+./dev-tools/birth-d7-content-studio.command
+```
+
+The pilot sets posture YELLOW per ADR-0088 Decision 3 (every
+publish is operator-gated regardless of posture; YELLOW is the
+second discipline on top of the per-call approval gate).
+
+### 3. Queue a publish
+
+After the editor approves + adapts a draft (Phase C), queue
+the publish via the `scheduled_publishing` skill:
+
+```bash
+PILOT_ID=...   # DistributionPilot-D7 instance_id
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${PILOT_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "scheduled_publishing",
+    "skill_version": "1",
+    "tool_version": "1",
+    "session_id": "publish-trial-001",
+    "args": {
+      "topic_slug": "multi-agent-governance",
+      "platform": "twitter",
+      "fire_at": "2026-05-24T09:00:00-08:00",
+      "title": "On multi-agent governance",
+      "tags": ["governance", "ai"],
+      "operator_reason": "Queueing for Tuesday morning Pacific time."
+    }
+  }'
+```
+
+The dispatch will request operator approval (YELLOW posture +
+per-call external gate). Once approved, the queue record lands
+in `data/d7/publish_queue.jsonl`. The pilot does NOT call a
+publish API — the future forest-publish connector picks the
+queue record up at fire_at.
+
+### 4. Weekly performance digest
+
+```bash
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${PILOT_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "performance_tracking",
+    "skill_version": "1",
+    "tool_version": "1",
+    "session_id": "perf-trial-001",
+    "args": {
+      "window_hours": 168,
+      "operator_reason": "Weekly D7 distribution digest."
+    }
+  }'
+```
+
+### 5. YELLOW → GREEN promotion
+
+After enough operator-approved publishes have fired without
+surprise — typically 10-20 publish cycles — the operator can
+promote the pilot to GREEN. Even after GREEN, the per-call
+external approval gate remains (load-bearing safety regardless
+of posture). The YELLOW → GREEN promotion only removes the
+posture-driven auto-queue on dispatch; the external-action
+approval at queue time stays.
+
+```bash
+curl -s --max-time 10 -X POST \
+  "http://127.0.0.1:7423/agents/${PILOT_ID}/posture" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"posture": "green", "reason": "After 20 operator-approved publishes fired without surprise; proposal quality bedded in."}'
+```
+
+### 6. Recovery
+
+- **publish_schedule refuses with "fire_at must be in the future"** →
+  the timestamp passed is in the past; pick a future time. Pacific
+  time per CLAUDE.md.
+- **YELLOW queue accumulating without approvals** → check the
+  operator approval queue; the operator (not the agent) is the
+  bottleneck by design.
+- **Stale queue entries** → run `performance_tracking` to surface
+  d7_publish_queued entries > 24h old; drain manually or pass to
+  the connector when it ships.
+- **Cascade firing erroneously** → check `config/handoffs.yaml`
+  cascade_rules. The d1→d7 + d2→d7 active rules fire on every
+  knowledge_curation / daily_reflection — that's by design but
+  can be disabled by removing the rule entry.
+
+---
+
+## Cascade wiring summary
+
+After Phase D, the live cascade rules involving D7 are:
+
+| Source (upstream) | Target (downstream) | Status |
+|---|---|---|
+| `d1.knowledge_curation` | `d7.content_drafting` | ACTIVE |
+| `d2.daily_reflection` | `d7.content_seed` | ACTIVE |
+| `d4.release_signoff` | `d7.release_notes_draft` | INERT (d7 skill missing) |
+| `d7.editing` | `d9.curriculum_module` | INERT (d9 not shipped) |
+| `d7.format_adaptation` | `d9.curriculum_format` | INERT (d9 not shipped) |
+
+INERT cascades are documented in `config/handoffs.yaml` comments
+but not codified — they activate when their target domains ship.

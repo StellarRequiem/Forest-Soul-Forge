@@ -1,10 +1,19 @@
 # Domain D7 — Content Creation Studio
-# ADR-0067 T1 manifest. Status: planned.
+# ADR-0067 T1 manifest. Status: live.
 # Depends on D1 Knowledge Forge for source material; depends on
 # operator profile (T5) extension for voice samples (queued).
+#
+# ADR-0088 LIVE (2026-05-23): all 4 phases CLOSED. Roles writer +
+# content_researcher (Phase A, GREEN), style_steward (Phase B,
+# GREEN), editor (Phase C, GREEN), distribution_pilot (Phase D,
+# YELLOW) all alive. Three new builtin tools: voice_profile_build.v1,
+# voice_match_check.v1, format_adapt.v1, publish_schedule.v1.
+# Seven skill manifests. Cascade wiring d1→d7 knowledge_curation
+# + d2→d7 daily_reflection ACTIVE. Umbrella birth script +
+# runbook live.
 domain_id: d7_content_studio
 name: Content Creation Studio
-status: planned
+status: live
 
 description: |
   End-to-end content pipeline: idea → researched → drafted →

@@ -767,6 +767,43 @@ tools:
     side_effects: read_only
     archetype_tags: [style_steward]
 
+  publish_schedule.v1:
+    name: publish_schedule
+    version: "1"
+    description: |
+      ADR-0088 Phase D — D7 Content Studio publish queue. Queues
+      a publish request for the operator's forest-publish
+      connector via data/d7/publish_queue.jsonl. side_effects=
+      external + every call operator-gated via the
+      ``external_always_human_approval`` rule (load-bearing
+      regardless of agent posture). NEVER publishes directly —
+      the queue → connector handoff keeps the agent surface
+      operator-gated end-to-end. distribution_pilot (YELLOW
+      posture) is the only role with this in its kit.
+    input_schema:
+      type: object
+      required: [platform, title, body, fire_at]
+      properties:
+        platform:
+          type: string
+          enum: [twitter, linkedin, newsletter, blog, substack, ghost]
+        title:
+          type: string
+        body:
+          type: string
+        fire_at:
+          type: string
+          description: "ISO-8601 timestamp; must be in the future."
+        tags:
+          type: array
+          items: {type: string}
+        reply_to:
+          type: string
+        queue_path:
+          type: string
+    side_effects: external
+    archetype_tags: [distribution_pilot]
+
   format_adapt.v1:
     name: format_adapt
     version: "1"
@@ -3722,6 +3759,26 @@ archetypes:
       - format_adapt.v1               # ADR-0088 Phase C — target-format rewrite
       # No web_fetch. No shell_exec. No code_edit. No publish tools
       # (distribution_pilot's lane). Pure editorial composition.
+
+  # ---- ADR-0088 Phase D — D7 Content Studio distribution -------------
+  # distribution_pilot kit. Actuator genre, external ceiling.
+  # YELLOW posture default. publish_schedule.v1 (external; per-call
+  # operator-gated) is the load-bearing action surface. The pilot
+  # NEVER calls a publish API directly — queue → forest-publish
+  # connector handoff is the separation.
+  distribution_pilot:
+    standard_tools:
+      - llm_think.v1                  # reasoning over publish timing + platform-specific tone
+      - memory_recall.v1              # walk approved drafts + format-adapted artifacts + prior publishes
+      - memory_write.v1               # write attestations of queued publishes to private memory
+      - delegate.v1                   # route ambiguous publish decisions back to operator / editor
+      - audit_chain_verify.v1         # chain integrity before queueing publishes
+      - text_summarize.v1             # condense long approval-batches into operator briefs
+      - operator_profile_read.v1      # ADR-0068 — work_hours + timezone inform fire_at scheduling
+      - publish_schedule.v1           # ADR-0088 Phase D — publish queue
+      # No web_fetch. No shell_exec. No code_edit. No draft-
+      # mutation tools (writer's lane) + no editing tools (editor's
+      # lane). Pure publish-queue action surface.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

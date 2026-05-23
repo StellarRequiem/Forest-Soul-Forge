@@ -54,6 +54,9 @@ from forest_soul_forge.tools.builtin.voice_match_check import (
     VoiceMatchCheckTool,
 )
 from forest_soul_forge.tools.builtin.format_adapt import FormatAdaptTool
+from forest_soul_forge.tools.builtin.publish_schedule import (
+    PublishScheduleTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -521,3 +524,12 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # format_adaptation.v1 skill layers LLM-driven tone polishing
     # on top via llm_think. Editor agent's primary tool.
     registry.register(FormatAdaptTool())
+    # ADR-0088 Phase D — publish_schedule.v1. Queues a publish
+    # request for the future forest-publish connector via
+    # data/d7/publish_queue.jsonl. side_effects=external + per-call
+    # approval gate (load-bearing safety regardless of agent
+    # posture). NEVER publishes directly; queue → connector
+    # handoff keeps the agent surface operator-gated end-to-end.
+    # distribution_pilot (YELLOW posture) is the only role with
+    # this in its kit.
+    registry.register(PublishScheduleTool())

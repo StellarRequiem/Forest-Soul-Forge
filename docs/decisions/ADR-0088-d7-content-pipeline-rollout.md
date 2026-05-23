@@ -1,7 +1,13 @@
 # ADR-0088 — D7 Content Pipeline: rollout
 
-**Status:** Proposed (2026-05-23). Phase A IN PROGRESS — writer +
-content_researcher roles landing.
+**Status:** Accepted (2026-05-23). All four phases CLOSED —
+D7 Content Pipeline LIVE with all 5 agents alive (Writer-D7,
+ContentResearcher-D7, StyleSteward-D7, Editor-D7,
+DistributionPilot-D7 YELLOW); 4 new builtin tools
+(voice_profile_build.v1, voice_match_check.v1, format_adapt.v1,
+publish_schedule.v1) with 101 unit tests total; 7 skill
+manifests; cascade wiring d1→d7 knowledge_curation +
+d2→d7 daily_reflection ACTIVE; umbrella + runbook live.
 **Date:** 2026-05-23
 **Tracks:** Domain Rollout / Operator Content Pipeline
 **Supersedes:** none

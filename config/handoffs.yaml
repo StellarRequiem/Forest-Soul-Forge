@@ -179,6 +179,49 @@ default_skill_per_capability:
     skill_name: long_term_archival
     skill_version: "1"
 
+  # D7 Content Pipeline — ADR-0088 Phase D (2026-05-23).
+  # All 5 entry capabilities now have live skills:
+  - domain: d7_content_studio
+    capability: draft_writing
+    skill_name: draft_writing
+    skill_version: "1"
+  - domain: d7_content_studio
+    capability: content_research
+    skill_name: content_research
+    skill_version: "1"
+  - domain: d7_content_studio
+    capability: voice_matching
+    skill_name: voice_matching
+    skill_version: "1"
+  - domain: d7_content_studio
+    capability: editing
+    skill_name: editing
+    skill_version: "1"
+  - domain: d7_content_studio
+    capability: format_adaptation
+    skill_name: format_adaptation
+    skill_version: "1"
+  - domain: d7_content_studio
+    capability: scheduled_publishing
+    skill_name: scheduled_publishing
+    skill_version: "1"
+  - domain: d7_content_studio
+    capability: performance_tracking
+    skill_name: performance_tracking
+    skill_version: "1"
+  # ADR-0088 Decision 4 — the manifest capability names
+  # "content_drafting" + "content_seed" both target the writer's
+  # draft_writing skill (the canonical drafting surface). Same
+  # pattern as D2's morning_briefing → daily_orchestration mapping.
+  - domain: d7_content_studio
+    capability: content_drafting
+    skill_name: draft_writing
+    skill_version: "1"
+  - domain: d7_content_studio
+    capability: content_seed
+    skill_name: draft_writing
+    skill_version: "1"
+
   # D1 Personal Knowledge Forge — ADR-0086 Phase D (2026-05-23).
   # All 6 entry capabilities now have live skills:
   - domain: d1_knowledge_forge
@@ -251,6 +294,40 @@ cascade_rules:
       catalog. The operator's personal knowledge corpus stays
       synced with the framework rules they're actually bound
       by — no "we missed the SOC2 amendment" gaps.
+
+  # ADR-0088 Phase D — D7 Content Pipeline cascades.
+  #
+  # ACTIVATING the two cascades that were declared INERT in
+  # ADR-0086 + ADR-0087's downstream-cascade notes: D1's
+  # knowledge_curation now flows into D7's content_drafting so
+  # the Writer-D7 can draw on the librarian's catalog as source
+  # material; D2's daily_reflection now flows into D7's
+  # content_seed so the Reflector-D2's evening sweep surfaces
+  # blog-post seeds the writer can pick up.
+  - source_domain: d1_knowledge_forge
+    source_capability: knowledge_curation
+    target_domain: d7_content_studio
+    target_capability: content_drafting
+    reason: |
+      Every D1 librarian catalog write cascades into a D7 content
+      drafting trigger. Writer-D7's draft_writing skill reads
+      recent topic:<slug> catalog entries from lineage memory +
+      surfaces yesterday's knowledge work into today's draft
+      pipeline. This was declared INERT in ADR-0086 Decision 4's
+      downstream-cascade notes; activating now that D7 ships.
+
+  - source_domain: d2_daily_life_os
+    source_capability: daily_reflection
+    target_domain: d7_content_studio
+    target_capability: content_seed
+    reason: |
+      Every D2 evening reflection cascades into a D7 content seed
+      trigger. Reflector-D2's daily_reflection digest surfaces
+      decisions + patterns the operator may want to write about;
+      Writer-D7's draft_writing skill picks the digest up via
+      lineage memory as candidate content seeds. This was
+      declared INERT in ADR-0087 Decision 4's downstream-cascade
+      notes; activating now that D7 ships.
 
   # ADR-0087 Phase D — D2 Daily Life OS cascades.
   #
@@ -330,6 +407,40 @@ cascade_rules:
 # when its target domain ships. Until then they are
 # documentation, not configuration — same INERT pattern as
 # ADR-0086's downstream-cascade notes.
+
+# ADR-0088 Phase D — INERT cascades involving D7.
+#
+# The D7 manifest at config/domains/d7_content_studio.yaml names
+# four handoff_targets:
+#   d1_knowledge_forge   # source material for drafts (handled via d1→d7 active cascade above)
+#   d2_daily_life_os     # weekly retro → content seeds (handled via d2→d7 active cascade above)
+#   d4_code_review       # PR → changelog → public release notes
+#   d9_learning_coach    # drafts → curriculum
+#
+# d4 → d7 (release notes from PR signoff) is an attractive cascade
+# but the d4 side ships release_check.v1 + safe_migration.v1; a
+# "release-notes-from-pr" capability doesn't yet exist on the d4
+# side. Adding the cascade would require either:
+#   - a new d4 capability (release_notes_draft) wired to a new
+#     skill, OR
+#   - reusing the existing release_signoff capability + a new
+#     d7-side skill that consumes the signoff as content seed.
+# Either path is bigger than one phase's scope. Declare inert.
+#
+# d7 → d9 is straightforward — every approved d7 draft is a
+# candidate curriculum module — but D9 Learning Coach hasn't
+# shipped yet. The receiving capability doesn't exist; declare
+# inert until D9 lands.
+#
+# Pending cascades, declared inert:
+#   d4.release_signoff         → d7.release_notes_draft  (d7 side needs new skill)
+#   d7.editing                 → d9.curriculum_module    (d9 not yet shipped)
+#   d7.format_adaptation       → d9.curriculum_format    (d9 not yet shipped)
+#
+# Each pending cascade will land as a real cascade_rules entry
+# when its target capability ships. Until then they are
+# documentation, not configuration — same INERT pattern as
+# ADR-0086 + ADR-0087's downstream-cascade notes.
 
 # ADR-0078 Phase A — NO new cascade rules from forensic_archive.
 # Deliberate. The ADR's Decision 4 named three cascades on the

@@ -1,0 +1,144 @@
+schema_version: 1
+name: performance_tracking
+version: '1'
+description: |
+  DistributionPilot-D7's performance-tracking skill. Walks the
+  audit chain over an operator-named window for queued + fired
+  publish events, buckets them by platform + topic, and
+  produces an operator-readable digest covering: what was
+  scheduled, what fired, what was operator-approved vs. operator-
+  rejected, what was published per platform. Read-only synthesis;
+  the connector layer owns actual publish-result telemetry, but
+  the pilot can surface the queue + approval-state half of the
+  story from its own attestations.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's timezone for ts framing.
+    2. recall_queued_publishes — memory_recall scope=private for
+       the recent d7_publish_queued attestations.
+    3. recall_publish_results — memory_recall scope=lineage for
+       any publish_result entries the connector wrote back
+       (future surface; absent until connector ships).
+    4. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked end-to-end.
+    5. narrate_digest — llm_think wraps the recall results
+       into an operator-readable digest by platform + topic,
+       flagging stale queue entries (queued > 24h, not fired)
+       + flagged rejections.
+    6. write_digest_attestation — memory_write scope=private
+       records the digest tagged for operator review
+       (d7_performance_digest + window:${window_hours}h +
+       attestor:DistributionPilot-D7).
+
+  Read-only end-to-end — synthesis only.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  properties:
+    window_hours:
+      type: integer
+      default: 168
+      description: >
+        Window to walk in hours. Default 168 = 7 days.
+        Cap 720 = 30 days.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the digest
+        attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_queued_publishes
+    tool: memory_recall.v1
+    args:
+      query: "d7_publish_queued"
+      mode: private
+      limit: 100
+
+  - id: recall_publish_results
+    tool: memory_recall.v1
+    args:
+      query: "publish_result"
+      mode: lineage
+      limit: 100
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: narrate_digest
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are DistributionPilot-D7, the D7 Content Studio
+        distribution agent. Compose a performance digest over
+        the queue + result attestations for the operator.
+
+        Operator profile:
+          timezone: ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Window: last ${inputs.window_hours} hours.
+
+        Queued publish attestations (private memory):
+        ${recall_queued_publishes.out.entries}
+
+        Publish results from forest-publish connector (lineage
+        memory; absent until connector ships):
+        ${recall_publish_results.out.entries}
+
+        Produce a structured digest:
+        1. Queue summary — how many publishes queued in the
+           window, broken down by platform.
+        2. Fire summary — how many fired vs. queued (when
+           connector wrote results); when results are absent,
+           note "connector not yet wired" instead of fabricating.
+        3. Stale queue entries — any d7_publish_queued >
+           24h old without a matching publish_result.
+        4. Per-topic recap — which topics shipped, with the
+           ordered platform sequence (e.g. "multi-agent-governance:
+           blog → twitter_thread → linkedin").
+        5. Operator-action recommendation — drain stale queue
+           entries, schedule next batch, surface any rejections
+           for re-edit.
+        6. Halt warning if chain status != "ok" — refuse to
+           publish the digest.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_digest_attestation
+    tool: memory_write.v1
+    args:
+      content: ${narrate_digest.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d7_performance_digest"
+        - "window:${inputs.window_hours}h"
+        - "attestor:DistributionPilot-D7"
+
+output:
+  window_hours: ${inputs.window_hours}
+  queued_count: ${recall_queued_publishes.out.count}
+  result_count: ${recall_publish_results.out.count}
+  narrative: ${narrate_digest.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  digest_entry_id: ${write_digest_attestation.out.entry_id}

@@ -1998,6 +1998,87 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  distribution_pilot:
+    # ADR-0088 Phase D — D7 Content Studio distribution actuator.
+    # Actuator genre, external ceiling. YELLOW posture default per
+    # ADR-0088 Decision 3 — every dispatch beyond read_only queues
+    # for operator approval. publish_schedule.v1 (external-class)
+    # carries per-call approval gating by the
+    # ``external_always_human_approval`` rule regardless of posture;
+    # the YELLOW posture is the second discipline that pauses
+    # every other non-read-only dispatch the role can fire. Same
+    # two-layer pattern as time_steward (ADR-0087 Phase B).
+    policies:
+      - id: forbid_silent_publish
+        rule: forbid
+        triggers: [publish_silent, dispatch_publish_silent, schedule_publish_silent]
+        rationale: |
+          Every publish action is operator-reviewed via the
+          approval queue. Silent action would bypass the
+          YELLOW-posture discipline + the actuator genre's
+          per-call gate, making the role indistinguishable from
+          a runaway publisher. Both layers — posture + per-call
+          gate — must fire on every queued publish.
+      - id: forbid_direct_publish
+        rule: forbid
+        triggers: [direct_publish_api_call, twitter_post_direct, linkedin_post_direct, blog_post_direct, substack_post_direct]
+        rationale: |
+          The pilot NEVER calls a real publish API. publish_schedule.v1
+          writes a queue record only; the future forest-publish
+          connector picks the queue up + executes the publish at
+          fire_at. Calling a publish API directly would bypass
+          the connector-handoff separation + the queue-as-source-
+          of-truth discipline.
+      - id: require_publish_attestation
+        rule: require
+        triggers: [publish_schedule, queue_publish_request]
+        rationale: |
+          Every queued publish emits a memory_write attestation
+          with (platform, title_hash, fire_at, source_draft_id,
+          attestor, ts). Without the attestation, the operator
+          can't audit the pilot's queue + can't reconcile
+          publishes that fired against publishes that were
+          scheduled.
+      - id: require_approved_source
+        rule: require
+        triggers: [publish_schedule]
+        rationale: |
+          Every queued publish must reference an editorial-approve
+          verdict OR an operator-explicit override. The pilot
+          MUST NOT queue a publish from a draft that hasn't
+          passed the editor's gates (verify_claim + voice_match).
+          Same prerequisite-discipline pattern as the D8
+          policy_enforcer's compliance-scan reference.
+      - id: forbid_chain_break_action
+        rule: require
+        triggers: [publish_schedule]
+        rationale: |
+          Before any publish queue action, the chain's
+          audit_chain_verify must confirm hash-linked integrity.
+          Publishes queued against a broken chain inherit the
+          brokenness + can't be reconciled.
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - direct_publish_api_call
+      - twitter_post_direct
+      - linkedin_post_direct
+      - blog_post_direct
+      - substack_post_direct
+      - publish_silent
+      - modify_production_systems
+    operator_duties:
+      - "Review every queued publish via the approval queue. YELLOW posture means every non-read-only action queues — that's the bedding-in friction by design + the operator's last word on what ships."
+      - "Move from YELLOW to GREEN posture only after the proposal-quality bar is bedded in — auto-approved publishes that you'd have approved manually anyway. Even after GREEN, per-call approval gates on publish_schedule.v1 (external) remain."
+      - "Verify the editorial-approve precondition — the pilot queues only drafts the editor approved. If a queued publish references an un-approved draft, the wiring is broken + the queue should be drained."
+      - "Treat a chain_broken halt as an emergency — publishes queued against a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   editor:
     # ADR-0088 Phase C — D7 Content Studio editor. Guardian
     # genre, read_only ceiling. The agent composes three

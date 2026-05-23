@@ -1,0 +1,145 @@
+schema_version: 1
+name: scheduled_publishing
+version: '1'
+description: |
+  DistributionPilot-D7's primary skill. Queues a publish request
+  for an editor-approved draft via publish_schedule.v1. The
+  publish itself fires when the future forest-publish connector
+  picks the queue record up at fire_at; this skill ONLY queues —
+  it NEVER calls a publish API directly.
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's timezone for fire_at framing + work_hours
+       sanity-check.
+    2. recall_approved_artifact — memory_recall scope=lineage for
+       the editor's format-adapted artifact (tag:
+       d7_format_adapted + topic:${topic_slug}). Refuses cleanly
+       when no approved artifact exists ("editor must approve
+       + adapt the draft first").
+    3. recall_editorial_verdict — memory_recall scope=lineage for
+       the editorial verdict (tag: editorial_verdict +
+       topic:${topic_slug}). The require_approved_source policy
+       enforces the precondition: queueing a publish from an
+       un-approved draft is forbidden.
+    4. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end.
+    5. queue_publish — publish_schedule.v1 writes the queue
+       record. side_effects=external + per-call approval gate
+       fires regardless of agent posture.
+    6. write_publish_attestation — memory_write scope=private
+       records the queue event tagged for downstream monitoring
+       (d7_publish_queued + platform:${platform} +
+       topic:${topic_slug} + request_id:${request_id} +
+       attestor:DistributionPilot-D7).
+
+  NEVER publishes directly. Two layers of defense in depth:
+  per-call approval gate (load-bearing regardless of posture) +
+  YELLOW posture (auto-queues every non-read-only dispatch).
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - publish_schedule.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, platform, fire_at, title]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic of the editor-approved artifact being queued.
+        Used to recall the artifact + verdict from lineage memory.
+    platform:
+      type: string
+      enum: [twitter, linkedin, newsletter, blog, substack, ghost]
+      description: >
+        Target publish platform. Must match the format the
+        editor adapted the draft into.
+    fire_at:
+      type: string
+      description: >
+        ISO-8601 timestamp when the connector should publish.
+        Must be in the future. Pacific time is preferred per
+        CLAUDE.md.
+    title:
+      type: string
+      description: >
+        Post title (1-500 chars). Pilot derives from the
+        artifact when absent, but the operator can override
+        here for platform-specific headlines.
+    tags:
+      type: array
+      items: {type: string}
+      default: []
+      description: >
+        Platform-specific tags (max 20).
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the publish attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_approved_artifact
+    tool: memory_recall.v1
+    args:
+      query: "d7_format_adapted topic:${inputs.topic_slug}"
+      mode: lineage
+      limit: 3
+
+  - id: recall_editorial_verdict
+    tool: memory_recall.v1
+    args:
+      query: "editorial_verdict topic:${inputs.topic_slug}"
+      mode: lineage
+      limit: 3
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: queue_publish
+    tool: publish_schedule.v1
+    args:
+      platform: ${inputs.platform}
+      title: ${inputs.title}
+      body: ${recall_approved_artifact.out.entries}
+      fire_at: ${inputs.fire_at}
+      tags: ${inputs.tags}
+
+  - id: write_publish_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        Queued publish for topic ${inputs.topic_slug} on
+        platform ${inputs.platform} firing at ${inputs.fire_at}.
+        Operator reason: ${inputs.operator_reason}.
+        Editorial verdict ref: ${recall_editorial_verdict.out.entries}.
+        Request ID: ${queue_publish.out.request_id}.
+        Chain status: ${verify_chain_integrity.out.status}.
+      layer: episodic
+      scope: private
+      tags:
+        - "d7_publish_queued"
+        - "platform:${inputs.platform}"
+        - "topic:${inputs.topic_slug}"
+        - "request_id:${queue_publish.out.request_id}"
+        - "attestor:DistributionPilot-D7"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  platform: ${inputs.platform}
+  fire_at: ${inputs.fire_at}
+  request_id: ${queue_publish.out.request_id}
+  queue_path: ${queue_publish.out.queue_path}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_id: ${write_publish_attestation.out.entry_id}

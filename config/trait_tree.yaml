@@ -1037,6 +1037,23 @@ roles:
       emotional: 0.9    # voice fidelity is a deeply human signal
       embodiment: 0.5
 
+  # ---- ADR-0088 Phase D — D7 Content Studio (distribution) ----
+  # distribution_pilot: actuator-genre publishing role. Queues
+  # publishes via publish_schedule.v1; YELLOW posture default.
+  # Every publish is operator-gated by two layers — the actuator-
+  # genre external ceiling's per-call approval + the YELLOW
+  # posture's auto-queue. The agent NEVER calls a real publish API;
+  # the forest-publish connector picks the queue up at fire_at.
+  distribution_pilot:
+    description: "Distribution actuator. Dispatches publish_schedule.v1 (external-class publish queue) on behalf of operator-approved drafts; NEVER publishes directly — the queue handoff to a future forest-publish connector is the load-bearing separation. YELLOW posture default: every non-read-only action queues for operator approval even after posture promotion (actuator-genre external ceiling + per-call approval gating apply regardless). Genre: actuator. ADR-0088 Phase D."
+    domain_weights:
+      security: 1.6     # publish targets are external; security posture matters
+      audit: 2.4        # every queued publish is audit-trailed
+      cognitive: 1.6    # reasoning over format + timing
+      communication: 1.8 # operator-facing approval requests
+      emotional: 0.7
+      embodiment: 1.7   # the action surface — publish queue
+
   # ---- ADR-0088 Phase C — D7 Content Studio (editing + format adaptation) ----
   # editor: guardian-genre review + format-adaptation role.
   # Composes verify_claim.v1 (fact-check) + voice_match_check.v1
