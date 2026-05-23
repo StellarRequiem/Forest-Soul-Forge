@@ -2976,6 +2976,38 @@ archetypes:
       # No shell_exec. No code_edit. No external network. Read-only by
       # construction; that's the genre invariant.
 
+  # ---- ADR-0085 Phase A — D8 Compliance Auditor -------------------------
+  # audit_archivist + evidence_collector kits. Both genuinely read_only:
+  # capture / attest via memory_write, verify via audit_chain_verify +
+  # file_integrity, never shell_exec / code_edit. Same construction as
+  # forensic_archivist for the D3 side; D8 mirrors the pattern for the
+  # compliance side of the house.
+  audit_archivist:
+    standard_tools:
+      - llm_think.v1            # retention-policy judgment + chain-trend reasoning
+      - memory_write.v1         # archival attestations in private memory
+      - memory_recall.v1        # look up prior attestations for an archive id
+      - delegate.v1             # escalate retention-floor violations to operator
+      - audit_chain_verify.v1   # confirm chain integrity before attesting
+      - file_integrity.v1       # sha256 archive bytes + compare to prior attestation
+      - code_read.v1            # read framework yaml + retention policy + manifests
+      - text_summarize.v1       # condense long archival histories for operator review
+      # No shell_exec. No code_edit. No external network. Read-only by
+      # construction — same posture as forensic_archivist.
+
+  evidence_collector:
+    standard_tools:
+      - llm_think.v1            # scope-selection judgment (what to capture per framework)
+      - memory_write.v1         # evidence_captured attestations in private memory
+      - memory_recall.v1        # walk prior captures to avoid duplicates
+      - delegate.v1             # escalate capture-failure or scope-gap to operator
+      - audit_chain_verify.v1   # confirm chain integrity before capturing windows
+      - file_integrity.v1       # sha256 captured sources at capture time
+      - code_read.v1            # read source configs + audit chain entries + framework yaml
+      - text_summarize.v1       # produce capture-summary briefs
+      # No shell_exec. No code_edit. No web_fetch. Passive evidence
+      # capture; the corpus is local + private.
+
   # ADR-0064 T4 (B379) — telemetry_steward archetype kit.
   # All read_only. Steward reviews batch anchors + summarizes; never
   # touches raw events (anomaly_ace's lane) and never acts on findings

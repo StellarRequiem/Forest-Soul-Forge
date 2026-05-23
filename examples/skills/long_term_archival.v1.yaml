@@ -1,0 +1,212 @@
+schema_version: 1
+name: long_term_archival
+version: '1'
+description: |
+  AuditArchivist-D8's long-term archival attestation skill.
+  Verifies an archive's integrity hash, verifies the audit chain,
+  evaluates retention compliance against the framework's
+  retention floor, and writes an archival attestation to memory.
+
+  Read-only end-to-end. The skill NEVER mutates an archived
+  artifact's bytes — bytes are frozen at archive time and the
+  archivist's contribution is the attestation chain. ADR-0085
+  Phase A's design invariant: the archivist verifies + attests;
+  if archival storage needs migration, that's an explicit
+  operator action that re-roots the attestation chain.
+
+  Five-step pipeline:
+    1. prior_context — memory_recall scope=private for prior
+       attestations of this archive_id. Surfaces the retention
+       history (acquire → attestations → eventual retire).
+    2. verify_archive_integrity — file_integrity mode=snapshot
+       on archive_path. Produces the current sha256; mismatch
+       with the prior attestation means the archive has drifted
+       (tamper or storage-corruption signal).
+    3. verify_chain_integrity — audit_chain_verify confirms the
+       daemon's chain is intact end-to-end. An attestation on a
+       broken chain is itself broken.
+    4. evaluate_retention — llm_think reasons over retention
+       policy: is the archive's age within the framework's
+       retention floor? Does the framework allow retirement
+       attestation at this date? Emits ATTEST_RETAIN /
+       ATTEST_RETIRE / HALT verdicts.
+    5. write_attestation — memory_write scope=private records
+       the archival attestation. Both ATTEST and HALT events
+       are written so the chain is complete; the operator
+       reviews HALTs through the standard delegate queue.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - file_integrity.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+
+inputs:
+  type: object
+  required: [archive_id, archive_path, framework_tag, transition_type]
+  properties:
+    archive_id:
+      type: string
+      description: >
+        Operator-readable identifier for the archived artifact.
+        Convention: "<framework>_<period>_<short>" — e.g.,
+        "soc2_2026Q1_evidencepack". Used as memory tag so the
+        per-archive attestation chain is reconstructible.
+    archive_path:
+      type: string
+      description: >
+        Absolute or repo-relative path to the archive. Must be
+        under data/compliance/archive/ (the per-tool
+        allowed_paths constraint patched at birth time enforces
+        this).
+    framework_tag:
+      type: string
+      description: >
+        Framework the archive is bound to (e.g., "soc2",
+        "iso27001"). Drives the retention-floor lookup the
+        evaluate_retention step performs.
+    transition_type:
+      type: string
+      enum: [acquire, attest_retain, attest_retire]
+      description: >
+        The archival transition being attested.
+          acquire        — first entry into long-term storage.
+          attest_retain  — periodic re-attestation that the
+                           archive still meets the retention
+                           floor.
+          attest_retire  — archive has reached / exceeded its
+                           retention ceiling and is being
+                           formally retired.
+    retention_floor_days:
+      type: integer
+      default: 365
+      description: >
+        Operator-configured minimum days the archive must be
+        retained for the bound framework. SOC2 default 365;
+        operator overrides per archive.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded verbatim in the attestation.
+
+steps:
+  - id: prior_context
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.archive_id}
+      mode: private
+      limit: 20
+
+  - id: verify_archive_integrity
+    tool: file_integrity.v1
+    args:
+      paths: ["${inputs.archive_path}"]
+      mode: snapshot
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: evaluate_retention
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are AuditArchivist-D8, the long-term archival guardian
+        in D8 Compliance Auditor. Evaluate an archival transition
+        and emit an attestation verdict.
+
+        Transition being attested:
+          archive_id:          ${inputs.archive_id}
+          archive_path:        ${inputs.archive_path}
+          framework_tag:       ${inputs.framework_tag}
+          transition_type:     ${inputs.transition_type}
+          retention_floor_days: ${inputs.retention_floor_days}
+          operator_reason:     ${inputs.operator_reason}
+
+        Verified archive integrity (file_integrity output):
+        ${verify_archive_integrity.out.digests}
+
+        Audit chain integrity:
+          status:    ${verify_chain_integrity.out.status}
+          broken_at: ${verify_chain_integrity.out.broken_at}
+          reason:    ${verify_chain_integrity.out.reason}
+
+        Prior attestation chain for this archive_id (most recent first):
+        ${prior_context.out.entries}
+
+        Apply these decision rules IN ORDER. Stop at the first
+        match and emit the corresponding verdict.
+
+        1. If audit chain status != "ok":
+             HALT — chain_broken: <reason>. Any new attestation
+             written against a broken chain is itself invalid.
+
+        2. If transition_type == "acquire" AND prior entries
+           exist for this archive_id:
+             HALT — duplicate_acquire: archive already in long-term
+             storage; this would create a fork in the attestation
+             chain.
+
+        3. If transition_type IN {"attest_retain", "attest_retire"}
+           AND no prior entries exist:
+             HALT — orphan_transition: no acquire entry on record;
+             cannot retain or retire what was never acquired.
+
+        4. If transition_type IN {"attest_retain", "attest_retire"}
+           AND the current archive hash from verify_archive_integrity
+           does NOT match the most recent prior attestation's recorded
+           hash:
+             HALT — tamper_suspected: archive bytes changed since
+             prior attestation. Cite both hashes.
+
+        5. If transition_type == "attest_retire" AND the time
+           since the original acquire attestation is LESS than
+           retention_floor_days:
+             HALT — retention_floor_violation: archive is being
+             retired before the framework's retention floor allows.
+
+        6. Otherwise:
+             ATTEST — emit the attestation tuple. Format:
+                VERDICT: ATTEST
+                ARCHIVE_ID: ${inputs.archive_id}
+                TRANSITION: ${inputs.transition_type}
+                CURRENT_HASH: <hex from verify_archive_integrity>
+                FRAMEWORK: ${inputs.framework_tag}
+                ATTESTOR: AuditArchivist-D8
+                REASON: ${inputs.operator_reason}
+
+        For HALT verdicts, format as:
+                VERDICT: HALT
+                ARCHIVE_ID: ${inputs.archive_id}
+                HALT_CODE: <one of: chain_broken, duplicate_acquire,
+                           orphan_transition, tamper_suspected,
+                           retention_floor_violation>
+                DETAIL: <one-line explanation citing concrete values>
+
+        The last line of your output MUST be the VERDICT line and
+        the block MUST be parseable by simple regex.
+
+  - id: write_attestation
+    tool: memory_write.v1
+    args:
+      content: ${evaluate_retention.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "long_term_archival"
+        - "${inputs.archive_id}"
+        - "framework:${inputs.framework_tag}"
+        - "transition:${inputs.transition_type}"
+        - "attestor:AuditArchivist-D8"
+
+output:
+  archive_id: ${inputs.archive_id}
+  archive_path: ${inputs.archive_path}
+  transition_type: ${inputs.transition_type}
+  current_hash: ${verify_archive_integrity.out.digests}
+  chain_status: ${verify_chain_integrity.out.status}
+  verdict_block: ${evaluate_retention.out.response}
+  attestation_entry_id: ${write_attestation.out.entry_id}

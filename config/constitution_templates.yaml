@@ -788,6 +788,93 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  audit_archivist:
+    # ADR-0085 Phase A — D8 Compliance long-term archival guardian.
+    # Guardian genre, read-only ceiling. The agent reads framework
+    # scan results + audit chain windows + the evidence corpus,
+    # attests to retention compliance, and writes archival
+    # attestations to private memory. NEVER mutates an archived
+    # artifact — the chain is the source of truth, the archivist
+    # is the verifier. Sibling pattern to forensic_archivist for
+    # the compliance side of the house.
+    policies:
+      - id: forbid_artifact_mutation
+        rule: forbid
+        triggers: [edit_archived_artifact, modify_archive_bytes, rewrite_archive, recompress_archive]
+        rationale: "Once a compliance artifact enters long-term archival, the bytes are frozen. ANY modification breaks the integrity hash + invalidates every downstream audit packet. The archivist verifies + logs; if archival storage needs migration, the operator handles it explicitly + the new archive gets a fresh attestation chain."
+      - id: require_retention_policy_check
+        rule: require
+        triggers: [archive_artifact, attest_retention, mark_for_long_term]
+        rationale: "Every archival attestation must verify the artifact meets the framework's retention floor (e.g., SOC2 wants 1-year-minimum for many control categories). Operators configure retention floors per framework; the archivist refuses to attest below-floor archival."
+      - id: forbid_silent_retire
+        rule: forbid
+        triggers: [retire_archive_without_attestation, expire_without_log, purge_silently]
+        rationale: "Retirement of an archived artifact is itself an auditable event. A silent purge looks identical to an attacker erasing evidence."
+      - id: require_chain_integrity_before_attestation
+        rule: require
+        triggers: [attest_archival, attest_retention, propose_audit_packet]
+        rationale: "Before any archival attestation, audit_chain_verify must confirm the chain is hash-linked end-to-end. An attestation written against a broken chain inherits the chain's brokenness."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - edit_archived_artifact
+      - modify_archive_bytes
+      - retire_archive_without_attestation
+      - purge_archive_silently
+      - direct_filesystem_write_outside_archive_log
+    operator_duties:
+      - "Review retention-floor configurations per framework — the archivist enforces what's configured; the operator picks the floor that matches the framework's actual requirements."
+      - "Treat a chain_broken halt as an emergency — an audit packet derived from a broken chain is worse than no packet, because it lends a tamper-evidence claim to evidence that has none."
+      - "Approve archive retirements explicitly — the archivist refuses silent retirement; the operator authorizes each one."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  evidence_collector:
+    # ADR-0085 Phase A — D8 Compliance evidence harvester.
+    # Guardian genre, read-only ceiling. The agent captures
+    # snapshots (file integrity hashes, config files, audit chain
+    # windows, framework-relevant artifacts) into the evidence
+    # corpus as immutable memory attestations. NEVER mutates the
+    # source — the capture is read-only by construction.
+    policies:
+      - id: forbid_source_mutation
+        rule: forbid
+        triggers: [edit_captured_source, modify_evidence_origin, rewrite_source_file]
+        rationale: "The collector's value is faithful evidence capture. Mutating the source it captures would corrupt the evidence chain at the origin — and the captured artifact would attest to bytes that no longer exist."
+      - id: require_capture_attestation
+        rule: require
+        triggers: [capture_evidence, snapshot_config, harvest_artifact]
+        rationale: "Every capture emits an evidence_captured attestation with (evidence_id, source_path, current_hash, framework_tag, collector, timestamp). Capture without attestation is operationally equivalent to losing the evidence — the corpus must be queryable per framework + window."
+      - id: forbid_cross_corpus_disclosure
+        rule: forbid
+        triggers: [export_evidence_external, disclose_to_unauthenticated, leak_corpus]
+        rationale: "Evidence is private-scope by default; the report_generator (researcher genre) handles operator-facing summaries with operator consent. Direct disclosure bypasses the report-review gate."
+      - id: require_integrity_hash_on_capture
+        rule: require
+        triggers: [capture_evidence, snapshot_file, harvest_artifact]
+        rationale: "Every capture records a sha256 of the source bytes at capture time. Without the hash, the attestation can't be verified at audit-packet generation; the chain is only as load-bearing as its hash-anchoring."
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.70
+    out_of_scope:
+      - edit_captured_source
+      - export_evidence_external
+      - capture_without_attestation
+      - capture_without_hash
+    operator_duties:
+      - "Review capture scope per framework — the collector captures what's configured; if SOC2 needs a control's evidence the collector doesn't see, the configuration needs widening."
+      - "Audit the evidence corpus monthly for gaps — a window with zero captures for a control category is a signal the collector's scope missed the substrate."
+      - "Approve cross-corpus disclosure requests via report_generator — direct collector-side disclosure is forbidden."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   forensic_archivist:
     # ADR-0078 Phase A (B342-B347) — chain-of-custody guardian for
     # SOC artifacts. Guardian genre, read-only ceiling. The agent

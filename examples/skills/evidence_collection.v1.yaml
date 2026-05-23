@@ -1,0 +1,139 @@
+schema_version: 1
+name: evidence_collection
+version: '1'
+description: |
+  EvidenceCollector-D8's compliance evidence capture skill.
+  Takes a snapshot of operator-designated compliance-relevant
+  files / configs, records sha256 + size + capture time, writes
+  an evidence_captured attestation into private memory, and
+  verifies the audit chain integrity before stamping the entry.
+
+  Read-only end-to-end. The skill NEVER mutates the source
+  bytes; the corpus is built from immutable snapshots of the
+  live system. ADR-0085 Phase A's design invariant: the
+  collector captures + attests; the source remains untouched.
+  Constitutional policies enforce this at governance layer
+  (forbid_source_mutation, require_capture_attestation,
+  require_integrity_hash_on_capture, forbid_cross_corpus_disclosure).
+
+  Four-step pipeline:
+    1. prior_context — memory_recall scope=private for any prior
+       captures of this evidence_id, so duplicate captures of an
+       unchanged source can be skipped (or noted as confirming
+       evidence the bytes haven't drifted).
+    2. verify_chain_integrity — audit_chain_verify confirms the
+       daemon's audit chain is hash-linked end-to-end. An
+       attestation written against a broken chain is itself
+       brokenness-tainted; the skill halts in step 4 if non-ok.
+    3. capture_integrity — file_integrity mode=snapshot on
+       source_paths. Produces the current sha256 set that the
+       attestation will record. Symlink-aware (the catalog tool
+       refuses to follow symlinks; a planted link can't trick
+       the collector into attesting against a decoy).
+    4. write_attestation — memory_write scope=private records
+       the evidence_captured entry with framework tag, source
+       paths, hashes, attestor, timestamp. Only runs if step 2
+       returned ok; otherwise the chain-broken halt is recorded
+       in its place (operator-visible).
+
+  Output goes back to the operator. The evidence corpus is
+  queryable per evidence_id via memory_recall + tag-scan.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - file_integrity.v1
+  - audit_chain_verify.v1
+
+inputs:
+  type: object
+  required: [evidence_id, source_paths, framework_tag]
+  properties:
+    evidence_id:
+      type: string
+      description: >
+        Operator-readable identifier for the evidence capture.
+        Convention: "<framework>_<control_id>_<short>" — e.g.,
+        "soc2_CC6.1_keyfile". Used as the memory tag so the
+        per-evidence chain is reconstructible by querying that
+        exact string.
+    source_paths:
+      type: array
+      items: {type: string}
+      maxItems: 50
+      description: >
+        Absolute or repo-relative paths to capture. Must be under
+        the operator-configured compliance-relevant roots (the
+        per-tool allowed_paths constraint patched at birth time
+        enforces this). Passed directly to file_integrity.
+    framework_tag:
+      type: string
+      description: >
+        Framework this evidence is being captured for (e.g.,
+        "soc2", "iso27001", "gdpr"). Used as a memory tag so
+        framework-scoped queries can find all evidence for a
+        given audit packet.
+    control_id:
+      type: string
+      default: ""
+      description: >
+        Optional. Framework-specific control identifier (e.g.,
+        "CC6.1" for SOC2). Recorded in the attestation tags so
+        per-control queries can find the supporting evidence.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Operator-supplied reason for the capture (e.g.,
+        "quarterly SOC2 evidence sweep"). Audit-readable prose;
+        recorded verbatim in the attestation.
+
+steps:
+  - id: prior_context
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.evidence_id}
+      mode: private
+      limit: 10
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: capture_integrity
+    tool: file_integrity.v1
+    args:
+      paths: ${inputs.source_paths}
+      mode: snapshot
+
+  - id: write_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        EVIDENCE_CAPTURED
+        evidence_id:    ${inputs.evidence_id}
+        framework_tag:  ${inputs.framework_tag}
+        control_id:     ${inputs.control_id}
+        operator_reason: ${inputs.operator_reason}
+        chain_status:   ${verify_chain_integrity.out.status}
+        files_captured: ${capture_integrity.out.files}
+        digests:        ${capture_integrity.out.digests}
+        skipped:        ${capture_integrity.out.skipped}
+        attestor:       EvidenceCollector-D8
+      layer: episodic
+      scope: private
+      tags:
+        - "evidence_captured"
+        - "${inputs.evidence_id}"
+        - "framework:${inputs.framework_tag}"
+        - "attestor:EvidenceCollector-D8"
+
+output:
+  evidence_id: ${inputs.evidence_id}
+  framework_tag: ${inputs.framework_tag}
+  control_id: ${inputs.control_id}
+  files_captured: ${capture_integrity.out.files}
+  digests: ${capture_integrity.out.digests}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_entry_id: ${write_attestation.out.entry_id}

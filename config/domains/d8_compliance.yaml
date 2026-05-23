@@ -5,7 +5,15 @@
 # PR + daily/weekly schedule, not annual audits.
 domain_id: d8_compliance
 name: Automated Compliance Auditor
-status: planned
+# Status: rolling out per ADR-0085 (2026-05-22 onwards).
+#   Phase A (audit_archivist + evidence_collector): IN PROGRESS
+#   Phase B (compliance_scanner + framework_check.v1): pending
+#   Phase C (policy_enforcer + policy_lint.v1):       pending
+#   Phase D (report_generator + audit_packet_generate.v1, cascade
+#            wiring, umbrella):                       pending
+# Flips to `live` when Phase D closes and all 5 roles + 3 tools
+# ship.
+status: partial
 
 description: |
   Continuous compliance, not annual audits. License/security/policy

@@ -767,6 +767,36 @@ roles:
       emotional: 0.4
       embodiment: 0.5
 
+  # ---- ADR-0085 Phase A — D8 Compliance Auditor (B-D8A) -----------------
+  # Two read-only guardians that establish the evidence pipeline:
+  #   - audit_archivist:    long-term archival of compliance artifacts;
+  #                         the chain-of-custody guardian for the D8 side
+  #                         (sibling pattern to forensic_archivist for D3).
+  #   - evidence_collector: passive capture of compliance evidence
+  #                         snapshots from the live system (file hashes,
+  #                         config snapshots, audit chain windows).
+  # Both GREEN posture per ADR-0085 Decision 5 — read-only attestation
+  # is non-acting; gate is the operator's later use of the evidence.
+  audit_archivist:
+    description: "Long-term archival guardian for compliance artifacts. Reads the audit chain + evidence corpus + framework scan history; attests to retention compliance + integrity of archived packets. NEVER mutates an archived artifact (forbid_artifact_mutation policy). Distinct from forensic_archivist (D3 SOC chain-of-custody for incident artifacts): audit_archivist owns the compliance side — long-horizon retention, framework-aligned archival, audit-packet input. Genre: guardian. ADR-0085 Phase A."
+    domain_weights:
+      security: 1.8     # compliance is security-adjacent; not the primary frame
+      audit: 2.7        # the load-bearing trait — every action is audit work
+      cognitive: 1.5    # archival reasoning + retention-policy checks
+      communication: 1.5 # operator-facing archival reports
+      emotional: 0.4
+      embodiment: 0.5   # read-heavy; rare writes (own attestation entries)
+
+  evidence_collector:
+    description: "Compliance evidence harvester. Captures snapshots of the live system (config files, audit chain windows, file integrity hashes, framework-relevant artifacts) and writes them to the evidence corpus as immutable attestations. NEVER mutates source data (forbid_source_mutation policy). The passive companion to audit_archivist: collector PRODUCES evidence entries; archivist VERIFIES + RETAINS them long-term. Genre: guardian. ADR-0085 Phase A."
+    domain_weights:
+      security: 1.8
+      audit: 2.6        # passive capture for the audit trail
+      cognitive: 1.4    # rule-driven scope selection (what to capture)
+      communication: 1.3 # operator-facing capture summaries
+      emotional: 0.4
+      embodiment: 0.6   # read-heavy capture; writes attestations to private memory
+
   domain_orchestrator:
     description: "ADR-0067 T5 Cross-Domain Orchestrator. Singleton-per-forest router that decomposes operator utterances (via decompose_intent.v1) and routes each sub-intent to the right domain swarm (via route_to_domain.v1 + the resolve_route() engine). Sits behind the Persistent Assistant Chat (ADR-0047) so the operator talks to one front door while the orchestrator dispatches across ten domains. Genre: companion. Kit: decompose_intent.v1 + route_to_domain.v1 + operator_profile_read.v1 + llm_think.v1 + delegate.v1 + verify_claim.v1."
     domain_weights:
