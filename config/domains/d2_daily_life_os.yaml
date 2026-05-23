@@ -1,10 +1,19 @@
 # Domain D2 — Daily Life OS
-# ADR-0067 T1 manifest. Status: planned.
+# ADR-0067 T1 manifest. Status: live.
 # The single artifact every morning + reflection cycle every evening.
 # Top of the orchestrator stack — uses every domain below it.
+#
+# ADR-0087 LIVE (2026-05-23): all 4 phases CLOSED. Roles
+# coordinator + inbox_triager (Phase A), time_steward (Phase B,
+# YELLOW), task_prioritizer (Phase C), reflector (Phase D) all
+# alive. Three new builtin tools: schedule_reminder.v1,
+# calendar_block.v1, task_rank.v1, decision_journal_compile.v1.
+# Seven skill manifests. Cascade wiring d1→d2 morning_briefing
+# ACTIVE; d2→d3/d5/d6/d7 declared inert. Umbrella birth script +
+# runbook live.
 domain_id: d2_daily_life_os
 name: Daily Life OS
-status: planned
+status: live
 
 description: |
   The everyday operating system. Coordinates morning briefings,

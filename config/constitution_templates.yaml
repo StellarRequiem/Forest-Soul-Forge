@@ -1678,6 +1678,62 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  reflector:
+    # ADR-0087 Phase D — D2 Daily Life OS evening-reflection
+    # researcher. Researcher genre, read_only ceiling. Walks the
+    # audit chain via decision_journal_compile.v1, narrates via
+    # llm_think. Never mutates source data; the operator owns the
+    # follow-up on flagged open items.
+    policies:
+      - id: forbid_chain_mutation
+        rule: forbid
+        triggers: [edit_audit_chain, rewrite_decision_entry, modify_chain_segment]
+        rationale: |
+          The reflector reads + wraps the audit chain into a
+          digest. Editing the chain to make a reflection "cleaner"
+          would invalidate every downstream verification + would
+          violate the audit-chain's append-only invariant.
+      - id: require_reflection_attestation
+        rule: require
+        triggers: [emit_reflection, finalize_evening_digest]
+        rationale: |
+          Every reflection emits a memory_write attestation with
+          (window, decision_count, deferral_count, pattern_count,
+          attestor, ts). Without the attestation, the operator
+          can't audit which window the reflection covered + can't
+          compare reflections over time.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_message_external, post_reflection_externally]
+        rationale: |
+          Reflection content is private/lineage scope. Operator-
+          driven sharing is a separate explicit action; the
+          reflector never crosses the external boundary.
+      - id: require_chain_integrity_before_reflection
+        rule: require
+        triggers: [emit_reflection, finalize_evening_digest]
+        rationale: |
+          The reflection rests on audit-chain content. A reflection
+          built on a broken chain inherits the brokenness + may
+          surface decisions that were tampered with after-the-fact.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - edit_audit_chain
+      - rewrite_decision_entry
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Review reflections at the end of each day — the reflector surfaces; you decide which open items get carried to tomorrow's briefing."
+      - "Audit reflection attestations monthly — recurring topic-pattern flags across many days are a signal worth taking to the morning briefing."
+      - "Treat a chain_broken halt as an emergency — a reflection built on a broken chain is worse than no reflection (it lends false coherence)."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   task_prioritizer:
     # ADR-0087 Phase C — D2 Daily Life OS task ranker. Researcher
     # genre, read_only ceiling. The agent dispatches task_rank.v1

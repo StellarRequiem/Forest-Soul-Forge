@@ -1,7 +1,12 @@
 # ADR-0087 — D2 Daily Life OS: rollout
 
-**Status:** Proposed (2026-05-23). Phase A in flight; Phases B/C/D
-queued.
+**Status:** Accepted (2026-05-23). All four phases CLOSED —
+D2 Daily Life OS LIVE with all 5 agents alive (Coordinator-D2,
+InboxTriager-D2, TimeSteward-D2 YELLOW, TaskPrioritizer-D2,
+Reflector-D2); 4 new builtin tools (schedule_reminder.v1,
+calendar_block.v1, task_rank.v1, decision_journal_compile.v1)
+with 118 unit tests total; 7 skill manifests; cascade wiring
+d1→d2 morning_briefing ACTIVE; umbrella + runbook live.
 **Date:** 2026-05-23
 **Tracks:** Domain Rollout / Daily Operator Leverage
 **Supersedes:** none

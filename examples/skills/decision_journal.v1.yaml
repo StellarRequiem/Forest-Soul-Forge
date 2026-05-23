@@ -1,0 +1,75 @@
+schema_version: 1
+name: decision_journal
+version: '1'
+description: |
+  Reflector-D2's raw decision-journal skill. Lightweight wrapper
+  over decision_journal_compile.v1 + a memory attestation. Use
+  this when the operator wants the structured data without the
+  LLM narrative — for example, when feeding the digest to another
+  agent or to an external analysis tool.
+
+  daily_reflection.v1 is the wrapped narration variant; this
+  one stops at the compile step.
+
+  Three-step pipeline:
+    1. verify_chain_integrity — audit_chain_verify.
+    2. compile — decision_journal_compile.v1 produces the
+       structured digest.
+    3. attest — memory_write scope=private records the
+       attestation with the digest summary.
+
+  Read-only end-to-end. Constitutional policies still enforce
+  the discipline (require_reflection_attestation,
+  forbid_chain_mutation, forbid_external_disclosure,
+  require_chain_integrity_before_reflection).
+
+requires:
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - decision_journal_compile.v1
+
+inputs:
+  type: object
+  properties:
+    window_hours:
+      type: integer
+      default: 24
+      description: >
+        How far back to walk. Default 24. Operators widen to
+        168 for weekly retrospectives.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the attestation.
+
+steps:
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compile
+    tool: decision_journal_compile.v1
+    args:
+      window_hours: ${inputs.window_hours}
+
+  - id: attest
+    tool: memory_write.v1
+    args:
+      content: ${compile.out.summary}
+      layer: episodic
+      scope: private
+      tags:
+        - "decision_journal_built"
+        - "window:${inputs.window_hours}h"
+        - "attestor:Reflector-D2"
+
+output:
+  window_hours: ${inputs.window_hours}
+  summary: ${compile.out.summary}
+  decisions: ${compile.out.decisions}
+  deferrals: ${compile.out.deferrals}
+  patterns: ${compile.out.patterns}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_id: ${attest.out.entry_id}

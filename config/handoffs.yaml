@@ -29,17 +29,40 @@ default_skill_per_capability:
   # the cross-check can't distinguish 'forward intent' from
   # 'missing-and-forgotten' wiring.
   #
-  # D2 Daily Life OS
+  # D2 Daily Life OS — ADR-0087 Phase D (2026-05-23).
+  # All 8 entry capabilities now have live skills.
+  - domain: d2_daily_life_os
+    capability: daily_orchestration
+    skill_name: daily_orchestration
+    skill_version: "1"
+  - domain: d2_daily_life_os
+    capability: morning_briefing
+    skill_name: daily_orchestration
+    skill_version: "1"
+  - domain: d2_daily_life_os
+    capability: inbox_triage
+    skill_name: inbox_triage
+    skill_version: "1"
+  - domain: d2_daily_life_os
+    capability: calendar_management
+    skill_name: calendar_management
+    skill_version: "1"
   - domain: d2_daily_life_os
     capability: reminder
     skill_name: schedule_reminder
     skill_version: "1"
-    future_skill: true
   - domain: d2_daily_life_os
-    capability: morning_briefing
-    skill_name: generate_briefing
+    capability: task_prioritization
+    skill_name: task_prioritization
     skill_version: "1"
-    future_skill: true
+  - domain: d2_daily_life_os
+    capability: daily_reflection
+    skill_name: daily_reflection
+    skill_version: "1"
+  - domain: d2_daily_life_os
+    capability: decision_journal
+    skill_name: decision_journal
+    skill_version: "1"
 
   # D3 Local SOC
   - domain: d3_local_soc
@@ -229,6 +252,27 @@ cascade_rules:
       synced with the framework rules they're actually bound
       by — no "we missed the SOC2 amendment" gaps.
 
+  # ADR-0087 Phase D — D2 Daily Life OS cascades.
+  #
+  # ACTIVATING the cascade that was declared INERT in
+  # ADR-0086's downstream-cascade notes: D1's daily knowledge
+  # delta now flows into D2's morning briefing so the
+  # Coordinator-D2 has yesterday's knowledge activity visible
+  # when it composes the brief. This is the "morning briefing
+  # surfaces knowledge work" arc the D2 manifest's value-prop
+  # named.
+  - source_domain: d1_knowledge_forge
+    source_capability: daily_knowledge_delta
+    target_domain: d2_daily_life_os
+    target_capability: morning_briefing
+    reason: |
+      Every D1 daily knowledge delta cascades into a D2 morning
+      briefing trigger. Coordinator-D2's daily_orchestration
+      skill reads recent daily_delta_built memory entries +
+      surfaces yesterday's catalog activity into today's brief.
+      This was declared INERT in ADR-0086 Decision 4's
+      downstream-cascade notes; activating now that D2 ships.
+
 # ADR-0086 Phase D — INERT d1→downstream cascades.
 #
 # The D1 manifest at config/domains/d1_knowledge_forge.yaml
@@ -258,6 +302,34 @@ cascade_rules:
 # when its target domain ships. Until then they are
 # documentation, not configuration — the operator who wants
 # them earlier can opt in manually.
+
+# ADR-0087 Phase D — INERT d2→downstream cascades.
+#
+# The D2 manifest at config/domains/d2_daily_life_os.yaml
+# names five handoff_targets:
+#   d1_knowledge_forge  # surface relevant knowledge in briefings (handled via d1→d2 active cascade above)
+#   d3_local_soc        # behavior-change anomalies flag here
+#   d5_smart_home       # routines (vacation mode, etc.)
+#   d6_finance          # bill due-date reminders
+#   d7_content_studio   # weekly retro → content seeds
+#
+# d3 is upstream of d2 in the rollout order but the d2→d3
+# direction (D2 surfacing behavior-change anomalies to D3's
+# anomaly_ace) is conceptually deferred until D2 has lived
+# long enough to detect operator-behavior baselines worth
+# anomaly-flagging. D5, D6, D7 are downstream of D2 in the
+# rollout order, so the receiving roles don't exist yet.
+#
+# Pending cascades, declared inert:
+#   d2.task_prioritization     → d5.routines
+#   d2.reminder                → d6.bill_reminder
+#   d2.daily_reflection        → d7.content_seed
+#   d2.morning_briefing        → d3.anomaly_baseline   (deferred)
+#
+# Each pending cascade will land as a real cascade_rules entry
+# when its target domain ships. Until then they are
+# documentation, not configuration — same INERT pattern as
+# ADR-0086's downstream-cascade notes.
 
 # ADR-0078 Phase A — NO new cascade rules from forensic_archive.
 # Deliberate. The ADR's Decision 4 named three cascades on the

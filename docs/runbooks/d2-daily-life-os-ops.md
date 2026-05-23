@@ -13,7 +13,7 @@ that lands D2 Phase A (this runbook will grow as Phases B–D ship).
 | **A** | coordinator + inbox_triager | none — reuses existing | CLOSED |
 | **B** | time_steward (YELLOW) | schedule_reminder.v1 + calendar_block.v1 | CLOSED |
 | **C** | task_prioritizer | task_rank.v1 | CLOSED |
-| **D** | reflector | decision_journal_compile.v1 | queued |
+| **D** | reflector | decision_journal_compile.v1 | CLOSED |
 
 Each phase = one commit + one push, so the operator can verify
 phase N before phase N+1 fires.
@@ -312,6 +312,70 @@ get the same order.
   task whose tags match. The `focus_bonus` skill input
   overrides this default magnitude.
 
-## Phase D onward
+## Phase D — reflection + cascade + umbrella
 
-Section for Phase D will land with the phase commit.
+### 1. Restart the daemon + birth
+
+Phase D adds the `reflector` role + the
+`decision_journal_compile.v1` builtin tool.
+
+```bash
+./dev-tools/force-restart-daemon.command
+./dev-tools/birth-reflector.command
+```
+
+GREEN posture default — read-only evening synthesis is non-acting.
+
+### 2. First dispatch — evening reflection
+
+```bash
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${REFLECTOR_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "daily_reflection",
+    "skill_version": "1",
+    "inputs": {"window_hours": 24}
+  }' | python3 -m json.tool
+```
+
+Expect a digest covering today's operator-decision events,
+deferred / open items, and recurring-topic patterns (>= 3
+entries on the same topic). The LLM narration follows the
+structured data.
+
+### 3. Birthing all five D2 agents at once
+
+```bash
+./dev-tools/birth-d2-daily-life-os.command
+```
+
+The umbrella script invokes each child birth script in order
+(coordinator → inbox_triager → time_steward → task_prioritizer
+→ reflector). Idempotent — re-running it skips already-born
+agents.
+
+### 4. Cascade discipline
+
+`config/handoffs.yaml` now carries:
+
+- **ACTIVE** `d1_knowledge_forge.daily_knowledge_delta →
+  d2_daily_life_os.morning_briefing` — D1's nightly delta
+  feeds tomorrow's brief.
+- **INERT** `d2.task_prioritization → d5.routines`,
+  `d2.reminder → d6.bill_reminder`,
+  `d2.daily_reflection → d7.content_seed`,
+  `d2.morning_briefing → d3.anomaly_baseline` (deferred until
+  D2 has lived long enough to detect operator-behavior
+  baselines worth flagging).
+
+The INERT cascades are documentation only until those
+downstream domains ship — same pattern as ADR-0086's
+downstream notes.
+
+### 5. Domain status
+
+`config/domains/d2_daily_life_os.yaml` now reads
+`status: live`. ADR-0087 is Accepted. The D2 row in STATE.md
+matches.

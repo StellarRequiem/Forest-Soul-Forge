@@ -966,6 +966,23 @@ roles:
       emotional: 0.8
       embodiment: 0.6
 
+  # ---- ADR-0087 Phase D — D2 Daily Life OS (reflection) ----
+  # reflector: researcher-genre evening-sweep role. Walks the
+  # audit chain for operator-decision events over a window
+  # (default 24h), compiles a decision-journal digest via
+  # decision_journal_compile.v1, narrates via llm_think.
+  # Read-only synthesis; never mutates source data. GREEN
+  # posture per ADR-0087 Decision 1.
+  reflector:
+    description: "Evening reflection researcher. Dispatches decision_journal_compile.v1 to walk the audit chain for operator decisions in the window (default 24h) + recurring-topic patterns, narrates via llm_think — what was decided, what was deferred, what surfaced as a pattern. Read-only synthesis; never mutates source data. Genre: researcher. ADR-0087 Phase D."
+    domain_weights:
+      security: 0.8
+      audit: 2.3        # the digest IS audit-trail synthesis
+      cognitive: 2.3    # pattern detection across decisions
+      communication: 2.3 # operator-facing digest is the deliverable
+      emotional: 1.0    # gentle framing on evening reflection
+      embodiment: 0.6
+
   # ---- ADR-0087 Phase B — D2 Daily Life OS (scheduling + calendar) ----
   # time_steward: actuator-genre scheduling role. Creates scheduled
   # reminders (data/d2/reminders.jsonl) + queues calendar events

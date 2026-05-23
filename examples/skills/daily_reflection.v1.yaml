@@ -1,0 +1,140 @@
+schema_version: 1
+name: daily_reflection
+version: '1'
+description: |
+  Reflector-D2's primary evening-sweep skill. Walks the audit
+  chain over an operator-named window (default 24h) via
+  decision_journal_compile.v1, then narrates the operator-
+  decision events, deferrals, and recurring-topic patterns via
+  llm_think.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       timezone + work_hours. Gives the narration honest
+       Pacific-time framing.
+    2. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked end-to-end.
+    3. compile — decision_journal_compile.v1 walks the chain
+       + buckets decisions / deferrals / recurring topics.
+    4. narrate — llm_think wraps the digest in operator-
+       readable prose: what was decided, what was deferred,
+       what kept circling back.
+    5. attest — memory_write scope=private records the
+       reflection attestation with window + counts + top
+       patterns + attestor.
+
+  Read-only end-to-end. Constitutional policies enforce the
+  discipline at governance layer (require_reflection_attestation,
+  forbid_chain_mutation, forbid_external_disclosure,
+  require_chain_integrity_before_reflection).
+
+  All timestamps Pacific time per CLAUDE.md.
+
+requires:
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - decision_journal_compile.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  properties:
+    window_hours:
+      type: integer
+      default: 24
+      description: >
+        How far back to walk. Default 24 (daily evening sweep).
+        Operators widen to 168 for a weekly retrospective on
+        Sundays.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compile
+    tool: decision_journal_compile.v1
+    args:
+      window_hours: ${inputs.window_hours}
+
+  - id: narrate
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Reflector-D2, the D2 Daily Life OS evening-
+        reflection agent. Wrap the day's decision-journal data
+        into an operator-readable digest.
+
+        Window: ${inputs.window_hours} hours
+        Operator reason: ${inputs.operator_reason}
+
+        Operator profile:
+          work_hours:     ${operator_context.out.work_hours}
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Decision digest:
+          decisions_count: ${compile.out.summary.decision_count}
+          deferrals_count: ${compile.out.summary.deferral_count}
+          patterns_count:  ${compile.out.summary.pattern_count}
+
+        Decisions:
+        ${compile.out.decisions}
+
+        Deferrals / open items:
+        ${compile.out.deferrals}
+
+        Recurring topic patterns:
+        ${compile.out.patterns}
+
+        Produce a structured reflection:
+        1. Decisions made today — list each with topic + one-
+           sentence interpretation. If a decision was operator-
+           driven (operator_* event_type), name it as such.
+        2. Open items + deferrals — what got pushed to
+           tomorrow, what's still pending. Surface this honestly;
+           the operator needs to see what piled up.
+        3. Recurring patterns — topics that came up >= 3 times
+           today. These are signals worth taking to tomorrow's
+           morning briefing (Coordinator-D2's daily_orchestration
+           consumes these via memory_recall).
+        4. Gentle framing — close with a one-sentence
+           observation about the day's shape. No sycophancy;
+           the operator wants honest reflection, not
+           cheerleading.
+        5. Halt warning if chain status != "ok".
+
+        Be concise; the operator reads this once at the end of
+        the day. All timestamps Pacific time.
+
+  - id: attest
+    tool: memory_write.v1
+    args:
+      content: ${narrate.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "daily_reflection_built"
+        - "window:${inputs.window_hours}h"
+        - "attestor:Reflector-D2"
+
+output:
+  window_hours: ${inputs.window_hours}
+  summary: ${compile.out.summary}
+  reflection: ${narrate.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_id: ${attest.out.entry_id}

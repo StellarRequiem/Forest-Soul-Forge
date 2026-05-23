@@ -44,6 +44,9 @@ from forest_soul_forge.tools.builtin.calendar_block import (
     CalendarBlockTool,
 )
 from forest_soul_forge.tools.builtin.task_rank import TaskRankTool
+from forest_soul_forge.tools.builtin.decision_journal_compile import (
+    DecisionJournalCompileTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -488,3 +491,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # bonus. Read-only; the LLM narrative is layered by the
     # task_prioritization.v1 skill via llm_think.
     registry.register(TaskRankTool())
+    # ADR-0087 Phase D — decision_journal_compile.v1. Walks the
+    # audit chain over an operator-named window and buckets
+    # decisions / deferrals / recurring-topic patterns into a
+    # digest for the Reflector-D2's evening sweep. Read-only;
+    # the LLM narrative is layered by daily_reflection.v1 skill.
+    registry.register(DecisionJournalCompileTool())

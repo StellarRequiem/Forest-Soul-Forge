@@ -714,6 +714,30 @@ tools:
     side_effects: external
     archetype_tags: [time_steward]
 
+  decision_journal_compile.v1:
+    name: decision_journal_compile
+    version: "1"
+    description: |
+      ADR-0087 Phase D — D2 Daily Life OS decision-journal
+      compiler. Walks the audit chain over a window (default 24h)
+      and buckets operator-decision events, deferred / open items,
+      and recurring-topic patterns. Read-only end-to-end; the
+      ``daily_reflection.v1`` skill wraps this with chain-integrity
+      verification + memory_write of the final attestation.
+      The reflector role is the primary consumer.
+    input_schema:
+      type: object
+      properties:
+        window_hours:
+          type: integer
+          minimum: 1
+          maximum: 720
+          default: 24
+        audit_chain_path:
+          type: string
+    side_effects: read_only
+    archetype_tags: [reflector]
+
   task_rank.v1:
     name: task_rank
     version: "1"
@@ -3486,6 +3510,23 @@ archetypes:
       # No mcp_call. No web_fetch. No browser_action. The triager
       # produces drafts; the operator (or a future outbound-actuator
       # role) handles real sends.
+
+  # ---- ADR-0087 Phase D — D2 Daily Life OS reflection ----------
+  # reflector kit. Researcher genre, read_only synthesis.
+  # decision_journal_compile.v1 produces the digest; llm_think
+  # produces the operator-facing narrative.
+  reflector:
+    standard_tools:
+      - llm_think.v1                      # evening-sweep narrative
+      - memory_recall.v1                  # walk prior reflections + daily_briefing carryforward
+      - memory_write.v1                   # write reflection attestations to private memory
+      - delegate.v1                       # route lingering open items back to coordinator
+      - audit_chain_verify.v1             # chain integrity before publishing reflection
+      - text_summarize.v1                 # condense long decision lists into operator-readable digests
+      - operator_profile_read.v1          # ADR-0068 — operator context for the framing
+      - decision_journal_compile.v1       # ADR-0087 Phase D — the chain-walking digest builder
+      # No web_fetch. No shell_exec. No mutation tools — read-only
+      # evening synthesis end-to-end.
 
   # ---- ADR-0087 Phase C — D2 Daily Life OS prioritization ------
   # task_prioritizer kit. Researcher genre, read_only synthesis.
