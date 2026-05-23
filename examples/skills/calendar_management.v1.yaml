@@ -1,0 +1,181 @@
+schema_version: 1
+name: calendar_management
+version: '1'
+description: |
+  TimeSteward-D2's calendar action skill. Validates the request
+  against the operator's work_hours, verifies audit chain
+  integrity, queues the calendar create / decline / cancel
+  request to the forest-calendar connector via
+  data/d2/calendar_queue.jsonl, and writes a memory attestation.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       work_hours + timezone. Required by
+       require_work_hours_check_for_meetings policy on
+       create operations.
+    2. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked. A calendar action queued
+       against a broken chain is operationally untrustworthy.
+    3. analyze — llm_think reasons about the request in the
+       operator's work_hours context. For create: is the
+       proposed slot inside work_hours? for decline: is the
+       polite-message tone appropriate? for cancel: is there
+       a downstream attendee we should also notify?
+    4. queue_action — calendar_block.v1 queues the request
+       for the forest-calendar connector. External side-
+       effect; per-call approval gates via
+       external_always_human_approval (every call is
+       operator-gated regardless of posture). Refuses cleanly
+       when forest-calendar is absent.
+    5. attest — memory_write scope=private records the
+       attestation with action_kind + queued_request_id +
+       analyze.out.response + attestor.
+
+  Constitutional policies enforce the action discipline at
+  governance layer (require_action_attestation,
+  forbid_silent_calendar_action,
+  require_work_hours_check_for_meetings,
+  forbid_chain_break_action).
+  All timestamps Pacific time per CLAUDE.md.
+
+requires:
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - calendar_block.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [operation]
+  properties:
+    operation:
+      type: string
+      description: >
+        One of: create / decline / cancel.
+    start:
+      type: string
+      description: >
+        ISO-8601 timestamp (required for create). Pacific time
+        per CLAUDE.md.
+    end:
+      type: string
+      description: >
+        ISO-8601 timestamp (required for create; must be after
+        start). Pacific time.
+    subject:
+      type: string
+      description: >
+        Event title (required for create; max 500 chars).
+    body:
+      type: string
+      default: ""
+      description: >
+        Event description (optional; max 5000 chars).
+    attendees:
+      type: array
+      items: {type: string}
+      default: []
+      description: >
+        Email addresses (optional; max 50).
+    event_id:
+      type: string
+      default: ""
+      description: >
+        Identifier of the existing event (required for
+        decline / cancel).
+    decline_message:
+      type: string
+      default: ""
+      description: >
+        Polite decline text (used on decline; max 5000 chars).
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: analyze
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are TimeSteward-D2, the D2 Daily Life OS calendar
+        actuator. Analyze the proposed calendar action against
+        the operator's stated work_hours + timezone.
+
+        Operator profile:
+          work_hours:     ${operator_context.out.work_hours}
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Operation: ${inputs.operation}
+        Start:     ${inputs.start}
+        End:       ${inputs.end}
+        Subject:   ${inputs.subject}
+        Event id:  ${inputs.event_id}
+
+        Operator reason: ${inputs.operator_reason}
+        Audit chain integrity: ${verify_chain_integrity.out.status}
+
+        For create operations:
+        1. Is the proposed slot inside work_hours? If not, flag
+           the conflict + propose a work-hours alternative.
+        2. Is the meeting subject specific enough to justify
+           the time block? Vague subjects often mean
+           productivity drag.
+        3. Recommend approve / decline / counter-propose with
+           one sentence of reasoning.
+
+        For decline operations:
+        1. Is the decline_message tone appropriate for the
+           subject + operator's work_hours protection?
+        2. Recommend approve / refine / abandon.
+
+        For cancel operations:
+        1. Are there attendees who should also be notified
+           outside the calendar app?
+        2. Recommend approve / refine.
+
+        All timestamps Pacific time. Be terse — the operator
+        sees this in the approval queue.
+
+  - id: queue_action
+    tool: calendar_block.v1
+    args:
+      operation: ${inputs.operation}
+      start: ${inputs.start}
+      end: ${inputs.end}
+      subject: ${inputs.subject}
+      body: ${inputs.body}
+      attendees: ${inputs.attendees}
+      event_id: ${inputs.event_id}
+      decline_message: ${inputs.decline_message}
+
+  - id: attest
+    tool: memory_write.v1
+    args:
+      content: ${analyze.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "calendar_action_queued"
+        - "operation:${inputs.operation}"
+        - "request_id:${queue_action.out.request_id}"
+        - "attestor:TimeSteward-D2"
+
+output:
+  operation: ${inputs.operation}
+  request_id: ${queue_action.out.request_id}
+  analysis: ${analyze.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_id: ${attest.out.entry_id}

@@ -1678,6 +1678,83 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  time_steward:
+    # ADR-0087 Phase B — D2 Daily Life OS scheduling + calendar
+    # actuator. Actuator genre, external ceiling. YELLOW posture
+    # default per ADR-0087 Decision 2 — every dispatch beyond
+    # read_only queues for operator approval. The two action
+    # tools (schedule_reminder.v1 filesystem + calendar_block.v1
+    # external) both carry per-call approval gates by the standard
+    # rules; the YELLOW posture is the second discipline that
+    # pauses every other non-read-only dispatch the role can fire.
+    policies:
+      - id: forbid_silent_calendar_action
+        rule: forbid
+        triggers: [calendar_create_silent, calendar_decline_silent, calendar_cancel_silent, schedule_reminder_silent]
+        rationale: |
+          Every calendar / reminder action is operator-reviewed
+          via the approval queue. Silent action would bypass the
+          YELLOW-posture discipline + the actuator genre's per-call
+          gate, making the role indistinguishable from a runaway
+          scheduler. Both layers — posture + per-call gate — must
+          fire on every action.
+      - id: require_action_attestation
+        rule: require
+        triggers: [schedule_reminder, calendar_block, queue_calendar_request]
+        rationale: |
+          Every scheduled action emits a memory_write attestation
+          with (action_kind, fire_at_or_event_window, attestor, ts).
+          Without the attestation, the operator can't audit the
+          steward's queue + can't reconcile reminders that fired
+          against reminders that were scheduled.
+      - id: forbid_send_email
+        rule: forbid
+        triggers: [send_email, dispatch_email, post_to_channel]
+        rationale: |
+          The steward queues calendar requests (which the
+          forest-calendar connector dispatches as native calendar
+          operations) + schedules reminders (which a connector or
+          desktop notifier fires). The steward NEVER sends an
+          email directly — that's inbox_triager's lane (drafts only)
+          + the operator's send action.
+      - id: require_work_hours_check_for_meetings
+        rule: require
+        triggers: [calendar_create]
+        rationale: |
+          Every calendar_create attempt must reference
+          operator_profile.work_hours in its prompt-time reasoning.
+          The steward's value-prop is calendar PROTECTION; creating
+          a meeting outside the operator's stated work_hours
+          without explicit operator authorization defeats the
+          discipline.
+      - id: forbid_chain_break_action
+        rule: require
+        triggers: [schedule_reminder, calendar_block]
+        rationale: |
+          Before any reminder / calendar queue action, the
+          chain's audit_chain_verify must confirm hash-linked
+          integrity. Actions queued against a broken chain inherit
+          the brokenness + can't be reconciled.
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - send_email
+      - dispatch_email
+      - modify_production_systems
+      - calendar_create_silent
+      - calendar_decline_silent
+      - schedule_reminder_silent
+    operator_duties:
+      - "Review every queued reminder + every queued calendar action via the approval queue. YELLOW posture means every non-read-only action queues — that's the bedding-in friction by design."
+      - "Move from YELLOW to GREEN posture only after the proposal-quality bar is bedded in — auto-approved reminders that fire usefully + auto-queued calendar declines that the operator agrees with. Even after GREEN, per-call approval gates on the external + filesystem tools remain."
+      - "Curate the operator profile's work_hours + timezone — the steward's discipline only matches operator intent if the profile reflects it."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   inbox_triager:
     # ADR-0087 Phase A — D2 Daily Life OS inbox triage. Communicator
     # genre, network ceiling. The agent reads inbox snapshots (memory

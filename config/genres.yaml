@@ -133,6 +133,7 @@ genres:
       - release_gatekeeper       # ADR-0077 / B341 — moved from guardian
       - playbook_pilot           # ADR-0066 (B456) — D3 Phase D SOAR actuator; discipline via constitution policy, not genre
       - policy_enforcer          # ADR-0085 Phase C — D8 compliance policy enforcer; YELLOW posture, every remediation operator-gated; constitution policies forbid silent application
+      - time_steward             # ADR-0087 Phase B — D2 Daily Life OS scheduling + calendar actuator. YELLOW posture default; the only acting role in D2. Kit: schedule_reminder.v1 + calendar_block.v1 + memory_recall/write + audit_chain_verify + llm_think + text_summarize + operator_profile_read + delegate.
 
   guardian:
     description: |

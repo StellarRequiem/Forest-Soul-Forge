@@ -11,7 +11,7 @@ that lands D2 Phase A (this runbook will grow as Phases B–D ship).
 | Phase | New agent(s) | New builtin tool | Status |
 |---|---|---|---|
 | **A** | coordinator + inbox_triager | none — reuses existing | CLOSED |
-| **B** | time_steward (YELLOW) | schedule_reminder.v1 + calendar_block.v1 | queued |
+| **B** | time_steward (YELLOW) | schedule_reminder.v1 + calendar_block.v1 | CLOSED |
 | **C** | task_prioritizer | task_rank.v1 | queued |
 | **D** | reflector | decision_journal_compile.v1 | queued |
 
@@ -166,9 +166,103 @@ mail client; the agent never sends.
 
 ---
 
-## Phase B onward
+## Phase B — scheduling + calendar (YELLOW)
 
-Sections for Phases B, C, D will land with each phase commit.
-Phase B introduces YELLOW-posture gating for time_steward;
-expect a section on the approval queue + YELLOW→GREEN
-promotion criteria.
+### 1. Restart the daemon
+
+Phase B adds the `time_steward` role + two new builtin tools
+(`schedule_reminder.v1` filesystem, `calendar_block.v1`
+external). The daemon picks these up at lifespan boot.
+
+```bash
+./dev-tools/force-restart-daemon.command
+```
+
+Verify `time_steward` appears under the `actuator` genre's
+roles list and that the two new tools appear in
+`/tools/catalog`.
+
+### 2. Birth the agent
+
+```bash
+./dev-tools/birth-time-steward.command
+```
+
+The script does NOT flip posture — time_steward stays at its
+default **YELLOW** per ADR-0087 Decision 2. Every non-read-only
+dispatch queues for operator approval.
+
+### 3. First dispatch — schedule a reminder
+
+```bash
+curl -s --max-time 30 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${TIME_STEWARD_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "schedule_reminder",
+    "skill_version": "1",
+    "inputs": {
+      "fire_at": "2026-05-24T09:00:00-07:00",
+      "message": "Review D2 Phase B outcomes",
+      "channel": "memory"
+    }
+  }' | python3 -m json.tool
+```
+
+YELLOW posture → the dispatch will queue rather than
+auto-execute. Approve it via the pending-calls endpoint or
+the Approvals tab; the tool then appends the reminder to
+`data/d2/reminders.jsonl`. The fire itself runs unattended
+when a future connector picks up the record.
+
+### 4. First dispatch — decline a calendar event
+
+```bash
+curl -s --max-time 30 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${TIME_STEWARD_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "calendar_management",
+    "skill_version": "1",
+    "inputs": {
+      "operation": "decline",
+      "event_id": "fake-event-1",
+      "decline_message": "Scheduling conflict — async would work better"
+    }
+  }' | python3 -m json.tool
+```
+
+If the forest-calendar connector marker
+(`data/connectors/forest-calendar.enabled`) is absent, the
+tool refuses cleanly with "calendar connector not wired" —
+that's the graceful-degradation pattern. To smoke-test
+without a real connector, touch the marker file first:
+
+```bash
+mkdir -p data/connectors
+touch data/connectors/forest-calendar.enabled
+```
+
+### 5. YELLOW → GREEN promotion criteria
+
+Move time_steward from YELLOW to GREEN only after:
+
+- At least 10 reminders have been queued + manually approved
+  without operator-corrected drift (the operator agreed with
+  the timing + channel each time).
+- At least 5 calendar actions have been queued + manually
+  approved without the operator declining the decline.
+- The `data/d2/reminders.jsonl` ledger doesn't show any
+  fire times outside the operator's work_hours that the
+  operator wouldn't endorse.
+
+Even after GREEN, the per-call `requires_human_approval`
+gates on `schedule_reminder.v1` (filesystem) and
+`calendar_block.v1` (external) remain in force — that's the
+actuator-genre + tool-policy baseline regardless of posture.
+
+## Phase C onward
+
+Sections for Phases C, D will land with each phase commit.

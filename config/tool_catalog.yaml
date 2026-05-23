@@ -629,6 +629,91 @@ tools:
     side_effects: read_only
     archetype_tags: [verifier, guardian, observer, security_low]
 
+  schedule_reminder.v1:
+    name: schedule_reminder
+    version: "1"
+    description: |
+      ADR-0087 Phase B — D2 Daily Life OS reminder substrate.
+      Appends a reminder record to data/d2/reminders.jsonl with
+      fire_at + channel + message. Filesystem side-effect;
+      ``filesystem_always_human_approval`` gates each creation
+      so the operator approves before any reminder lands in the
+      ledger. The fire itself runs unattended when a future
+      forest-mail / forest-slack / desktop-notification connector
+      picks the record up. Time_steward (actuator, YELLOW posture)
+      is the primary consumer.
+    input_schema:
+      type: object
+      required: [fire_at, message]
+      properties:
+        fire_at:
+          type: string
+          description: "ISO-8601 timestamp when the reminder fires. Must be in the future."
+        message:
+          type: string
+          description: "Reminder text (1-2000 chars)."
+        channel:
+          type: string
+          enum: [memory, email, slack, desktop, audit]
+          default: memory
+          description: "Delivery surface. 'memory' always works without external connectors."
+        reminders_path:
+          type: string
+          description: "Override ledger path (tests; production omits)."
+    side_effects: filesystem
+    archetype_tags: [time_steward]
+
+  calendar_block.v1:
+    name: calendar_block
+    version: "1"
+    description: |
+      ADR-0087 Phase B — D2 Daily Life OS calendar surface.
+      Queues create / decline / cancel requests for the
+      forest-calendar connector via data/d2/calendar_queue.jsonl.
+      side_effects=external + every call operator-gated via the
+      ``external_always_human_approval`` rule (load-bearing
+      regardless of agent posture). Refuses cleanly when the
+      forest-calendar connector is absent (graceful degradation
+      per ADR-0086 Decision 4 pattern). Time_steward is the only
+      role with this in its kit.
+    input_schema:
+      type: object
+      required: [operation]
+      properties:
+        operation:
+          type: string
+          enum: [create, decline, cancel]
+        start:
+          type: string
+          description: "ISO-8601 start timestamp (required for create)."
+        end:
+          type: string
+          description: "ISO-8601 end timestamp (required for create; must be after start)."
+        subject:
+          type: string
+          description: "Event title (required for create; max 500 chars)."
+        body:
+          type: string
+          description: "Event description / agenda (optional; max 5000 chars)."
+        attendees:
+          type: array
+          items: {type: string}
+          description: "Email addresses (optional; max 50)."
+        event_id:
+          type: string
+          description: "Required for decline / cancel."
+        decline_message:
+          type: string
+          description: "Optional polite decline text (max 5000 chars)."
+        queue_path:
+          type: string
+          description: "Override queue ledger (tests; production omits)."
+        assume_connector:
+          type: boolean
+          description: "Tests bypass the connector-marker presence check; production omits."
+    side_effects: external
+    archetype_tags: [time_steward]
+
   daily_knowledge_delta.v1:
     name: daily_knowledge_delta
     version: "1"
@@ -3353,6 +3438,26 @@ archetypes:
       # No mcp_call. No web_fetch. No browser_action. The triager
       # produces drafts; the operator (or a future outbound-actuator
       # role) handles real sends.
+
+  # ---- ADR-0087 Phase B — D2 Daily Life OS scheduling + calendar ------
+  # time_steward kit. Actuator genre; the only acting role in D2.
+  # YELLOW posture default. The two new builtin tools land here:
+  # schedule_reminder.v1 (filesystem) + calendar_block.v1 (external).
+  # Per-call approval gating + YELLOW posture + actuator genre
+  # ceiling together enforce the discipline.
+  time_steward:
+    standard_tools:
+      - llm_think.v1                  # reasoning over work_hours + meeting density
+      - memory_recall.v1              # walk prior reminders + queued calendar events
+      - memory_write.v1               # write attestations of scheduled / declined actions
+      - delegate.v1                   # route ambiguous scheduling decisions back to coordinator
+      - audit_chain_verify.v1         # chain integrity before queueing actions
+      - text_summarize.v1             # condense meeting-density into operator briefs
+      - operator_profile_read.v1      # ADR-0068 — work_hours + timezone drive scheduling
+      - schedule_reminder.v1          # ADR-0087 Phase B — reminder ledger
+      - calendar_block.v1             # ADR-0087 Phase B — calendar queue
+      # No web_fetch. No shell_exec. No code_edit. Pure scheduling
+      # action surface.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

@@ -37,6 +37,12 @@ from forest_soul_forge.tools.builtin.knowledge_contradiction_scan import (
 from forest_soul_forge.tools.builtin.daily_knowledge_delta import (
     DailyKnowledgeDeltaTool,
 )
+from forest_soul_forge.tools.builtin.schedule_reminder import (
+    ScheduleReminderTool,
+)
+from forest_soul_forge.tools.builtin.calendar_block import (
+    CalendarBlockTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -463,3 +469,15 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # tool. The skill that wraps it persists the final delta
     # artifact via memory_write.
     registry.register(DailyKnowledgeDeltaTool())
+    # ADR-0087 Phase B — schedule_reminder.v1. Appends a reminder
+    # record to data/d2/reminders.jsonl. side_effects=filesystem
+    # so filesystem_always_human_approval gates each creation;
+    # the fire itself is handled by a future connector picking
+    # records out of the ledger at fire-time.
+    registry.register(ScheduleReminderTool())
+    # ADR-0087 Phase B — calendar_block.v1. Queues calendar
+    # create / decline / cancel requests for the forest-calendar
+    # connector. side_effects=external (every call operator-
+    # gated). Refuses cleanly when forest-calendar is absent —
+    # graceful degradation per ADR-0086 Decision 4 pattern.
+    registry.register(CalendarBlockTool())
