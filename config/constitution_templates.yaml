@@ -2832,6 +2832,173 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  critic:
+    # ADR-0090 Phase B — D10 Research Lab adversarial-critique
+    # role. Guardian genre, read_only ceiling. Consumes analyst-
+    # produced decompositions + composes counter-arguments
+    # (counter-evidence + alternative interpretations + missing
+    # considerations) tagged for lab_synthesizer pickup. NEVER
+    # overwrites the analyst's verdict + NEVER synthesizes.
+    # GREEN posture per ADR-0090 Decision 1 — counter-argument is
+    # non-acting; the attestation is the deliverable.
+    policies:
+      - id: forbid_analyst_verdict_overwrite
+        rule: forbid
+        triggers: [rewrite_decomposition, mutate_analyst_verdict, replace_decomposition_attestation]
+        rationale: |
+          The analyst's decomposition + verdict is immutable from
+          the critic's perspective. The critic counters; it never
+          overwrites. Letting the critic mutate the analyst's
+          attestation would conflate critique with analysis +
+          erase the verdict-vs-counter separation the lab_synthesizer
+          depends on to compose a fair synthesis. The decomposition
+          + the counter-arguments BOTH stand in the audit chain —
+          this is the adversarial-collaboration mode from the
+          ADR-0067 domain manifest ("outputs aren't averaged; both
+          stand").
+      - id: forbid_synthesis
+        rule: forbid
+        triggers: [compose_synthesis, aggregate_across_decompositions, render_lab_report]
+        rationale: |
+          Lab synthesis is lab_synthesizer's exclusive lane (D10
+          Phase B). The critic surfaces counter-arguments;
+          combining them with the decomposition into a final
+          synthesis would conflate critique with synthesis +
+          bypass the citation-graph + confidence-scoring discipline
+          the lab_synthesizer applies.
+      - id: require_counter_attestation
+        rule: require
+        triggers: [emit_counter_argument, finalize_critique]
+        rationale: |
+          Every counter-argument emits a memory_write attestation
+          with (topic_slug, decomposition_entry_id, claim_id,
+          counter_kind, counter_summary, attestor, ts). Without
+          the attestation, lab_synthesizer can't trace which
+          decomposition a counter rests on + the operator can't
+          audit which counter shaped a given synthesis.
+      - id: require_chain_integrity_before_critique
+        rule: require
+        triggers: [emit_counter_argument]
+        rationale: |
+          The counter rests on memory + chain content (the
+          analyst's decomposition + prior counters). A counter
+          attested on a broken chain inherits the brokenness +
+          its provenance can't be re-verified.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_counter_external, post_counter_to_external_service]
+        rationale: |
+          Counter-arguments are private/lineage scope. Operator-
+          driven sharing is a separate explicit action; the critic
+          never crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - rewrite_decomposition
+      - mutate_analyst_verdict
+      - compose_synthesis
+      - render_lab_report
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat critic + analyst as adversarial collaborators — the two attestations stand alongside; you decide whether to fold the counter into your understanding."
+      - "Audit counter attestations weekly — a critic that consistently produces low-evidence counters is a signal the verify_claim corpus needs filling in."
+      - "Treat a chain_broken halt as an emergency — counter-arguments attested on a broken chain inherit the brokenness."
+      - "Read the decomposition before the counter — context matters; the counter is structured as opposition to a specific claim, not a free-standing essay."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  lab_synthesizer:
+    # ADR-0090 Phase B — D10 Research Lab research-synthesis
+    # role. Researcher genre, read_only ceiling. Aggregates
+    # analyst-produced decompositions + critic-produced counters
+    # into a synthesis report with citation graph
+    # (citation_graph_build.v1) + per-conclusion confidence band
+    # (confidence_score.v1). Renamed from manifest "synthesizer"
+    # to avoid collision with D1's synthesizer (ADR-0090
+    # Decision 2). GREEN posture — synthesis is non-acting; the
+    # report is the deliverable.
+    policies:
+      - id: forbid_critique
+        rule: forbid
+        triggers: [counter_argue, refute_claim, render_adversarial_position]
+        rationale: |
+          Adversarial critique is critic's exclusive lane (D10
+          Phase B). The lab_synthesizer aggregates; it never
+          argues against a decomposition. Letting the synthesizer
+          critique would conflate synthesis with critique +
+          collapse the two-role separation the lab depends on for
+          balanced reports ("both stand" per ADR-0067 domain
+          manifest).
+      - id: forbid_decomposition_mutation
+        rule: forbid
+        triggers: [rewrite_decomposition, mutate_analyst_verdict, replace_decomposition_attestation]
+        rationale: |
+          The analyst's decomposition is read-only from the
+          synthesizer's perspective. The synthesizer aggregates
+          across decompositions + composes a synthesis; it never
+          rewrites a decomposition. Mutating the decomposition
+          would corrupt the provenance chain the citation graph
+          rests on.
+      - id: require_citation_graph_per_synthesis
+        rule: require
+        triggers: [emit_synthesis, finalize_report]
+        rationale: |
+          Every synthesis MUST include a citation graph composed
+          via citation_graph_build.v1. Skipping the graph would
+          let the synthesis ship without operator-auditable
+          claim → source provenance + bypass the forensic-replay
+          discipline ADR-0090 makes load-bearing.
+      - id: require_confidence_score_per_conclusion
+        rule: require
+        triggers: [emit_synthesis, finalize_report]
+        rationale: |
+          Every conclusion in the synthesis MUST carry a
+          confidence band composed via confidence_score.v1.
+          Skipping the score would let conclusions ship without
+          their per-claim uncertainty + bypass the confidence-
+          calibration discipline ADR-0090 makes load-bearing.
+      - id: require_synthesis_attestation
+        rule: require
+        triggers: [emit_synthesis, finalize_report]
+        rationale: |
+          Every synthesis emits a memory_write attestation with
+          (topic_slug, source_decomposition_ids, source_counter_ids,
+          conclusion_count, citation_graph_summary,
+          confidence_band_distribution, attestor, ts). Without
+          the attestation, operators can't audit which
+          decompositions + counters shaped a given report.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_report_external, post_synthesis_to_external_service]
+        rationale: |
+          Synthesis reports are private/lineage scope. Operator-
+          driven sharing is a separate explicit action; the
+          synthesizer never crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - counter_argue
+      - rewrite_decomposition
+      - render_adversarial_position
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Read the synthesis with its citation graph + confidence bands open — the synthesis is the narrative; the graph + bands are the provenance + uncertainty."
+      - "Audit synthesis attestations weekly — a synthesizer that consistently produces low-confidence syntheses is a signal the gatherer's source set or the analyst's verify_claim corpus needs widening."
+      - "Treat 'low' confidence bands as a flag, not a verdict — low confidence means the synthesis hasn't earned strong conclusions yet, not that the topic is unanswerable."
+      - "Treat a chain_broken halt as an emergency — synthesis attested on a broken chain inherits the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

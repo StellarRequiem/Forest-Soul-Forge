@@ -3278,6 +3278,95 @@ tools:
     side_effects: external
     archetype_tags: [software_engineer]
 
+  # ---- ADR-0090 Phase B — D10 Research Lab citation + confidence ----
+  citation_graph_build.v1:
+    name: citation_graph_build
+    version: "1"
+    description: |
+      ADR-0090 Phase B citation grapher. Builds a directed
+      citation graph from a list of (claim, sources) pairs. Nodes
+      are unique normalized claims (SHA-256 derived node IDs);
+      edges are claim → source pairs. Deterministic: two calls
+      with the same inputs produce the same graph. Read-only.
+      lab_synthesizer (D10 Phase B) is the primary consumer —
+      every synthesis report includes the citation graph as a
+      deliverable so the operator can audit which sources support
+      which conclusions.
+    input_schema:
+      type: object
+      required: [claim_records]
+      properties:
+        claim_records:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [claim, sources]
+            properties:
+              claim: {type: string}
+              claim_kind:
+                type: string
+                enum: [primary, sub_claim, counter]
+                default: primary
+              verdict:
+                type: string
+                enum: [CONFIRMED, REFUTED, INCONCLUSIVE, UNKNOWN]
+              sources:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    source_id: {type: string}
+                    source_url: {type: string}
+                    catalog_entry_id: {type: string}
+                    source_type:
+                      type: string
+                      enum: [web, catalog, memory, verify_claim]
+                    excerpt: {type: string, maxLength: 500}
+        topic_slug:
+          type: string
+    side_effects: read_only
+    archetype_tags: [lab_synthesizer]
+
+  confidence_score.v1:
+    name: confidence_score
+    version: "1"
+    description: |
+      ADR-0090 Phase B confidence calibrator. Computes a
+      calibrated confidence band (low / medium / high) for a
+      single claim from three signals: source count + verify_claim
+      verdict + critic counter density. Deterministic. Read-only.
+      lab_synthesizer (D10 Phase B) is the primary consumer; the
+      score is recorded in every synthesis report so the operator
+      can see the per-conclusion uncertainty band. The breakdown
+      surfaces each signal's contribution so the operator can
+      audit which signal drove the band.
+    input_schema:
+      type: object
+      required: [claim, source_count]
+      properties:
+        claim:
+          type: string
+          maxLength: 2000
+        source_count:
+          type: integer
+          minimum: 0
+        verdict:
+          type: string
+          enum: [CONFIRMED, REFUTED, INCONCLUSIVE, UNKNOWN]
+          default: UNKNOWN
+        counter_count:
+          type: integer
+          minimum: 0
+          default: 0
+        topic_slug:
+          type: string
+        claim_id:
+          type: string
+    side_effects: read_only
+    archetype_tags: [lab_synthesizer]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
@@ -4103,6 +4192,47 @@ archetypes:
       # No web_fetch (gatherer's lane). No shell_exec. No
       # code_edit. No critique tools (critic's lane). No synthesis
       # tools (lab_synthesizer's lane). Pure decomposition kit.
+
+  # ---- ADR-0090 Phase B — D10 Research Lab critique + synthesis ----
+  # critic + lab_synthesizer kits. critic is guardian-genre
+  # (read_only ceiling); lab_synthesizer is researcher-genre but
+  # its actual kit ceiling is read_only too (no web_fetch needed
+  # — the synthesizer composes over existing memory + tool outputs).
+  # Two new builtin tools land in Phase B:
+  # citation_graph_build.v1 + confidence_score.v1, both read_only.
+  critic:
+    standard_tools:
+      - llm_think.v1                  # adversarial reasoning + counter-evidence framing is the load-bearing tool
+      - memory_recall.v1              # walk analyst decompositions + prior counters + source bundles
+      - memory_write.v1               # write counter-argument attestations tagged for lab_synthesizer pickup
+      - delegate.v1                   # hand off to lab_synthesizer / analyst for follow-up
+      - audit_chain_verify.v1         # chain integrity before publishing counter
+      - text_summarize.v1             # condense long decompositions into per-claim counter spans
+      - operator_profile_read.v1      # ADR-0068 — expertise_level frames counter depth
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      - verify_claim.v1               # ADR-0063 — Reality Anchor cross-check on counter-claims (critics' counters are themselves verifiable claims)
+      # No web_fetch (gatherer's lane). No shell_exec. No code_edit.
+      # No synthesis tools (lab_synthesizer's lane). No decomposition-
+      # mutation tools — forbid_analyst_verdict_overwrite enforces
+      # the read-only-vs-decomposition discipline at governance layer
+      # too. Pure counter-argument kit.
+
+  lab_synthesizer:
+    standard_tools:
+      - llm_think.v1                  # synthesis composition is the load-bearing reasoning tool
+      - memory_recall.v1              # walk analyst decompositions + critic counters + prior syntheses
+      - memory_write.v1               # write synthesis attestations to private memory
+      - delegate.v1                   # hand off to critic / analyst for follow-up; cascade to D1 / D7 / D9
+      - audit_chain_verify.v1         # chain integrity before publishing synthesis
+      - text_summarize.v1             # condense long decomposition + counter sets into synthesis spans
+      - operator_profile_read.v1      # ADR-0068 — areas_of_focus + expertise frame the synthesis
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      - citation_graph_build.v1       # ADR-0090 Phase B — required per require_citation_graph_per_synthesis policy
+      - confidence_score.v1           # ADR-0090 Phase B — required per require_confidence_score_per_conclusion policy
+      # No web_fetch (gatherer's lane). No shell_exec. No code_edit.
+      # No verify_claim (analyst + critic's lane — synthesizer
+      # aggregates verdicts; it doesn't reverify). No critique
+      # tools (critic's lane). Pure synthesis kit.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

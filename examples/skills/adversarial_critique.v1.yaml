@@ -1,0 +1,212 @@
+schema_version: 1
+name: adversarial_critique
+version: '1'
+description: |
+  Critic-D10's primary skill. Consumes an analyst-produced
+  decomposition (by topic_slug + decomposition_entry_id) and
+  composes a structured counter-argument: per claim, surfaces
+  counter-evidence + alternative interpretations + missing
+  considerations the analyst's verdict did not address. Writes a
+  counter-argument attestation tagged for lab_synthesizer pickup.
+
+  Counter-argument only — the critic NEVER overwrites the
+  analyst's verdict (forbid_analyst_verdict_overwrite) and NEVER
+  synthesizes across decompositions (lab_synthesizer's lane). The
+  decomposition + the counter BOTH stand in the audit chain — this
+  is the adversarial-collaboration mode from the ADR-0067 domain
+  manifest ("outputs aren't averaged; both stand").
+
+  Seven-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's areas_of_focus + expertise_level. Frames
+       counter depth.
+    2. recall_decomposition — memory_recall scope=lineage for the
+       analyst's decomposition attestation matching the
+       topic_slug. Without one, the skill explains the critic
+       can't counter what hasn't been decomposed.
+    3. recall_source_bundle — memory_recall scope=lineage for
+       the gatherer's source bundle on the topic. The critic
+       walks the same sources the analyst saw + surfaces what
+       the analyst missed.
+    4. recall_prior_counters — memory_recall scope=lineage for
+       prior counters on the topic. Lets the critic extend
+       rather than duplicate.
+    5. verify_chain_integrity — audit_chain_verify confirms
+       hash-linkage. A counter attested on a broken chain
+       inherits the brokenness.
+    6. verify_counter_claim — verify_claim.v1 dispatched over
+       the operator-provided counter_claim (if any). Counters
+       are themselves verifiable claims; the Reality Anchor
+       cross-check surfaces where the counter rests on ground
+       truth vs. interpretation.
+    7. compose_counter — llm_think composes the structured
+       counter-argument: per claim, list counter-evidence spans
+       + alternative interpretations + missing considerations
+       + a counter_kind (counter_evidence /
+       alternative_interpretation / missing_consideration).
+       NEVER mutates the analyst's verdict.
+    8. write_counter_attestation — memory_write scope=private
+       records the counter tagged for lab_synthesizer pickup
+       (counter_argument:${topic_slug} + attestor:Critic-D10).
+
+  NEVER overwrites the analyst's verdict + NEVER synthesizes.
+  forbid_analyst_verdict_overwrite + forbid_synthesis policies
+  enforce this at governance layer.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - verify_claim.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this counter addresses. Convention: lowercase
+        kebab-case. Matches the analyst's decomposition
+        attestation tag.
+    counter_claim:
+      type: string
+      default: ""
+      description: >
+        Optional operator-suggested counter_claim text. If
+        provided, the critic dispatches verify_claim.v1 over it
+        to anchor the counter on ground truth. If empty, the
+        critic surfaces counters purely from the decomposition +
+        the source bundle.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the counter attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_decomposition
+    tool: memory_recall.v1
+    args:
+      query: "decomposition:${inputs.topic_slug}"
+      mode: lineage
+      limit: 5
+
+  - id: recall_source_bundle
+    tool: memory_recall.v1
+    args:
+      query: "source_bundle:${inputs.topic_slug}"
+      mode: lineage
+      limit: 5
+
+  - id: recall_prior_counters
+    tool: memory_recall.v1
+    args:
+      query: "counter_argument:${inputs.topic_slug}"
+      mode: lineage
+      limit: 10
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: verify_counter_claim
+    tool: verify_claim.v1
+    args:
+      claim: ${inputs.counter_claim}
+
+  - id: compose_counter
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Critic-D10, the D10 Research Lab adversarial-
+        critique agent. Compose a structured counter-argument
+        against the analyst's decomposition for topic
+        "${inputs.topic_slug}".
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          expertise:      ${operator_context.out.expertise_level}
+
+        Operator's suggested counter_claim:
+          ${inputs.counter_claim}
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Reality Anchor verdict on the counter_claim:
+          status:     ${verify_counter_claim.out.status}
+          rationale:  ${verify_counter_claim.out.rationale}
+
+        Analyst's decomposition (lineage memory; Analyst-D10):
+        ${recall_decomposition.out.entries}
+
+        Source bundle (lineage memory; Gatherer-D10):
+        ${recall_source_bundle.out.entries}
+
+        Prior counters on this topic:
+        ${recall_prior_counters.out.entries}
+
+        Produce a structured counter-argument:
+        1. Counter framing — one paragraph naming which
+           decomposition you are countering (entry_id +
+           topic_slug) + the operator's question behind the
+           counter.
+        2. Per-claim counters — for each claim in the
+           decomposition, list:
+             - counter_kind: one of
+                 counter_evidence /
+                 alternative_interpretation /
+                 missing_consideration
+             - counter_summary: one sentence stating the
+               counter.
+             - counter_spans: extracted quotes (≤200 chars each)
+               from the source bundle that support the counter.
+               If no source span supports the counter, mark
+               INTERPRETIVE and explain.
+             - counter_rationale: 2-3 sentences explaining how
+               the counter weakens, qualifies, or reframes the
+               analyst's verdict.
+        3. Counters MUST be specific to the analyst's claims —
+           do NOT introduce a new question; surface what the
+           analyst missed about the question they did decompose.
+        4. NEVER write a new verdict — the analyst's verdict
+           stands; your job is to surface counter-evidence that
+           makes the verdict richer + better-qualified.
+        5. NEVER synthesize across decompositions — that is
+           lab_synthesizer's lane; surface counters per claim
+           only.
+
+        Halt warning if chain status != "ok" — refuse to
+        compose the counter and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_counter_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_counter.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d10_counter_argument"
+        - "counter_argument:${inputs.topic_slug}"
+        - "attestor:Critic-D10"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  counter_text: ${compose_counter.out.response}
+  counter_claim_verdict: ${verify_counter_claim.out.status}
+  decomposition_hits: ${recall_decomposition.out.count}
+  bundle_hits: ${recall_source_bundle.out.count}
+  prior_counter_hits: ${recall_prior_counters.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  counter_entry_id: ${write_counter_attestation.out.entry_id}

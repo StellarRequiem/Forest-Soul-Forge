@@ -1,0 +1,262 @@
+schema_version: 1
+name: research_synthesis
+version: '1'
+description: |
+  Lab_Synthesizer-D10's primary skill. Aggregates the analyst's
+  decomposition + the critic's counter-arguments on a topic into
+  a research-report synthesis. Composes a citation graph
+  (citation_graph_build.v1) + per-conclusion confidence band
+  (confidence_score.v1) alongside the narrative so the operator
+  gets the synthesis + the provenance + the uncertainty as one
+  audited deliverable.
+
+  Synthesis only — the lab_synthesizer NEVER critiques (critic's
+  lane) + NEVER mutates the analyst's decompositions
+  (forbid_decomposition_mutation). The decomposition + counter
+  attestations are read-only inputs; the synthesis is a new
+  attestation that cites them by entry_id.
+
+  Eight-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       areas_of_focus + expertise_level. Frames synthesis depth.
+    2. recall_decompositions — memory_recall scope=lineage for
+       analyst decomposition attestations matching the
+       topic_slug. The synthesis aggregates across these.
+    3. recall_counters — memory_recall scope=lineage for critic
+       counter-argument attestations matching the topic_slug.
+       Counters stand alongside decompositions in the synthesis.
+    4. recall_source_bundle — memory_recall scope=lineage for
+       the gatherer's source bundle on the topic. The synthesis
+       cites sources by source_id from the bundle.
+    5. verify_chain_integrity — audit_chain_verify confirms
+       hash-linkage. A synthesis attested on a broken chain
+       inherits the brokenness.
+    6. build_citation_graph — citation_graph_build.v1 composes
+       a directed claim → source graph from the decomposition's
+       claims + the bundle's source set. Required per
+       require_citation_graph_per_synthesis policy.
+    7. score_primary_conclusion — confidence_score.v1 composes
+       a confidence band for the operator's primary_conclusion
+       from source_count + verify_claim verdict + critic counter
+       density. Required per require_confidence_score_per_conclusion
+       policy.
+    8. compose_synthesis — llm_think composes the synthesis
+       narrative: framing + per-conclusion + citation graph
+       summary + confidence band + dissenting counters preserved
+       in-place. NEVER mutates the decomposition or counters.
+    9. write_synthesis_attestation — memory_write scope=private
+       records the synthesis tagged for operator + cascade
+       pickup (synthesis:${topic_slug} +
+       attestor:Lab_Synthesizer-D10).
+
+  NEVER critiques + NEVER mutates decompositions. forbid_critique
+  + forbid_decomposition_mutation policies enforce this at
+  governance layer.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - citation_graph_build.v1
+  - confidence_score.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, primary_conclusion]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this synthesis addresses. Convention: lowercase
+        kebab-case. Matches the analyst's decomposition + the
+        critic's counter attestation tags.
+    primary_conclusion:
+      type: string
+      description: >
+        The operator's primary conclusion the synthesis should
+        aggregate the lab's work around. The synthesizer scores
+        this conclusion (confidence_score.v1) and frames the
+        synthesis around it.
+    primary_claim_source_count:
+      type: integer
+      default: 0
+      description: >
+        Number of sources supporting the primary conclusion in
+        the gatherer's bundle. Feeds confidence_score.v1.
+    primary_claim_verdict:
+      type: string
+      default: "UNKNOWN"
+      description: >
+        Reality Anchor verdict on the primary conclusion
+        (CONFIRMED / REFUTED / INCONCLUSIVE / UNKNOWN). Pulled
+        from the analyst's decomposition. Feeds
+        confidence_score.v1.
+    primary_claim_counter_count:
+      type: integer
+      default: 0
+      description: >
+        Number of critic counter-arguments against the primary
+        conclusion. Feeds confidence_score.v1.
+    claim_records:
+      type: array
+      default: []
+      description: >
+        Per-claim records for citation_graph_build.v1: list of
+        {claim, sources, claim_kind, verdict}. Optional — if
+        omitted, the synthesis composes from the decomposition
+        narrative without a structured graph (graph_node_count =
+        0 in the output).
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the synthesis
+        attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_decompositions
+    tool: memory_recall.v1
+    args:
+      query: "decomposition:${inputs.topic_slug}"
+      mode: lineage
+      limit: 10
+
+  - id: recall_counters
+    tool: memory_recall.v1
+    args:
+      query: "counter_argument:${inputs.topic_slug}"
+      mode: lineage
+      limit: 10
+
+  - id: recall_source_bundle
+    tool: memory_recall.v1
+    args:
+      query: "source_bundle:${inputs.topic_slug}"
+      mode: lineage
+      limit: 5
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: build_citation_graph
+    tool: citation_graph_build.v1
+    args:
+      topic_slug: ${inputs.topic_slug}
+      claim_records: ${inputs.claim_records}
+
+  - id: score_primary_conclusion
+    tool: confidence_score.v1
+    args:
+      claim: ${inputs.primary_conclusion}
+      topic_slug: ${inputs.topic_slug}
+      source_count: ${inputs.primary_claim_source_count}
+      verdict: ${inputs.primary_claim_verdict}
+      counter_count: ${inputs.primary_claim_counter_count}
+
+  - id: compose_synthesis
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Lab_Synthesizer-D10, the D10 Research Lab
+        synthesis agent. Compose a research-report synthesis on
+        topic "${inputs.topic_slug}" framed around the operator's
+        primary conclusion.
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          expertise:      ${operator_context.out.expertise_level}
+
+        Primary conclusion: ${inputs.primary_conclusion}
+        Operator reason:    ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Confidence band for primary conclusion:
+          band:      ${score_primary_conclusion.out.band}
+          score:     ${score_primary_conclusion.out.score}
+          rationale: ${score_primary_conclusion.out.rationale}
+
+        Citation graph summary:
+          node_count:   ${build_citation_graph.out.node_count}
+          edge_count:   ${build_citation_graph.out.edge_count}
+          source_count: ${build_citation_graph.out.source_count}
+
+        Analyst decompositions (lineage memory; Analyst-D10):
+        ${recall_decompositions.out.entries}
+
+        Critic counter-arguments (lineage memory; Critic-D10):
+        ${recall_counters.out.entries}
+
+        Source bundle (lineage memory; Gatherer-D10):
+        ${recall_source_bundle.out.entries}
+
+        Produce a structured synthesis report:
+        1. Topic framing — one paragraph stating the topic + the
+           operator's question + the primary conclusion the
+           synthesis is framed around.
+        2. Primary conclusion — restate the operator's
+           conclusion + its confidence band (use the band/score
+           above; do NOT recompute). Cite the supporting
+           decomposition entry_ids inline.
+        3. Supporting decompositions — for each decomposition,
+           summarize in 2-3 sentences which claims it analyzed +
+           what verdict it rendered. Cite the entry_id.
+        4. Dissenting counters — for each counter, summarize in
+           2-3 sentences which claim it challenged + the
+           counter_kind + the counter's force. Counters are
+           preserved in-place (no averaging); the synthesis
+           explicitly names where the lab's voices disagree.
+        5. Citation graph summary — one paragraph naming the
+           node/edge/source counts above + which sources span
+           the most claims (most-cited sources) + which claims
+           lack source backing (orphans).
+        6. Operator next steps — concrete actions the operator
+           could take to raise the confidence band (widen the
+           allowlist, dispatch verify_claim over a sub-claim,
+           re-run the gatherer on a specific source set).
+
+        NEVER mutate the decomposition or counter attestations —
+        cite them by entry_id; the originals stand.
+        NEVER critique the analyst's verdict — that is critic's
+        lane; surface dissenting counters by reference, not by
+        re-arguing them.
+
+        Halt warning if chain status != "ok" — refuse to
+        compose the synthesis and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_synthesis_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_synthesis.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d10_synthesis"
+        - "synthesis:${inputs.topic_slug}"
+        - "attestor:Lab_Synthesizer-D10"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  synthesis_text: ${compose_synthesis.out.response}
+  primary_conclusion: ${inputs.primary_conclusion}
+  confidence_band: ${score_primary_conclusion.out.band}
+  confidence_score: ${score_primary_conclusion.out.score}
+  citation_graph_node_count: ${build_citation_graph.out.node_count}
+  citation_graph_edge_count: ${build_citation_graph.out.edge_count}
+  citation_graph_source_count: ${build_citation_graph.out.source_count}
+  decomposition_hits: ${recall_decompositions.out.count}
+  counter_hits: ${recall_counters.out.count}
+  bundle_hits: ${recall_source_bundle.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  synthesis_entry_id: ${write_synthesis_attestation.out.entry_id}

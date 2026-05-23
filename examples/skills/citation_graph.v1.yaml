@@ -1,0 +1,113 @@
+schema_version: 1
+name: citation_graph
+version: '1'
+description: |
+  Lab_Synthesizer-D10's secondary skill. Builds a standalone
+  citation graph for a topic without running a full synthesis.
+  Useful for operator-driven exploration: "show me which sources
+  back which claims on topic X" without composing a narrative
+  report. The synthesis skill embeds a graph inline; this skill
+  is the bare-graph affordance.
+
+  Graph composition only — the lab_synthesizer NEVER mutates the
+  decomposition or counters; it cites them by entry_id. The graph
+  is a read-only view over the analyst's per-claim records.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       areas_of_focus + expertise_level. Frames any narrative
+       overlay on the graph.
+    2. recall_decompositions — memory_recall scope=lineage for
+       analyst decomposition attestations matching the topic.
+       The graph aggregates claim records across decompositions.
+    3. verify_chain_integrity — audit_chain_verify confirms
+       hash-linkage. A graph attested on a broken chain inherits
+       the brokenness.
+    4. build_citation_graph — citation_graph_build.v1 composes
+       a directed claim → source graph from the operator-
+       provided claim_records (or from an empty set if the
+       operator just wants the chain-integrity check + a stub
+       graph).
+    5. write_graph_attestation — memory_write scope=private
+       records the graph tagged for operator pickup
+       (citation_graph:${topic_slug} +
+       attestor:Lab_Synthesizer-D10).
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - citation_graph_build.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, claim_records]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this graph addresses. Convention: lowercase
+        kebab-case.
+    claim_records:
+      type: array
+      description: >
+        Per-claim records for citation_graph_build.v1: list of
+        {claim, sources, claim_kind, verdict}. The operator
+        provides these from the decomposition's structured
+        claim list.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the graph attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_decompositions
+    tool: memory_recall.v1
+    args:
+      query: "decomposition:${inputs.topic_slug}"
+      mode: lineage
+      limit: 10
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: build_citation_graph
+    tool: citation_graph_build.v1
+    args:
+      topic_slug: ${inputs.topic_slug}
+      claim_records: ${inputs.claim_records}
+
+  - id: write_graph_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        Citation graph for ${inputs.topic_slug}.
+        Built at ${build_citation_graph.out.built_at}.
+        Nodes: ${build_citation_graph.out.node_count}.
+        Edges: ${build_citation_graph.out.edge_count}.
+        Sources: ${build_citation_graph.out.source_count}.
+        Chain status: ${verify_chain_integrity.out.status}.
+        Operator reason: ${inputs.operator_reason}.
+      layer: episodic
+      scope: private
+      tags:
+        - "d10_citation_graph"
+        - "citation_graph:${inputs.topic_slug}"
+        - "attestor:Lab_Synthesizer-D10"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  node_count: ${build_citation_graph.out.node_count}
+  edge_count: ${build_citation_graph.out.edge_count}
+  source_count: ${build_citation_graph.out.source_count}
+  decomposition_hits: ${recall_decompositions.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  graph_entry_id: ${write_graph_attestation.out.entry_id}

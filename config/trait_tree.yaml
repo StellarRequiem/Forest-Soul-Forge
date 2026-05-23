@@ -1243,6 +1243,46 @@ roles:
       emotional: 0.5
       embodiment: 0.4
 
+  # ---- ADR-0090 Phase B — D10 Research Lab (critique + synthesis) ----
+  # critic: guardian-genre adversarial-critique role. Consumes the
+  # analyst's per-claim decomposition + composes counter-arguments
+  # (counter-evidence, alternative interpretations, missing
+  # considerations). Writes counter-argument attestations tagged
+  # for lab_synthesizer pickup. Read-only — NEVER overwrites the
+  # analyst's verdict (forbid_analyst_verdict_overwrite) and NEVER
+  # synthesizes across decompositions (lab_synthesizer's lane).
+  # GREEN posture per ADR-0090 Decision 1 — counter-argument is
+  # non-acting; the attestation is the deliverable.
+  critic:
+    description: "Adversarial-critique guardian. Consumes the analyst's per-claim decomposition + composes counter-arguments (counter-evidence + alternative interpretations + missing considerations) + writes counter-argument attestations tagged for lab_synthesizer pickup. NEVER overwrites the analyst's verdict + NEVER synthesizes (lab_synthesizer's lane). GREEN posture. Genre: guardian. ADR-0090 Phase B."
+    domain_weights:
+      security: 0.9     # counter-argument is private; no external boundary crossing
+      audit: 2.8        # every counter-argument attests to which decomposition it challenges
+      cognitive: 2.6    # adversarial reasoning + counter-evidence retrieval is the load-bearing trait
+      communication: 1.5 # counter-arguments are downstream-role consumed
+      emotional: 0.6    # adversarial framing is read-then-respond, low affective load
+      embodiment: 0.4
+
+  # lab_synthesizer: researcher-genre synthesis role. Consumes
+  # analyst decompositions + critic counter-arguments and
+  # composes a research-report synthesis with citation graph
+  # (citation_graph_build.v1) + per-conclusion confidence band
+  # (confidence_score.v1). Renamed from manifest "synthesizer" to
+  # avoid collision with D1's synthesizer (ADR-0090 Decision 2,
+  # same disambiguation pattern as D1's knowledge_verifier vs.
+  # verifier_loop). Read-only — NEVER critiques (critic's lane)
+  # + NEVER mutates the analyst's decompositions
+  # (forbid_decomposition_mutation). GREEN posture.
+  lab_synthesizer:
+    description: "Research-synthesis researcher. Aggregates analyst decompositions + critic counter-arguments into a synthesis report with citation graph (citation_graph_build.v1) + per-conclusion confidence band (confidence_score.v1). Renamed from manifest synthesizer to avoid collision with D1's synthesizer. NEVER critiques (critic's lane) + NEVER mutates decompositions. GREEN posture. Genre: researcher. ADR-0090 Phase B."
+    domain_weights:
+      security: 0.9     # synthesis is private; no external boundary crossing
+      audit: 2.7        # every synthesis attests to source decompositions + critic counters + citation graph
+      cognitive: 2.5    # aggregation + confidence-calibration reasoning is the load-bearing trait
+      communication: 1.8 # synthesis reports are operator-facing prose
+      emotional: 0.5
+      embodiment: 0.4
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so

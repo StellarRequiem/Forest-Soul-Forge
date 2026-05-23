@@ -72,6 +72,12 @@ from forest_soul_forge.tools.builtin.misconception_log import (
 from forest_soul_forge.tools.builtin.spaced_repetition_schedule import (
     SpacedRepetitionScheduleTool,
 )
+from forest_soul_forge.tools.builtin.citation_graph_build import (
+    CitationGraphBuildTool,
+)
+from forest_soul_forge.tools.builtin.confidence_score import (
+    ConfidenceScoreTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -585,3 +591,17 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # picks queue records up and dispatches a reminder via D2 if
     # they want a notification at fire_at.
     registry.register(SpacedRepetitionScheduleTool())
+    # ADR-0090 Phase B — citation_graph_build.v1. Builds a directed
+    # citation graph from per-claim source records: nodes are
+    # unique normalized claims (SHA-256 derived node IDs), edges
+    # are claim→source pairs. Read-only. The lab_synthesizer (D10)
+    # consumes this so every synthesis report ships the citation
+    # graph as an operator-auditable deliverable.
+    registry.register(CitationGraphBuildTool())
+    # ADR-0090 Phase B — confidence_score.v1. Computes a calibrated
+    # confidence band (low / medium / high) for a single claim
+    # from source count + verify_claim verdict + critic-counter
+    # density. Deterministic; read-only. The lab_synthesizer (D10)
+    # writes one per conclusion in every synthesis report so the
+    # operator can see the per-conclusion uncertainty band.
+    registry.register(ConfidenceScoreTool())
