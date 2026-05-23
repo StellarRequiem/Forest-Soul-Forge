@@ -2670,6 +2670,168 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  gatherer:
+    # ADR-0090 Phase A — D10 Research Lab source-gathering role.
+    # Researcher genre, network ceiling (web_fetch is the load-
+    # bearing tool). Pulls source material via allowlisted
+    # web_fetch + lineage memory + D1 catalog reads and composes
+    # structured source-bundle attestations the analyst + critic +
+    # lab_synthesizer consume. Read-only — NEVER analyzes
+    # (analyst's lane), NEVER synthesizes (lab_synthesizer's
+    # lane), NEVER critiques (critic's lane). Same gather-then-
+    # hand-off discipline as D7's content_researcher.
+    policies:
+      - id: forbid_analysis
+        rule: forbid
+        triggers: [decompose_claim, score_evidence, render_verdict]
+        rationale: |
+          Decomposing claims + rendering verdicts is the analyst's
+          exclusive lane (D10 Phase A). The gatherer composes the
+          SOURCE BUNDLE but NEVER opens claims. Letting the gatherer
+          analyze would conflate sourcing with reasoning + bypass
+          the analyst's verify_claim-cross-referenced verdict
+          discipline. Same flag-not-rewrite separation as D1's
+          prospector vs synthesizer + D7's content_researcher vs
+          writer split.
+      - id: forbid_synthesis
+        rule: forbid
+        triggers: [compose_synthesis, aggregate_across_claims, render_lab_report]
+        rationale: |
+          Lab synthesis is lab_synthesizer's exclusive lane (D10
+          Phase B). The gatherer surfaces sources; combining them
+          into a research report would conflate sourcing with
+          synthesis + bypass the citation-graph + confidence-
+          scoring discipline the synthesizer applies.
+      - id: forbid_silent_source_substitution
+        rule: forbid
+        triggers: [swap_source, use_unsourced_claim, fetch_outside_allowlist]
+        rationale: |
+          Sources MUST originate in the operator-curated allowlist
+          (forest-files / forest-browser-history / forest-github)
+          OR in the D1 catalog. Composing a bundle from a non-
+          allowlisted URL would corrupt the bundle's provenance +
+          invalidate the deterministic-replay contract downstream
+          roles depend on.
+      - id: require_bundle_attestation
+        rule: require
+        triggers: [emit_source_bundle, finalize_source_set]
+        rationale: |
+          Every bundle emits a memory_write attestation with
+          (topic_slug, source_count, source_url_set, fetch_ts,
+          attestor, ts). Without the attestation, analyst + critic +
+          lab_synthesizer can't trace which bundle a claim
+          decomposition rests on + the operator can't audit which
+          source set shaped a given verdict.
+      - id: require_chain_integrity_before_bundle
+        rule: require
+        triggers: [emit_source_bundle]
+        rationale: |
+          The bundle rests on memory + chain content (prior bundles,
+          allowlist attestations). A bundle attested on a broken
+          chain inherits the brokenness + its provenance can't be
+          re-verified.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - decompose_claim
+      - score_evidence
+      - render_verdict
+      - compose_synthesis
+      - fetch_outside_allowlist
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Curate the source allowlist — the gatherer pulls from what you configure; widening the allowlist is operator-side authorship."
+      - "Audit bundle attestations weekly — a bundle that consistently misses operator-flagged sources is a signal the allowlist needs widening."
+      - "Verify the gatherer→analyst handoff fires — if bundles accumulate without analyst pickup, decompositions won't reflect current sources."
+      - "Treat a chain_broken halt as an emergency — a bundle attested on a broken chain inherits the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  analyst:
+    # ADR-0090 Phase A — D10 Research Lab deep-analysis role.
+    # Researcher genre, read_only ceiling. Consumes gatherer-
+    # produced source bundles + composes per-claim decompositions
+    # (claim → cited support spans → verify_claim verdict). Writes
+    # analysis attestations tagged for critic + lab_synthesizer
+    # pickup. NEVER critiques (critic's lane) + NEVER synthesizes
+    # (lab_synthesizer's lane). GREEN posture per ADR-0090
+    # Decision 1 — deep-analysis is non-acting; the verdict + the
+    # attestation are the deliverables.
+    policies:
+      - id: forbid_critique
+        rule: forbid
+        triggers: [counter_argue, refute_claim, render_adversarial_position]
+        rationale: |
+          Adversarial critique is critic's exclusive lane (D10
+          Phase B). The analyst composes the DECOMPOSITION + the
+          verdict but NEVER argues against it. Letting the analyst
+          critique would conflate analysis with adversarial
+          checking + bypass the critic's per-claim counter-evidence
+          discipline. The two-role split is the load-bearing
+          governance separation: one decomposes, one challenges,
+          neither can short-circuit the other's lane.
+      - id: forbid_synthesis
+        rule: forbid
+        triggers: [compose_synthesis, aggregate_across_decompositions, render_lab_report]
+        rationale: |
+          Lab synthesis is lab_synthesizer's exclusive lane (D10
+          Phase B). The analyst surfaces per-claim verdicts;
+          aggregating across them into a final report would
+          conflate analysis with synthesis + bypass the citation-
+          graph + confidence-scoring discipline the synthesizer
+          applies.
+      - id: require_verify_claim_per_decomposition
+        rule: require
+        triggers: [emit_decomposition, finalize_verdict]
+        rationale: |
+          The analyst MUST run verify_claim.v1 over EACH claim it
+          decomposes. Skipping verify_claim would let the analyst's
+          verdict rest on the gatherer's source set without the
+          Reality Anchor cross-check + would short-circuit the
+          ground-truth verification ADR-0063 makes load-bearing.
+      - id: require_decomposition_attestation
+        rule: require
+        triggers: [emit_decomposition, finalize_verdict]
+        rationale: |
+          Every decomposition emits a memory_write attestation
+          with (topic_slug, source_bundle_id, claim_count, verdict,
+          verify_claim_results, attestor, ts). Without the
+          attestation, critic + lab_synthesizer can't trace which
+          source bundle a verdict rests on + the operator can't
+          audit which decomposition shaped a given conclusion.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_decomposition_external, post_verdict_to_external_service]
+        rationale: |
+          Decompositions are private/lineage scope. Operator-driven
+          sharing is a separate explicit action; the analyst never
+          crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - counter_argue
+      - refute_claim
+      - compose_synthesis
+      - render_lab_report
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the analyst as your decomposer, not your synthesizer — the per-claim verdict is real; the cross-claim aggregation is the lab_synthesizer's job."
+      - "Audit decomposition attestations weekly — a decomposition that consistently surfaces unverified verdicts is a signal verify_claim's evidence corpus needs filling in."
+      - "Treat a verify_claim INCONCLUSIVE verdict as an action item, not a failure — INCONCLUSIVE means the corpus didn't have ground truth, not that the claim is wrong."
+      - "Treat a chain_broken halt as an emergency — decompositions attested on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

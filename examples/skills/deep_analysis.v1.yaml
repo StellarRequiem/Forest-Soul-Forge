@@ -1,0 +1,185 @@
+schema_version: 1
+name: deep_analysis
+version: '1'
+description: |
+  Analyst-D10's primary skill. Consumes a gatherer-produced
+  source bundle (by topic_slug) + composes per-claim
+  decompositions: each candidate claim → supporting source
+  excerpts → verify_claim.v1 verdict (CONFIRMED / REFUTED /
+  INCONCLUSIVE). Writes a decomposition attestation tagged for
+  critic + lab_synthesizer pickup.
+
+  Decomposition + verdict only — the analyst NEVER critiques
+  (critic's lane) + NEVER synthesizes across decompositions
+  (lab_synthesizer's lane).
+
+  Seven-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       areas_of_focus + expertise_level. Frames decomposition
+       depth (deeper for areas_of_focus matches).
+    2. recall_source_bundle — memory_recall scope=lineage for
+       the gatherer's bundle attestation matching the
+       topic_slug. Without one, the skill explains the analyst
+       can't decompose without a bundle.
+    3. recall_prior_decompositions — memory_recall scope=lineage
+       for prior decomposition attestations on the topic. Lets
+       the analyst extend rather than duplicate.
+    4. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. A decomposition attested
+       on a broken chain inherits the brokenness.
+    5. verify_primary_claim — verify_claim.v1 dispatched over
+       the operator's primary_claim text against the corpus.
+       Reality Anchor cross-check is load-bearing per the
+       require_verify_claim_per_decomposition policy.
+    6. compose_decomposition — llm_think composes a structured
+       decomposition: per claim, list source spans + verdict +
+       confidence rationale. NEVER critiques.
+    7. write_decomposition_attestation — memory_write
+       scope=private records the decomposition tagged for
+       critic + lab_synthesizer pickup
+       (decomposition:${topic_slug} + attestor:Analyst-D10).
+
+  NEVER critiques + NEVER synthesizes. forbid_critique +
+  forbid_synthesis policies enforce this at governance layer.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - verify_claim.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, primary_claim]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this decomposition addresses. Convention:
+        lowercase kebab-case. Matches the gatherer's bundle
+        attestation tag.
+    primary_claim:
+      type: string
+      description: >
+        The operator's primary claim to decompose + verify. The
+        analyst surfaces supporting + counter-supporting source
+        spans from the bundle and renders a verdict via
+        verify_claim.v1.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the decomposition
+        attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_source_bundle
+    tool: memory_recall.v1
+    args:
+      query: "source_bundle:${inputs.topic_slug}"
+      mode: lineage
+      limit: 5
+
+  - id: recall_prior_decompositions
+    tool: memory_recall.v1
+    args:
+      query: "decomposition:${inputs.topic_slug}"
+      mode: lineage
+      limit: 10
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: verify_primary_claim
+    tool: verify_claim.v1
+    args:
+      claim: ${inputs.primary_claim}
+
+  - id: compose_decomposition
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Analyst-D10, the D10 Research Lab deep-analysis
+        agent. Compose a per-claim decomposition for topic
+        "${inputs.topic_slug}" centered on the operator's primary
+        claim.
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          expertise:      ${operator_context.out.expertise_level}
+
+        Primary claim: ${inputs.primary_claim}
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Source bundle (lineage memory; Gatherer-D10):
+        ${recall_source_bundle.out.entries}
+
+        Prior decompositions on this topic:
+        ${recall_prior_decompositions.out.entries}
+
+        Reality Anchor verdict on the primary claim:
+          status:     ${verify_primary_claim.out.status}
+          rationale:  ${verify_primary_claim.out.rationale}
+
+        Produce a structured decomposition:
+        1. Primary claim restatement — one paragraph framing
+           the claim + the operator's question behind it.
+        2. Supporting source spans — extracted quotes from the
+           bundle that support the claim. Each span: source_id,
+           excerpt (max 200 chars), why-it-supports rationale.
+        3. Counter source spans — extracted quotes that would
+           refute or qualify. Same shape as #2. If none, say so.
+        4. Sub-claims — break the primary claim into 2-5
+           atomic sub-claims. For each, mark INTERNAL_VERDICT
+           (CONFIRMED / REFUTED / INCONCLUSIVE) based on the
+           spans above + the Reality Anchor verdict on the
+           primary claim. INTERNAL_VERDICT is the analyst's
+           judgment; the operator's lane is to dispatch
+           verify_claim.v1 over each sub-claim for the
+           authoritative cross-check.
+        5. Confidence rationale — qualitative confidence band
+           (low / medium / high) + WHY. This is NOT the
+           confidence_score.v1 output (lab_synthesizer's lane);
+           it's the analyst's per-claim judgment.
+
+        NEVER critique your own decomposition — surface the
+        analysis as fairly as possible; the critic agent
+        (Critic-D10, D10 Phase B) will adversarially probe it.
+        NEVER aggregate across decompositions — lab_synthesizer
+        owns synthesis.
+
+        Halt warning if chain status != "ok" — refuse to
+        compose the decomposition and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_decomposition_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_decomposition.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d10_decomposition"
+        - "decomposition:${inputs.topic_slug}"
+        - "attestor:Analyst-D10"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  decomposition_text: ${compose_decomposition.out.response}
+  primary_claim_verdict: ${verify_primary_claim.out.status}
+  bundle_hits: ${recall_source_bundle.out.count}
+  prior_decomposition_hits: ${recall_prior_decompositions.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  decomposition_entry_id: ${write_decomposition_attestation.out.entry_id}

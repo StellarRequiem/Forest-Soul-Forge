@@ -1205,6 +1205,44 @@ roles:
       emotional: 0.7
       embodiment: 0.5
 
+  # ---- ADR-0090 Phase A — D10 Research Lab (gathering + analysis) ----
+  # gatherer: researcher-genre source-gathering role. Pulls source
+  # material via allowlisted web_fetch + lineage memory + D1 catalog
+  # reads and produces structured source-bundle attestations the
+  # analyst + critic + synthesizer consume. Read-only; NEVER
+  # synthesizes (lab_synthesizer's lane) + NEVER critiques (critic's
+  # lane). GREEN posture per ADR-0090 Decision 1 — sourcing is
+  # non-acting; the brief is operator-facing prose + the bundle is
+  # downstream-role consumed.
+  gatherer:
+    description: "Source-gathering researcher. Pulls source material via web_fetch (allowlisted) + lineage memory + D1 catalog reads (memory_recall) and composes structured source-bundle attestations the analyst + critic + synthesizer pick up. NEVER analyzes (analyst's lane) + NEVER synthesizes (lab_synthesizer's lane) + NEVER critiques (critic's lane). GREEN posture. Genre: researcher. ADR-0090 Phase A."
+    domain_weights:
+      security: 1.1     # web_fetch crosses the allowlist boundary; non-trivial security floor
+      audit: 2.4        # every bundle attests to its url-set + fetch timestamps + source hashes
+      cognitive: 2.0    # query-decomposition + source-selection reasoning
+      communication: 1.7 # bundles are operator + downstream-role consumed
+      emotional: 0.5
+      embodiment: 0.4
+
+  # analyst: researcher-genre deep-analysis role. Consumes
+  # gatherer-produced source bundles + composes per-claim
+  # decompositions (claim → cited support spans → verify_claim
+  # verdict). Writes analysis attestations tagged for critic +
+  # lab_synthesizer pickup. Read-only; NEVER critiques the
+  # decomposition (critic's lane) + NEVER synthesizes across
+  # decompositions (lab_synthesizer's lane). GREEN posture per
+  # ADR-0090 Decision 1 (deep-analysis is non-acting; the verdict
+  # is the deliverable).
+  analyst:
+    description: "Deep-analysis researcher. Consumes gatherer source bundles + composes per-claim decompositions (claim → cited support spans → verify_claim verdict) + writes analysis attestations tagged for critic + lab_synthesizer pickup. NEVER critiques (critic's lane) + NEVER synthesizes (lab_synthesizer's lane). GREEN posture. Genre: researcher. ADR-0090 Phase A."
+    domain_weights:
+      security: 0.8     # decomposition is private; no external boundary crossing
+      audit: 2.6        # every decomposition attests to source bundle + verdict provenance
+      cognitive: 2.6    # claim-decomposition + verdict reasoning is the load-bearing trait
+      communication: 1.6 # decomposition is downstream-role consumed
+      emotional: 0.5
+      embodiment: 0.4
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so

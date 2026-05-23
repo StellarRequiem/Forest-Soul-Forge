@@ -1,0 +1,188 @@
+schema_version: 1
+name: source_gathering
+version: '1'
+description: |
+  Gatherer-D10's primary skill. Takes an operator-provided
+  research_question + optional source URL list, fetches each via
+  web_fetch (operator-allowlisted), pulls related catalog entries
+  from lineage memory (D1 librarian's catalog via memory_recall),
+  and composes a structured source bundle the analyst + critic +
+  lab_synthesizer consume.
+
+  Sourcing + bundle composition only — the gatherer NEVER
+  decomposes claims (analyst's lane) + NEVER synthesizes across
+  bundles (lab_synthesizer's lane) + NEVER critiques (critic's
+  lane). Bundle attestations land in private memory tagged for
+  analyst pickup (source_bundle:${topic_slug}).
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's areas_of_focus + timezone. Lens for source
+       relevance scoring.
+    2. recall_prior_bundles — memory_recall scope=private for
+       any prior bundle on this topic_slug. Recently-built
+       bundles are surfaced; the operator decides whether the
+       new pass extends or replaces them.
+    3. fetch_primary_source — web_fetch pulls the first source
+       URL if provided. The per-(agent, tool) allowed_hosts
+       constraint patched at birth time enforces the operator
+       allowlist (forbid_silent_source_substitution policy
+       enforces it at governance layer too). When the URL is
+       empty, the skill composes purely from lineage memory.
+    4. recall_lineage_catalog — memory_recall scope=lineage for
+       D1-catalog entries tagged topic:${topic_slug}. Bridges
+       the D1 → D10 cascade — the analyst's decomposition
+       inherits the operator's curated knowledge surface.
+    5. verify_chain_integrity — audit_chain_verify confirms
+       hash-linkage end-to-end. A bundle attested on a broken
+       chain inherits the brokenness.
+    6. compose_bundle — llm_think composes a structured bundle
+       with per-source metadata (url, fetch_ts, content excerpt)
+       + a topic framing + an analyst-action hint (proceed to
+       decompose / surface for operator review / gap detected).
+    7. write_bundle_attestation — memory_write scope=private
+       records the bundle tagged for analyst pickup
+       (source_bundle:${topic_slug} + attestor:Gatherer-D10).
+
+  NEVER analyzes claims. forbid_analysis policy enforces this
+  at governance layer regardless of posture.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - web_fetch.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, research_question]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this bundle binds to. Convention: lowercase
+        kebab-case. Used as the source_bundle:${slug}
+        memory tag so the analyst's decomposition picks it up.
+    research_question:
+      type: string
+      description: >
+        The operator's research question — frames source
+        selection. Recorded in the bundle attestation so the
+        operator can audit which question shaped which sources.
+    source_url:
+      type: string
+      default: ""
+      description: >
+        Optional primary URL to fetch. Must resolve under the
+        operator-allowlisted host set (web_fetch enforces this
+        at the tool layer). When empty, the skill composes from
+        lineage memory only.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the bundle attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_prior_bundles
+    tool: memory_recall.v1
+    args:
+      query: "source_bundle:${inputs.topic_slug}"
+      mode: private
+      limit: 5
+
+  - id: fetch_primary_source
+    tool: web_fetch.v1
+    args:
+      url: ${inputs.source_url}
+      method: GET
+
+  - id: recall_lineage_catalog
+    tool: memory_recall.v1
+    args:
+      query: "topic:${inputs.topic_slug}"
+      mode: lineage
+      limit: 20
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_bundle
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Gatherer-D10, the D10 Research Lab source-
+        gathering agent. Compose a structured source bundle for
+        topic "${inputs.topic_slug}" answering the operator's
+        research question.
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Research question: ${inputs.research_question}
+        Operator reason:   ${inputs.operator_reason}
+        Source URL:        ${inputs.source_url}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Prior bundles on this topic (most recent first):
+        ${recall_prior_bundles.out.entries}
+
+        Fetched source content (truncated; empty when no URL):
+        ${fetch_primary_source.out.body}
+
+        D1 lineage catalog entries on this topic:
+        ${recall_lineage_catalog.out.entries}
+
+        Produce a structured bundle:
+        1. Topic framing — one paragraph of context the analyst
+           needs to start decomposing claims.
+        2. Per-source records — for each source (fetched URL +
+           catalog entries), include: source_id, source_url or
+           catalog_entry_id, fetch_ts (Pacific), content excerpt
+           (max 500 chars), candidate-claim hints (1-3 phrases
+           the analyst should look at).
+        3. Source coverage assessment — does this bundle have
+           enough breadth for the research question? Flag gaps.
+        4. Analyst-action hint: proceed to decompose / surface
+           for operator review (allowlist widening needed) /
+           gap detected (insufficient sources).
+
+        NEVER decompose claims yourself — that's the analyst's
+        lane. NEVER render verdicts — that's verify_claim's job
+        and the analyst dispatches it. Surface candidate claims
+        as hints only.
+
+        Halt warning if chain status != "ok" — refuse to compose
+        the bundle and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_bundle_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_bundle.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d10_source_bundle"
+        - "source_bundle:${inputs.topic_slug}"
+        - "attestor:Gatherer-D10"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  bundle_text: ${compose_bundle.out.response}
+  source_status: ${fetch_primary_source.out.status}
+  catalog_hits: ${recall_lineage_catalog.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  bundle_entry_id: ${write_bundle_attestation.out.entry_id}

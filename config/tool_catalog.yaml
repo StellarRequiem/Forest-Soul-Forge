@@ -4067,6 +4067,43 @@ archetypes:
       # No web_fetch. No shell_exec. No code_edit. No curriculum
       # mutation tools (curriculum_designer's lane).
 
+  # ---- ADR-0090 Phase A — D10 Research Lab gathering + analysis ----
+  # gatherer + analyst kits. Both researcher-genre. The gatherer
+  # operates at network ceiling (web_fetch is the load-bearing
+  # tool); the analyst at read_only ceiling (verify_claim is the
+  # load-bearing tool). No new builtin tools land here — both
+  # roles reuse existing kit.
+  gatherer:
+    standard_tools:
+      - llm_think.v1                  # query decomposition + source-selection reasoning
+      - memory_recall.v1              # walk lineage + D1 catalog reads + prior bundles
+      - memory_write.v1               # write source-bundle attestations to private memory
+      - delegate.v1                   # hand off to analyst / critic / lab_synthesizer
+      - audit_chain_verify.v1         # chain integrity before publishing bundle
+      - text_summarize.v1             # condense long source sets into operator-readable summaries
+      - operator_profile_read.v1      # ADR-0068 — areas_of_focus + expertise frame the bundle
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      - web_fetch.v1                  # allowlisted source pulls (load-bearing for gathering)
+      # No shell_exec. No code_edit. No verify_claim (analyst's
+      # lane). No synthesis tools (lab_synthesizer's lane).
+      # No critique tools (critic's lane). Pure source-bundle
+      # composition kit.
+
+  analyst:
+    standard_tools:
+      - llm_think.v1                  # claim-decomposition + verdict reasoning is the load-bearing tool
+      - memory_recall.v1              # walk source bundles + prior decompositions
+      - memory_write.v1               # write decomposition attestations tagged for critic / lab_synthesizer pickup
+      - delegate.v1                   # hand off to critic / lab_synthesizer / gatherer for follow-up
+      - audit_chain_verify.v1         # chain integrity before publishing decomposition
+      - text_summarize.v1             # condense long source bundles into per-claim spans
+      - operator_profile_read.v1      # ADR-0068 — expertise_level frames decomposition depth
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      - verify_claim.v1               # ADR-0063 — Reality Anchor cross-check (load-bearing per require_verify_claim_per_decomposition)
+      # No web_fetch (gatherer's lane). No shell_exec. No
+      # code_edit. No critique tools (critic's lane). No synthesis
+      # tools (lab_synthesizer's lane). Pure decomposition kit.
+
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard
   # guardian read-only support set. The scanner reads framework
