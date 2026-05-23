@@ -42,11 +42,13 @@ description: |
        candidate + chooses (a) stamp via memory_flag_contradiction.v1
        direct dispatch, (b) accept-as-exception, or (c) defer.
 
-  The memory_flag_contradiction.v1 tool is listed in the skill's
-  requires set so the verifier's kit-resolution check stays
-  consistent — but the actual flag write is operator-driven,
-  not in-skill. This preserves the flag-not-rewrite invariant
-  AND keeps the operator-gate load-bearing.
+  The memory_flag_contradiction.v1 tool is intentionally NOT in
+  the verifier's kit (side_effects=filesystem would exceed
+  guardian's read_only ceiling). The flag-write is dispatched by
+  the operator AFTER reviewing the verifier's escalation. This
+  preserves the flag-not-rewrite invariant (ADR-0036
+  §flag-not-rewrite) at the kit-composition layer AND keeps the
+  operator-review gate load-bearing.
 
   Output goes back to the operator: the flag count + the
   rationale (which candidates were dropped at ground-truth,
@@ -56,10 +58,15 @@ requires:
   - memory_recall.v1
   - audit_chain_verify.v1
   - knowledge_contradiction_scan.v1
-  - memory_flag_contradiction.v1
   - llm_think.v1
   - verify_claim.v1
   - delegate.v1
+  # memory_flag_contradiction.v1 (side_effects=filesystem) is NOT
+  # required — the actual flag-write is operator-dispatched
+  # post-YELLOW-review per the skill description. Keeping the
+  # tool out of `requires` matches the verifier's kit composition
+  # (the tool isn't in the kit either) and keeps the skill
+  # resolvable for a guardian-genre agent.
 
 inputs:
   type: object

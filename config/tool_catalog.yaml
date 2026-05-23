@@ -3260,13 +3260,17 @@ archetypes:
       - delegate.v1                        # escalate confirmed contradictions to operator
       - audit_chain_verify.v1              # chain integrity before flagging
       - text_summarize.v1                  # condense contradiction evidence for operator review
-      - knowledge_contradiction_scan.v1    # ADR-0086 Phase C — the candidate detector
-      - memory_flag_contradiction.v1       # ADR-0036 T2 — the flag-not-rewrite substrate
-      - verify_claim.v1                    # ADR-0063 — Reality Anchor check before flag escalation
-      # No memory_write — the only write surface is the flag,
-      # which goes through memory_flag_contradiction.v1's
-      # purpose-built substrate (contradiction-row writer, not
-      # raw memory_write).
+      - knowledge_contradiction_scan.v1    # ADR-0086 Phase C — the candidate detector (read_only)
+      - verify_claim.v1                    # ADR-0063 — Reality Anchor cross-check before escalation (read_only)
+      # memory_flag_contradiction.v1 (side_effects=filesystem)
+      # would exceed guardian's read_only ceiling and is NOT in
+      # this kit. The actual flag-write is operator-dispatched
+      # post-YELLOW-review, NOT in-agent — same separation as
+      # policy_enforcer (which surfaces remediations via memory
+      # writes but never applies them). This keeps the verifier's
+      # surface aligned with its flag-not-rewrite invariant
+      # (ADR-0036 §flag-not-rewrite) at the kit-composition layer,
+      # not just at the constitution-policy layer.
 
   # ---- ADR-0086 Phase B — D1 Knowledge Forge synthesis -----------------
   # synthesizer kit: topic_genealogy_build.v1 +
