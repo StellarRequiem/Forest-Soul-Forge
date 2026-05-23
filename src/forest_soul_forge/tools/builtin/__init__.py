@@ -24,6 +24,7 @@ from forest_soul_forge.tools.builtin.git_local_scan import GitLocalScanTool
 from forest_soul_forge.tools.builtin.git_log_read import GitLogReadTool
 from forest_soul_forge.tools.builtin.file_integrity import FileIntegrityTool
 from forest_soul_forge.tools.builtin.framework_check import FrameworkCheckTool
+from forest_soul_forge.tools.builtin.policy_lint import PolicyLintTool
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -410,3 +411,9 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # required_attestation, audit_event_required) against the live
     # system. Read-only; compliance_scanner is the primary consumer.
     registry.register(FrameworkCheckTool())
+    # ADR-0085 Phase C — policy_lint.v1. Reads operator configs +
+    # the framework's lint_rules section, emits findings + proposed
+    # remediations. Does NOT apply remediations; policy_enforcer
+    # (YELLOW posture) consumes the proposals and surfaces them to
+    # the operator for approval. Read-only.
+    registry.register(PolicyLintTool())

@@ -236,7 +236,15 @@ Each phase follows the established template:
   CC6.1/CC7.2/CC8.1/A1.2/C1.1); skill manifest
   `examples/skills/compliance_scan.v1.yaml`; birth script
   `dev-tools/birth-compliance-scanner.command`.
-- **Phase C** — enforcement. Status: NOT STARTED.
+- **Phase C** — enforcement. Status: CLOSED (2026-05-22).
+  Shipped: `policy_enforcer` role (actuator genre, YELLOW posture)
+  in trait_tree / genres / constitution_templates / tool_catalog;
+  new builtin tool `policy_lint.v1` with 20 unit tests; SOC2
+  framework yaml gains `lint_rules` section (4 lint rules
+  covering yaml_key_required / yaml_key_forbidden /
+  file_max_age_days); skill manifest
+  `examples/skills/policy_enforcement.v1.yaml`; birth script
+  `dev-tools/birth-policy-enforcer.command`.
 - **Phase D** — reporting + cascade. Status: NOT STARTED.
 
 ADR flips to **Accepted** when Phase D closes and

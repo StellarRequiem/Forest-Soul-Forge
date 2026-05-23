@@ -875,6 +875,49 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  policy_enforcer:
+    # ADR-0085 Phase C — D8 Compliance policy enforcer. Actuator
+    # genre, YELLOW posture default (per ADR-0085 Decision 5).
+    # The agent dispatches policy_lint.v1, surfaces findings as
+    # remediation proposals, and routes each proposal to the
+    # operator approval queue via delegate. NEVER applies a
+    # remediation silently — the action surface is the operator's
+    # later approval + manual fix, not the agent.
+    policies:
+      - id: forbid_silent_remediation
+        rule: forbid
+        triggers: [apply_remediation, install_fix, edit_config_for_compliance, write_remediation_to_disk]
+        rationale: "Remediation execution is operator-owned. Even with YELLOW posture gating tool calls, the agent must NEVER apply a remediation in-line — the surface is: scan → propose → escalate → operator applies. Silent application would invert the audit chain's traceability."
+      - id: require_proposal_attestation
+        rule: require
+        triggers: [propose_remediation, escalate_remediation, emit_lint_finding]
+        rationale: "Every proposed remediation emits an audit attestation with (file, rule_id, severity, proposal_text, attestor). Without the attestation, the proposal can't be reproduced or audited later."
+      - id: forbid_framework_yaml_mutation
+        rule: forbid
+        triggers: [edit_framework_yaml, install_lint_rule, write_compliance_framework]
+        rationale: "Framework yamls are operator-authored + committed to via the proper workflow. The enforcer reads them; the operator authors them."
+      - id: require_chain_integrity_before_proposal
+        rule: require
+        triggers: [emit_remediation_proposal, escalate_to_operator]
+        rationale: "Before any proposal is escalated to the operator, audit_chain_verify must confirm the chain is hash-linked end-to-end. Proposals built on a broken chain inherit the brokenness."
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.80
+    out_of_scope:
+      - apply_remediation
+      - edit_framework_yaml
+      - install_fix_to_disk
+      - write_to_config_silently
+    operator_duties:
+      - "Review every remediation proposal via the approval queue — the enforcer surfaces; you decide whether to apply, accept-as-exception, or defer."
+      - "Move from YELLOW to GREEN posture only after the proposal-quality bar is bedded in — false-positive proposals waste your time; the YELLOW friction is the bedding-in step."
+      - "When a proposal would touch operator-committed config (settings.json, framework yamls), apply the fix yourself via the proper editing + git workflow — do not authorize the agent to edit those files even via posture promotion."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   compliance_scanner:
     # ADR-0085 Phase B — D8 Compliance framework scanner. Guardian
     # genre, read-only ceiling. The agent reads framework yamls +

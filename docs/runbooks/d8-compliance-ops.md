@@ -12,7 +12,7 @@ that lands D8 Phase A (this runbook will grow as Phases B–D ship).
 |---|---|---|---|
 | **A** | audit_archivist + evidence_collector | none — reuses file_integrity + audit_chain_verify | CLOSED |
 | **B** | compliance_scanner | framework_check.v1 | CLOSED |
-| C | policy_enforcer | policy_lint.v1 | pending |
+| **C** | policy_enforcer | policy_lint.v1 | CLOSED |
 | D | report_generator | audit_packet_generate.v1 | pending |
 
 Each phase = one commit + one push, so the operator can verify
@@ -241,8 +241,97 @@ All gap reports: `memory_recall.v1` with
 
 ---
 
-## Phase C–D (pending)
+## Phase C — enforcement
 
-This runbook will grow as Phases C / D ship. Each phase
-adds one role, one builtin tool, one skill, and one runbook
-section here.
+### What it adds
+
+- `policy_enforcer` (actuator genre, YELLOW posture): runs lint
+  evaluations + surfaces remediation proposals; NEVER applies a
+  fix silently.
+- `policy_lint.v1` builtin tool: reads a framework's `lint_rules`
+  section + lints operator config files. Rule kinds:
+  yaml_key_required, yaml_key_forbidden, file_max_age_days.
+- SOC2 framework gains a `lint_rules` section: writes_enabled_
+  documented, signed_commits_enforced, anonymous_disabled,
+  token_rotation_recent.
+- `policy_enforcement.v1` skill — six-step pipeline that runs
+  the lint, synthesizes operator-readable proposals, escalates
+  via delegate, attests via memory_write.
+
+### Posture rationale
+
+The enforcer is the ONLY action-class role in D8. YELLOW posture
+default means every dispatched tool call routes through the
+approval gate. Combined with:
+- `forbid_silent_remediation` policy (governance layer)
+- kit composition with NO `code_edit` / `shell_exec`
+  (tool-availability layer)
+
+…the agent cannot apply a fix to disk by any path. The
+"enforcer" verb refers to surfacing + gating, not autonomous
+execution.
+
+### Birth the agent
+
+```bash
+./dev-tools/force-restart-daemon.command
+./dev-tools/birth-policy-enforcer.command
+```
+
+### First proposal cycle
+
+```
+POST /agents/<PolicyEnforcer-D8-id>/tools/call
+{
+  "tool_name": "skill_run",
+  "tool_version": "1",
+  "session_id": "<uuid>",
+  "args": {
+    "skill_name": "policy_enforcement",
+    "skill_version": "1",
+    "inputs": {
+      "framework_id": "soc2",
+      "target_paths": [".claude/settings.local.json", "config/genres.yaml"],
+      "operator_reason": "first soc2 lint sweep"
+    }
+  }
+}
+```
+
+The skill runs `policy_lint.v1`, condenses findings into proposal
+text, escalates via `delegate.v1` to the operator approval queue,
+and writes the proposal bundle to private memory tagged
+`framework:soc2` for trending.
+
+### Promotion to GREEN
+
+Move from YELLOW to GREEN posture only after several proposal
+cycles confirm the false-positive rate is low. The YELLOW
+friction is the bedding-in step — false positives waste the
+operator's time; YELLOW makes that cost visible.
+
+### Authoring new lint rules
+
+The framework yaml's `lint_rules` section is operator-authored
+just like the system-level `controls` section. Each rule:
+
+```yaml
+- rule_id: <unique>
+  kind: yaml_key_required | yaml_key_forbidden | file_max_age_days
+  severity: high | medium | low
+  params:
+    # kind-specific; see policy_lint.v1's docstring
+    key: ...
+    expected_value: ...
+    value_pattern: ...
+    file_pattern: ...
+  remediation: |
+    Operator-readable fix description.
+```
+
+---
+
+## Phase D (pending)
+
+Phase D adds report_generator + audit_packet_generate.v1 +
+cascade wiring + the umbrella birth script.

@@ -1,0 +1,149 @@
+schema_version: 1
+name: policy_enforcement
+version: '1'
+description: |
+  PolicyEnforcer-D8's primary remediation-proposal skill. Runs
+  policy_lint.v1 against operator-supplied config files,
+  synthesizes a remediation proposal for each finding, escalates
+  each proposal to the operator via delegate.v1, and writes a
+  proposal attestation to private memory.
+
+  **Does NOT apply remediations.** YELLOW posture default +
+  forbid_silent_remediation policy + kit composition (no
+  code_edit / shell_exec) all enforce this. The skill surfaces
+  proposals; the operator applies them out-of-band.
+
+  Six-step pipeline:
+    1. prior_context — memory_recall scope=private for prior
+       proposals against this framework_id; surfaces patterns
+       (a control failing the same lint for weeks needs
+       different attention than a one-off).
+    2. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked end-to-end.
+    3. run_lint — policy_lint.v1 evaluates the target paths
+       against the framework's lint_rules.
+    4. synthesize_proposals — llm_think turns the raw findings
+       into operator-readable proposal text (each with the
+       affected file + rule_id + impact assessment +
+       suggested fix). Halt if chain is broken.
+    5. escalate_to_operator — delegate routes the proposal
+       bundle to the operator approval queue. The operator
+       reviews + applies (or rejects); the agent never applies.
+    6. write_attestation — memory_write scope=private records
+       the proposal bundle for trending + audit reproducibility.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - policy_lint.v1
+  - delegate.v1
+  - llm_think.v1
+
+inputs:
+  type: object
+  required: [framework_id, target_paths]
+  properties:
+    framework_id:
+      type: string
+    target_paths:
+      type: array
+      items: {type: string}
+      maxItems: 100
+    rule_ids:
+      type: array
+      items: {type: string}
+      default: []
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: prior_context
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.framework_id}
+      mode: private
+      limit: 10
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: run_lint
+    tool: policy_lint.v1
+    args:
+      framework_id: ${inputs.framework_id}
+      target_paths: ${inputs.target_paths}
+      rule_ids:     ${inputs.rule_ids}
+
+  - id: synthesize_proposals
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are PolicyEnforcer-D8, the D8 Compliance remediation
+        proposer. Turn the lint findings into operator-readable
+        proposals. YOU DO NOT APPLY THE REMEDIATIONS — the
+        operator reviews + applies them.
+
+        Framework: ${inputs.framework_id}
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+          broken_at: ${verify_chain_integrity.out.broken_at}
+
+        Lint findings (from policy_lint.v1):
+        ${run_lint.out.findings}
+
+        Files evaluated: ${run_lint.out.files_evaluated}
+
+        Prior proposals (most recent first):
+        ${prior_context.out.entries}
+
+        Produce a structured proposal bundle:
+        1. One-line top-line verdict
+           (NO_FINDINGS / PROPOSE_REMEDIATIONS / HALT).
+        2. For each finding: file, rule_id, severity, the
+           proposed fix text (verbatim from policy_lint), and a
+           one-line impact note ("touches operator-committed
+           config" / "transient cache, low-risk rotation" / etc.).
+        3. Trend signal: any finding that matches a recent
+           prior proposal gets flagged as "still-open"; new
+           findings as "fresh".
+        4. Halt warning if audit chain status != "ok" — in this
+           case ALL proposals are deferred.
+
+        Be concise; this goes to the operator's approval queue.
+
+  - id: escalate_to_operator
+    tool: delegate.v1
+    args:
+      target_role: operator
+      task_summary: |
+        Compliance remediation proposals
+        (framework=${inputs.framework_id}):
+        ${synthesize_proposals.out.response}
+      reason: |
+        ADR-0085 Phase C — every remediation is operator-gated.
+        Routing the proposal bundle to the approval queue.
+
+  - id: write_attestation
+    tool: memory_write.v1
+    args:
+      content: ${synthesize_proposals.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "compliance_remediation_proposal"
+        - "framework:${inputs.framework_id}"
+        - "attestor:PolicyEnforcer-D8"
+
+output:
+  framework_id: ${inputs.framework_id}
+  findings_count: ${run_lint.out.findings}
+  proposal_text: ${synthesize_proposals.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  escalation_id: ${escalate_to_operator.out.delegation_id}
+  attestation_entry_id: ${write_attestation.out.entry_id}

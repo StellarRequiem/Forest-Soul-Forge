@@ -141,3 +141,51 @@ controls:
           The operator-keychain secrets directory should exist
           as the canonical store for sensitive material. Create
           it (chmod 700) if absent.
+
+# ADR-0085 Phase C — lint_rules consumed by policy_lint.v1.
+# These are CONTENT rules (config yaml inspection); the controls
+# above are SYSTEM rules consumed by framework_check.v1.
+lint_rules:
+  - rule_id: writes_enabled_documented
+    kind: yaml_key_required
+    severity: medium
+    params:
+      file_pattern: "settings\\.local\\.json$"
+      key: "permissions.allow"
+    remediation: |
+      SOC2 CC6.1 expects documented access controls. The local
+      settings file should declare an explicit allow list; an
+      absent allow key means the harness falls through to
+      defaults that may be wider than necessary.
+
+  - rule_id: signed_commits_enforced
+    kind: yaml_key_required
+    severity: high
+    params:
+      file_pattern: "(^|/)config/.*\\.yaml$"
+      key: "commit_signing.enabled"
+      expected_value: true
+    remediation: |
+      SOC2 CC8.1 expects authorized changes. Where commit
+      signing is configurable in a project yaml, it must be
+      enabled. Set commit_signing.enabled: true.
+
+  - rule_id: anonymous_disabled
+    kind: yaml_key_forbidden
+    severity: high
+    params:
+      file_pattern: "settings\\.json$"
+      key: "auth.anonymous"
+    remediation: |
+      SOC2 CC6.1 forbids anonymous access on production systems.
+      Remove auth.anonymous from settings.json.
+
+  - rule_id: token_rotation_recent
+    kind: file_max_age_days
+    severity: low
+    params:
+      file_pattern: "(^|/)(\\.fsf/secrets|secrets)/api_token"
+      max_days: 90
+    remediation: |
+      SOC2 CC6.1 expects credential rotation. Rotate the API
+      token by regenerating it and updating .env / secrets store.

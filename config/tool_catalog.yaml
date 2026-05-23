@@ -629,6 +629,37 @@ tools:
     side_effects: read_only
     archetype_tags: [verifier, guardian, observer, security_low]
 
+  policy_lint.v1:
+    name: policy_lint
+    version: "1"
+    description: |
+      ADR-0085 Phase C compliance policy linter. Reads operator
+      config files + a framework's lint_rules section, evaluates
+      content-level rules (yaml_key_required, yaml_key_forbidden,
+      file_max_age_days), emits findings + proposed remediation
+      text. Does NOT apply remediations — policy_enforcer (YELLOW)
+      consumes the proposals + surfaces them for operator approval.
+      Read-only; policy_enforcer is the primary consumer.
+    input_schema:
+      type: object
+      required: [framework_id, target_paths]
+      properties:
+        framework_id:
+          type: string
+          pattern: "^[a-zA-Z0-9_]+$"
+        target_paths:
+          type: array
+          items: {type: string}
+          minItems: 1
+          maxItems: 100
+        framework_dir:
+          type: string
+        rule_ids:
+          type: array
+          items: {type: string}
+    side_effects: read_only
+    archetype_tags: [policy_enforcer, actuator]
+
   framework_check.v1:
     name: framework_check
     version: "1"
@@ -3037,6 +3068,26 @@ archetypes:
       - text_summarize.v1       # produce capture-summary briefs
       # No shell_exec. No code_edit. No web_fetch. Passive evidence
       # capture; the corpus is local + private.
+
+  # ---- ADR-0085 Phase C — D8 Compliance policy enforcer ----------------
+  # policy_enforcer kit: policy_lint.v1 + the standard actuator
+  # support set, MINUS code_edit / shell_exec. The enforcer
+  # surfaces remediations as proposals via memory_write +
+  # delegate; it does NOT apply them. forbid_silent_remediation
+  # policy + YELLOW posture default enforce that at the
+  # governance layer; the kit composition enforces it at the
+  # tool-availability layer (no tool the enforcer has access to
+  # can apply a remediation to disk).
+  policy_enforcer:
+    standard_tools:
+      - llm_think.v1            # remediation reasoning + impact analysis
+      - memory_write.v1         # proposal attestations in private memory
+      - memory_recall.v1        # walk prior proposals for trending
+      - delegate.v1             # route proposals to operator approval queue
+      - audit_chain_verify.v1   # chain integrity before escalating proposals
+      - text_summarize.v1       # condense lint findings into proposal text
+      - policy_lint.v1          # ADR-0085 Phase C — the lint evaluator
+      - code_read.v1            # read source configs targeted for lint
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard
