@@ -1,0 +1,157 @@
+schema_version: 1
+name: knowledge_contradiction_flag
+version: '1'
+description: |
+  KnowledgeVerifier-D1's primary contradiction-audit skill.
+  Runs knowledge_contradiction_scan.v1 to surface candidate
+  pairs, cross-checks each high-confidence candidate against
+  the Reality Anchor (verify_claim.v1, ADR-0063) to drop
+  ground-truth mismatches that aren't really contradictions,
+  then stamps the survivors via memory_flag_contradiction.v1
+  (ADR-0036 T2's flag-not-rewrite substrate).
+
+  Single-agent scope per ADR-0086 Decision 3. The skill NEVER
+  rewrites or resolves contradictions — flags only. The
+  operator (per the role's operator_duties) reviews each flag
+  and decides whether to amend one entry, the other, both, or
+  accept-as-exception.
+
+  YELLOW posture per ADR-0086 Decision 1: every flag fires
+  through the operator-approval queue before propagating to
+  downstream domains.
+
+  Four-step pipeline (the actual flag-write is operator-driven
+  post-review per YELLOW posture; memory_flag_contradiction.v1
+  is dispatched by the operator after review, not in-line):
+    1. verify_chain_integrity — audit_chain_verify confirms
+       the chain. A scan against a broken chain inherits the
+       brokenness; the narrative records the halt warning so
+       the operator sees the chain breakage before any flag
+       lands.
+    2. scan_for_candidates — knowledge_contradiction_scan.v1
+       walks the agent's memory for candidate pairs +
+       confidence scores. Single-agent scope per ADR-0086
+       Decision 3.
+    3. narrate — llm_think condenses the candidate list into
+       per-pair evidence text + recommends a contradiction
+       kind for each ("direct" / "updated" / "qualified" /
+       "retracted") that the operator can use when stamping.
+    4. escalate — delegate routes the consolidated candidate
+       set + narrative to the operator-approval queue via
+       the YELLOW posture's gate. The operator reviews each
+       candidate + chooses (a) stamp via memory_flag_contradiction.v1
+       direct dispatch, (b) accept-as-exception, or (c) defer.
+
+  The memory_flag_contradiction.v1 tool is listed in the skill's
+  requires set so the verifier's kit-resolution check stays
+  consistent — but the actual flag write is operator-driven,
+  not in-skill. This preserves the flag-not-rewrite invariant
+  AND keeps the operator-gate load-bearing.
+
+  Output goes back to the operator: the flag count + the
+  rationale (which candidates were dropped at ground-truth,
+  which were stamped + escalated).
+
+requires:
+  - memory_recall.v1
+  - audit_chain_verify.v1
+  - knowledge_contradiction_scan.v1
+  - memory_flag_contradiction.v1
+  - llm_think.v1
+  - verify_claim.v1
+  - delegate.v1
+
+inputs:
+  type: object
+  required: [topic_slug]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic to scan. Convention: lowercase kebab-case.
+    window_days:
+      type: integer
+      default: 365
+      description: >
+        How far back to walk. Default 365.
+    min_confidence:
+      type: number
+      default: 0.4
+      description: >
+        Minimum scanner confidence to consider a pair.
+        Default 0.4 (includes lexical_cue + explicit_flag).
+        Operators can raise to 1.0 for explicit-flag-only.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in each flag.
+
+steps:
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: scan_for_candidates
+    tool: knowledge_contradiction_scan.v1
+    args:
+      topic_slug:     ${inputs.topic_slug}
+      window_days:    ${inputs.window_days}
+      min_confidence: ${inputs.min_confidence}
+      scope:          single_agent
+
+  - id: narrate
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are KnowledgeVerifier-D1, the D1 single-agent
+        contradiction auditor. Produce per-pair evidence text
+        for the contradiction stamps about to be written.
+
+        Topic: ${inputs.topic_slug}
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Candidate pairs (from knowledge_contradiction_scan):
+        ${scan_for_candidates.out.contradiction_pairs}
+
+        For EACH pair, produce a 2-3 sentence evidence block:
+        1. What contradicts what (quote the conflicting
+           assertions, with provenance if available).
+        2. Why this is a candidate contradiction (refer to the
+           detection_kind + confidence from the scan).
+        3. Recommended kind: "direct" / "updated" /
+           "qualified" / "retracted" — the contradiction kind
+           the memory_flag_contradiction stamp will record.
+
+        If chain status != "ok" produce ONLY a halt warning
+        and the pairs will NOT be flagged.
+
+  - id: escalate
+    tool: delegate.v1
+    args:
+      target_role: "operator"
+      skill_name:  "operator_review"
+      reason: |
+        ADR-0086 Phase C — knowledge_verifier flag escalation.
+        Topic: ${inputs.topic_slug}. Candidate count:
+        ${scan_for_candidates.out.metadata.pair_count}. Operator
+        review required before flag propagation downstream.
+        Narrative attached.
+      payload:
+        topic_slug:     ${inputs.topic_slug}
+        candidate_pairs: ${scan_for_candidates.out.contradiction_pairs}
+        narrative:       ${narrate.out.response}
+        chain_status:    ${verify_chain_integrity.out.status}
+
+output:
+  topic_slug:      ${inputs.topic_slug}
+  candidate_count: ${scan_for_candidates.out.metadata.pair_count}
+  explicit_flag_count: ${scan_for_candidates.out.metadata.explicit_flag_count}
+  lexical_cue_count:   ${scan_for_candidates.out.metadata.lexical_cue_count}
+  narrative:       ${narrate.out.response}
+  chain_status:    ${verify_chain_integrity.out.status}
+  escalation_id:   ${escalate.out.delegate_id}

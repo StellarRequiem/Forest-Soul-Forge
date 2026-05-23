@@ -629,6 +629,46 @@ tools:
     side_effects: read_only
     archetype_tags: [verifier, guardian, observer, security_low]
 
+  knowledge_contradiction_scan.v1:
+    name: knowledge_contradiction_scan
+    version: "1"
+    description: |
+      ADR-0086 Phase C single-agent contradiction scanner. Walks
+      the calling agent's private + lineage memory for
+      contradictions on a topic; uses an explicit-flag pass
+      (Relationship: contradicts/potential_contradiction in
+      catalog blocks, confidence 1.0) plus a lexical-cue pass
+      (opposite-pair words + negation flips, confidence 0.4).
+      Returns a candidate-pair list with per-pair confidence;
+      caller's skill writes the actual flag via
+      memory_flag_contradiction.v1. Read-only. Cross-agent
+      scope deferred to v0.4 per ADR-0086 Decision 3 —
+      scope='cross_agent' raises ToolValidationError until then.
+    input_schema:
+      type: object
+      required: [topic_slug]
+      properties:
+        topic_slug:
+          type: string
+          pattern: "^[a-z0-9-]+$"
+        agent_role:
+          type: string
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 730
+        audit_chain_path:
+          type: string
+        min_confidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        scope:
+          type: string
+          enum: [single_agent]
+    side_effects: read_only
+    archetype_tags: [knowledge_verifier, guardian]
+
   topic_genealogy_build.v1:
     name: topic_genealogy_build
     version: "1"
@@ -3203,6 +3243,30 @@ archetypes:
       # No file_integrity (prospector pulls live sources; integrity
       # is the librarian + audit-chain combination's job).
       # No shell_exec. No code_edit. No catalog writes (librarian's lane).
+
+  # ---- ADR-0086 Phase C — D1 Knowledge Forge verification --------------
+  # knowledge_verifier kit: knowledge_contradiction_scan.v1 +
+  # memory_flag_contradiction.v1 (ADR-0036 T2) + the standard
+  # guardian read-only support set. YELLOW posture by default
+  # (operator-gated). Reads memory + chain; flags via
+  # memory_flag_contradiction.v1 substrate (the only write tool
+  # in the kit; flag-not-rewrite invariant enforced at the
+  # substrate level). NO shell_exec / code_edit / web_fetch —
+  # verification is catalog-internal.
+  knowledge_verifier:
+    standard_tools:
+      - llm_think.v1                       # contradiction reasoning + evidence comparison
+      - memory_recall.v1                   # walk the agent's own memory
+      - delegate.v1                        # escalate confirmed contradictions to operator
+      - audit_chain_verify.v1              # chain integrity before flagging
+      - text_summarize.v1                  # condense contradiction evidence for operator review
+      - knowledge_contradiction_scan.v1    # ADR-0086 Phase C — the candidate detector
+      - memory_flag_contradiction.v1       # ADR-0036 T2 — the flag-not-rewrite substrate
+      - verify_claim.v1                    # ADR-0063 — Reality Anchor check before flag escalation
+      # No memory_write — the only write surface is the flag,
+      # which goes through memory_flag_contradiction.v1's
+      # purpose-built substrate (contradiction-row writer, not
+      # raw memory_write).
 
   # ---- ADR-0086 Phase B — D1 Knowledge Forge synthesis -----------------
   # synthesizer kit: topic_genealogy_build.v1 +

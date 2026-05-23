@@ -263,11 +263,14 @@ and ADR-0085 (D8).
   `examples/skills/knowledge_summarize.v1.yaml` +
   `examples/skills/topic_genealogy.v1.yaml`; birth script
   `dev-tools/birth-synthesizer.command`.
-- **Phase C** — verification. Status: pending. Ships:
-  `knowledge_verifier` role (YELLOW posture); new builtin tool
-  `knowledge_contradiction_scan.v1`; skill manifest
-  `examples/skills/knowledge_contradiction_flag.v1.yaml`; birth
-  script `dev-tools/birth-knowledge-verifier.command`.
+- **Phase C** — verification. Status: CLOSED (2026-05-23).
+  Shipped: `knowledge_verifier` role (YELLOW posture default,
+  guardian genre) in trait_tree / genres / constitution_templates /
+  tool_catalog; new builtin tool `knowledge_contradiction_scan.v1`
+  with 28 unit tests (explicit-flag pass + lexical-cue pass +
+  single-agent scope gate; scope=cross_agent reserved for v0.4);
+  skill manifest `examples/skills/knowledge_contradiction_flag.v1.yaml`;
+  birth script `dev-tools/birth-knowledge-verifier.command`.
 - **Phase D** — delta + cascade + umbrella. Status: pending.
   Ships: new builtin tool `daily_knowledge_delta.v1`; skill
   manifest `examples/skills/daily_knowledge_delta.v1.yaml`;

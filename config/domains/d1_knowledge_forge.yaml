@@ -4,12 +4,13 @@
 # after Phase α substrate (orchestrator + voice + plugins + scale).
 domain_id: d1_knowledge_forge
 name: Personal Knowledge Forge
-# ADR-0086 Phase B closed (2026-05-23): synthesizer role + birth
-# script + topic_genealogy_build.v1 tool (28 unit tests) + 2 skill
-# manifests shipped on top of Phase A intake. Phases C-D queued
-# (knowledge_verifier, daily_knowledge_delta + cascade). Flips to
+# ADR-0086 Phase C closed (2026-05-23): knowledge_verifier role
+# (YELLOW posture) + birth script + knowledge_contradiction_scan.v1
+# tool (28 unit tests, single-agent scope per Decision 3) +
+# contradiction-flag skill shipped on top of Phase A+B. Phase D
+# queued (daily_knowledge_delta + cascade + umbrella). Flips to
 # "live" at Phase D close per ADR-0086 §Phase status footer.
-status: phase_b
+status: phase_c
 
 description: |
   Active personal knowledge curation. Not a passive note-store —

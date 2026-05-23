@@ -13,7 +13,7 @@ that lands D1 Phase A (this runbook will grow as Phases B–D ship).
 |---|---|---|---|
 | **A** | librarian + prospector | none — reuses web_fetch + memory_write/recall + audit_chain_verify + personal_recall + llm_think | CLOSED |
 | **B** | synthesizer | topic_genealogy_build.v1 | CLOSED |
-| **C** | knowledge_verifier | knowledge_contradiction_scan.v1 | pending |
+| **C** | knowledge_verifier | knowledge_contradiction_scan.v1 | CLOSED |
 | **D** | (none — pure substrate phase) | daily_knowledge_delta.v1 | pending |
 
 Each phase = one commit + one push, so the operator can verify
@@ -263,14 +263,89 @@ Returns narrative prose with per-claim provenance preserved.
 
 ---
 
-## Phase C–D (pending)
+## Phase C — verification
 
-These sections will land as each phase closes. Tracking summary:
+### 1. Restart the daemon
 
-- **Phase C** — verification. Will add: `knowledge_verifier`
-  role (YELLOW posture), `knowledge_contradiction_scan.v1`
-  tool, `knowledge_contradiction_flag.v1` skill. Single-agent
-  scope per ADR-0086 Decision 3.
+The new role + tool need a daemon reload to take effect:
+
+```bash
+./dev-tools/force-restart-daemon.command
+```
+
+Verify `/genres` lists `knowledge_verifier` under `guardian`
+and `/tools/catalog` lists `knowledge_contradiction_scan.v1`.
+
+### 2. Birth KnowledgeVerifier-D1
+
+```bash
+./dev-tools/birth-knowledge-verifier.command
+```
+
+Idempotent; sets posture **YELLOW** per ADR-0086 Decision 1.
+This forces every flagged contradiction through the operator
+approval queue before propagating downstream.
+
+### 3. Dispatch a contradiction scan
+
+After the librarian has cataloged multiple entries against a
+topic, the verifier can scan for contradictions:
+
+```
+POST /agents/<KnowledgeVerifier-D1-id>/tools/call
+{
+  "tool_name": "skill_run",
+  "tool_version": "1",
+  "session_id": "<uuid>",
+  "args": {
+    "skill_name": "knowledge_contradiction_flag",
+    "skill_version": "1",
+    "skill_args": {
+      "topic_slug": "diffusion-models",
+      "window_days": 365,
+      "min_confidence": 0.4,
+      "operator_reason": "post-catalog contradiction sweep"
+    }
+  }
+}
+```
+
+The verifier returns: the candidate count, per-pair evidence
+narrative, the chain integrity status, and a delegate-escalation
+id pointing at the operator approval queue entry. The actual
+contradiction-stamp write (`memory_flag_contradiction.v1`) is
+operator-dispatched **after review** — YELLOW posture gates the
+in-skill flag.
+
+### 4. Single-agent scope guard
+
+Per ADR-0086 Decision 3, `knowledge_contradiction_scan.v1`
+hard-rejects `scope: cross_agent` with a `ToolValidationError`.
+The cross-agent contradiction-scan path is deferred to v0.4
+when the kernel-singleton verifier_loop's wiring lands. Operators
+who try `scope: "cross_agent"` get a clean rejection (not a
+silent fallback), so the deferral is observable.
+
+### 5. Observation
+
+- **Candidate pairs:** the scan tool's output includes
+  `contradiction_pairs` with per-pair `confidence` +
+  `detection_kind` (`explicit_flag` 1.0 / `lexical_cue` 0.4).
+- **Operator approvals:** the YELLOW posture queue at
+  `GET /approvals?agent_id=<KnowledgeVerifier-D1-id>` lists
+  pending escalations.
+- **Stamped contradictions:** after operator-driven dispatch
+  of `memory_flag_contradiction.v1`, query
+  `GET /memory/<verifier_id>?contradiction_flag=true`
+  (the substrate writes to a dedicated `memory_contradictions`
+  table — ADR-0036 T2).
+
+---
+
+## Phase D (pending)
+
+This section will land at Phase D close. Tracking summary:
+
 - **Phase D** — delta + cascade + umbrella. Will add:
   `daily_knowledge_delta.v1` tool, `daily_knowledge_delta.v1`
   skill, cascade wiring (d8→d1 active; d1→d9/d10/d7/d2 declared

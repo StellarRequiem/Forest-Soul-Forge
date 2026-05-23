@@ -31,6 +31,9 @@ from forest_soul_forge.tools.builtin.audit_packet_generate import (
 from forest_soul_forge.tools.builtin.topic_genealogy_build import (
     TopicGenealogyBuildTool,
 )
+from forest_soul_forge.tools.builtin.knowledge_contradiction_scan import (
+    KnowledgeContradictionScanTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -439,3 +442,13 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # chain temporal ordering. Read-only; synthesizer's primary
     # tool for D1 Phase B.
     registry.register(TopicGenealogyBuildTool())
+    # ADR-0086 Phase C — knowledge_contradiction_scan.v1. Walks
+    # the calling agent's own memory for contradictions on a
+    # topic; emits a candidate-pair list with confidence scores
+    # (1.0 explicit_flag / 0.4 lexical_cue). Single-agent scope
+    # per ADR-0086 Decision 3; cross-agent path deferred to v0.4
+    # (the scope=cross_agent input value raises
+    # ToolValidationError until then). Read-only; the caller's
+    # skill writes the actual flag via memory_flag_contradiction.v1
+    # in a separate step.
+    registry.register(KnowledgeContradictionScanTool())
