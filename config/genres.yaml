@@ -100,6 +100,7 @@ genres:
       # findings into briefings / pages / Slack threads. Same risk floor
       # as briefer (network, all outbound human-approval-gated).
       - incident_communicator
+      - inbox_triager            # ADR-0087 Phase A — D2 Daily Life OS inbox triage; communicator-genre role that reads operator inbox snapshots and produces candidate drafts via email_draft.v1; NEVER sends (drafts only; send is a separate operator-driven action). Kit: memory_recall/write + llm_think + text_summarize + email_draft + action_items_extract + audit_chain_verify + operator_profile_read.
 
   actuator:
     description: |
@@ -232,6 +233,7 @@ genres:
       - report_generator         # ADR-0085 Phase D — D8 compliance report generator; synthesizes audit packets from chain + evidence + scan history (read_only)
       - prospector               # ADR-0086 Phase A — D1 knowledge prospector; allowlisted-network research role that pulls source material + hands off to librarian for catalog discipline (kit: web_fetch + llm_think + memory_recall/write + text_summarize + operator_profile_read)
       - synthesizer              # ADR-0086 Phase B — D1 knowledge synthesizer; researcher-genre synthesis over the librarian's catalog (topic_genealogy_build.v1 + daily_knowledge_delta.v1 + memory_recall/write + llm_think + text_summarize + personal_recall)
+      - coordinator              # ADR-0087 Phase A — D2 Daily Life OS orchestrator; researcher-genre role that composes the morning briefing from operator-profile + audit chain + D1 deltas + sibling D2 inputs; routes via delegate.v1 but NEVER acts on calendars / inboxes / tasks itself (kit: memory_recall/write + audit_chain_verify + llm_think + text_summarize + operator_profile_read + personal_recall + delegate)
 
   companion:
     description: |

@@ -917,6 +917,38 @@ roles:
       emotional: 0.5
       embodiment: 0.6
 
+  # ---- ADR-0087 Phase A — D2 Daily Life OS (intake + orchestration) ----
+  # coordinator: researcher-genre orchestration role. Walks operator
+  # profile + audit chain to produce the morning briefing; routes
+  # downstream by delegating to D1 (knowledge), D2 sibling roles
+  # (time_steward, task_prioritizer, reflector), and other domains.
+  # Read-only synthesis; never acts on its own. GREEN posture per
+  # ADR-0087 Decision 1.
+  coordinator:
+    description: "Daily Life OS orchestrator. Composes the operator's morning briefing from operator-profile + audit chain + handoff inputs from sibling D2 roles + D1 knowledge deltas. Routes downstream via delegate.v1; NEVER acts on calendars / inboxes / tasks itself — that's time_steward / inbox_triager / task_prioritizer's lane. Genre: researcher. ADR-0087 Phase A."
+    domain_weights:
+      security: 1.0     # operator-facing briefing; orchestration boundary is light security
+      audit: 2.0        # every routing decision attests to its inputs
+      cognitive: 2.4    # composition + prioritization reasoning
+      communication: 2.4 # the briefing IS operator-facing prose
+      emotional: 1.2    # warmth on briefings without crossing into companion territory
+      embodiment: 0.6
+
+  # inbox_triager: communicator-genre triage role. Reads (does NOT
+  # send) email / message inputs and produces a triaged digest +
+  # candidate drafts the operator approves. email_draft.v1 produces
+  # drafts only; the send is a separate operator-driven action
+  # outside the agent surface. GREEN posture per ADR-0087 Decision 1.
+  inbox_triager:
+    description: "Inbox triage communicator. Reads operator inbox snapshots (provided via memory_write from a forest-mail / forest-slack connector when present, or operator-pasted into private memory when absent), classifies + ranks + produces candidate replies via email_draft.v1. NEVER sends — drafts only; the send is a separate operator-driven action. Genre: communicator. ADR-0087 Phase A."
+    domain_weights:
+      security: 1.0     # inbox content is sensitive — but the triager never discloses it externally
+      audit: 1.8        # every draft attests to its source message
+      cognitive: 1.8    # classification + ranking reasoning
+      communication: 2.5 # the role's deliverable IS communication
+      emotional: 1.2    # warmth on operator-facing replies
+      embodiment: 0.5
+
   domain_orchestrator:
     description: "ADR-0067 T5 Cross-Domain Orchestrator. Singleton-per-forest router that decomposes operator utterances (via decompose_intent.v1) and routes each sub-intent to the right domain swarm (via route_to_domain.v1 + the resolve_route() engine). Sits behind the Persistent Assistant Chat (ADR-0047) so the operator talks to one front door while the orchestrator dispatches across ten domains. Genre: companion. Kit: decompose_intent.v1 + route_to_domain.v1 + operator_profile_read.v1 + llm_think.v1 + delegate.v1 + verify_claim.v1."
     domain_weights:

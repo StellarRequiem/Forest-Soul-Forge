@@ -1,0 +1,150 @@
+schema_version: 1
+name: inbox_triage
+version: '1'
+description: |
+  InboxTriager-D2's primary skill. Reads an inbox snapshot (the
+  operator's recent messages from forest-mail / forest-slack
+  connectors when present, or operator-pasted into private memory
+  when absent), classifies + ranks the items, extracts action
+  items, and drafts a candidate reply for the top item via
+  email_draft.v1.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's stated work_hours, areas_of_focus, timezone.
+       Tone + filter calibration source.
+    2. inbox_snapshot — memory_recall scope=private for the
+       most recent inbox content tagged inbox_snapshot.
+    3. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. A draft attested on a
+       broken chain inherits the brokenness.
+    4. classify_and_rank — llm_think classifies each thread
+       (urgent / important / FYI / junk) + extracts action items
+       via action_items_extract on the urgent / important set.
+    5. draft_top_reply — email_draft.v1 produces a candidate
+       reply for the highest-priority thread; written to private
+       memory tagged for operator review.
+
+  NEVER sends — drafts only. The operator copies + sends through
+  the real mail client. forbid_send + forbid_unsolicited_outreach
+  + require_draft_attestation policies enforce this at governance
+  layer.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - email_draft.v1
+  - action_items_extract.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  properties:
+    snapshot_tag:
+      type: string
+      default: "inbox_snapshot"
+      description: >
+        Memory tag the inbox snapshot is written under. Connector
+        writes default to "inbox_snapshot"; operator-paste batches
+        can use a custom tag if running multiple snapshots in
+        parallel.
+    max_items:
+      type: integer
+      default: 20
+      description: >
+        Cap on items to classify in one pass. Default 20 keeps
+        the LLM prompt size sensible; widen for catch-up after
+        PTO.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the draft attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: inbox_snapshot
+    tool: memory_recall.v1
+    args:
+      query: ${inputs.snapshot_tag}
+      mode: private
+      limit: ${inputs.max_items}
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: classify_and_rank
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are InboxTriager-D2, the D2 Daily Life OS inbox
+        triage agent. Classify + rank the inbox snapshot.
+
+        Operator profile:
+          work_hours:     ${operator_context.out.work_hours}
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Inbox snapshot:
+        ${inbox_snapshot.out.entries}
+
+        Produce a structured triage:
+        1. Top-priority thread: which one needs a reply first?
+           Cite the entry_id + a one-sentence summary.
+        2. Classification per thread: urgent / important / FYI /
+           junk. Be honest — over-classifying as urgent burns
+           the operator's attention budget.
+        3. Per-thread one-line summary for non-junk items.
+        4. Three to five action items extracted from the top-
+           priority items (these will be expanded via
+           action_items_extract).
+        5. Suggested reply length + tone for the top thread
+           (e.g., "short ack + reschedule ask", "warm decline").
+        6. Halt warning if chain status != "ok" — refuse to
+           draft.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: extract_actions
+    tool: action_items_extract.v1
+    args:
+      text: ${classify_and_rank.out.response}
+      limit: 10
+
+  - id: draft_top_reply
+    tool: email_draft.v1
+    args:
+      intent: ${classify_and_rank.out.response}
+      tone: "direct"
+      length: "short"
+
+  - id: write_triage_attestation
+    tool: memory_write.v1
+    args:
+      content: ${classify_and_rank.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "inbox_triage_run"
+        - "snapshot:${inputs.snapshot_tag}"
+        - "attestor:InboxTriager-D2"
+
+output:
+  snapshot_tag: ${inputs.snapshot_tag}
+  triage_summary: ${classify_and_rank.out.response}
+  action_items: ${extract_actions.out.response}
+  draft_reply: ${draft_top_reply.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  triage_entry_id: ${write_triage_attestation.out.entry_id}

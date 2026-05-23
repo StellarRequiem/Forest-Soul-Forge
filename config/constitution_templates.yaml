@@ -1618,6 +1618,128 @@ role_base:
     reality_anchor:
       enabled: true
 
+  coordinator:
+    # ADR-0087 Phase A — D2 Daily Life OS orchestrator. Researcher
+    # genre, network ceiling. The agent composes the morning briefing
+    # from operator-profile + audit chain + sibling-role handoffs +
+    # D1 knowledge deltas. Routes downstream via delegate.v1; NEVER
+    # acts on calendars / inboxes / tasks (those belong to
+    # time_steward / inbox_triager / task_prioritizer).
+    policies:
+      - id: forbid_direct_action
+        rule: forbid
+        triggers: [schedule_reminder, calendar_block, send_message_external, create_task, complete_task]
+        rationale: |
+          The coordinator is a routing + composition layer. Calendar
+          actions belong to time_steward; inbox actions belong to
+          inbox_triager; task actions belong to task_prioritizer (and
+          even there, only ranking — never mutation). Direct action
+          would invert the D2 separation-of-duties discipline + bypass
+          the YELLOW-posture gating on time_steward.
+      - id: require_briefing_attestation
+        rule: require
+        triggers: [emit_briefing, finalize_morning_briefing]
+        rationale: |
+          Every briefing emits a memory_write attestation with
+          (window, input_sources, attestor, ts). Without the
+          attestation, the operator can't audit which inputs the
+          briefing rested on + which were stale.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_message_external, post_briefing_externally]
+        rationale: |
+          Briefings are private/lineage scope. Operator-driven
+          sharing is a separate explicit action; the coordinator
+          never crosses the external boundary.
+      - id: require_chain_integrity_before_briefing
+        rule: require
+        triggers: [emit_briefing, finalize_morning_briefing]
+        rationale: |
+          The briefing rests on audit-chain content (overnight events,
+          prior-day decisions, D1 catalog writes). A briefing built
+          on a broken chain inherits the brokenness.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - schedule_reminder
+      - calendar_block
+      - send_message_external
+      - create_task
+      - complete_task
+      - modify_production_systems
+    operator_duties:
+      - "Review morning briefings — the coordinator surfaces; you decide which items to act on, which to defer, which to delegate further."
+      - "Audit briefing-input attestations weekly — a briefing that consistently misses a known D1 cataloging stream is a signal the handoff isn't firing."
+      - "Treat a chain_broken halt as an emergency — briefings derived from a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  inbox_triager:
+    # ADR-0087 Phase A — D2 Daily Life OS inbox triage. Communicator
+    # genre, network ceiling. The agent reads inbox snapshots (memory
+    # entries written by a connector OR operator paste) and produces
+    # candidate drafts via email_draft.v1. NEVER sends — drafts are
+    # operator-reviewed and operator-sent. The communicator-genre
+    # ceiling permits network for downstream message preparation,
+    # but the constitutional policies + the kit composition keep the
+    # action surface to drafts-only.
+    policies:
+      - id: forbid_send
+        rule: forbid
+        triggers: [send_email, send_message_external, dispatch_email, post_to_channel, mcp_call_mutating]
+        rationale: |
+          The triager produces DRAFTS for the operator to send (or
+          not). Actual sends are explicitly outside the role's
+          surface — the email_draft.v1 tool only writes the draft
+          to memory; the operator copies + sends through the real
+          mail client. Same drafts-only pattern as briefer / notifier.
+      - id: require_draft_attestation
+        rule: require
+        triggers: [emit_draft, prepare_reply]
+        rationale: |
+          Every draft emits a memory_write attestation with
+          (source_message_id, recipients, draft_text, attestor, ts).
+          Without the attestation, the operator can't trace which
+          source message a draft is responding to + can't audit the
+          triager's drafting patterns over time.
+      - id: forbid_unsolicited_outreach
+        rule: forbid
+        triggers: [draft_outreach_to_new_recipient, initiate_thread]
+        rationale: |
+          The triager RESPONDS to inbox content; it does NOT initiate
+          outreach to new recipients. Initiating a thread crosses
+          into actuator-class territory + requires explicit operator
+          authorship of the recipient list.
+      - id: scope_drafts_to_private_memory
+        rule: scope_memory
+        triggers: [memory_write]
+        rationale: |
+          Inbox content is sensitive. Drafts land in private memory
+          scope; operator-controlled sharing through the chat surface
+          handles cross-agent / operator visibility.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - send_email
+      - send_message_external
+      - mcp_call_mutating
+      - draft_outreach_to_new_recipient
+      - modify_production_systems
+    operator_duties:
+      - "Review every draft before sending — the triager prepares; you send."
+      - "Audit the triager's classification quality weekly — a high false-priority rate (junk ranked as high-priority) means the prompt or the operator-profile inputs need tuning."
+      - "Curate the inbox-input feed — drafts are only as good as the inbox snapshot the triager sees; an empty or stale feed produces empty briefings."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

@@ -1,0 +1,144 @@
+schema_version: 1
+name: daily_orchestration
+version: '1'
+description: |
+  Coordinator-D2's primary morning-briefing skill. Walks the
+  operator profile + prior briefings + audit chain over the
+  configured window, composes a structured briefing covering
+  inbox items, calendar density, task priorities, knowledge
+  deltas from D1, and overnight decisions. Read-only end-to-end
+  — the coordinator orchestrates; siblings act.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's stated work_hours, areas_of_focus, timezone.
+       Steers the prioritization + tone of the briefing.
+    2. prior_briefings — memory_recall scope=private for prior
+       daily_briefing_built attestations. Surfaces what was
+       briefed yesterday so today's briefing can carry forward
+       items still on the operator's plate.
+    3. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked. A briefing built from a broken
+       chain inherits the brokenness.
+    4. compose_briefing — llm_think condenses the inputs into a
+       structured briefing: headline, top-3 priorities, calendar
+       density, knowledge delta callouts from D1, open items
+       from prior briefings.
+    5. write_briefing — memory_write scope=private records the
+       daily_briefing_built attestation with the briefing text +
+       input source ids, tagged with window + attestor.
+
+  Output goes back to the operator. The briefing artifact is
+  queryable per window via memory_recall + tag-scan.
+
+  Constitutional policies enforce the orchestration discipline at
+  governance layer (require_briefing_attestation, forbid_direct_action,
+  forbid_external_disclosure, require_chain_integrity_before_briefing).
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  properties:
+    window_hours:
+      type: integer
+      default: 24
+      description: >
+        How far back to walk. Default 24 (daily briefing).
+        Operators can widen to 168 (weekly) for Monday-morning
+        catch-up after the weekend.
+    focus_topic:
+      type: string
+      default: ""
+      description: >
+        Optional. If present, steer the briefing toward one
+        topic / project. Default no filter — full cross-domain
+        sweep.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the briefing attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: prior_briefings
+    tool: memory_recall.v1
+    args:
+      query: "daily_briefing_built"
+      mode: private
+      limit: 5
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_briefing
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Coordinator-D2, the D2 Daily Life OS
+        orchestrator. Produce the operator's morning briefing.
+
+        Window: ${inputs.window_hours} hours
+        Focus topic: ${inputs.focus_topic}
+        Operator reason: ${inputs.operator_reason}
+
+        Operator profile:
+          work_hours:     ${operator_context.out.work_hours}
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Prior briefings (most recent first — carry forward
+        open items the operator hasn't resolved):
+        ${prior_briefings.out.entries}
+
+        Produce a structured briefing:
+        1. Headline: one sentence — what's the dominant theme
+           today? ("Heavy meeting day", "Light calendar, good
+           for deep work", "Three deadlines this week").
+        2. Top-3 priorities: a numbered list of the highest-
+           leverage items the operator should tackle. Pull
+           from prior-briefing open items + areas_of_focus.
+        3. Calendar density: rough sketch of meeting load by
+           work_hours block (morning / mid-day / afternoon).
+        4. Knowledge / decision callouts: anything from
+           overnight catalog writes or operator-decision events
+           that's worth surfacing.
+        5. Carry-forward items: open items from prior briefings
+           that are still un-addressed.
+        6. Halt warning if chain status != "ok" — surface the
+           breakage instead of the briefing.
+
+        All timestamps are Pacific time, never UTC. Be concise;
+        the operator reads this first thing in the morning.
+
+  - id: write_briefing
+    tool: memory_write.v1
+    args:
+      content: ${compose_briefing.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "daily_briefing_built"
+        - "window:${inputs.window_hours}h"
+        - "attestor:Coordinator-D2"
+
+output:
+  window_hours: ${inputs.window_hours}
+  focus_topic: ${inputs.focus_topic}
+  briefing: ${compose_briefing.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  briefing_entry_id: ${write_briefing.out.entry_id}
