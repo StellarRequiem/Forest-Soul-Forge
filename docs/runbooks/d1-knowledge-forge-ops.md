@@ -11,8 +11,8 @@ that lands D1 Phase A (this runbook will grow as Phases B–D ship).
 
 | Phase | New agent(s) | New builtin tool | Status |
 |---|---|---|---|
-| **A** | librarian + prospector | none — reuses web_fetch + memory_write/recall + audit_chain_verify + personal_recall + llm_think | in flight |
-| **B** | synthesizer | topic_genealogy_build.v1 | pending |
+| **A** | librarian + prospector | none — reuses web_fetch + memory_write/recall + audit_chain_verify + personal_recall + llm_think | CLOSED |
+| **B** | synthesizer | topic_genealogy_build.v1 | CLOSED |
 | **C** | knowledge_verifier | knowledge_contradiction_scan.v1 | pending |
 | **D** | (none — pure substrate phase) | daily_knowledge_delta.v1 | pending |
 
@@ -186,14 +186,87 @@ step's `status` in the skill response:
 
 ---
 
-## Phase B–D (pending)
+## Phase B — synthesis
+
+### 1. Restart the daemon to load synthesizer role + tool
+
+```bash
+./dev-tools/force-restart-daemon.command
+```
+
+Verify `/genres` lists `synthesizer` under the `researcher` genre
+and `/tools/catalog` lists `topic_genealogy_build.v1`.
+
+### 2. Birth Synthesizer-D1
+
+```bash
+./dev-tools/birth-synthesizer.command
+```
+
+Idempotent; sets posture GREEN per ADR-0086 Decision 1.
+
+### 3. Build a topic graph
+
+After the librarian has cataloged some entries against a topic
+(per Phase A step 5), the synthesizer can build a graph:
+
+```
+POST /agents/<Synthesizer-D1-id>/tools/call
+{
+  "tool_name": "skill_run",
+  "tool_version": "1",
+  "session_id": "<uuid>",
+  "args": {
+    "skill_name": "topic_genealogy",
+    "skill_version": "1",
+    "skill_args": {
+      "topic_slug": "diffusion-models",
+      "window_days": 365,
+      "operator_reason": "first topic graph for D1 verification"
+    }
+  }
+}
+```
+
+The synthesizer returns: a structured graph (nodes = catalog
+entries; edges = relationships), a one-paragraph narrative, and
+a private-memory attestation tagged `topic_graph_built` +
+`topic:<slug>` + `attestor:Synthesizer-D1`.
+
+### 4. Summarize what's been learned
+
+```
+POST /agents/<Synthesizer-D1-id>/tools/call
+{
+  "tool_name": "skill_run",
+  "tool_version": "1",
+  "session_id": "<uuid>",
+  "args": {
+    "skill_name": "knowledge_summarize",
+    "skill_version": "1",
+    "skill_args": {
+      "topic_slug": "diffusion-models",
+      "max_entries": 50
+    }
+  }
+}
+```
+
+Returns narrative prose with per-claim provenance preserved.
+
+### 5. Observation
+
+- **Topic graphs:** `GET /memory/<synthesizer_id>?tag=topic_graph_built`
+- **Summaries:** `GET /memory/<synthesizer_id>?tag=knowledge_summary`
+- **Per-topic graph history:** filter by `topic:<slug>` to see
+  how the graph has grown.
+
+---
+
+## Phase C–D (pending)
 
 These sections will land as each phase closes. Tracking summary:
 
-- **Phase B** — synthesis. Will add: `synthesizer` role,
-  `topic_genealogy_build.v1` tool, `knowledge_summarize.v1` +
-  `topic_genealogy.v1` skills. Operator-facing dispatch surface
-  for building topic graphs from the catalog.
 - **Phase C** — verification. Will add: `knowledge_verifier`
   role (YELLOW posture), `knowledge_contradiction_scan.v1`
   tool, `knowledge_contradiction_flag.v1` skill. Single-agent

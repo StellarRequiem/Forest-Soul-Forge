@@ -1,0 +1,151 @@
+schema_version: 1
+name: topic_genealogy
+version: '1'
+description: |
+  Synthesizer-D1's primary topic-graph synthesis skill. Dispatches
+  topic_genealogy_build.v1 to construct a topic graph from
+  the Librarian-D1 catalog, walks prior topic-genealogy artifacts
+  for trend signal, then writes the new graph + a one-paragraph
+  operator narrative into private memory as a synthesis
+  attestation.
+
+  Read-only end-to-end. The synthesizer wraps the catalog into
+  graphs; it never mutates source data. ADR-0086 Phase B's
+  design invariant. Constitutional policies enforce this at
+  governance layer (forbid_catalog_mutation,
+  require_synthesis_attestation, require_provenance_in_synthesis,
+  forbid_external_disclosure).
+
+  Four-step pipeline:
+    1. prior_graphs — memory_recall scope=private for prior
+       topic_graph_built attestations against this topic_slug.
+       Surfaces trend signal: did the graph just gain a new
+       refinement? Did a contradiction edge just appear?
+    2. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked end-to-end. A graph built
+       from a broken chain inherits the brokenness — the
+       provenance trail can't be re-verified.
+    3. build_graph — topic_genealogy_build.v1 walks the chain
+       for entries tagged topic:<slug> within the window,
+       derives edges, returns the structured graph.
+    4. narrate — llm_think condenses the graph into an
+       operator narrative: "the topic has N catalog claims,
+       seeded by X, refined K times, with M contradictions
+       flagged for review."
+    5. write_synthesis — memory_write scope=private records
+       the topic_graph_built attestation with the raw graph
+       JSON + the narrative, tagged with topic + attestor.
+
+  Output goes back to the operator.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - topic_genealogy_build.v1
+  - llm_think.v1
+
+inputs:
+  type: object
+  required: [topic_slug]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic to build the graph for. Convention: lowercase
+        kebab-case (e.g., "diffusion-models").
+    window_days:
+      type: integer
+      default: 365
+      description: >
+        How far back to walk the catalog. Default 365 (one
+        year); cap 730 per topic_genealogy_build.v1's tool
+        contract.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the synthesis
+        attestation.
+
+steps:
+  - id: prior_graphs
+    tool: memory_recall.v1
+    args:
+      query: "topic_graph_built:${inputs.topic_slug}"
+      mode: private
+      limit: 5
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: build_graph
+    tool: topic_genealogy_build.v1
+    args:
+      topic_slug: ${inputs.topic_slug}
+      window_days: ${inputs.window_days}
+
+  - id: narrate
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Synthesizer-D1, the D1 Knowledge Forge synthesis
+        agent. Condense the topic graph into an operator narrative.
+
+        Topic: ${inputs.topic_slug}
+        Window: ${inputs.window_days} days
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Graph summary:
+          node_count: ${build_graph.out.node_count}
+          edge_count: ${build_graph.out.edge_count}
+          edge_kinds: ${build_graph.out.metadata.edge_kinds}
+
+        Nodes (most recent first):
+        ${build_graph.out.nodes}
+
+        Edges:
+        ${build_graph.out.edges}
+
+        Prior topic-graph attestations for this topic:
+        ${prior_graphs.out.entries}
+
+        Produce a structured narrative:
+        1. One-line overall verdict (e.g., "topic has 7 catalog
+           claims, seeded by entry-X, 2 refinements, 1 flagged
+           contradiction for review").
+        2. Trend signal: how does this graph differ from the
+           prior attestations? New seeds, new refinements, new
+           contradictions, or stable.
+        3. Operator-action hint: if any contradictions are
+           flagged, route to Knowledge-Verifier-D1 for review;
+           if there's a long uninterrupted refinement chain,
+           flag for the operator's review of catalog drift.
+        4. Halt warning if chain status != "ok".
+
+        Be concise; the operator reads many topic syntheses.
+
+  - id: write_synthesis
+    tool: memory_write.v1
+    args:
+      content: ${narrate.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "topic_graph_built"
+        - "topic:${inputs.topic_slug}"
+        - "attestor:Synthesizer-D1"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  node_count: ${build_graph.out.node_count}
+  edge_count: ${build_graph.out.edge_count}
+  edge_kinds: ${build_graph.out.metadata.edge_kinds}
+  chain_status: ${verify_chain_integrity.out.status}
+  narrative: ${narrate.out.response}
+  synthesis_entry_id: ${write_synthesis.out.entry_id}

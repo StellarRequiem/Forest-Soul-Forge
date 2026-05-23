@@ -28,6 +28,9 @@ from forest_soul_forge.tools.builtin.policy_lint import PolicyLintTool
 from forest_soul_forge.tools.builtin.audit_packet_generate import (
     AuditPacketGenerateTool,
 )
+from forest_soul_forge.tools.builtin.topic_genealogy_build import (
+    TopicGenealogyBuildTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -428,3 +431,11 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # sha256 lets the operator verify the bundle hasn't drifted
     # after generation.
     registry.register(AuditPacketGenerateTool())
+    # ADR-0086 Phase B — topic_genealogy_build.v1. Walks memory
+    # entries tagged topic:<slug> + their audit-chain provenance
+    # to construct a topic graph. Nodes are claims; edges describe
+    # relationships (refines / confirms / contradicts / temporal_only)
+    # derived from the catalog block's Relationship: field plus
+    # chain temporal ordering. Read-only; synthesizer's primary
+    # tool for D1 Phase B.
+    registry.register(TopicGenealogyBuildTool())

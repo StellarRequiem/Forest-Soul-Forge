@@ -1,0 +1,130 @@
+schema_version: 1
+name: knowledge_summarize
+version: '1'
+description: |
+  Synthesizer-D1's general-purpose summarization skill. Operator
+  asks "what have I learned about X?" — the synthesizer walks
+  the catalog (via memory_recall + personal_recall), condenses
+  the matching entries into an operator-readable summary, and
+  attests the summary back into private memory with full
+  provenance to the source catalog entries.
+
+  Distinct from topic_genealogy.v1: this skill produces narrative
+  prose; the genealogy skill produces structured graphs. Both
+  are read-only synthesis paths. Constitutional policies enforce
+  the discipline at governance layer (require_synthesis_attestation,
+  require_provenance_in_synthesis, forbid_external_disclosure).
+
+  Five-step pipeline:
+    1. catalog_walk — memory_recall scope=private for catalog
+       entries tagged topic:<slug>. Surfaces every claim the
+       librarian has cataloged.
+    2. personal_index_query — personal_recall.v1 ADR-0076
+       hybrid retrieval against the operator's personal index;
+       complements the topic-tag walk with semantic matches
+       that may not share the exact slug.
+    3. verify_chain_integrity — audit_chain_verify confirms
+       the chain. Summaries derived from a broken chain
+       inherit the brokenness.
+    4. summarize — llm_think condenses the catalog walk +
+       semantic matches into a narrative summary preserving
+       provenance per claim (source URL + access time).
+    5. write_summary — memory_write scope=private records
+       the synthesis attestation tagged with topic + attestor.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - personal_recall.v1
+
+inputs:
+  type: object
+  required: [topic_slug]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic to summarize. Convention: lowercase kebab-case.
+    max_entries:
+      type: integer
+      default: 50
+      description: >
+        Max catalog entries to fold into the summary. Higher
+        values give richer summaries but use more LLM tokens.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the summary attestation.
+
+steps:
+  - id: catalog_walk
+    tool: memory_recall.v1
+    args:
+      query: "topic:${inputs.topic_slug}"
+      mode: private
+      limit: ${inputs.max_entries}
+
+  - id: personal_index_query
+    tool: personal_recall.v1
+    args:
+      query: ${inputs.topic_slug}
+      k: 10
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: summarize
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Synthesizer-D1, the D1 Knowledge Forge synthesis
+        agent. Produce a narrative summary of what the operator
+        has learned about this topic.
+
+        Topic: ${inputs.topic_slug}
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Catalog entries tagged topic:${inputs.topic_slug}:
+        ${catalog_walk.out.entries}
+
+        Semantically related personal-index hits:
+        ${personal_index_query.out.results}
+
+        Produce a structured summary:
+        1. One-paragraph overview of what the operator has
+           cataloged on this topic.
+        2. Key claims (3-7 bullets), each carrying the source
+           URL + the access timestamp. NEVER drop provenance —
+           a claim without a citation is a hallucination.
+        3. Open questions: contradictions or gaps the catalog
+           reveals.
+        4. Halt warning if chain status != "ok".
+
+        Be faithful to the catalog. The summary wraps what's
+        there; it does NOT extrapolate beyond it.
+
+  - id: write_summary
+    tool: memory_write.v1
+    args:
+      content: ${summarize.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "knowledge_summary"
+        - "topic:${inputs.topic_slug}"
+        - "attestor:Synthesizer-D1"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  summary_text: ${summarize.out.response}
+  catalog_entry_count: ${catalog_walk.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  summary_entry_id: ${write_summary.out.entry_id}

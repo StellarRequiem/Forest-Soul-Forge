@@ -629,6 +629,38 @@ tools:
     side_effects: read_only
     archetype_tags: [verifier, guardian, observer, security_low]
 
+  topic_genealogy_build.v1:
+    name: topic_genealogy_build
+    version: "1"
+    description: |
+      ADR-0086 Phase B topic-graph builder. Walks memory entries
+      tagged topic:<slug> via the audit chain, derives edges
+      between them from the catalog block's Relationship: field
+      (refines / confirms / potential_contradiction) with a
+      temporal-ordering fallback, and returns a structured graph
+      (nodes + edges) the synthesizer's skill persists via
+      memory_write. Read-only; synthesizer is the primary
+      consumer.
+    input_schema:
+      type: object
+      required: [topic_slug]
+      properties:
+        topic_slug:
+          type: string
+          pattern: "^[a-z0-9-]+$"
+        window_days:
+          type: integer
+          minimum: 1
+          maximum: 730
+        audit_chain_path:
+          type: string
+        max_entries:
+          type: integer
+          minimum: 1
+          maximum: 5000
+    side_effects: read_only
+    archetype_tags: [synthesizer, researcher]
+
   audit_packet_generate.v1:
     name: audit_packet_generate
     version: "1"
@@ -3171,6 +3203,27 @@ archetypes:
       # No file_integrity (prospector pulls live sources; integrity
       # is the librarian + audit-chain combination's job).
       # No shell_exec. No code_edit. No catalog writes (librarian's lane).
+
+  # ---- ADR-0086 Phase B — D1 Knowledge Forge synthesis -----------------
+  # synthesizer kit: topic_genealogy_build.v1 +
+  # daily_knowledge_delta.v1 (Phase D) + the standard researcher
+  # read-only support set. Reads the librarian's catalog, builds
+  # topic graphs + daily deltas, writes synthesis attestations
+  # to private memory. NO shell_exec / code_edit / web_fetch —
+  # synthesis is catalog-internal.
+  synthesizer:
+    standard_tools:
+      - llm_think.v1                  # topic-graph reasoning + delta narrative
+      - memory_recall.v1              # walk the librarian's catalog entries
+      - memory_write.v1               # synthesis attestations in private memory
+      - delegate.v1                   # hand off to operator or to knowledge_verifier
+      - audit_chain_verify.v1         # chain integrity before publishing synthesis
+      - text_summarize.v1             # condense topic graphs into operator-readable digests
+      - topic_genealogy_build.v1      # ADR-0086 Phase B — the topic-graph builder
+      - personal_recall.v1            # ADR-0076 T4 hybrid retrieval over the personal index
+      - operator_profile_read.v1      # ADR-0068 — areas-of-focus inform synthesis scope
+      # daily_knowledge_delta.v1 added to this kit in Phase D when
+      # the tool lands. Synthesis stays read-only by construction.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

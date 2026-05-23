@@ -256,9 +256,10 @@ and ADR-0085 (D8).
   `examples/skills/research_gathering.v1.yaml`; operator runbook
   `docs/runbooks/d1-knowledge-forge-ops.md`. No new builtin
   tools.
-- **Phase B** — synthesis. Status: pending. Ships:
-  `synthesizer` role; new builtin tool
-  `topic_genealogy_build.v1`; skill manifests
+- **Phase B** — synthesis. Status: CLOSED (2026-05-23). Shipped:
+  `synthesizer` role in trait_tree / genres / constitution_templates /
+  tool_catalog; new builtin tool `topic_genealogy_build.v1` with
+  28 unit tests; skill manifests
   `examples/skills/knowledge_summarize.v1.yaml` +
   `examples/skills/topic_genealogy.v1.yaml`; birth script
   `dev-tools/birth-synthesizer.command`.
