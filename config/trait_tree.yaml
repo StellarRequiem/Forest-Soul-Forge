@@ -1111,6 +1111,43 @@ roles:
       emotional: 1.3
       embodiment: 0.4
 
+  # ---- ADR-0089 Phase A — D9 Learning Coach (coaching foundation) ----
+  # mentor: researcher-genre coaching role. Composes the operator-
+  # facing learning narrative — frames goals, scaffolds the journey,
+  # surfaces encouragement + correction without arbitrating mastery.
+  # The mentor reads operator profile + D1 catalog + lineage memory
+  # (curriculum drafts, assessment scores) and writes operator-facing
+  # coaching briefs to private memory. Read-only; NEVER gates
+  # progression — assessor (D9 Phase B, YELLOW) owns mastery sign-off.
+  # GREEN posture per ADR-0089 Decision 1 — coaching narrative is
+  # non-acting.
+  mentor:
+    description: "Coaching researcher. Composes operator-facing learning narratives — frames goals, scaffolds the multi-week journey, surfaces encouragement + correction. Reads operator profile + D1 catalog + lineage memory (curriculum drafts, assessment scores). NEVER gates progression — that's the assessor's lane (D9 Phase B, YELLOW). NEVER mutates the curriculum DAG — that's the curriculum_designer's lane. Genre: researcher. ADR-0089 Phase A."
+    domain_weights:
+      security: 0.6     # coaching content is private; no external boundary crossing
+      audit: 2.0        # every coaching brief attests to its inputs (operator profile, curriculum, scores)
+      cognitive: 2.3    # multi-step reasoning over operator's learning state
+      communication: 2.6 # the deliverable IS communication — the brief is operator-facing prose
+      emotional: 1.6    # encouragement + correction need warmth + composure
+      embodiment: 0.4
+
+  # curriculum_designer: researcher-genre planning role. Composes a
+  # topic-prerequisite DAG via curriculum_design.v1 from a goal +
+  # operator-curated catalog + operator-profile expertise; produces
+  # an ordered learning path the mentor + assessor + spaced_repetition_pilot
+  # consume. Read-only; NEVER assesses operator understanding (assessor's
+  # lane); NEVER drafts content (writer's lane, D7). GREEN posture per
+  # ADR-0089 Decision 1 (deterministic-DAG composition is non-acting).
+  curriculum_designer:
+    description: "Curriculum-design researcher. Dispatches curriculum_design.v1 over an operator-goal + operator-curated topic catalog (typically D1 catalog reads via memory_recall) to compose a topic-prereq DAG + deterministic ordered learning path. Writes curriculum attestations to private memory tagged for mentor + assessor + spaced_repetition_pilot pickup. Deterministic so the operator can audit + replay the path. Genre: researcher. ADR-0089 Phase A."
+    domain_weights:
+      security: 0.7     # curriculum artifacts are private; no external boundary crossing
+      audit: 2.5        # every curriculum attests to its catalog source + DAG structure
+      cognitive: 2.5    # DAG composition + topo-walk reasoning is the load-bearing trait
+      communication: 1.8 # the curriculum is operator + downstream-role consumed
+      emotional: 0.7
+      embodiment: 0.4
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so

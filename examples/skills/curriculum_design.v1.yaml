@@ -1,0 +1,173 @@
+schema_version: 1
+name: curriculum_design
+version: '1'
+description: |
+  Curriculum-Designer-D9's primary skill. Composes a topic-prereq
+  DAG + ordered learning path via curriculum_design.v1 from a
+  goal_topic + an operator-curated catalog (typically recent D1
+  catalog reads via memory_recall) + the operator's stated
+  expertise level. Writes the attestation tagged for mentor +
+  assessor + spaced_repetition_pilot pickup.
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read fetches the
+       operator's expertise_level + areas_of_focus + timezone.
+       The DAG composition reads expertise; the narrative reads
+       focus.
+    2. recall_catalog_entries — memory_recall scope=lineage for
+       D1 catalog entries (or operator-provided source rows)
+       relevant to the goal_topic. The designer composes from
+       what the librarian has cataloged + what the operator has
+       explicitly authored — NEVER hallucinates topics.
+    3. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. A curriculum attested on
+       a broken chain inherits the brokenness.
+    4. compose_curriculum — curriculum_design.v1 deterministically
+       composes the DAG + ordered path. Returns has_cycles +
+       orphan_prereqs + already_known so the downstream narrative
+       can surface gaps.
+    5. narrate_curriculum — llm_think wraps the deterministic
+       DAG with an operator-facing narrative covering "here's the
+       path I composed, here's why this order, here's what you
+       already know, here's what needs catalog entries the
+       librarian doesn't yet have."
+    6. write_curriculum_attestation — memory_write scope=private
+       records the curriculum with tags (curriculum:topic:
+       ${goal_topic_slug}, attestor:CurriculumDesigner-D9) for
+       downstream pickup.
+
+  Deterministic by design. forbid_silent_catalog_substitution +
+  require_curriculum_attestation policies enforce the
+  operator-curated-source discipline at governance layer.
+
+requires:
+  - curriculum_design.v1
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [goal_topic, goal_topic_slug, catalog]
+  properties:
+    goal_topic:
+      type: string
+      description: >
+        Human-readable goal — the topic the operator wants to be
+        fluent in by end of curriculum.
+    goal_topic_slug:
+      type: string
+      description: >
+        kebab-case slug for the goal topic, used to tag the
+        curriculum attestation + match downstream coaching /
+        assessment skills.
+    catalog:
+      type: array
+      description: >
+        Operator-curated topic catalog. Each entry has slug +
+        title + optional prereq_slugs + optional
+        current_familiarity. Typically composed by reading D1
+        catalog memory rows via memory_recall in the same
+        session.
+      minItems: 1
+    target_weeks:
+      type: integer
+      default: 12
+      description: >
+        Operator-stated intended duration in weeks.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the curriculum
+        attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_catalog_entries
+    tool: memory_recall.v1
+    args:
+      query: "topic:${inputs.goal_topic_slug}"
+      mode: lineage
+      limit: 50
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_curriculum
+    tool: curriculum_design.v1
+    args:
+      goal_topic: ${inputs.goal_topic}
+      catalog: ${inputs.catalog}
+      expertise_level: ${operator_context.out.expertise_level}
+      target_weeks: ${inputs.target_weeks}
+
+  - id: narrate_curriculum
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Curriculum-Designer-D9, the D9 Learning Coach
+        curriculum agent. Narrate the deterministic curriculum
+        you just composed for goal "${inputs.goal_topic}".
+
+        Operator profile:
+          expertise:      ${operator_context.out.expertise_level}
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+        Target weeks:    ${inputs.target_weeks}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Composed path (curriculum_design.v1):
+        ${compose_curriculum.out.ordered_path}
+
+        Already known:    ${compose_curriculum.out.already_known}
+        Orphan prereqs:   ${compose_curriculum.out.orphan_prereqs}
+        Has cycles:       ${compose_curriculum.out.has_cycles}
+        Max depth:        ${compose_curriculum.out.summary.max_depth}
+
+        Surface (a) the ordered path, (b) the rationale for the
+        order, (c) what the operator already knows, (d) what
+        catalog gaps need filling (orphan_prereqs are slugs the
+        librarian hasn't cataloged yet), and (e) any cycles in
+        the catalog that need operator intervention.
+
+        DO NOT assess the operator's understanding — that's the
+        assessor's lane. DO NOT compose drafts — that's the
+        writer's lane (D7). All timestamps are Pacific time.
+
+        Halt warning if chain status != "ok" — refuse to
+        narrate the curriculum and explain why.
+
+  - id: write_curriculum_attestation
+    tool: memory_write.v1
+    args:
+      content: ${narrate_curriculum.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d9_curriculum"
+        - "curriculum:topic:${inputs.goal_topic_slug}"
+        - "attestor:CurriculumDesigner-D9"
+
+output:
+  goal_topic: ${inputs.goal_topic}
+  goal_topic_slug: ${inputs.goal_topic_slug}
+  ordered_path: ${compose_curriculum.out.ordered_path}
+  path_size: ${compose_curriculum.out.summary.path_size}
+  has_cycles: ${compose_curriculum.out.has_cycles}
+  orphan_prereqs: ${compose_curriculum.out.orphan_prereqs}
+  already_known: ${compose_curriculum.out.already_known}
+  chain_status: ${verify_chain_integrity.out.status}
+  curriculum_entry_id: ${write_curriculum_attestation.out.entry_id}
+  narration: ${narrate_curriculum.out.response}

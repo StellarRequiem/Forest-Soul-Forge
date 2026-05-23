@@ -57,6 +57,9 @@ from forest_soul_forge.tools.builtin.format_adapt import FormatAdaptTool
 from forest_soul_forge.tools.builtin.publish_schedule import (
     PublishScheduleTool,
 )
+from forest_soul_forge.tools.builtin.curriculum_design import (
+    CurriculumDesignTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -533,3 +536,10 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # distribution_pilot (YELLOW posture) is the only role with
     # this in its kit.
     registry.register(PublishScheduleTool())
+    # ADR-0089 Phase A — curriculum_design.v1. Composes a topic-
+    # prerequisite DAG from a goal + an operator-supplied topic
+    # catalog (recent D1 catalog reads) + operator-profile context.
+    # Deterministic topological order with stable tie-breaking so
+    # operator can audit + replay the path. Read-only;
+    # curriculum_designer (D9) is the primary consumer.
+    registry.register(CurriculumDesignTool())

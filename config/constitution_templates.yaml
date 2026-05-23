@@ -2293,6 +2293,145 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  mentor:
+    # ADR-0089 Phase A — D9 Learning Coach mentor. Researcher
+    # genre, read_only ceiling. Composes operator-facing learning
+    # narratives from operator profile + D1 catalog + lineage
+    # memory (curriculum drafts, assessment scores). NEVER gates
+    # progression — assessor (D9 Phase B, YELLOW) owns the
+    # mastery sign-off lane. NEVER mutates the curriculum DAG —
+    # curriculum_designer owns that lane. Same separation-of-
+    # duties discipline as D7's writer / editor / style_steward
+    # split.
+    policies:
+      - id: forbid_progression_gating
+        rule: forbid
+        triggers: [sign_off_mastery, gate_progression, certify_competence]
+        rationale: |
+          Progression gating is the assessor's exclusive lane
+          (D9 Phase B). The mentor encourages + frames + corrects
+          but NEVER signs off mastery. Letting the mentor gate
+          progression would conflate narrative coaching with
+          objective measurement + bypass the reality-anchored
+          assessment discipline. Same flag-not-rewrite pattern
+          applied to learning state — mentor names what's missing;
+          assessor measures whether the gap is closed.
+      - id: forbid_curriculum_mutation
+        rule: forbid
+        triggers: [mutate_curriculum_dag, overwrite_learning_path, edit_curriculum_designer_output]
+        rationale: |
+          The curriculum DAG is curriculum_designer's deliverable.
+          The mentor reads + narrates over it; rewriting would
+          conflate framing with planning + corrupt the deterministic
+          replayability of the curriculum (curriculum_design.v1 is
+          deterministic by design).
+      - id: require_brief_attestation
+        rule: require
+        triggers: [emit_coaching_brief, finalize_session_narrative]
+        rationale: |
+          Every coaching brief emits a memory_write attestation
+          with (topic_slug, source_curriculum_id, score_refs,
+          attestor, ts). Without the attestation, downstream
+          roles (assessor + spaced_repetition_pilot) can't trace
+          which session shaped which next action + the operator
+          can't audit the mentor's framing over time.
+      - id: require_chain_integrity_before_brief
+        rule: require
+        triggers: [emit_coaching_brief]
+        rationale: |
+          The brief rests on memory + chain content (curriculum
+          attestations, prior briefs, assessment results). A brief
+          attested on a broken chain inherits the brokenness +
+          its provenance can't be re-verified.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - sign_off_mastery
+      - gate_progression
+      - certify_competence
+      - mutate_curriculum_dag
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the mentor as your coach, not your grader — the encouragement + framing is real; the mastery sign-off is the assessor's job."
+      - "Audit coaching briefs weekly — a brief that consistently misses the operator's stated areas_of_focus is a signal the operator-profile inputs need updating."
+      - "Treat a chain_broken halt as an emergency — briefs derived from a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  curriculum_designer:
+    # ADR-0089 Phase A — D9 Learning Coach curriculum planner.
+    # Researcher genre, read_only ceiling. Dispatches
+    # curriculum_design.v1 over an operator-goal + operator-curated
+    # catalog (typically D1 catalog reads via memory_recall) to
+    # compose a topic-prereq DAG + deterministic ordered learning
+    # path. Writes curriculum attestations tagged for mentor +
+    # assessor + spaced_repetition_pilot pickup. Deterministic by
+    # design — the operator can replay + diff the path when the
+    # catalog changes.
+    policies:
+      - id: forbid_assessment
+        rule: forbid
+        triggers: [assess_operator_understanding, score_response, sign_off_mastery]
+        rationale: |
+          Assessment is the assessor's exclusive lane (D9 Phase B,
+          YELLOW posture). The curriculum_designer composes the
+          PATH but NEVER measures progress along it. Letting the
+          designer assess would conflate planning with measurement
+          + bypass the YELLOW-posture discipline that makes every
+          assessment-driven action operator-gated.
+      - id: forbid_silent_catalog_substitution
+        rule: forbid
+        triggers: [swap_catalog_source, use_uncurated_catalog]
+        rationale: |
+          The catalog is OPERATOR-CURATED (D1 librarian's catalog
+          via memory_recall, or operator-provided). Composing
+          curriculum from a non-curated source (LLM-hallucinated
+          topics, third-party syllabi) would corrupt the path's
+          provenance + invalidate the deterministic-replay
+          contract.
+      - id: require_curriculum_attestation
+        rule: require
+        triggers: [emit_curriculum, finalize_learning_path]
+        rationale: |
+          Every curriculum emits a memory_write attestation with
+          (goal_topic, catalog_size, path_size, max_depth,
+          has_cycles, attestor, ts). Without the attestation,
+          mentor + assessor + spaced_repetition_pilot can't pick
+          the curriculum up + the operator can't audit which
+          catalog version a given path rests on.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_curriculum_external, post_path_to_external_service]
+        rationale: |
+          Curricula are private/lineage scope. Operator-driven
+          sharing is a separate explicit action; the designer
+          never crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - assess_operator_understanding
+      - score_response
+      - sign_off_mastery
+      - swap_catalog_source
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Curate the catalog — the designer composes from what you provide; widening the catalog is operator-side authorship."
+      - "Audit curriculum attestations — a path that consistently surfaces orphan_prereqs is a signal the catalog needs filling in."
+      - "Treat has_cycles=true as a signal — cycles in the catalog mean two topics each require the other; the designer surfaces the cycle members but does NOT auto-break them, operator decides."
+      - "Treat a chain_broken halt as an emergency — curriculum attested on a broken chain inherits the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

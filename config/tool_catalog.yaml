@@ -804,6 +804,58 @@ tools:
     side_effects: external
     archetype_tags: [distribution_pilot]
 
+  curriculum_design.v1:
+    name: curriculum_design
+    version: "1"
+    description: |
+      ADR-0089 Phase A — D9 Learning Coach curriculum composer.
+      Composes a topic-prerequisite DAG from a goal topic + an
+      operator-supplied topic catalog (typically recent D1
+      catalog reads via memory_recall) + operator-profile
+      expertise context. Returns a deterministic topological
+      walk of the DAG with stable tie-breaking (fewer-unmet
+      prereqs > shallower depth > catalog index), so two calls
+      with the same inputs always produce the same path.
+      Read-only. The curriculum_design.v1 skill wraps this with
+      memory_recall of source catalog entries + memory_write of
+      the attestation; LLM narrative layers on top separately.
+      curriculum_designer (D9) is the primary consumer.
+    input_schema:
+      type: object
+      required: [goal_topic, catalog]
+      properties:
+        goal_topic:
+          type: string
+          description: "Operator's stated end goal — the topic to be fluent in by end of curriculum."
+        catalog:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [slug, title]
+            properties:
+              slug: {type: string}
+              title: {type: string}
+              prereq_slugs:
+                type: array
+                items: {type: string}
+              current_familiarity:
+                type: number
+                minimum: 0
+                maximum: 10
+        expertise_level:
+          type: string
+          enum: [novice, intermediate, advanced]
+          default: novice
+        target_weeks:
+          type: integer
+          minimum: 1
+          maximum: 52
+          default: 12
+    side_effects: read_only
+    archetype_tags: [curriculum_designer]
+
   format_adapt.v1:
     name: format_adapt
     version: "1"
@@ -3779,6 +3831,39 @@ archetypes:
       # No web_fetch. No shell_exec. No code_edit. No draft-
       # mutation tools (writer's lane) + no editing tools (editor's
       # lane). Pure publish-queue action surface.
+
+  # ---- ADR-0089 Phase A — D9 Learning Coach coaching foundation ----
+  # mentor + curriculum_designer kits. Both researcher-genre,
+  # read_only ceiling. The mentor narrates; the designer plans.
+  # No new builtin tools land here for mentor (reuses existing);
+  # curriculum_designer gets curriculum_design.v1.
+  mentor:
+    standard_tools:
+      - llm_think.v1                  # the load-bearing tool — coaching narrative composition
+      - memory_recall.v1              # walk curriculum drafts + assessment scores + lineage memory
+      - memory_write.v1               # write coaching brief attestations to private memory
+      - delegate.v1                   # hand off to assessor / curriculum_designer / spaced_repetition_pilot
+      - audit_chain_verify.v1         # chain integrity before publishing brief
+      - text_summarize.v1             # condense long session histories into briefs
+      - operator_profile_read.v1      # ADR-0068 — areas_of_focus + expertise frame the narrative
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      # No web_fetch. No shell_exec. No code_edit. No assessment
+      # tools (assessor's lane, Phase B). No curriculum mutation
+      # tools. Pure narrative composition kit.
+
+  curriculum_designer:
+    standard_tools:
+      - llm_think.v1                  # narrative wrapping the deterministic DAG
+      - memory_recall.v1              # walk D1 catalog + prior curricula + operator goals
+      - memory_write.v1               # write curriculum attestations tagged for mentor / assessor / spaced_repetition_pilot pickup
+      - delegate.v1                   # hand off to mentor / assessor / D1 librarian for catalog reads
+      - audit_chain_verify.v1         # chain integrity before publishing curricula
+      - text_summarize.v1             # condense long catalogs into operator-readable summaries
+      - operator_profile_read.v1      # ADR-0068 — expertise_level + areas_of_focus inform DAG
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval to surface D1 catalog reads
+      - curriculum_design.v1          # ADR-0089 Phase A — the deterministic DAG composer
+      # No web_fetch. No shell_exec. No code_edit. No assessment
+      # tools (assessor's lane, Phase B). Pure curriculum composition.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard
