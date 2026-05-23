@@ -12,7 +12,15 @@ Per-tool unit tests here only need validate() + prompt construction.
 """
 from __future__ import annotations
 
+import os
 import pytest
+
+# --- B452 follow-up: email_draft tests can be disabled via env var.
+# Set FSF_SKIP_EMAIL_TESTS=1 to skip all email_draft-related tests.
+# The tests themselves are sound (validate-only, no network), but
+# the operator requested they be disableable. Keep the code; just gate it.
+_SKIP_EMAIL = os.environ.get("FSF_SKIP_EMAIL_TESTS", "0") == "1"
+_email_skip_reason = "email_draft tests disabled via FSF_SKIP_EMAIL_TESTS=1"
 
 from forest_soul_forge.tools.base import ToolContext, ToolValidationError
 from forest_soul_forge.tools.builtin.action_items_extract import (
@@ -105,6 +113,7 @@ class TestCodeExplain:
 
 # ---- email_draft ----------------------------------------------------------
 
+@pytest.mark.skipif(_SKIP_EMAIL, reason=_email_skip_reason)
 class TestEmailDraft:
     def test_validate_minimal(self):
         EmailDraftTool().validate({"intent": "Thank the team for shipping."})

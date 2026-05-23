@@ -235,6 +235,7 @@ genres:
       - prospector               # ADR-0086 Phase A — D1 knowledge prospector; allowlisted-network research role that pulls source material + hands off to librarian for catalog discipline (kit: web_fetch + llm_think + memory_recall/write + text_summarize + operator_profile_read)
       - synthesizer              # ADR-0086 Phase B — D1 knowledge synthesizer; researcher-genre synthesis over the librarian's catalog (topic_genealogy_build.v1 + daily_knowledge_delta.v1 + memory_recall/write + llm_think + text_summarize + personal_recall)
       - coordinator              # ADR-0087 Phase A — D2 Daily Life OS orchestrator; researcher-genre role that composes the morning briefing from operator-profile + audit chain + D1 deltas + sibling D2 inputs; routes via delegate.v1 but NEVER acts on calendars / inboxes / tasks itself (kit: memory_recall/write + audit_chain_verify + llm_think + text_summarize + operator_profile_read + personal_recall + delegate)
+      - task_prioritizer         # ADR-0087 Phase C — D2 Daily Life OS task ranker; researcher-genre role that dispatches task_rank.v1 (deterministic urgency/impact/effort scoring) + llm_think for narration over operator-provided task lists. NEVER mutates the task store. Kit: task_rank.v1 + memory_recall/write + audit_chain_verify + llm_think + text_summarize + operator_profile_read + delegate.
 
   companion:
     description: |

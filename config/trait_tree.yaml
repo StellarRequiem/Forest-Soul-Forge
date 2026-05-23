@@ -949,6 +949,23 @@ roles:
       emotional: 1.2    # warmth on operator-facing replies
       embodiment: 0.5
 
+  # ---- ADR-0087 Phase C — D2 Daily Life OS (prioritization) ----
+  # task_prioritizer: researcher-genre ranking role. Reads
+  # operator task lists + operator profile, ranks via
+  # deterministic task_rank.v1 + narrates via llm_think. NEVER
+  # mutates the task store — the operator (or a connector) owns
+  # task creation + completion. GREEN posture per ADR-0087
+  # Decision 1.
+  task_prioritizer:
+    description: "Task prioritization researcher. Dispatches task_rank.v1 over an operator-provided task list, applies deterministic urgency / impact / effort scoring with operator-profile context (areas_of_focus drives the focus_bonus), surfaces a ranked digest via llm_think narration. NEVER mutates the task store — task creation + completion is operator-driven. Read-only. Genre: researcher. ADR-0087 Phase C."
+    domain_weights:
+      security: 0.8     # task content is operator-private but not adversarial
+      audit: 2.0        # every ranking attests to its inputs + criteria
+      cognitive: 2.6    # prioritization reasoning is the load-bearing trait
+      communication: 2.0 # the ranked digest is operator-facing
+      emotional: 0.8
+      embodiment: 0.6
+
   # ---- ADR-0087 Phase B — D2 Daily Life OS (scheduling + calendar) ----
   # time_steward: actuator-genre scheduling role. Creates scheduled
   # reminders (data/d2/reminders.jsonl) + queues calendar events

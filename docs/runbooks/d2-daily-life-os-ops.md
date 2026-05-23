@@ -12,7 +12,7 @@ that lands D2 Phase A (this runbook will grow as Phases B–D ship).
 |---|---|---|---|
 | **A** | coordinator + inbox_triager | none — reuses existing | CLOSED |
 | **B** | time_steward (YELLOW) | schedule_reminder.v1 + calendar_block.v1 | CLOSED |
-| **C** | task_prioritizer | task_rank.v1 | queued |
+| **C** | task_prioritizer | task_rank.v1 | CLOSED |
 | **D** | reflector | decision_journal_compile.v1 | queued |
 
 Each phase = one commit + one push, so the operator can verify
@@ -263,6 +263,55 @@ gates on `schedule_reminder.v1` (filesystem) and
 `calendar_block.v1` (external) remain in force — that's the
 actuator-genre + tool-policy baseline regardless of posture.
 
-## Phase C onward
+## Phase C — prioritization
 
-Sections for Phases C, D will land with each phase commit.
+### 1. Restart the daemon + birth
+
+Phase C adds the `task_prioritizer` role + the `task_rank.v1`
+builtin tool.
+
+```bash
+./dev-tools/force-restart-daemon.command
+./dev-tools/birth-task-prioritizer.command
+```
+
+GREEN posture default — read-only ranking is non-acting.
+
+### 2. First dispatch — rank an operator-provided list
+
+```bash
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/api/v1/agents/${TASK_PRIORITIZER_ID}/skills/run" \
+  -H "X-FSF-Token: $FSF_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "task_prioritization",
+    "skill_version": "1",
+    "inputs": {
+      "tasks": [
+        {"title": "Pay rent", "urgency": 10, "impact": 9, "effort": 1, "tags": ["finance"], "due_in_hours": 24},
+        {"title": "Reply to Alice", "urgency": 6, "impact": 4, "effort": 2, "tags": ["communication"]},
+        {"title": "Read latest D2 ADR", "urgency": 3, "impact": 8, "effort": 4, "tags": ["forest"]}
+      ]
+    }
+  }' | python3 -m json.tool
+```
+
+Expect a ranking with the highest-leverage task on top + a
+narration that cites the dominant score component per item.
+The ranking is deterministic — re-run with the same inputs to
+get the same order.
+
+### 3. Scoring discipline
+
+- Default weights: urgency=1.2, impact=1.5, effort=0.5 (effort
+  SUBTRACTS — cheap high-impact wins).
+- `due_in_hours` overrides low urgency: ~10 hour deadline floors
+  urgency at ~8.3.
+- `areas_of_focus` from the operator profile adds +1 to any
+  task whose tags match. The `focus_bonus` skill input
+  overrides this default magnitude.
+
+## Phase D onward
+
+Section for Phase D will land with the phase commit.

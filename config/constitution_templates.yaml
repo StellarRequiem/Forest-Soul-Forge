@@ -1678,6 +1678,68 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  task_prioritizer:
+    # ADR-0087 Phase C — D2 Daily Life OS task ranker. Researcher
+    # genre, read_only ceiling. The agent dispatches task_rank.v1
+    # (deterministic scoring) + llm_think (narrative). NEVER
+    # mutates the task store; the operator (or a connector) owns
+    # task creation + completion.
+    policies:
+      - id: forbid_task_store_mutation
+        rule: forbid
+        triggers: [create_task, complete_task, delete_task, modify_task]
+        rationale: |
+          The prioritizer RANKS operator-provided task lists; it
+          does not author or close tasks. Mutating the task store
+          would conflate ranking with execution + bypass the
+          operator's own task-management discipline.
+      - id: require_ranking_attestation
+        rule: require
+        triggers: [emit_ranking, finalize_prioritization]
+        rationale: |
+          Every ranking emits a memory_write attestation with
+          (task_count, top_task_title, weights, areas_of_focus,
+          attestor, ts). Without the attestation, the operator
+          can't trace which weights drove a ranking + can't
+          audit ranking drift over time.
+      - id: forbid_speculative_ranking
+        rule: forbid
+        triggers: [rank_inferred_tasks, rank_without_explicit_list]
+        rationale: |
+          The prioritizer ranks tasks the OPERATOR (or a
+          connector handoff) explicitly provided. Inferring tasks
+          from chat history or memory entries + ranking those
+          would surface a list the operator never agreed to
+          curate, which defeats the discipline.
+      - id: require_chain_integrity_before_ranking
+        rule: require
+        triggers: [emit_ranking, finalize_prioritization]
+        rationale: |
+          The ranking rests on memory + chain content
+          (prior-day rankings, operator profile attestations).
+          A ranking built on a broken chain inherits the
+          brokenness + can't be reconciled with the operator's
+          historical context.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - create_task
+      - complete_task
+      - delete_task
+      - modify_task
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Review weekly the weights the prioritizer uses — defaults are 1.2/1.5/0.5 (urgency/impact/effort). Operator override via the weights input."
+      - "Audit ranking attestations weekly — a ranking that consistently demotes operator-flagged work is a signal the areas_of_focus profile needs updating."
+      - "Treat the prioritizer as advisory — the ranking is a STARTING point for the operator's own judgment; never autopilot off the top item."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   time_steward:
     # ADR-0087 Phase B — D2 Daily Life OS scheduling + calendar
     # actuator. Actuator genre, external ceiling. YELLOW posture

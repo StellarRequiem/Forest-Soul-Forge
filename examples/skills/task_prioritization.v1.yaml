@@ -1,0 +1,145 @@
+schema_version: 1
+name: task_prioritization
+version: '1'
+description: |
+  TaskPrioritizer-D2's primary skill. Takes an operator-provided
+  task list, fetches operator areas_of_focus to drive the focus
+  bonus, ranks deterministically via task_rank.v1, then narrates
+  the top items via llm_think.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       areas_of_focus + work_hours.
+    2. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked. A ranking attested against
+       a broken chain inherits the brokenness.
+    3. rank — task_rank.v1 produces the deterministic ranked
+       list with per-task score breakdown.
+    4. narrate — llm_think wraps the ranking in operator-
+       readable prose: top-3 priorities, why they ranked
+       where they did, what got demoted.
+    5. attest — memory_write scope=private records the
+       attestation with weights + areas_of_focus + top item +
+       attestor.
+
+  Read-only end-to-end. The ranking is deterministic + the
+  narration is LLM-driven; together they give the operator both
+  the audit trail (replay the rank by re-running with the same
+  inputs) and the human-readable context. Constitutional
+  policies enforce the discipline at governance layer
+  (forbid_task_store_mutation, require_ranking_attestation,
+  forbid_speculative_ranking, require_chain_integrity_before_ranking).
+
+  All timestamps Pacific time per CLAUDE.md.
+
+requires:
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - task_rank.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [tasks]
+  properties:
+    tasks:
+      type: array
+      description: >
+        Operator-provided task list. Each entry has title (str)
+        plus optional urgency / impact / effort (0..10),
+        due_in_hours (>= 0), tags (list[str]).
+    weights:
+      type: object
+      default: {}
+      description: >
+        Optional weight overrides. Keys: urgency / impact /
+        effort. Defaults 1.2 / 1.5 / 0.5.
+    focus_bonus:
+      type: number
+      default: 1.0
+      description: >
+        Score added when a task tag matches an operator
+        area_of_focus.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: rank
+    tool: task_rank.v1
+    args:
+      tasks: ${inputs.tasks}
+      weights: ${inputs.weights}
+      areas_of_focus: ${operator_context.out.areas_of_focus}
+      focus_bonus: ${inputs.focus_bonus}
+
+  - id: narrate
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are TaskPrioritizer-D2, the D2 Daily Life OS task
+        prioritization agent. Narrate the ranked task list.
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          work_hours:     ${operator_context.out.work_hours}
+          timezone:       ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Ranked task list (deterministic — re-running with the
+        same inputs produces the same order):
+        ${rank.out.ranked}
+
+        Weights applied:
+          urgency: ${rank.out.weights.urgency}
+          impact:  ${rank.out.weights.impact}
+          effort:  ${rank.out.weights.effort}
+
+        Produce a structured narration:
+        1. Top-3 priorities — the title + one sentence on why
+           it ranked where it did (cite the dominant score
+           component from the breakdown).
+        2. Demoted highlights — anything the operator would
+           expect to be high but landed lower than rank-3, with
+           one sentence on why.
+        3. Focus-bonus observations — which areas_of_focus
+           lifted which items.
+        4. Halt warning if chain status != "ok" — refuse to
+           commit the ranking as load-bearing.
+
+        Be terse — the operator reads this to validate the
+        order, not to expand it. All timestamps Pacific time.
+
+  - id: attest
+    tool: memory_write.v1
+    args:
+      content: ${narrate.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "task_ranking_built"
+        - "top_task:${rank.out.ranked[0].title}"
+        - "attestor:TaskPrioritizer-D2"
+
+output:
+  task_count: ${rank.out.task_count}
+  ranked: ${rank.out.ranked}
+  narrative: ${narrate.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_id: ${attest.out.entry_id}
