@@ -2363,6 +2363,72 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  socratic_partner:
+    # ADR-0089 Phase C — D9 Learning Coach Socratic-dialogue communicator.
+    # Communicator genre, network ceiling (but the kit composition
+    # keeps the action surface to memory-only — same drafts-only
+    # pattern as D2's inbox_triager). Runs multi-turn dialogue
+    # sessions; surfaces operator's reasoning gaps via questions.
+    # NEVER grades (assessor's lane) + NEVER drafts curriculum
+    # (curriculum_designer's lane). GREEN posture default per
+    # ADR-0089 Decision 1 — dialogue-only is non-acting.
+    policies:
+      - id: forbid_grading
+        rule: forbid
+        triggers: [grade_response, score_understanding, certify_competence, sign_off_mastery]
+        rationale: |
+          Grading is the assessor's exclusive lane (D9 Phase B,
+          YELLOW posture). The Socratic partner asks questions;
+          NEVER scores answers. Letting the partner grade would
+          conflate dialogue with measurement + bypass the
+          Reality-Anchored assessment discipline + the YELLOW-
+          posture gating that makes every assessment-driven action
+          operator-gated.
+      - id: forbid_curriculum_mutation
+        rule: forbid
+        triggers: [mutate_curriculum_dag, overwrite_learning_path, edit_curriculum_designer_output]
+        rationale: |
+          The curriculum DAG is curriculum_designer's deliverable.
+          The Socratic partner reads + dialogues over it; rewriting
+          would conflate dialogue with planning + invalidate the
+          deterministic replayability of the curriculum.
+      - id: require_session_attestation
+        rule: require
+        triggers: [emit_dialogue_turn, finalize_session]
+        rationale: |
+          Every dialogue session emits a memory_write attestation
+          with (topic_slug, turn_count, gap_summary, attestor, ts).
+          Without the attestation, downstream roles (assessor +
+          mentor) can't trace which session surfaced which gap +
+          the operator can't audit the partner's questioning quality
+          over time.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_dialogue_external, post_session_externally]
+        rationale: |
+          Dialogue content is private/lineage scope. Operator-driven
+          sharing is a separate explicit action; the partner never
+          crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - grade_response
+      - score_understanding
+      - certify_competence
+      - mutate_curriculum_dag
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the partner as your questioner, not your grader — the questions are real; the score is the assessor's job."
+      - "Audit session attestations weekly — a session that consistently misses the operator's stated reasoning gaps is a signal the curriculum / assessment-history inputs need refresh."
+      - "Treat a chain_broken halt as an emergency — sessions attested on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   assessor:
     # ADR-0089 Phase B — D9 Learning Coach measurement guardian.
     # Guardian genre, read_only ceiling. Composes

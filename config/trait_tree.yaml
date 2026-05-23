@@ -1148,6 +1148,25 @@ roles:
       emotional: 0.7
       embodiment: 0.4
 
+  # ---- ADR-0089 Phase C — D9 Learning Coach (Socratic dialogue) ------
+  # socratic_partner: communicator-genre dialogue role. Runs
+  # multi-turn Socratic dialogue sessions over a topic — asks
+  # questions, surfaces operator's reasoning gaps, NEVER grades
+  # responses (assessor's lane) + NEVER drafts curriculum
+  # (curriculum_designer's lane). The role's deliverable IS
+  # dialogue — operator-facing prose that surfaces gaps without
+  # filling them. GREEN posture per ADR-0089 Decision 1 (dialogue-
+  # only is non-acting; conversations to private memory).
+  socratic_partner:
+    description: "Socratic-dialogue communicator. Runs multi-turn questioning sessions over a topic — surfaces operator's reasoning gaps via questions, NEVER grades responses (assessor's lane) + NEVER drafts curriculum (curriculum_designer's lane). Reads operator profile + curriculum + lineage memory (prior dialogues, assessment results) and writes session attestations to private memory tagged for downstream pickup. Genre: communicator. ADR-0089 Phase C."
+    domain_weights:
+      security: 0.6     # dialogue content is private; no external boundary crossing
+      audit: 1.8        # every session attests to its inputs
+      cognitive: 2.3    # question-design reasoning + gap-detection
+      communication: 2.7 # the deliverable IS dialogue — operator-facing prose
+      emotional: 1.8    # Socratic questioning needs warmth + patience + empathy
+      embodiment: 0.4
+
   # ---- ADR-0089 Phase B — D9 Learning Coach (assessment ledger) ------
   # assessor: guardian-genre measurement role. Composes knowledge_assessment.v1
   # (item generation) + assessment_score.v1 (response scoring) +

@@ -101,6 +101,7 @@ genres:
       # as briefer (network, all outbound human-approval-gated).
       - incident_communicator
       - inbox_triager            # ADR-0087 Phase A — D2 Daily Life OS inbox triage; communicator-genre role that reads operator inbox snapshots and produces candidate drafts via email_draft.v1; NEVER sends (drafts only; send is a separate operator-driven action). Kit: memory_recall/write + llm_think + text_summarize + email_draft + action_items_extract + audit_chain_verify + operator_profile_read.
+      - socratic_partner         # ADR-0089 Phase C — D9 Learning Coach Socratic-dialogue communicator; runs multi-turn questioning sessions over a topic, surfaces operator's reasoning gaps via questions. NEVER grades responses (assessor's lane) + NEVER drafts curriculum (curriculum_designer's lane). GREEN posture. No new builtin tools — reuses existing kit (memory_recall/write + llm_think + text_summarize + operator_profile_read + personal_recall + audit_chain_verify + delegate).
 
   actuator:
     description: |

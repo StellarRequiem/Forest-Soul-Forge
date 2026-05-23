@@ -12,7 +12,7 @@ that lands D9 Phase A (this runbook will grow as Phases B–D ship).
 |---|---|---|---|
 | **A** | mentor + curriculum_designer | curriculum_design.v1 | CLOSED |
 | **B** | assessor (YELLOW) | knowledge_assessment.v1 + assessment_score.v1 + misconception_log.v1 | CLOSED |
-| **C** | socratic_partner | none — reuses existing | queued |
+| **C** | socratic_partner | none — reuses existing | CLOSED |
 | **D** | spaced_repetition_pilot (YELLOW) | spaced_repetition_schedule.v1 | queued |
 
 Each phase = one commit + one push, so the operator can verify
@@ -277,9 +277,81 @@ approval. After confirmation, the entry lands in
 `data/d9/misconceptions.jsonl`. The next assessment session reads
 recent ledger entries to target the gap.
 
-## Phase C / D — TBD
+## Phase C — Socratic dialogue
 
-Sections expand as Phases C, D ship.
+### 1. Restart the daemon + birth the partner
+
+```bash
+./dev-tools/force-restart-daemon.command
+./dev-tools/birth-socratic-partner.command
+```
+
+`socratic_partner` role, `communicator` genre, **GREEN** posture
+default. No new builtin tools — the role reuses the existing
+memory_recall / memory_write / llm_think / text_summarize /
+operator_profile_read / personal_recall / audit_chain_verify /
+delegate kit.
+
+### 2. First dispatch — run a dialogue turn
+
+```bash
+PARTNER_ID=...   # SocraticPartner-D9 instance_id
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/agents/${PARTNER_ID}/skills/dispatch" \
+  -H "X-FSF-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "socratic_dialogue",
+    "skill_version": "1",
+    "inputs": {
+      "topic_slug": "diffusion-forward",
+      "operator_input": "I think forward diffusion is just random noise injection",
+      "turn_kind": "question"
+    }
+  }'
+```
+
+The response carries `turn_text` (the question the partner
+composed), `prior_turn_count`, `chain_status`, and
+`turn_entry_id`. Repeated dispatches thread the conversation by
+matching memory_recall on `socratic:topic:${topic_slug}` against
+the operator's earlier inputs.
+
+### 3. End-of-session — produce a gap summary
+
+```bash
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/agents/${PARTNER_ID}/skills/dispatch" \
+  -H "X-FSF-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "socratic_dialogue",
+    "skill_version": "1",
+    "inputs": {
+      "topic_slug": "diffusion-forward",
+      "operator_input": "OK I think we are done for today",
+      "turn_kind": "summary"
+    }
+  }'
+```
+
+The summary turn produces a gap report suitable for the assessor
+to pick up via `memory_recall` on
+`socratic:topic:${topic_slug}` — the Phase B + Phase C handoff
+runs entirely through lineage memory, no explicit delegate
+required.
+
+### 4. Recovery — what to do when something refuses
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Partner tries to grade response | LLM hallucinated grading language | `forbid_grading` policy refuses at governance layer; if it leaks through, file as content-quality bug and tune the skill's prompt. |
+| Partner rewrites curriculum | Same hallucination class | `forbid_curriculum_mutation` policy fires; same recovery. |
+| Dialogue ignores prior turns | memory_recall query mismatch | Verify `socratic:topic:${topic_slug}` tag is being written by every turn; if missing, the role's tag template drifted. |
+
+## Phase D — TBD
+
+Section expands as Phase D ships.
 
 ### YELLOW posture promotion criteria (Phases B + D)
 

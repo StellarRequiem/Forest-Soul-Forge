@@ -1,0 +1,169 @@
+schema_version: 1
+name: socratic_dialogue
+version: '1'
+description: |
+  SocraticPartner-D9's primary skill. Runs a single dialogue turn
+  in a multi-turn Socratic session — pulls curriculum + prior
+  session context, composes a question (or follow-up question)
+  surfacing a reasoning gap, writes the turn attestation to
+  private memory.
+
+  The skill expects to be dispatched repeatedly across a session;
+  each dispatch composes ONE turn from the operator's prior turn
+  + the curriculum + the prior session memory. The operator
+  drives the conversation pacing — there's no "session" entity
+  enforced; the audit chain + memory_recall thread the turns
+  together by topic_slug.
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       expertise_level + areas_of_focus + timezone.
+    2. recall_curriculum — memory_recall scope=lineage for the
+       curriculum_designer's attestation matching topic_slug.
+       Without one, the partner can still dialogue but flags
+       the missing curriculum at the top of the turn.
+    3. recall_prior_turns — memory_recall for any
+       d9_socratic_session attestations tagged with topic_slug.
+       Gives the partner the conversation history so questions
+       follow on coherently.
+    4. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end.
+    5. compose_turn — llm_think composes the next question (or
+       reflective comment) from the curriculum + prior turns +
+       operator's most recent input. Explicitly forbids
+       grading + curriculum mutation.
+    6. write_turn_attestation — memory_write scope=private
+       records the turn with tags (d9_socratic_session,
+       socratic:topic:${topic_slug}, attestor:SocraticPartner-D9).
+
+  NEVER grades responses + NEVER mutates curriculum. Policies
+  forbid_grading + forbid_curriculum_mutation enforce this at
+  the governance layer.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, operator_input]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this dialogue addresses. Matches the
+        curriculum_designer's attestation tag.
+    operator_input:
+      type: string
+      description: >
+        The operator's most recent turn — either an initial
+        prompt (for the first turn in a session) or an answer
+        to a prior question.
+    turn_kind:
+      type: string
+      enum: [question, reflective_followup, summary]
+      default: question
+      description: >
+        Default ``question`` (Socratic mode). ``reflective_followup``
+        surfaces what the operator's last answer revealed without
+        directly grading. ``summary`` produces an end-of-session
+        gap summary suitable for delegating to the assessor.
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_curriculum
+    tool: memory_recall.v1
+    args:
+      query: "curriculum:topic:${inputs.topic_slug}"
+      mode: lineage
+      limit: 5
+
+  - id: recall_prior_turns
+    tool: memory_recall.v1
+    args:
+      query: "socratic:topic:${inputs.topic_slug}"
+      mode: private
+      limit: 20
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_turn
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are SocraticPartner-D9, the D9 Learning Coach
+        Socratic-dialogue agent. Compose the next turn in an
+        ongoing dialogue on topic "${inputs.topic_slug}".
+
+        Operator profile:
+          expertise:      ${operator_context.out.expertise_level}
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Operator reason: ${inputs.operator_reason}
+        Turn kind:       ${inputs.turn_kind}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Curriculum context (lineage memory; curriculum_designer-D9):
+        ${recall_curriculum.out.entries}
+
+        Prior turns in this session (private memory):
+        ${recall_prior_turns.out.entries}
+
+        Operator's most recent input:
+        ${inputs.operator_input}
+
+        Compose the next turn appropriate for turn_kind:
+          - question: ask a question that surfaces a reasoning gap
+            in the operator's prior input. Build on what they
+            said; don't change topic. Aim for one specific question,
+            not a list.
+          - reflective_followup: name what the operator's prior
+            answer revealed (a clarification they're close to, a
+            distinction they're missing). Do NOT grade — describe.
+          - summary: at session end, produce a gap summary suitable
+            for the assessor to pick up via memory_recall on
+            socratic:topic:${inputs.topic_slug}.
+
+        NEVER certify mastery. NEVER mutate curriculum. NEVER
+        grade with a score.
+
+        Halt warning if chain status != "ok" — refuse to compose
+        the turn and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_turn_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_turn.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d9_socratic_session"
+        - "socratic:topic:${inputs.topic_slug}"
+        - "turn_kind:${inputs.turn_kind}"
+        - "attestor:SocraticPartner-D9"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  turn_kind: ${inputs.turn_kind}
+  turn_text: ${compose_turn.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  turn_entry_id: ${write_turn_attestation.out.entry_id}
+  prior_turn_count: ${recall_prior_turns.out.count}
+  curriculum_hits: ${recall_curriculum.out.count}

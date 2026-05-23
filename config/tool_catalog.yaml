@@ -3960,6 +3960,26 @@ archetypes:
       # No web_fetch. No shell_exec. No code_edit. No assessment
       # tools (assessor's lane, Phase B). Pure curriculum composition.
 
+  # ---- ADR-0089 Phase C — D9 Learning Coach Socratic dialogue ----
+  # socratic_partner kit. Communicator genre, network ceiling but
+  # the kit composition keeps the action surface to memory-only.
+  # No new builtin tools — reuses existing kit. The role's
+  # deliverable IS dialogue: operator-facing prose that surfaces
+  # gaps without filling them.
+  socratic_partner:
+    standard_tools:
+      - llm_think.v1                  # the load-bearing tool — question-design + gap-detection
+      - memory_recall.v1              # walk curriculum + prior sessions + assessment history
+      - memory_write.v1               # write session attestations to private memory
+      - delegate.v1                   # escalate gaps surfaced in dialogue to assessor / mentor
+      - audit_chain_verify.v1         # chain integrity before publishing session
+      - text_summarize.v1             # condense long sessions into gap summaries
+      - operator_profile_read.v1      # ADR-0068 — areas_of_focus + expertise frame the dialogue
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      # No web_fetch. No shell_exec. No code_edit. No assessment
+      # tools (assessor's lane). No curriculum mutation tools.
+      # Pure dialogue composition kit.
+
   # ---- ADR-0089 Phase B — D9 Learning Coach assessment ledger ----
   # assessor kit. Guardian genre, read_only ceiling. YELLOW posture
   # default. Composes knowledge_assessment.v1 + assessment_score.v1
