@@ -60,6 +60,15 @@ from forest_soul_forge.tools.builtin.publish_schedule import (
 from forest_soul_forge.tools.builtin.curriculum_design import (
     CurriculumDesignTool,
 )
+from forest_soul_forge.tools.builtin.knowledge_assessment import (
+    KnowledgeAssessmentTool,
+)
+from forest_soul_forge.tools.builtin.assessment_score import (
+    AssessmentScoreTool,
+)
+from forest_soul_forge.tools.builtin.misconception_log import (
+    MisconceptionLogTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -543,3 +552,24 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # operator can audit + replay the path. Read-only;
     # curriculum_designer (D9) is the primary consumer.
     registry.register(CurriculumDesignTool())
+    # ADR-0089 Phase B — knowledge_assessment.v1. Deterministically
+    # generates the structural envelope for a quiz item (slug +
+    # difficulty + kind + stable item_id). Read-only; assessor (D9
+    # YELLOW posture) is the primary consumer. LLM item-text
+    # composition is layered separately via the wrapping skill's
+    # llm_think step.
+    registry.register(KnowledgeAssessmentTool())
+    # ADR-0089 Phase B — assessment_score.v1. Scores an operator
+    # response against ground-truth answers via strict match +
+    # token-set Jaccard lexical overlap. Read-only. Returns
+    # verdict ∈ {correct, partial, incorrect, deferred} with a
+    # numerical score; the wrapping skill layers verify_claim
+    # (Reality Anchor, ADR-0063) + llm_think rubric on top.
+    registry.register(AssessmentScoreTool())
+    # ADR-0089 Phase B — misconception_log.v1. Appends a
+    # misconception record to data/d9/misconceptions.jsonl.
+    # side_effects=filesystem; per-call human approval gate
+    # enforces operator review on every ledger write (assessor
+    # YELLOW posture is the second discipline). The next assessment
+    # session reads recent ledger entries to target the gap.
+    registry.register(MisconceptionLogTool())

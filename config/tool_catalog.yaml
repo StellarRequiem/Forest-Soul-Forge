@@ -804,6 +804,101 @@ tools:
     side_effects: external
     archetype_tags: [distribution_pilot]
 
+  knowledge_assessment.v1:
+    name: knowledge_assessment
+    version: "1"
+    description: |
+      ADR-0089 Phase B — D9 Learning Coach quiz-item generator.
+      Deterministically generates the structural envelope for an
+      assessment item (slug + difficulty + kind + stable item_id).
+      Read-only. The wrapping skill's llm_think step composes the
+      item-text from the structural template; the structure
+      itself is the audit substrate so two calls with the same
+      inputs produce the same envelope. assessor (D9 YELLOW)
+      is the primary consumer.
+    input_schema:
+      type: object
+      required: [topic_slug]
+      properties:
+        topic_slug: {type: string}
+        difficulty:
+          type: string
+          enum: [easy, medium, hard]
+          default: medium
+        kind:
+          type: string
+          enum: [multiple_choice, short_answer, explain]
+          default: short_answer
+        seed: {type: string}
+        prompt_template: {type: string}
+    side_effects: read_only
+    archetype_tags: [assessor]
+
+  assessment_score.v1:
+    name: assessment_score
+    version: "1"
+    description: |
+      ADR-0089 Phase B — D9 Learning Coach response scorer.
+      Scores an operator response against ground-truth answers
+      via strict match + token-set Jaccard lexical overlap.
+      Returns verdict in {correct, partial, incorrect, deferred}
+      with a numerical score (0.0..1.0) + per-dimension breakdown.
+      Read-only end-to-end; the wrapping skill layers
+      verify_claim.v1 (Reality Anchor, ADR-0063) + llm_think
+      rubric narration on top. Deterministic so the operator can
+      audit + replay the score.
+    input_schema:
+      type: object
+      required: [item_id, topic_slug, response]
+      properties:
+        item_id: {type: string}
+        topic_slug: {type: string}
+        response: {type: string}
+        ground_truth_answers:
+          type: array
+          items: {type: string}
+          maxItems: 20
+        partial_credit_threshold:
+          type: number
+          minimum: 0
+          maximum: 1
+        full_credit_threshold:
+          type: number
+          minimum: 0
+          maximum: 1
+    side_effects: read_only
+    archetype_tags: [assessor]
+
+  misconception_log.v1:
+    name: misconception_log
+    version: "1"
+    description: |
+      ADR-0089 Phase B — D9 Learning Coach misconception ledger.
+      Appends a misconception record to data/d9/misconceptions.jsonl
+      capturing (topic, claim_summary, correction, severity,
+      source_item_id, assessor_id). side_effects=filesystem +
+      every call operator-gated via the
+      ``filesystem_always_human_approval`` rule (load-bearing
+      regardless of agent posture). The next assessment session
+      reads recent ledger entries to target the gap. assessor
+      (YELLOW posture) is the only role with this in its kit.
+    input_schema:
+      type: object
+      required: [topic_slug, claim_summary, correction]
+      properties:
+        topic_slug: {type: string}
+        claim_summary: {type: string}
+        correction: {type: string}
+        severity:
+          type: string
+          enum: [minor, moderate, major]
+          default: moderate
+        source_item_id: {type: string}
+        assessor_id: {type: string}
+        ledger_path: {type: string}
+    side_effects: filesystem
+    archetype_tags: [assessor]
+
   curriculum_design.v1:
     name: curriculum_design
     version: "1"
@@ -3864,6 +3959,34 @@ archetypes:
       - curriculum_design.v1          # ADR-0089 Phase A — the deterministic DAG composer
       # No web_fetch. No shell_exec. No code_edit. No assessment
       # tools (assessor's lane, Phase B). Pure curriculum composition.
+
+  # ---- ADR-0089 Phase B — D9 Learning Coach assessment ledger ----
+  # assessor kit. Guardian genre, read_only ceiling. YELLOW posture
+  # default. Composes knowledge_assessment.v1 + assessment_score.v1
+  # + verify_claim.v1 into an assessment pass. misconception_log.v1
+  # (filesystem) is NOT in the kit — same knowledge_verifier pattern;
+  # assessor produces misconception_proposal memory_write entries,
+  # operator dispatches misconception_log.v1 directly post-review.
+  assessor:
+    standard_tools:
+      - llm_think.v1                  # rubric narration + misconception synthesis
+      - memory_recall.v1              # walk curriculum + prior scores + misconception history
+      - memory_write.v1               # score attestations + misconception_proposal entries to private memory
+      - delegate.v1                   # escalate confirmed misconceptions to operator queue (operator commits via misconception_log.v1)
+      - audit_chain_verify.v1         # chain integrity before publishing scores
+      - text_summarize.v1             # condense long response evidence into operator-readable rationale
+      - operator_profile_read.v1      # ADR-0068 — expertise_level frames difficulty selection
+      - knowledge_assessment.v1       # ADR-0089 Phase B — quiz-item generator (read_only)
+      - assessment_score.v1           # ADR-0089 Phase B — deterministic response scorer (read_only)
+      - verify_claim.v1               # ADR-0063 — Reality Anchor cross-check for 'correct' verdicts
+      # misconception_log.v1 (side_effects=filesystem) NOT in this
+      # kit — guardian's read_only ceiling rejects filesystem-class
+      # tools. Same separation as D1's knowledge_verifier (which
+      # omits memory_flag_contradiction.v1 from its kit and dispatches
+      # via operator post-YELLOW review). The flag-not-write
+      # invariant is enforced at the kit-composition layer.
+      # No web_fetch. No shell_exec. No code_edit. No curriculum
+      # mutation tools (curriculum_designer's lane).
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

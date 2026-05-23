@@ -1148,6 +1148,25 @@ roles:
       emotional: 0.7
       embodiment: 0.4
 
+  # ---- ADR-0089 Phase B — D9 Learning Coach (assessment ledger) ------
+  # assessor: guardian-genre measurement role. Composes knowledge_assessment.v1
+  # (item generation) + assessment_score.v1 (response scoring) +
+  # verify_claim.v1 (Reality Anchor) into an assessment pass; persists
+  # misconceptions via misconception_log.v1 (filesystem; operator-gated
+  # per-call). YELLOW posture default per ADR-0089 Decision 3 — every
+  # non-read-only action queues for operator approval. The only role
+  # with progression-gating authority in D9. Same separation-of-duties
+  # pattern as D7's distribution_pilot (action-gated by YELLOW + per-call).
+  assessor:
+    description: "Knowledge-assessment guardian. Composes knowledge_assessment.v1 (item generation) + assessment_score.v1 (deterministic response scoring) + verify_claim.v1 (Reality Anchor ground-truth check) into a single assessment pass over operator responses. Persists misconceptions via misconception_log.v1 (filesystem; operator-gated per-call). NEVER drafts curriculum (curriculum_designer's lane) + NEVER frames coaching narratives (mentor's lane). YELLOW posture default. Genre: guardian. ADR-0089 Phase B."
+    domain_weights:
+      security: 1.0     # ledger writes are private; verify_claim crosses ground-truth
+      audit: 2.6        # every score + misconception attests to its rubric inputs
+      cognitive: 2.3    # rubric reasoning is the load-bearing trait
+      communication: 1.5 # operator-facing verdicts + ledger entries
+      emotional: 0.7
+      embodiment: 0.5
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so

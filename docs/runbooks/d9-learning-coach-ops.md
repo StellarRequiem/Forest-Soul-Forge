@@ -11,7 +11,7 @@ that lands D9 Phase A (this runbook will grow as Phases B–D ship).
 | Phase | New agent(s) | New builtin tool | Status |
 |---|---|---|---|
 | **A** | mentor + curriculum_designer | curriculum_design.v1 | CLOSED |
-| **B** | assessor (YELLOW) | knowledge_assessment.v1 + assessment_score.v1 + misconception_log.v1 | queued |
+| **B** | assessor (YELLOW) | knowledge_assessment.v1 + assessment_score.v1 + misconception_log.v1 | CLOSED |
 | **C** | socratic_partner | none — reuses existing | queued |
 | **D** | spaced_repetition_pilot (YELLOW) | spaced_repetition_schedule.v1 | queued |
 
@@ -168,9 +168,118 @@ and `brief_entry_id` (the memory_write attestation row).
 
 ---
 
-## Phase B / C / D — TBD
+## Phase B — assessment + misconception ledger
 
-Sections expand as Phases B, C, D ship.
+### 1. Restart the daemon + birth the assessor
+
+```bash
+./dev-tools/force-restart-daemon.command
+./dev-tools/birth-assessor.command
+```
+
+The assessor is `assessor` role / `guardian` genre / **YELLOW**
+posture default. Three new builtin tools land in this phase:
+`knowledge_assessment.v1` (read_only), `assessment_score.v1`
+(read_only), `misconception_log.v1` (filesystem).
+
+### 2. Why misconception_log.v1 is NOT in the assessor's kit
+
+Guardian-genre's `max_side_effects=read_only` ceiling rejects
+filesystem-class tools. Same pattern as D1's `knowledge_verifier`
+which deliberately omits `memory_flag_contradiction.v1`: the
+assessor produces a **misconception_proposal** memory_write entry
+(via the `misconception_tracking.v1` skill); the operator picks
+it up + dispatches `misconception_log.v1` directly to commit to
+the persistent ledger.
+
+This keeps the assessor's surface aligned with its flag-not-
+write invariant at the kit-composition layer, not just the
+constitution-policy layer.
+
+### 3. First dispatch — score a response
+
+```bash
+ASSESSOR_ID=...   # Assessor-D9 instance_id
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/agents/${ASSESSOR_ID}/skills/dispatch" \
+  -H "X-FSF-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "knowledge_assessment",
+    "skill_version": "1",
+    "inputs": {
+      "topic_slug": "diffusion-forward",
+      "response": "Forward diffusion adds Gaussian noise step by step",
+      "ground_truth_answers": [
+        "Forward diffusion adds Gaussian noise step by step",
+        "noise is added gradually in T discrete steps"
+      ],
+      "difficulty": "medium",
+      "kind": "short_answer"
+    }
+  }'
+```
+
+The response carries `verdict` ∈ {correct, partial, incorrect,
+deferred}, `score` (0.0..1.0), `reality_anchor_verdict` (from
+verify_claim.v1), and `score_entry_id` (the memory_write
+attestation). On `incorrect` or `partial`, follow with
+`misconception_tracking.v1`.
+
+### 4. Second dispatch — propose a misconception (incorrect verdict)
+
+```bash
+curl -s --max-time 60 -X POST \
+  "http://127.0.0.1:7423/agents/${ASSESSOR_ID}/skills/dispatch" \
+  -H "X-FSF-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skill_name": "misconception_tracking",
+    "skill_version": "1",
+    "inputs": {
+      "topic_slug": "diffusion-forward",
+      "source_item_id": "item_abc...",
+      "claim_summary": "Forward diffusion is reversible",
+      "correction": "Forward diffusion is designed to be irreversible; reverse process learns to invert it",
+      "severity": "moderate"
+    }
+  }'
+```
+
+The skill writes a `misconception_proposal` memory_write entry +
+returns `next_step` describing the operator's commit path.
+
+### 5. Third dispatch — commit the proposal to the ledger (operator)
+
+Operators dispatch `misconception_log.v1` directly (not via the
+assessor's skill kit):
+
+```bash
+curl -s --max-time 30 -X POST \
+  "http://127.0.0.1:7423/tools/dispatch" \
+  -H "X-FSF-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tool_name": "misconception_log",
+    "tool_version": "1",
+    "args": {
+      "topic_slug": "diffusion-forward",
+      "claim_summary": "Forward diffusion is reversible",
+      "correction": "Forward diffusion is designed to be irreversible; reverse process learns to invert it",
+      "severity": "moderate",
+      "source_item_id": "item_abc..."
+    }
+  }'
+```
+
+Per `filesystem_always_human_approval`, this dispatch queues for
+approval. After confirmation, the entry lands in
+`data/d9/misconceptions.jsonl`. The next assessment session reads
+recent ledger entries to target the gap.
+
+## Phase C / D — TBD
+
+Sections expand as Phases C, D ship.
 
 ### YELLOW posture promotion criteria (Phases B + D)
 

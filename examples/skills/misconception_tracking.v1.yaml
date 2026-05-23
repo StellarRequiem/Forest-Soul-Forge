@@ -1,0 +1,136 @@
+schema_version: 1
+name: misconception_tracking
+version: '1'
+description: |
+  Assessor-D9's misconception-proposal skill. Produces a
+  misconception_proposal memory_write entry from an operator-
+  acknowledged incorrect/partial verdict; the operator commits
+  to the persistent ledger by dispatching misconception_log.v1
+  directly post-review.
+
+  This split — propose-via-memory + commit-via-tool — is the
+  same pattern as D1's knowledge_verifier (which proposes via
+  memory_write and the operator dispatches memory_flag_contradiction.v1
+  to commit). It keeps the assessor's kit inside guardian's
+  read_only ceiling at the kit-composition layer while keeping
+  the discipline at the policy + operator-duty layer.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read.
+    2. recall_score — memory_recall for the score attestation
+       this proposal references (so the proposal can name
+       item_id + verdict + score in its body).
+    3. verify_chain_integrity — audit_chain_verify.
+    4. compose_proposal — llm_think composes the proposal body
+       (claim_summary + correction + severity) from the score +
+       operator-supplied context.
+    5. write_proposal_attestation — memory_write scope=private
+       records the proposal with tags (misconception_proposal,
+       topic_slug, item_id, attestor:Assessor-D9). Operator picks
+       it up + dispatches misconception_log.v1 to commit.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, source_item_id, claim_summary, correction]
+  properties:
+    topic_slug: {type: string}
+    source_item_id:
+      type: string
+      description: >
+        The assessment item that surfaced the misconception.
+        Lets the operator trace the proposal back to the
+        scoring event.
+    claim_summary:
+      type: string
+      description: >
+        Operator-acknowledged paraphrase of the wrong claim.
+    correction:
+      type: string
+      description: >
+        Ground-truth correction.
+    severity:
+      type: string
+      enum: [minor, moderate, major]
+      default: moderate
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_score
+    tool: memory_recall.v1
+    args:
+      query: "item:${inputs.source_item_id}"
+      mode: lineage
+      limit: 5
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_proposal
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Assessor-D9. Compose a misconception_proposal for
+        operator review.
+
+        Topic:         ${inputs.topic_slug}
+        Source item:   ${inputs.source_item_id}
+        Claim:         ${inputs.claim_summary}
+        Correction:    ${inputs.correction}
+        Severity:      ${inputs.severity}
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain status: ${verify_chain_integrity.out.status}
+
+        Source score (lineage memory):
+        ${recall_score.out.entries}
+
+        Compose a one-paragraph proposal the operator can review.
+        Include the claim, the correction, the severity rationale,
+        and a one-line note on why this misconception matters for
+        the topic's prereq chain. NEVER commit to the ledger —
+        that's the operator's misconception_log.v1 dispatch.
+
+        Halt warning if chain status != "ok".
+
+        All timestamps are Pacific time.
+
+  - id: write_proposal_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_proposal.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d9_misconception_proposal"
+        - "misconception_proposal:topic:${inputs.topic_slug}"
+        - "source_item:${inputs.source_item_id}"
+        - "severity:${inputs.severity}"
+        - "attestor:Assessor-D9"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  source_item_id: ${inputs.source_item_id}
+  proposal_text: ${compose_proposal.out.response}
+  chain_status: ${verify_chain_integrity.out.status}
+  proposal_entry_id: ${write_proposal_attestation.out.entry_id}
+  severity: ${inputs.severity}
+  next_step: |
+    Operator review required. Dispatch misconception_log.v1
+    directly with this proposal's (topic_slug, claim_summary,
+    correction, severity, source_item_id) to commit to the
+    persistent ledger.

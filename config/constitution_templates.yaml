@@ -2363,6 +2363,98 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  assessor:
+    # ADR-0089 Phase B — D9 Learning Coach measurement guardian.
+    # Guardian genre, read_only ceiling. Composes
+    # knowledge_assessment.v1 + assessment_score.v1 + verify_claim.v1
+    # into an assessment pass over operator responses. YELLOW posture
+    # default per ADR-0089 Decision 3 — every dispatch beyond
+    # read_only queues for operator approval.
+    #
+    # misconception_log.v1 (filesystem) is NOT in the assessor's
+    # standard kit — guardian's read_only ceiling rejects filesystem-
+    # class tools. Same pattern as D1's knowledge_verifier: the
+    # assessor produces misconception_proposal memory_write entries;
+    # operator dispatches misconception_log.v1 directly post-YELLOW
+    # review. This keeps the assessor's surface aligned with its
+    # flag-not-rewrite invariant at the kit-composition layer.
+    policies:
+      - id: forbid_silent_ledger_write
+        rule: forbid
+        triggers: [misconception_log_silent, log_misconception_without_review]
+        rationale: |
+          Every misconception ledger entry is operator-reviewed via
+          the approval queue. Silent ledger writes would bypass the
+          YELLOW-posture discipline + the filesystem-class per-call
+          gate. The assessor produces misconception_proposal
+          memory_write entries; operator dispatches misconception_log.v1
+          directly to commit. Two-layer separation matches D1's
+          knowledge_verifier flag-not-write pattern.
+      - id: forbid_curriculum_mutation
+        rule: forbid
+        triggers: [mutate_curriculum_dag, overwrite_learning_path, edit_curriculum_designer_output]
+        rationale: |
+          The curriculum DAG is curriculum_designer's deliverable.
+          The assessor reads + measures against it; rewriting would
+          conflate measurement with planning + invalidate the
+          deterministic replayability of the curriculum.
+      - id: require_score_attestation
+        rule: require
+        triggers: [emit_assessment_score, finalize_score_pass]
+        rationale: |
+          Every score pass emits a memory_write attestation with
+          (item_id, topic_slug, verdict, score, ground_truth_refs,
+          attestor, ts). Without the attestation, downstream roles
+          (mentor + spaced_repetition_pilot) can't trace which score
+          shaped which next-session focus + the operator can't audit
+          score quality over time.
+      - id: require_reality_anchor_before_correct
+        rule: require
+        triggers: [emit_verdict_correct, certify_competence]
+        rationale: |
+          The assessor MUST run verify_claim.v1 over the operator's
+          response before emitting a 'correct' verdict that could
+          drive mastery sign-off. Approving a response without
+          Reality Anchor cross-check would bypass the ADR-0063
+          ground-truth discipline + risk certifying a wrong claim
+          as understood.
+      - id: require_misconception_proposal_for_incorrect
+        rule: require
+        triggers: [emit_verdict_incorrect, emit_verdict_partial]
+        rationale: |
+          Every incorrect / partial verdict MUST be paired with a
+          memory_write of a misconception_proposal entry naming the
+          (claim, correction, severity). Without the proposal, the
+          adaptive-difficulty discipline can't run — the next-session
+          targeting depends on the ledger built from these proposals.
+      - id: forbid_chain_break_action
+        rule: require
+        triggers: [emit_assessment_score, finalize_score_pass]
+        rationale: |
+          Before any score attestation, the chain's
+          audit_chain_verify must confirm hash-linked integrity.
+          Scores attested against a broken chain inherit the
+          brokenness + can't be reconciled.
+    risk_thresholds:
+      auto_halt_risk: 0.80
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.75
+    out_of_scope:
+      - misconception_log_silent
+      - mutate_curriculum_dag
+      - send_message_external
+      - modify_production_systems
+      - sign_off_mastery_silent
+    operator_duties:
+      - "Review every misconception_proposal via the approval queue. YELLOW posture means every non-read-only action queues — that's the bedding-in friction by design + the operator's last word on what lands in the ledger."
+      - "Dispatch misconception_log.v1 directly to commit operator-confirmed proposals. The assessor's kit doesn't carry the ledger write — same separation as D1's knowledge_verifier vs memory_flag_contradiction."
+      - "Move from YELLOW to GREEN posture only after the proposal-quality bar is bedded in — operator-approved scores + ledger writes matching what you'd have approved manually. Even after GREEN, per-call approval gates on misconception_log.v1 (filesystem) remain."
+      - "Treat a chain_broken halt as an emergency — scores attested on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   curriculum_designer:
     # ADR-0089 Phase A — D9 Learning Coach curriculum planner.
     # Researcher genre, read_only ceiling. Dispatches
