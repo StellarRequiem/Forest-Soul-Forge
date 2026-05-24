@@ -1415,7 +1415,7 @@ roles:
       cognitive: 2.3    # baseline comparison + cross-window pattern reasoning
       communication: 1.8 # reports are operator + risk_advisor consumed
       emotional: 0.5    # finance framing is read-then-respond
-      embodiment: 0.3
+      embodiment: 0.4
 
   # risk_advisor: guardian-genre anti-recommendation arbiter. Reads
   # candidate-operator-action attestations + composes "this is
@@ -1433,7 +1433,7 @@ roles:
       cognitive: 2.1    # pattern matching + out-of-pattern threshold reasoning
       communication: 1.6 # alerts are operator-facing prose
       emotional: 0.6    # anti-recommendation tone is read-then-respond
-      embodiment: 0.3
+      embodiment: 0.4
 
   # ---- ADR-0092 Phase B — D6 Personal Finance Guardian (transactions + bills) ----
   # transaction_tracker: researcher-genre transaction categorization
@@ -1452,7 +1452,7 @@ roles:
       cognitive: 2.0    # rule application + uncategorized-cohort pattern reasoning
       communication: 1.6 # attestations are operator + budget_analyst + risk_advisor consumed
       emotional: 0.4    # categorization framing is read-then-respond
-      embodiment: 0.3
+      embodiment: 0.4
 
   # bill_steward: researcher-genre bill stewardship role. Dispatches
   # bill_recurrence_check.v1 over operator-supplied bill ledgers +
@@ -1471,7 +1471,7 @@ roles:
       cognitive: 2.0    # recurrence classification + median-interval reasoning
       communication: 1.7 # attestations are operator + d2 schedule_reminder consumed via cascade
       emotional: 0.5    # bill framing is read-then-respond
-      embodiment: 0.3
+      embodiment: 0.4
 
   # ---- ADR-0092 Phase C — D6 Personal Finance Guardian (investment research) ----
   # investment_researcher: researcher-genre investment research role.
@@ -1491,7 +1491,7 @@ roles:
       cognitive: 2.2    # cross-option reasoning + dimension-tradeoff framing without advisory verdict
       communication: 1.7 # comparisons are operator-facing prose
       emotional: 0.4    # research framing is read-then-respond
-      embodiment: 0.3
+      embodiment: 0.4
 
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
