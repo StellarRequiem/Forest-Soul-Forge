@@ -10,10 +10,10 @@ that lands D5 Phase A (this runbook will grow as Phases B–D ship).
 
 | Phase | New agent(s) | New builtin tool | Status |
 |---|---|---|---|
-| **A** | home_steward + home_sentinel | none — reuses existing | IN FLIGHT |
-| **B** | energy_warden + comfort_optimizer | energy_anomaly_scan.v1 + comfort_recommend.v1 | pending |
-| **C** | routine_composer | routine_compose.v1 + home_state_snapshot.v1 | pending |
-| **D** | (cascade + umbrella + live) | none | pending |
+| **A** | home_steward + home_sentinel | none — reuses existing | SHIPPED |
+| **B** | energy_warden + comfort_optimizer | energy_anomaly_scan.v1 + comfort_recommend.v1 | SHIPPED |
+| **C** | routine_composer | home_state_snapshot.v1 + routine_compose.v1 | SHIPPED |
+| **D** | (cascade + umbrella + live) | none | SHIPPED |
 
 Each phase = one commit + one push, so the operator can verify
 phase N before phase N+1 fires.

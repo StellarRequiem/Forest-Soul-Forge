@@ -336,6 +336,47 @@ default_skill_per_capability:
     skill_name: research_synthesis
     skill_version: "1"
 
+  # D5 Smart Home Brain — ADR-0091 Phase D (2026-05-24).
+  # All entry capabilities + handoff_target aliases get live skills.
+  - domain: d5_smart_home
+    capability: home_orchestration
+    skill_name: home_orchestration
+    skill_version: "1"
+  - domain: d5_smart_home
+    capability: home_security
+    skill_name: home_security
+    skill_version: "1"
+  - domain: d5_smart_home
+    capability: energy_optimization
+    skill_name: energy_optimization
+    skill_version: "1"
+  - domain: d5_smart_home
+    capability: comfort_tuning
+    skill_name: comfort_tuning
+    skill_version: "1"
+  - domain: d5_smart_home
+    capability: routine_management
+    skill_name: routine_management
+    skill_version: "1"
+  - domain: d5_smart_home
+    capability: vacation_mode
+    skill_name: vacation_mode
+    skill_version: "1"
+  # ADR-0091 Decision 5 — capability aliases for the manifest's
+  # bare-name entries. device_control routes to routine_management
+  # (composition + queue is the device-touching surface);
+  # smart_home routes to the umbrella skill which orchestrates
+  # the steward + sentinel + energy_warden + comfort_optimizer
+  # pass in one dispatch.
+  - domain: d5_smart_home
+    capability: device_control
+    skill_name: routine_management
+    skill_version: "1"
+  - domain: d5_smart_home
+    capability: smart_home
+    skill_name: smart_home
+    skill_version: "1"
+
 # Cascade rules — engineer-defined, code-reviewed via PR.
 #
 # Each rule: when a route to (source_domain, source_capability)
@@ -569,6 +610,84 @@ cascade_rules:
       This was declared INERT in ADR-0086 Decision 4's
       downstream-cascade notes; activating now that D2 ships.
 
+  # ADR-0091 Phase D — D5 Smart Home Brain cascades.
+  #
+  # ACTIVATING four cascades that complete the smart-home arc:
+  #   d2 → d5 (morning_briefing → home_orchestration): the
+  #     coordinator's morning briefing seeds a state-of-the-home
+  #     pass so the operator's day starts with both the schedule
+  #     AND the household state.
+  #   d2 → d5 (task_prioritization → routine_management): the
+  #     task prioritizer surfacing a high-priority task can fold
+  #     into a routine envelope (e.g. "focus_mode for the next
+  #     two hours" composes a focus_mode routine).
+  #   d5 → d3 (home_security → incident_response): every
+  #     household-security alert routes to D3's incident
+  #     correlator so unfamiliar-presence or vacation-state
+  #     anomalies enter the SOC's investigation pipeline.
+  #   d5 → d2 (routine_management → reminder): every queued
+  #     routine seeds a D2 schedule_reminder so the operator
+  #     gets a heads-up at scheduled_for time even when the
+  #     forest-home-assistant connector isn't installed yet.
+  - source_domain: d2_daily_life_os
+    source_capability: morning_briefing
+    target_domain: d5_smart_home
+    target_capability: home_orchestration
+    reason: |
+      Every D2 morning briefing cascades into a D5
+      home_orchestration trigger. HomeSteward-D5's
+      home_orchestration skill reads the briefing's calendar +
+      task context + composes the state-of-the-home report
+      with that context baked in (a Travel day frames the
+      report differently than a focus-work day). Was declared
+      INERT in ADR-0087 Decision 4's downstream-cascade notes;
+      activating now that D5 ships.
+
+  - source_domain: d2_daily_life_os
+    source_capability: task_prioritization
+    target_domain: d5_smart_home
+    target_capability: routine_management
+    reason: |
+      Every D2 task prioritization cascades into a D5
+      routine_management trigger. RoutineComposer-D5 reads
+      recent task_rank attestations + surfaces them as
+      candidate routine envelopes (high-priority focus blocks
+      compose focus_mode routines; recurring evening blocks
+      compose sleep_mode routines). Was declared INERT in
+      ADR-0087 Decision 4's downstream-cascade notes;
+      activating now that D5 ships. YELLOW posture on
+      routine_composer still requires operator approval per
+      queue write — the cascade triggers composition, not
+      direct queueing.
+
+  - source_domain: d5_smart_home
+    source_capability: home_security
+    target_domain: d3_local_soc
+    target_capability: incident_response
+    reason: |
+      Every D5 household-security alert cascades into a D3
+      incident_response trigger. IncidentCorrelator-D3 reads
+      recent home_security_alert attestations + correlates
+      them with the broader telemetry pipeline (network
+      anomalies, presence-based behavior baselines). This
+      completes the "home_state visibility feeds SOC posture"
+      arc the D5 manifest's value-prop named ("SOC sees you're
+      not home → tightens posture").
+
+  - source_domain: d5_smart_home
+    source_capability: routine_management
+    target_domain: d2_daily_life_os
+    target_capability: reminder
+    reason: |
+      Every D5 queued routine cascades into a D2 reminder
+      trigger. TimeSteward-D2 reads recent routine_queued
+      attestations + schedules a reminder at scheduled_for so
+      the operator gets a heads-up before the routine fires.
+      Critical fallback for the period before forest-home-
+      assistant ships — without the connector, the operator
+      picks queue records up manually + the D2 reminder is the
+      only fire-time prompt.
+
 # ADR-0086 Phase D — INERT d1→downstream cascades.
 #
 # The D1 manifest at config/domains/d1_knowledge_forge.yaml
@@ -616,13 +735,44 @@ cascade_rules:
 # rollout order, so the receiving roles don't exist yet.
 #
 # Pending cascades, declared inert:
-#   d2.task_prioritization     → d5.routines
+#   d2.task_prioritization     → d5.routine_management  (ACTIVATED in ADR-0091 Phase D)
+#   d2.morning_briefing        → d5.home_orchestration  (ACTIVATED in ADR-0091 Phase D)
 #   d2.reminder                → d6.bill_reminder
 #   d2.daily_reflection        → d7.content_seed
 #   d2.morning_briefing        → d3.anomaly_baseline   (deferred)
 #
+# As of ADR-0091 Phase D the two d2→d5 cascades are live;
+# remaining d2→d6/d7 cascades land when their target domains
+# ship.
+
+# ADR-0091 Phase D — INERT d5→downstream cascades.
+#
+# The D5 manifest at config/domains/d5_smart_home.yaml names
+# four handoff_targets:
+#   d2_daily_life_os    # routines (vacation mode, etc.)         — handled via d5→d2 active cascade above
+#   d3_local_soc        # posture changes based on home state    — handled via d5→d3 active cascade above
+#   d1_knowledge_forge  # routines indexed for "when did I last…" queries
+#   d6_finance          # power-bill anomaly hand-off
+#
+# d1 + d6 cascades stay inert:
+#   - d5 → d1 (routines_index): d1 has no `routines_index`
+#     capability; "when did I last X" queries can already be
+#     answered against the routine_queued attestations in
+#     memory via memory_recall, so there's no D1-side capability
+#     to add. If a future operator wants explicit routine
+#     indexing in the catalog, librarian-D1 can subscribe via a
+#     separate cascade rule.
+#   - d5 → d6 (power_bill_anomaly): D6 doesn't ship yet (final
+#     domain in the rollout order). The energy_warden's
+#     spike/drift attestations are ready for D6 to consume when
+#     it lands.
+#
+# Pending cascades, declared inert:
+#   d5.energy_optimization    → d6.power_bill_anomaly   (deferred until D6 ships)
+#   d5.routine_management     → d1.routines_index       (deferred; capability TBD)
+#
 # Each pending cascade will land as a real cascade_rules entry
-# when its target domain ships. Until then they are
+# when its target capability exists. Until then they are
 # documentation, not configuration — same INERT pattern as
 # ADR-0086's downstream-cascade notes.
 

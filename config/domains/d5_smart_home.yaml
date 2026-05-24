@@ -4,7 +4,7 @@
 # network + forest-home-assistant plugin shipping.
 domain_id: d5_smart_home
 name: Smart Home Brain
-status: planned
+status: live
 
 description: |
   Local-first IoT orchestration. NOT "Alexa-but-local" — causal
@@ -25,6 +25,8 @@ entry_agents:
     capability: comfort_tuning
   - role: home_sentinel
     capability: home_security
+  - role: routine_composer
+    capability: routine_management
 
 capabilities:
   - home_orchestration

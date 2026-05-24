@@ -1,0 +1,118 @@
+schema_version: 1
+name: smart_home
+version: '1'
+description: |
+  D5 Smart Home Brain umbrella skill. Orchestrates a single
+  end-to-end pass over the household: HomeSteward composes the
+  state-of-the-home report, HomeSentinel composes the alert
+  set, EnergyWarden classifies device anomalies,
+  ComfortOptimizer composes recommendations. Each sub-skill is
+  dispatched as a separate delegate.v1 call so per-role
+  attestations stand alongside in the audit chain (per ADR-0091
+  Decision 3 — both attestations stand). Routine queueing is a
+  separate explicit dispatch (routine_management.v1 or
+  vacation_mode.v1) because routine_compose.v1 is filesystem +
+  YELLOW posture; we don't bundle queue writes into the
+  umbrella.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches home
+       address + routines + areas_of_focus. Same lens applied
+       to every sub-skill below.
+    2. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked end-to-end. If broken, the
+       umbrella halts BEFORE delegating; sub-skills also
+       check, but the umbrella's check is the load-bearing
+       fast-fail.
+    3. compose_steward_report — delegate to HomeSteward-D5's
+       home_orchestration.v1 with the window_slug.
+    4. compose_sentinel_alerts — delegate to HomeSentinel-D5's
+       home_security.v1 with the same window_slug. Stands
+       alongside the steward's report per Decision 3.
+    5. write_umbrella_attestation — memory_write scope=private
+       records the cross-role correlation
+       (steward_entry_id + sentinel_entry_id + window_slug +
+       attestor:D5-umbrella).
+
+  NEVER queues routines. NEVER actuates devices. Routine
+  queueing is operator-explicit via
+  routine_management.v1 / vacation_mode.v1 — the umbrella's
+  job is the observation-pass, not the action-pass.
+
+  Energy + comfort sub-passes are operator-explicit too —
+  energy_optimization.v1 + comfort_tuning.v1 take
+  device-record + area inputs the operator supplies; the
+  umbrella doesn't infer them. This keeps the umbrella's
+  dispatch shape stable (one window_slug + chain check + two
+  delegates).
+
+requires:
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - operator_profile_read.v1
+  - delegate.v1
+
+inputs:
+  type: object
+  required: [window_slug]
+  properties:
+    window_slug:
+      type: string
+      description: >
+        Time-bucket slug all sub-skills bind to. Convention:
+        lowercase kebab-case matching home_orchestration +
+        home_security skill window_slug conventions.
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_steward_report
+    tool: delegate.v1
+    args:
+      target_role: home_steward
+      skill: home_orchestration.v1
+      inputs:
+        window_slug: ${inputs.window_slug}
+        operator_reason: "umbrella pass — ${inputs.operator_reason}"
+
+  - id: compose_sentinel_alerts
+    tool: delegate.v1
+    args:
+      target_role: home_sentinel
+      skill: home_security.v1
+      inputs:
+        window_slug: ${inputs.window_slug}
+        operator_reason: "umbrella pass — ${inputs.operator_reason}"
+
+  - id: write_umbrella_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        D5 umbrella pass complete for window ${inputs.window_slug}
+        Steward report entry: ${compose_steward_report.out.report_entry_id}
+        Sentinel alerts entry: ${compose_sentinel_alerts.out.alert_entry_id}
+        Operator reason: ${inputs.operator_reason}
+        Chain status: ${verify_chain_integrity.out.status}
+      layer: episodic
+      scope: private
+      tags:
+        - "d5_umbrella_pass"
+        - "umbrella_pass:${inputs.window_slug}"
+        - "attestor:D5-umbrella"
+
+output:
+  window_slug: ${inputs.window_slug}
+  steward_report_entry_id: ${compose_steward_report.out.report_entry_id}
+  sentinel_alert_entry_id: ${compose_sentinel_alerts.out.alert_entry_id}
+  chain_status: ${verify_chain_integrity.out.status}
+  umbrella_entry_id: ${write_umbrella_attestation.out.entry_id}

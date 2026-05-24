@@ -1,10 +1,11 @@
 # ADR-0091 — D5 Smart Home Brain: rollout
 
-**Status:** Proposed (2026-05-24). Phase A shipped today
-(home_steward + home_sentinel); Phases B (energy_warden +
-comfort_optimizer + energy_anomaly_scan.v1 + comfort_recommend.v1),
-C (routine_composer + routine_compose.v1 + home_state_snapshot.v1),
-D (cascade + umbrella + live) pending.
+**Status:** Accepted (2026-05-24). All four phases shipped:
+Phase A (home_steward + home_sentinel), Phase B (energy_warden +
+comfort_optimizer + `energy_anomaly_scan.v1` + `comfort_recommend.v1`),
+Phase C (routine_composer + `home_state_snapshot.v1` +
+`routine_compose.v1`), Phase D (cascade wiring + umbrella birth +
+domain manifest flipped to `live`).
 **Date:** 2026-05-24
 **Tracks:** Domain Rollout / Smart Home Substrate
 **Supersedes:** none
@@ -177,7 +178,7 @@ action. Different surface = different ceiling.
 
 ## Phase plan
 
-### Phase A — orchestration + security foundation (SHIPPED 2026-05-24)
+### Phase A — orchestration + security foundation (SHIPPED 2026-05-24, commit f3e3772)
 
 - Add `home_steward` (researcher, GREEN) + `home_sentinel`
   (guardian, GREEN) to `trait_tree.yaml`, `genres.yaml`,
@@ -188,7 +189,7 @@ action. Different surface = different ceiling.
   `dev-tools/birth-home-sentinel.command`.
 - Runbook: `docs/runbooks/d5-smart-home-ops.md`.
 
-### Phase B — energy + comfort analysis (pending)
+### Phase B — energy + comfort analysis (SHIPPED 2026-05-24, commit ecaba1a)
 
 - Add `energy_warden` (researcher, GREEN) + `comfort_optimizer`
   (researcher, GREEN) to trait_tree / genres /
@@ -206,7 +207,7 @@ action. Different surface = different ceiling.
 - Birth scripts: `dev-tools/birth-energy-warden.command`,
   `dev-tools/birth-comfort-optimizer.command`.
 
-### Phase C — routine queueing (pending)
+### Phase C — routine queueing (SHIPPED 2026-05-24, commit 5fef252)
 
 - Add `routine_composer` (actuator, YELLOW).
 - Two new builtin tools:
@@ -219,7 +220,7 @@ action. Different surface = different ceiling.
 - Skill manifests: `routine_management.v1`, `vacation_mode.v1`.
 - Birth script: `dev-tools/birth-routine-composer.command`.
 
-### Phase D — cascade + umbrella + domain live (pending)
+### Phase D — cascade + umbrella + domain live (SHIPPED 2026-05-24)
 
 - No new roles or builtin tools.
 - Skill manifest: `smart_home.v1` (umbrella composition).
