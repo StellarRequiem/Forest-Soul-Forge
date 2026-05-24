@@ -15,6 +15,21 @@ function fmtDate(iso) {
   }
 }
 
+// Cache of the last server response — filtered locally by the search input
+// so typing doesn't refetch over the network for every keystroke. Server-
+// side role/status filters still drive refresh() and the API.
+let _lastAgents = [];
+
+function applyTextFilter(agents) {
+  const input = document.getElementById("agents-search");
+  const q = (input?.value || "").trim().toLowerCase();
+  if (!q) return agents;
+  return agents.filter((a) => {
+    const hay = `${a.agent_name || ""} ${a.role || ""} ${a.instance_id || ""} ${a.dna || ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+}
+
 function renderList(agents, selectedId) {
   const root = document.getElementById("agents-list");
   root.innerHTML = "";
@@ -213,8 +228,9 @@ export async function refresh() {
   try {
     const res = await api.get(url);
     state.set("agents", res.agents);
+    _lastAgents = res.agents || [];
     const selected = state.get("selectedAgentId");
-    renderList(res.agents, selected);
+    renderList(applyTextFilter(_lastAgents), selected);
     populateParentSelect(res.agents);
     // If the currently selected agent is no longer in the list, clear detail.
     if (selected && !res.agents.find((a) => a.instance_id === selected)) {
@@ -235,6 +251,13 @@ export function start() {
   document.getElementById("agents-refresh").addEventListener("click", refresh);
   document.getElementById("agents-role-filter").addEventListener("change", refresh);
   document.getElementById("agents-status-filter").addEventListener("change", refresh);
+  // Client-side text filter — no API roundtrip per keystroke.
+  const search = document.getElementById("agents-search");
+  if (search) {
+    search.addEventListener("input", () => {
+      renderList(applyTextFilter(_lastAgents), state.get("selectedAgentId"));
+    });
+  }
   // Demo-friction audit P0 #3: refresh on tab activation so a returning
   // visitor doesn't see a stale list. The other panels do this; agents
   // got missed in the original wiring.

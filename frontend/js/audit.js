@@ -32,6 +32,24 @@ function fmtEventData(json) {
   }
 }
 
+let _lastEvents = [];
+
+function applyAuditFilter(events) {
+  const q = (document.getElementById("audit-search")?.value || "").trim().toLowerCase();
+  if (!q) return events;
+  return events.filter((ev) => {
+    const hay = [
+      `#${ev.seq}`,
+      ev.event_type || "",
+      ev.timestamp || "",
+      ev.agent_dna || "",
+      ev.instance_id || "",
+      ev.event_json || "",
+    ].join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+}
+
 function renderEvents(events) {
   const root = document.getElementById("audit-list");
   root.innerHTML = "";
@@ -40,7 +58,7 @@ function renderEvents(events) {
     empty.style.color = "var(--fg-faint)";
     empty.style.textAlign = "center";
     empty.style.padding = "var(--sp-4)";
-    empty.textContent = "No audit entries.";
+    empty.textContent = "No audit entries match.";
     root.appendChild(empty);
     return;
   }
@@ -166,7 +184,8 @@ export async function refresh() {
   try {
     const res = await api.get(`/audit/tail?n=${n}`);
     state.set("audit", res.events);
-    renderEvents(res.events);
+    _lastEvents = res.events || [];
+    renderEvents(applyAuditFilter(_lastEvents));
   } catch (e) {
     toast({
       title: "Failed to load audit chain",
@@ -179,5 +198,10 @@ export async function refresh() {
 export function start() {
   document.getElementById("audit-refresh").addEventListener("click", refresh);
   document.getElementById("audit-limit").addEventListener("change", refresh);
+  // Client-side text filter — no API refetch per keystroke.
+  const search = document.getElementById("audit-search");
+  if (search) {
+    search.addEventListener("input", () => renderEvents(applyAuditFilter(_lastEvents)));
+  }
   refresh();
 }

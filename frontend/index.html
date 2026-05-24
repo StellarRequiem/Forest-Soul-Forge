@@ -303,6 +303,7 @@
         <div class="panel__header">
           <h2 class="panel__title">Agents</h2>
           <div class="panel__actions">
+            <input type="search" id="agents-search" class="inp inp--sm" placeholder="filter by name, role, or id…" autocomplete="off" />
             <label for="agents-role-filter" class="lbl">role</label>
             <select id="agents-role-filter" class="inp inp--sm">
               <option value="">all</option>
@@ -664,6 +665,7 @@
         <div class="panel__header">
           <h2 class="panel__title">Audit chain</h2>
           <div class="panel__actions">
+            <input type="search" id="audit-search" class="inp inp--sm" placeholder="filter event_type, seq, payload…" autocomplete="off" />
             <label for="audit-limit" class="lbl">show last</label>
             <input type="number" id="audit-limit" class="inp inp--sm" value="50" min="1" max="500" />
             <button class="btn btn--ghost btn--sm" id="audit-refresh" type="button">refresh</button>

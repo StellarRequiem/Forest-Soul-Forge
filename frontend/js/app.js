@@ -32,6 +32,7 @@ import * as securityPanel from "./security.js";              // B258 / ADR-0062 
 import * as welcome from "./welcome.js";
 import * as statusbar from "./statusbar.js";
 import * as tour from "./tour.js";
+import * as ux from "./ux.js";
 import { toast } from "./toast.js";
 
 function wireTabs() {
@@ -59,6 +60,10 @@ async function boot() {
   // Tour overlay wires the "? tour" button + auto-shows the forge tour
   // on first visit (one-shot per browser via localStorage).
   tour.start();
+  // Cross-cutting UX: keyboard tab nav, Cmd-K command palette, clickable
+  // statusbar items. Independent of every other module; runs early so
+  // shortcuts work as soon as the user sees the page.
+  ux.start();
 
   // Health + providers can run immediately — they don't depend on anything.
   health.start();
