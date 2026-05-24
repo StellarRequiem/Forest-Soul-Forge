@@ -84,6 +84,12 @@ from forest_soul_forge.tools.builtin.claim_provenance import (
 from forest_soul_forge.tools.builtin.debate_orchestrate import (
     DebateOrchestrateTool,
 )
+from forest_soul_forge.tools.builtin.energy_anomaly_scan import (
+    EnergyAnomalyScanTool,
+)
+from forest_soul_forge.tools.builtin.comfort_recommend import (
+    ComfortRecommendTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -626,3 +632,20 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # debate_moderator dispatches it each turn so the operator
     # can audit + replay the orchestration.
     registry.register(DebateOrchestrateTool())
+    # ADR-0091 Phase B — energy_anomaly_scan.v1. Per-device anomaly
+    # classification (spike / drift / normal / missing_baseline) via
+    # z-score against operator-supplied baselines. Deterministic +
+    # read_only. energy_warden (D5) is the primary consumer; the
+    # wrapping energy_optimization.v1 skill layers memory_recall of
+    # baselines + memory_write of the attestation + LLM-driven
+    # recommendation narrative on top.
+    registry.register(EnergyAnomalyScanTool())
+    # ADR-0091 Phase B — comfort_recommend.v1. Per-area comfort-
+    # tuning recommendation composer (scene / temperature / lighting
+    # dimensions, one of a small enum of action_kinds per dimension).
+    # Deterministic + read_only. comfort_optimizer (D5) is the
+    # primary consumer; the wrapping comfort_tuning.v1 skill layers
+    # operator-profile context + memory_recall + memory_write of
+    # the attestation on top. Recommendations queue for operator
+    # review; nothing actuates.
+    registry.register(ComfortRecommendTool())

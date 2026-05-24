@@ -3473,6 +3473,111 @@ tools:
     side_effects: read_only
     archetype_tags: [debate_moderator]
 
+  energy_anomaly_scan.v1:
+    name: energy_anomaly_scan
+    version: "1"
+    description: |
+      ADR-0091 Phase B — D5 Smart Home Brain per-device energy
+      anomaly classifier. Classifies each reading against operator-
+      supplied baselines (mean + stddev + sample count) via z-score
+      windows: spike (>= spike_sigma, default 3.0), drift (between
+      drift_sigma 1.5 and spike_sigma), normal (within drift_sigma),
+      or missing_baseline (stddev <= 0 / mean missing / sample count
+      below min_baseline_samples). Deterministic + read_only. The
+      energy_optimization.v1 skill wraps this tool with memory_recall
+      of baselines + memory_write of the attestation; LLM-driven
+      recommendation narrative is layered separately.
+      energy_warden (D5) is the primary consumer.
+    input_schema:
+      type: object
+      required: [window_slug, readings]
+      properties:
+        window_slug:
+          type: string
+          description: "Time-bucket slug the scan binds to (e.g. evening-2026-05-24)."
+        readings:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [device_slug, current_watts]
+            properties:
+              device_slug: {type: string}
+              label: {type: string}
+              room: {type: string}
+              current_watts: {type: number, minimum: 0}
+              baseline_mean_watts: {type: number, minimum: 0}
+              baseline_stddev_watts: {type: number, minimum: 0}
+              baseline_sample_count: {type: integer, minimum: 0}
+        spike_sigma:
+          type: number
+          exclusiveMinimum: 0
+          default: 3.0
+        drift_sigma:
+          type: number
+          exclusiveMinimum: 0
+          default: 1.5
+        min_baseline_samples:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 5
+    side_effects: read_only
+    archetype_tags: [energy_warden]
+
+  comfort_recommend.v1:
+    name: comfort_recommend
+    version: "1"
+    description: |
+      ADR-0091 Phase B — D5 Smart Home Brain comfort-tuning
+      recommendation composer. For each area in the current
+      home_state, generates ordered recommendations across three
+      dimensions (scene / temperature / lighting), each yielding
+      one of a small enum of action_kinds (set_scene /
+      adjust_temperature / dim_lights / brighten_lights / no_action).
+      Deterministic + read_only — same input always produces the
+      same recommendation set. The comfort_tuning.v1 skill wraps
+      this tool with operator-profile context + memory_recall +
+      memory_write of the attestation; LLM-driven narrative layers
+      separately. comfort_optimizer (D5) is the primary consumer.
+      Recommendations queue for operator review; nothing actuates
+      (routine_composer's lane).
+    input_schema:
+      type: object
+      required: [window_slug, time_of_day, areas]
+      properties:
+        window_slug: {type: string}
+        time_of_day:
+          type: string
+          enum: [morning, midday, evening, night]
+        areas:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [area_slug]
+            properties:
+              area_slug: {type: string}
+              label: {type: string}
+              current_temp_f: {type: number}
+              current_brightness_pct: {type: number, minimum: 0, maximum: 100}
+              current_scene: {type: string}
+        preferences:
+          type: object
+          properties:
+            preferred_temp_min_f: {type: number}
+            preferred_temp_max_f: {type: number}
+            evening_dim_threshold_pct: {type: number, minimum: 0, maximum: 100}
+            morning_brighten_threshold_pct: {type: number, minimum: 0, maximum: 100}
+            temp_action_delta_f: {type: number}
+        vacation_mode:
+          type: boolean
+          default: false
+    side_effects: read_only
+    archetype_tags: [comfort_optimizer]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
@@ -4405,6 +4510,43 @@ archetypes:
       # No web_fetch. No shell_exec. No code_edit. No device-actuation
       # tools (routine_composer's lane). No optimization tools
       # (energy_warden + comfort_optimizer's lanes). Pure alert kit.
+
+  # ---- ADR-0091 Phase B — D5 Smart Home Brain energy + comfort ----
+  # energy_warden + comfort_optimizer kits. Both researcher-genre,
+  # both read_only. Each role's load-bearing tool is the matching
+  # Phase B builtin (energy_anomaly_scan / comfort_recommend);
+  # everything else mirrors the steward's read_only support set.
+  energy_warden:
+    standard_tools:
+      - energy_anomaly_scan.v1        # ADR-0091 Phase B — the load-bearing deterministic per-device classifier
+      - llm_think.v1                  # cross-window comparison + anomaly narrative reasoning
+      - memory_recall.v1              # walk recent readings + baselines + prior anomaly reports
+      - memory_write.v1               # write anomaly attestations tagged for comfort_optimizer + routine_composer
+      - delegate.v1                   # hand off to comfort_optimizer / routine_composer / operator
+      - audit_chain_verify.v1         # chain integrity before publishing anomaly report
+      - text_summarize.v1             # condense long reading sets into per-device synopses
+      - operator_profile_read.v1      # ADR-0068 — routines + areas_of_focus shape "expected to be high power" framing
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index (prior bills, prior baselines)
+      # No web_fetch. No shell_exec. No code_edit. No device-actuation
+      # tools (routine_composer's lane). No comfort-recommendation tools
+      # (comfort_optimizer's lane). No alert tools (home_sentinel's lane).
+      # Pure anomaly-attestation kit.
+
+  comfort_optimizer:
+    standard_tools:
+      - comfort_recommend.v1          # ADR-0091 Phase B — the load-bearing deterministic per-area recommendation composer
+      - llm_think.v1                  # cross-area narrative + preference-tradeoff reasoning
+      - memory_recall.v1              # walk current home_state snapshots + prior recommendations + operator preferences
+      - memory_write.v1               # write recommendation attestations tagged for routine_composer pickup
+      - delegate.v1                   # hand off to routine_composer / operator
+      - audit_chain_verify.v1         # chain integrity before publishing recommendation report
+      - text_summarize.v1             # condense recommendation sets into per-area + cross-area synopses
+      - operator_profile_read.v1      # ADR-0068 — areas_of_focus + routines + (eventually) preferred_temp shape recommendations
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index (prior recs, prior preference settings)
+      # No web_fetch. No shell_exec. No code_edit. No device-actuation
+      # tools (routine_composer's lane). No energy classification tools
+      # (energy_warden's lane). No alert tools (home_sentinel's lane).
+      # Pure recommendation-attestation kit.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

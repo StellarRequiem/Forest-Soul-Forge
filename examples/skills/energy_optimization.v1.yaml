@@ -1,0 +1,168 @@
+schema_version: 1
+name: energy_optimization
+version: '1'
+description: |
+  EnergyWarden-D5's primary skill. Dispatches energy_anomaly_scan.v1
+  over per-device readings against operator-supplied baselines +
+  composes an anomaly attestation tagged for comfort_optimizer +
+  routine_composer pickup.
+
+  Composition + attestation only — the warden NEVER actuates
+  devices (routine_composer's lane) + NEVER tunes comfort
+  (comfort_optimizer's lane) + NEVER alerts on security
+  (home_sentinel's lane). Anomaly attestations land in private
+  memory tagged for downstream pickup
+  (energy_anomaly_report:${window_slug}).
+
+  Seven-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       areas_of_focus + timezone. Drives the warden's framing of
+       which devices are "expected to draw high power" (e.g. an
+       EV charger on schedule).
+    2. recall_baselines — memory_recall scope=lineage for
+       operator-supplied baseline_snapshot attestations within
+       window_minutes (default 1440 — one day). The wrapping
+       skill consumes these and passes them as the readings'
+       baseline_mean / baseline_stddev / baseline_sample_count.
+    3. recall_prior_anomalies — memory_recall scope=private for
+       prior anomaly attestations on this window_slug. The warden
+       extends rather than duplicates; recent reports are surfaced
+       for diff-style narration.
+    4. recall_steward_report — memory_recall scope=lineage for the
+       matching state-of-the-home report (cross-references presence
+       framing — a spike on the EV charger when nobody is home
+       gets flagged more strongly).
+    5. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. An anomaly attested on a
+       broken chain inherits the brokenness.
+    6. classify_anomalies — energy_anomaly_scan.v1 produces the
+       deterministic per-device verdict set (spike / drift /
+       normal / missing_baseline) with z-scores.
+    7. write_anomaly_attestation — memory_write scope=private
+       records the verdict set tagged for downstream pickup
+       (energy_anomaly_report:${window_slug} +
+       attestor:EnergyWarden-D5).
+
+  NEVER actuates devices. forbid_device_action policy enforces
+  this at governance layer regardless of posture. NEVER tunes
+  comfort. forbid_comfort_tuning policy enforces this at
+  governance layer regardless of posture.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - energy_anomaly_scan.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [window_slug, readings]
+  properties:
+    window_slug:
+      type: string
+      description: >
+        Time-bucket slug this scan binds to. Convention:
+        lowercase kebab-case (e.g. "evening-2026-05-24").
+    window_minutes:
+      type: integer
+      default: 1440
+      description: >
+        How far back to walk baseline + reading attestations,
+        in minutes. Default 1440 (one day).
+    readings:
+      type: array
+      minItems: 1
+      maxItems: 200
+      description: >
+        Per-device current readings + baselines. Each entry is
+        the shape energy_anomaly_scan.v1 expects (device_slug +
+        current_watts + baseline_mean_watts +
+        baseline_stddev_watts + baseline_sample_count). The
+        skill passes them through directly; baselines are
+        typically composed by the operator from recent
+        baseline_snapshot memory attestations.
+    spike_sigma:
+      type: number
+      default: 3.0
+    drift_sigma:
+      type: number
+      default: 1.5
+    min_baseline_samples:
+      type: integer
+      default: 5
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the anomaly attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_baselines
+    tool: memory_recall.v1
+    args:
+      query: "baseline_snapshot"
+      mode: lineage
+      limit: 50
+
+  - id: recall_prior_anomalies
+    tool: memory_recall.v1
+    args:
+      query: "energy_anomaly_report:${inputs.window_slug}"
+      mode: private
+      limit: 5
+
+  - id: recall_steward_report
+    tool: memory_recall.v1
+    args:
+      query: "home_state_report:${inputs.window_slug}"
+      mode: lineage
+      limit: 3
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: classify_anomalies
+    tool: energy_anomaly_scan.v1
+    args:
+      window_slug: ${inputs.window_slug}
+      readings: ${inputs.readings}
+      spike_sigma: ${inputs.spike_sigma}
+      drift_sigma: ${inputs.drift_sigma}
+      min_baseline_samples: ${inputs.min_baseline_samples}
+
+  - id: write_anomaly_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        Energy anomaly report for window ${inputs.window_slug}.
+        Devices scanned: ${classify_anomalies.out.summary.device_count}
+        Spikes: ${classify_anomalies.out.summary.spike_count}
+        Drift:  ${classify_anomalies.out.summary.drift_count}
+        Normal: ${classify_anomalies.out.summary.normal_count}
+        Missing baseline: ${classify_anomalies.out.summary.missing_baseline_count}
+        Max |z|: ${classify_anomalies.out.summary.max_abs_z_score}
+        Chain status: ${verify_chain_integrity.out.status}
+        Operator reason: ${inputs.operator_reason}
+      layer: episodic
+      scope: private
+      tags:
+        - "d5_energy_anomaly_report"
+        - "energy_anomaly_report:${inputs.window_slug}"
+        - "attestor:EnergyWarden-D5"
+
+output:
+  window_slug: ${inputs.window_slug}
+  device_count: ${classify_anomalies.out.summary.device_count}
+  spike_count: ${classify_anomalies.out.summary.spike_count}
+  drift_count: ${classify_anomalies.out.summary.drift_count}
+  missing_baseline_count: ${classify_anomalies.out.summary.missing_baseline_count}
+  max_abs_z_score: ${classify_anomalies.out.summary.max_abs_z_score}
+  chain_status: ${verify_chain_integrity.out.status}
+  report_entry_id: ${write_anomaly_attestation.out.entry_id}

@@ -1341,6 +1341,43 @@ roles:
       emotional: 0.7    # alert tone is read-then-respond
       embodiment: 0.4
 
+  # ---- ADR-0091 Phase B — D5 Smart Home Brain (energy + comfort) ----
+  # energy_warden: researcher-genre energy analysis role. Dispatches
+  # energy_anomaly_scan.v1 over per-device readings against
+  # operator-supplied baselines + composes anomaly attestations.
+  # NEVER tunes (comfort_optimizer's lane); NEVER actuates devices
+  # (routine_composer's lane); NEVER alerts on security
+  # (home_sentinel's lane). GREEN posture per ADR-0091 Decision 1 —
+  # the anomaly attestation is the deliverable; nothing acts.
+  energy_warden:
+    description: "Energy-analysis researcher. Dispatches energy_anomaly_scan.v1 over per-device readings against operator-supplied baselines + composes anomaly attestations. NEVER tunes (comfort_optimizer's lane) + NEVER actuates devices (routine_composer's lane) + NEVER alerts on security (home_sentinel's lane). GREEN posture. Genre: researcher. ADR-0091 Phase B."
+    domain_weights:
+      security: 1.4     # household-energy visibility carries household-presence floor
+      audit: 2.6        # every anomaly attests to source readings + baseline + z-score
+      cognitive: 2.2    # anomaly detection + cross-window comparison reasoning
+      communication: 1.7 # attestations are operator + comfort_optimizer + routine_composer consumed
+      emotional: 0.5    # energy framing is read-then-respond
+      embodiment: 0.4
+
+  # comfort_optimizer: researcher-genre comfort recommendation
+  # role. Dispatches comfort_recommend.v1 over current home_state
+  # + operator preferences + time-of-day window + composes
+  # recommendation attestations. NEVER actuates devices
+  # (routine_composer's lane); NEVER classifies energy anomalies
+  # (energy_warden's lane); NEVER alerts on security
+  # (home_sentinel's lane). GREEN posture per ADR-0091 Decision 1 —
+  # recommendations queue for operator review + routine_composer
+  # pickup; nothing acts.
+  comfort_optimizer:
+    description: "Comfort-tuning researcher. Dispatches comfort_recommend.v1 over current home_state + operator preferences + time-of-day window + composes recommendation attestations. NEVER actuates devices (routine_composer's lane) + NEVER classifies energy anomalies (energy_warden's lane) + NEVER alerts on security (home_sentinel's lane). GREEN posture. Genre: researcher. ADR-0091 Phase B."
+    domain_weights:
+      security: 1.0     # comfort framing carries household-presence floor
+      audit: 2.4        # every recommendation attests to source state + preferences + window
+      cognitive: 2.1    # rule-based recommendation reasoning + cross-area composition
+      communication: 1.9 # recommendations are operator + routine_composer consumed
+      emotional: 0.9    # comfort framing carries affective tone (warmth, light)
+      embodiment: 0.5
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so
