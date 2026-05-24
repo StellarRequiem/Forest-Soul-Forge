@@ -1,0 +1,183 @@
+schema_version: 1
+name: hypothesis_testing
+version: '1'
+description: |
+  Debate_Moderator-D10's secondary skill. When the lab forms a
+  testable hypothesis (typically surfaced in a debate turn),
+  this skill composes a delegation to the existing
+  Experimenter-Smith agent (ADR-0056) to run a short-horizon
+  test, then writes an attestation linking the hypothesis to the
+  experimenter's run id for downstream replay.
+
+  Per ADR-0090 Decision 4 — D10 does NOT re-create an
+  experimenter; it references the existing ADR-0056 substrate.
+  The hypothesis_testing.v1 skill is the delegation wrapper that
+  routes the test request to Experimenter-Smith + records the
+  routing decision in lineage memory so the lab's audit chain
+  links the hypothesis back to the experimenter's run output.
+
+  Five-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       areas_of_focus + expertise. Frames hypothesis framing.
+    2. recall_prior_runs — memory_recall scope=lineage for
+       prior hypothesis_testing attestations on the topic. The
+       moderator extends rather than duplicates.
+    3. verify_chain_integrity — audit_chain_verify confirms
+       hash-linkage. A delegation attested on a broken chain
+       inherits the brokenness.
+    4. compose_test_request — llm_think composes the test
+       request narrative: hypothesis statement + falsification
+       criteria + expected substrate touched by the test +
+       why this is short-horizon-testable.
+    5. delegate_to_experimenter — delegate.v1 hands off the
+       request to Experimenter-Smith. The experimenter's own
+       skill runs the test; the moderator records only the
+       delegation.
+    6. write_delegation_attestation — memory_write scope=private
+       records (topic_slug, hypothesis, delegation target,
+       experimenter_run_handle (from delegate response),
+       attestor, ts) tagged for operator pickup
+       (hypothesis_test:${topic_slug} +
+       attestor:Debate_Moderator-D10).
+
+  NEVER runs the experiment itself — that is Experimenter-
+  Smith's lane (ADR-0056). NEVER analyzes the test result —
+  that is analyst's lane. The moderator's role is to ROUTE +
+  ATTEST.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - delegate.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, hypothesis]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this hypothesis relates to. Convention: lowercase
+        kebab-case.
+    hypothesis:
+      type: string
+      description: >
+        The testable hypothesis statement. Must be falsifiable +
+        short-horizon-testable per ADR-0056's experimenter
+        contract.
+    falsification_criteria:
+      type: string
+      default: ""
+      description: >
+        Operator-facing falsification criteria — what observation
+        would disprove the hypothesis.
+    experimenter_target:
+      type: string
+      default: "Experimenter-Smith"
+      description: >
+        Name of the experimenter agent to delegate to. Defaults
+        to the canonical ADR-0056 instance.
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_prior_runs
+    tool: memory_recall.v1
+    args:
+      query: "hypothesis_test:${inputs.topic_slug}"
+      mode: lineage
+      limit: 10
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_test_request
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Debate_Moderator-D10, composing a test request
+        for the experimenter agent on topic
+        "${inputs.topic_slug}".
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          expertise:      ${operator_context.out.expertise_level}
+
+        Hypothesis: ${inputs.hypothesis}
+        Falsification criteria: ${inputs.falsification_criteria}
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Prior hypothesis-test runs on this topic:
+        ${recall_prior_runs.out.entries}
+
+        Produce a structured test request:
+        1. Hypothesis statement — restate in operator-readable
+           prose + name the testable claim explicitly.
+        2. Falsification criteria — what observation disproves
+           the hypothesis. If the operator did not provide one,
+           propose three candidates.
+        3. Expected substrate — name the substrate the test
+           touches (memory layer, registry table, audit chain,
+           etc.) so the experimenter scopes its run.
+        4. Short-horizon framing — why this can land in one
+           experimenter run; if it requires multi-run
+           coordination, say so + recommend the operator split
+           into smaller hypotheses.
+
+        NEVER run the test yourself — delegation is the
+        deliverable. NEVER analyze the result — that is the
+        analyst's lane once the experimenter ships its run
+        attestation.
+
+        Halt warning if chain status != "ok" — refuse to compose
+        the request and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: delegate_to_experimenter
+    tool: delegate.v1
+    args:
+      target_role: experimenter
+      target_agent_name: ${inputs.experimenter_target}
+      handoff_kind: hypothesis_test
+      payload: ${compose_test_request.out.response}
+      reason: ${inputs.operator_reason}
+
+  - id: write_delegation_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        Hypothesis test delegation for topic ${inputs.topic_slug}.
+        Hypothesis: ${inputs.hypothesis}
+        Falsification criteria: ${inputs.falsification_criteria}
+        Test request: ${compose_test_request.out.response}
+        Delegated to: ${inputs.experimenter_target}
+        Chain status: ${verify_chain_integrity.out.status}
+      layer: episodic
+      scope: private
+      tags:
+        - "d10_hypothesis_test"
+        - "hypothesis_test:${inputs.topic_slug}"
+        - "attestor:Debate_Moderator-D10"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  hypothesis: ${inputs.hypothesis}
+  test_request: ${compose_test_request.out.response}
+  delegation_target: ${inputs.experimenter_target}
+  prior_run_hits: ${recall_prior_runs.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  delegation_entry_id: ${write_delegation_attestation.out.entry_id}

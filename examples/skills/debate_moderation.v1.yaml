@@ -1,0 +1,244 @@
+schema_version: 1
+name: debate_moderation
+version: '1'
+description: |
+  Debate_Moderator-D10's primary skill. Dispatches
+  debate_orchestrate.v1 (deterministic turn-ordering) +
+  claim_provenance.v1 (citation-graph walk on the most-recent
+  transcript claim) + composes a moderator narrative around the
+  next turn. Writes an orchestration attestation tagged for
+  operator + downstream-role pickup.
+
+  Moderation only — the moderator NEVER takes a substantive turn
+  (forbid_substantive_contribution) + NEVER critiques (critic's
+  lane) + NEVER synthesizes (lab_synthesizer's lane). The
+  deterministic turn-ordering tool output + the attestation are
+  the deliverables; the speakers' attestations are the substance.
+
+  Seven-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       areas_of_focus + expertise. Frames moderator narrative.
+    2. recall_transcript — memory_recall scope=lineage for prior
+       debate turn attestations matching the topic_slug. The
+       moderator reconstructs the transcript before deciding
+       the next turn.
+    3. recall_citation_graph — memory_recall scope=lineage for
+       the lab_synthesizer's most-recent citation graph on the
+       topic. Provenance walks rest on this graph.
+    4. verify_chain_integrity — audit_chain_verify confirms
+       hash-linkage. An orchestration attested on a broken
+       chain inherits the brokenness.
+    5. orchestrate_turn — debate_orchestrate.v1 dispatched over
+       the operator's question + role-set + reconstructed
+       transcript + strategy. Returns next_speaker +
+       next_turn_kind + termination signal.
+    6. walk_provenance — claim_provenance.v1 dispatched over
+       the most-recent transcript claim's node_id (if the
+       graph is non-empty + the operator provided a target).
+       The provenance hits surface in the narrative.
+    7. compose_narrative — llm_think composes the moderator's
+       framing of the next turn: who speaks, why, what
+       provenance the prior turn rested on, and (if
+       terminating) the closing rationale.
+    8. write_orchestration_attestation — memory_write
+       scope=private records the orchestration tagged for
+       operator + the next speaker
+       (orchestration:${topic_slug} +
+       attestor:Debate_Moderator-D10).
+
+  NEVER takes a substantive turn + NEVER critiques + NEVER
+  synthesizes. The relevant constitution policies enforce this
+  at governance layer.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - debate_orchestrate.v1
+  - claim_provenance.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, question, roles]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic this debate addresses. Convention: lowercase
+        kebab-case. Matches the source bundle / decomposition /
+        counter / synthesis attestation tags.
+    question:
+      type: string
+      description: >
+        The debate question — frames every turn.
+    roles:
+      type: array
+      items: {type: string}
+      description: >
+        Participating role names. Order matters for round_robin +
+        structured strategies.
+    strategy:
+      type: string
+      enum: [round_robin, structured, demand_driven]
+      default: round_robin
+    max_turns:
+      type: integer
+      default: 12
+    operator_signaled_close:
+      type: boolean
+      default: false
+    transcript:
+      type: array
+      default: []
+      description: >
+        Optional pre-built transcript. If omitted, the moderator
+        reconstructs from prior turn attestations in lineage
+        memory.
+    citation_graph:
+      type: object
+      default: {nodes: [], sources: []}
+      description: >
+        Optional citation graph for the provenance walk. If
+        omitted, the moderator pulls from lineage memory
+        (lab_synthesizer's most-recent graph attestation).
+    target_claim_node_id:
+      type: string
+      default: ""
+      description: >
+        Optional node_id of the transcript claim to walk back to
+        its sources. If omitted, the provenance walk is skipped
+        + the narrative composes without it.
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_transcript
+    tool: memory_recall.v1
+    args:
+      query: "orchestration:${inputs.topic_slug}"
+      mode: lineage
+      limit: 20
+
+  - id: recall_citation_graph
+    tool: memory_recall.v1
+    args:
+      query: "citation_graph:${inputs.topic_slug}"
+      mode: lineage
+      limit: 3
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: orchestrate_turn
+    tool: debate_orchestrate.v1
+    args:
+      question: ${inputs.question}
+      roles: ${inputs.roles}
+      transcript: ${inputs.transcript}
+      strategy: ${inputs.strategy}
+      max_turns: ${inputs.max_turns}
+      operator_signaled_close: ${inputs.operator_signaled_close}
+
+  - id: walk_provenance
+    tool: claim_provenance.v1
+    args:
+      citation_graph: ${inputs.citation_graph}
+      target_node_id: ${inputs.target_claim_node_id}
+
+  - id: compose_narrative
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are Debate_Moderator-D10, the D10 Research Lab
+        debate-moderation agent. Compose the moderator's framing
+        of the next turn for the debate on topic
+        "${inputs.topic_slug}".
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          expertise:      ${operator_context.out.expertise_level}
+
+        Question:            ${inputs.question}
+        Roles in this debate: ${inputs.roles}
+        Strategy:            ${inputs.strategy}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Deterministic turn decision (debate_orchestrate.v1):
+          next_speaker:     ${orchestrate_turn.out.next_speaker}
+          next_turn_kind:   ${orchestrate_turn.out.next_turn_kind}
+          turn_index:       ${orchestrate_turn.out.turn_index}
+          terminate:        ${orchestrate_turn.out.terminate}
+          terminate_reason: ${orchestrate_turn.out.terminate_reason}
+          rationale:        ${orchestrate_turn.out.rationale}
+
+        Provenance walk (claim_provenance.v1):
+          target_node_id:   ${walk_provenance.out.target_node_id}
+          found:            ${walk_provenance.out.found}
+          source_count:     ${walk_provenance.out.metrics.source_count}
+          sibling_count:    ${walk_provenance.out.metrics.sibling_count}
+
+        Reconstructed transcript (lineage memory):
+        ${recall_transcript.out.entries}
+
+        Most-recent citation graph (lineage memory):
+        ${recall_citation_graph.out.entries}
+
+        Produce a moderator narrative:
+        1. Turn framing — one short paragraph naming the next
+           speaker + the turn kind + why this turn fits the
+           strategy.
+        2. Provenance hand-off — if walk_provenance.out.found is
+           true, name the sources the prior turn's claim rested
+           on + flag any co-cited sibling claims worth referencing.
+           If found is false, say so explicitly.
+        3. Closing condition (if terminate is true) — explain the
+           termination reason + the closing speaker's role.
+        4. Operator next steps — concrete suggestions: bump
+           max_turns, signal close, change strategy, or
+           re-orchestrate after the next speaker's attestation.
+
+        NEVER take a substantive turn — your job is to ORDER +
+        FRAME, not to play any role. NEVER critique a position +
+        NEVER synthesize across turns.
+
+        Halt warning if chain status != "ok" — refuse to compose
+        the narrative and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_orchestration_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_narrative.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d10_orchestration"
+        - "orchestration:${inputs.topic_slug}"
+        - "attestor:Debate_Moderator-D10"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  next_speaker: ${orchestrate_turn.out.next_speaker}
+  next_turn_kind: ${orchestrate_turn.out.next_turn_kind}
+  turn_index: ${orchestrate_turn.out.turn_index}
+  terminate: ${orchestrate_turn.out.terminate}
+  terminate_reason: ${orchestrate_turn.out.terminate_reason}
+  provenance_source_count: ${walk_provenance.out.metrics.source_count}
+  provenance_sibling_count: ${walk_provenance.out.metrics.sibling_count}
+  transcript_hits: ${recall_transcript.out.count}
+  citation_graph_hits: ${recall_citation_graph.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  orchestration_entry_id: ${write_orchestration_attestation.out.entry_id}
+  narrative: ${compose_narrative.out.response}

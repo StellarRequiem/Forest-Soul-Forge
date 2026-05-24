@@ -1283,6 +1283,25 @@ roles:
       emotional: 0.5
       embodiment: 0.4
 
+  # ---- ADR-0090 Phase C — D10 Research Lab (debate moderation) ----
+  # debate_moderator: researcher-genre debate orchestration role.
+  # Dispatches debate_orchestrate.v1 (deterministic turn-ordering)
+  # + claim_provenance.v1 (citation-graph walk) to compose a
+  # structured multi-agent debate. The moderator ORDERS turns +
+  # SURFACES provenance; it NEVER takes a substantive turn itself
+  # (forbid_substantive_contribution). GREEN posture per ADR-0090
+  # Decision 1 — orchestration is non-acting; the deterministic
+  # tool output + the attestation are the deliverables.
+  debate_moderator:
+    description: "Debate-moderation researcher. Dispatches debate_orchestrate.v1 (deterministic turn-ordering) + claim_provenance.v1 (citation-graph walk) to structure multi-agent debates. NEVER takes a substantive turn (forbid_substantive_contribution) + NEVER critiques (critic's lane) + NEVER synthesizes (lab_synthesizer's lane). GREEN posture. Genre: researcher. ADR-0090 Phase C."
+    domain_weights:
+      security: 0.9     # moderation is private; no external boundary crossing
+      audit: 2.7        # every turn-order attests to (transcript, strategy, next_speaker)
+      cognitive: 2.3    # orchestration logic + provenance walk + transcript framing
+      communication: 1.9 # turn-by-turn structure is operator-facing prose
+      emotional: 0.6    # moderation tone is read-then-respond
+      embodiment: 0.4
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so

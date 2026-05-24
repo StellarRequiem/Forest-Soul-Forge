@@ -3367,6 +3367,112 @@ tools:
     side_effects: read_only
     archetype_tags: [lab_synthesizer]
 
+  # ---- ADR-0090 Phase C — D10 Research Lab provenance + debate ----
+  claim_provenance.v1:
+    name: claim_provenance
+    version: "1"
+    description: |
+      ADR-0090 Phase C provenance walker. Walks a citation graph
+      (output of citation_graph_build.v1) backward from a target
+      claim to its root sources + surfaces sibling claims that
+      share at least one source with the target. Deterministic;
+      two calls with the same inputs produce the same trace.
+      Read-only. debate_moderator (D10 Phase C) is the primary
+      consumer — given a transcript claim, the moderator traces
+      which sources back it + which other claims already cite
+      those sources, to detect reiteration vs new ground.
+    input_schema:
+      type: object
+      required: [citation_graph]
+      properties:
+        citation_graph:
+          type: object
+          required: [nodes, sources]
+          properties:
+            nodes:
+              type: array
+              items:
+                type: object
+                properties:
+                  node_id: {type: string}
+                  claim_text: {type: string}
+                  claim_kind: {type: string}
+                  verdict: {type: string}
+                  source_ids:
+                    type: array
+                    items: {type: string}
+            sources:
+              type: array
+              items:
+                type: object
+                properties:
+                  source_id: {type: string}
+                  source_type: {type: string}
+                  source_url: {type: string}
+                  catalog_entry_id: {type: string}
+        target_node_id:
+          type: string
+        target_claim_text:
+          type: string
+        include_siblings:
+          type: boolean
+          default: true
+    side_effects: read_only
+    archetype_tags: [debate_moderator, lab_synthesizer, analyst]
+
+  debate_orchestrate.v1:
+    name: debate_orchestrate
+    version: "1"
+    description: |
+      ADR-0090 Phase C debate orchestrator. Deterministic turn-
+      ordering for a multi-agent debate from question + role-set
+      + prior transcript + strategy (round_robin / structured /
+      demand_driven). Returns next_speaker + next_turn_kind +
+      termination signal (max_turns or operator_signal). Read-only.
+      debate_moderator (D10 Phase C) is the sole consumer — the
+      moderator dispatches it each turn so the operator can audit
+      + replay the orchestration. LLM-driven moderation is opaque;
+      this tool emits the structural turn-ordering, while LLM
+      narrative layers on top via the debate_moderation.v1 skill.
+    input_schema:
+      type: object
+      required: [question, roles]
+      properties:
+        question:
+          type: string
+          maxLength: 2000
+        roles:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: {type: string}
+        transcript:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [speaker]
+            properties:
+              speaker: {type: string}
+              turn_kind:
+                type: string
+                enum: [open, counter, rebut, synthesize, close]
+              summary: {type: string}
+        strategy:
+          type: string
+          enum: [round_robin, structured, demand_driven]
+          default: round_robin
+        max_turns:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 12
+        operator_signaled_close:
+          type: boolean
+          default: false
+    side_effects: read_only
+    archetype_tags: [debate_moderator]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
@@ -4233,6 +4339,30 @@ archetypes:
       # No verify_claim (analyst + critic's lane — synthesizer
       # aggregates verdicts; it doesn't reverify). No critique
       # tools (critic's lane). Pure synthesis kit.
+
+  # ---- ADR-0090 Phase C — D10 Research Lab debate moderation ----
+  # debate_moderator kit. Researcher genre but actual kit ceiling
+  # is read_only (no web_fetch — the moderator composes over
+  # existing transcript + citation-graph memory). Two new
+  # builtin tools land in Phase C: claim_provenance.v1 +
+  # debate_orchestrate.v1, both read_only.
+  debate_moderator:
+    standard_tools:
+      - llm_think.v1                  # narrative framing on top of deterministic turn-ordering output
+      - memory_recall.v1              # walk transcript + citation-graph memory
+      - memory_write.v1               # write orchestration attestations + transcript spans
+      - delegate.v1                   # hand off to the next speaker via the standard delegate path
+      - audit_chain_verify.v1         # chain integrity before publishing turn decision
+      - text_summarize.v1             # condense long transcripts into per-turn synopses
+      - operator_profile_read.v1      # ADR-0068 — areas_of_focus frame the moderator's lens
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      - debate_orchestrate.v1         # ADR-0090 Phase C — load-bearing turn-ordering tool
+      - claim_provenance.v1           # ADR-0090 Phase C — citation-graph walk for transcript claims
+      # No web_fetch (gatherer's lane). No shell_exec. No code_edit.
+      # No verify_claim (analyst + critic's lane). No synthesis
+      # tools (lab_synthesizer's lane). No critique tools
+      # (critic's lane). Pure orchestration kit — the moderator
+      # ORDERS turns; it never takes one (forbid_substantive_contribution).
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

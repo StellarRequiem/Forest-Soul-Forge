@@ -2999,6 +2999,87 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  debate_moderator:
+    # ADR-0090 Phase C — D10 Research Lab debate-moderation role.
+    # Researcher genre, read_only ceiling. Dispatches
+    # debate_orchestrate.v1 (deterministic turn-ordering) +
+    # claim_provenance.v1 (citation-graph walk) to compose a
+    # structured multi-agent debate. NEVER takes a substantive
+    # turn (forbid_substantive_contribution) + NEVER critiques
+    # (critic's lane) + NEVER synthesizes (lab_synthesizer's
+    # lane). GREEN posture per ADR-0090 Decision 1.
+    policies:
+      - id: forbid_substantive_contribution
+        rule: forbid
+        triggers: [contribute_position, render_opinion, take_turn_as_speaker]
+        rationale: |
+          The moderator orders turns + surfaces provenance; it
+          NEVER takes a substantive turn itself. Letting the
+          moderator contribute would conflate orchestration with
+          opinion + bias the debate toward the moderator's own
+          frame. The deterministic turn-ordering tool +
+          attestation are the deliverables; the speakers'
+          attestations are the substance.
+      - id: forbid_critique
+        rule: forbid
+        triggers: [counter_argue, refute_claim, render_adversarial_position]
+        rationale: |
+          Adversarial critique is critic's exclusive lane (D10
+          Phase B). The moderator routes turns to the critic; it
+          never plays the critic's role.
+      - id: forbid_synthesis
+        rule: forbid
+        triggers: [compose_synthesis, aggregate_across_decompositions, render_lab_report]
+        rationale: |
+          Lab synthesis is lab_synthesizer's exclusive lane
+          (D10 Phase B). The moderator routes turns to the
+          lab_synthesizer; it never plays the synthesizer's
+          role.
+      - id: require_orchestration_attestation
+        rule: require
+        triggers: [emit_turn_decision, finalize_round]
+        rationale: |
+          Every turn decision emits a memory_write attestation
+          with (topic_slug, turn_index, next_speaker,
+          next_turn_kind, strategy, terminate_reason, attestor,
+          ts). Without the attestation, operators can't replay
+          which orchestration shaped a given debate.
+      - id: require_chain_integrity_before_orchestration
+        rule: require
+        triggers: [emit_turn_decision]
+        rationale: |
+          The turn decision rests on memory + chain content (the
+          prior turn attestations + the citation graph). A
+          decision attested on a broken chain inherits the
+          brokenness.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_transcript_external, post_orchestration_to_external_service]
+        rationale: |
+          Debate transcripts are private/lineage scope. Operator-
+          driven sharing is a separate explicit action; the
+          moderator never crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.75
+      escalate_risk: 0.40
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - contribute_position
+      - render_opinion
+      - counter_argue
+      - compose_synthesis
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the moderator as the structural author of the debate — turn order + provenance walks are real; the substance comes from analyst/critic/lab_synthesizer."
+      - "Audit orchestration attestations weekly — a moderator that consistently terminates early is a signal max_turns is too tight."
+      - "Use operator_signaled_close to end a debate that has stopped producing new positions — the moderator won't infer closure on its own."
+      - "Treat a chain_broken halt as an emergency — orchestration attested on a broken chain inherits the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

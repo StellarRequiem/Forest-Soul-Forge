@@ -78,6 +78,12 @@ from forest_soul_forge.tools.builtin.citation_graph_build import (
 from forest_soul_forge.tools.builtin.confidence_score import (
     ConfidenceScoreTool,
 )
+from forest_soul_forge.tools.builtin.claim_provenance import (
+    ClaimProvenanceTool,
+)
+from forest_soul_forge.tools.builtin.debate_orchestrate import (
+    DebateOrchestrateTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -605,3 +611,18 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # writes one per conclusion in every synthesis report so the
     # operator can see the per-conclusion uncertainty band.
     registry.register(ConfidenceScoreTool())
+    # ADR-0090 Phase C — claim_provenance.v1. Walks a citation
+    # graph backward from a target claim to its root sources +
+    # surfaces co-cited sibling claims. Deterministic; read-only.
+    # The debate_moderator (D10) is the primary consumer — given
+    # a transcript claim, the moderator traces which sources back
+    # it + which other claims already cite those sources.
+    registry.register(ClaimProvenanceTool())
+    # ADR-0090 Phase C — debate_orchestrate.v1. Deterministic
+    # turn-ordering for a multi-agent debate from question +
+    # role-set + prior transcript + strategy (round_robin /
+    # structured / demand_driven). Returns next_speaker +
+    # next_turn_kind + termination signal. Read-only — the
+    # debate_moderator dispatches it each turn so the operator
+    # can audit + replay the orchestration.
+    registry.register(DebateOrchestrateTool())
