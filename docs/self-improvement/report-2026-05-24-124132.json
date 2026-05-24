@@ -1,0 +1,2786 @@
+{
+  "branch": "self-improve/2026-05-24-123309",
+  "timestamp": "2026-05-24T12:36:35-07:00",
+  "audit": {
+    "findings": [
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_catalog_reachable",
+        "details": {
+          "id": "tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_catalog_reachable",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_entry_shape",
+        "details": {
+          "id": "tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_entry_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section1_tool_dispatch.py::test_section1_mcp_call_v1_present",
+        "details": {
+          "id": "tests/conformance/test_section1_tool_dispatch.py::test_section1_mcp_call_v1_present",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section2_audit_chain.py::test_section2_jsonl_line_shape",
+        "details": {
+          "id": "tests/conformance/test_section2_audit_chain.py::test_section2_jsonl_line_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section2_audit_chain.py::test_section2_seq_monotonic",
+        "details": {
+          "id": "tests/conformance/test_section2_audit_chain.py::test_section2_seq_monotonic",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section2_audit_chain.py::test_section2_hash_chain_integrity",
+        "details": {
+          "id": "tests/conformance/test_section2_audit_chain.py::test_section2_hash_chain_integrity",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section3_plugin_manifest.py::test_section3_per_plugin_shape",
+        "details": {
+          "id": "tests/conformance/test_section3_plugin_manifest.py::test_section3_per_plugin_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section4_constitution.py::test_section4_agent_shape",
+        "details": {
+          "id": "tests/conformance/test_section4_constitution.py::test_section4_agent_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/tools]",
+        "details": {
+          "id": "tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/tools]",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/pending-calls]",
+        "details": {
+          "id": "tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/pending-calls]",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section7_schema.py::test_section7_healthz_reports_ok",
+        "details": {
+          "id": "tests/conformance/test_section7_schema.py::test_section7_healthz_reports_ok",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/integration/test_genre_floor_and_audit_ordering.py::test_traits_endpoint_lists_44_roles",
+        "details": {
+          "id": "tests/integration/test_genre_floor_and_audit_ordering.py::test_traits_endpoint_lists_44_roles",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_b377_telemetry_chain_hookup.py::TestVerify::test_verify_mismatch_on_store_tampering",
+        "details": {
+          "id": "tests/unit/test_b377_telemetry_chain_hookup.py::TestVerify::test_verify_mismatch_on_store_tampering",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_cli_encrypt.py::test_summarize_audit_chain_counts_mixed",
+        "details": {
+          "id": "tests/unit/test_cli_encrypt.py::test_summarize_audit_chain_counts_mixed",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_cli_encrypt.py::test_decrypt_event_encrypted_entry",
+        "details": {
+          "id": "tests/unit/test_cli_encrypt.py::test_decrypt_event_encrypted_entry",
+          "error": "a...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_cli_encrypt.py::test_rotate_audit_chain_reencrypts_under_new_key",
+        "details": {
+          "id": "tests/unit/test_cli_encrypt.py::test_rotate_audit_chain_reencrypts_under_new_key",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_cli_plugin_author.py::test_read_only_tier_keeps_echo_exemplar",
+        "details": {
+          "id": "tests/unit/test_cli_plugin_author.py::test_read_only_tier_keeps_echo_exemplar",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_cli_provenance.py::test_list_empty_files",
+        "details": {
+          "id": "tests/unit/test_cli_provenance.py::test_list_empty_files",
+          "error": "AttributeEr...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_cli_provenance.py::test_list_with_loaded_preferences_text",
+        "details": {
+          "id": "tests/unit/test_cli_provenance.py::test_list_with_loaded_preferences_text",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_cli_provenance.py::test_list_json_output",
+        "details": {
+          "id": "tests/unit/test_cli_provenance.py::test_list_json_output",
+          "error": "AttributeEr...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_d4_advanced_rollout.py::test_release_gatekeeper_audit_weight_is_max",
+        "details": {
+          "id": "tests/unit/test_d4_advanced_rollout.py::test_release_gatekeeper_audit_weight_is_max",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_daemon_readonly.py::TestHealth::test_healthz_reports_local_provider",
+        "details": {
+          "id": "tests/unit/test_daemon_readonly.py::TestHealth::test_healthz_reports_local_provider",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_decompose_intent.py::test_execute_classifies_routable",
+        "details": {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_classifies_routable",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_decompose_intent.py::test_execute_classifies_ambiguous_below_threshold",
+        "details": {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_classifies_ambiguous_below_threshold",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_decompose_intent.py::test_execute_classifies_no_match_for_unknown_domain",
+        "details": {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_classifies_no_match_for_unknown_domain",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_decompose_intent.py::test_execute_classifies_planned_domain",
+        "details": {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_classifies_planned_domain",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_decompose_intent.py::test_execute_audit_payload_is_pii_safe",
+        "details": {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_audit_payload_is_pii_safe",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_domain_orchestrator_role.py::test_trait_tree_has_domain_orchestrator",
+        "details": {
+          "id": "tests/unit/test_domain_orchestrator_role.py::test_trait_tree_has_domain_orchestrator",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_domain_orchestrator_role.py::test_constitution_template_present",
+        "details": {
+          "id": "tests/unit/test_domain_orchestrator_role.py::test_constitution_template_present",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_domain_orchestrator_role.py::test_singleton_set_includes_domain_orchestrator",
+        "details": {
+          "id": "tests/unit/test_domain_orchestrator_role.py::test_singleton_set_includes_domain_orchestrator",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_git_local_scan.py::test_execute_on_clean_repo_passes",
+        "details": {
+          "id": "tests/unit/test_git_local_scan.py::test_execute_on_clean_repo_passes",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_real_catalog_loads_without_errors",
+        "details": {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_real_catalog_loads_without_errors",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_id_skipped",
+        "details": {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_id_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_statement_skipped",
+        "details": {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_statement_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_domain_keywords_skipped",
+        "details": {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_domain_keywords_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_canonical_terms_skipped",
+        "details": {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_canonical_terms_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_invalid_severity_skipped",
+        "details": {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_invalid_severity_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_duplicate_id_second_skipped",
+        "details": {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_duplicate_id_second_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_home_state_snapshot.py::TestExecution::test_simple_two_room_snapshot",
+        "details": {
+          "id": "tests/unit/test_home_state_snapshot.py::TestExecution::test_simple_two_room_snapshot",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory.py::TestRecallVisibleToErrors::test_recall_modes_constant_excludes_realm",
+        "details": {
+          "id": "tests/unit/test_memory.py::TestRecallVisibleToErrors::test_recall_modes_constant_excludes_realm",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_append_encrypts_content_on_disk",
+        "details": {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_append_encrypts_content_on_disk",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_recall_decrypts_transparently",
+        "details": {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_recall_decrypts_transparently",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_get_decrypts_transparently",
+        "details": {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_get_decrypts_transparently",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_digest_computed_over_plaintext",
+        "details": {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_digest_computed_over_plaintext",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_encryption.py::TestMixedTable::test_legacy_row_reads_without_decrypt",
+        "details": {
+          "id": "tests/unit/test_memory_encryption.py::TestMixedTable::test_legacy_row_reads_without_decrypt",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_encrypted_row_read_without_config_raises",
+        "details": {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_encrypted_row_read_without_config_raises",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_wrong_key_on_recall_raises_decrypt_error",
+        "details": {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_wrong_key_on_recall_raises_decrypt_error",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_personal_scope.py::test_consented_mode_does_not_see_personal_rows",
+        "details": {
+          "id": "tests/unit/test_memory_personal_scope.py::test_consented_mode_does_not_see_personal_rows",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_operator_profile_write.py::test_write_no_op_when_value_unchanged",
+        "details": {
+          "id": "tests/unit/test_operator_profile_write.py::test_write_no_op_when_value_unchanged",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_plugin_grants.py::test_schema_version_is_21",
+        "details": {
+          "id": "tests/unit/test_plugin_grants.py::test_schema_version_is_21",
+          "error": "assert 2...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_procedural_shortcuts.py::test_schema_version_is_21",
+        "details": {
+          "id": "tests/unit/test_procedural_shortcuts.py::test_schema_version_is_21",
+          "error": "a...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_procedural_shortcuts.py::test_v15_to_v16_upgrade",
+        "details": {
+          "id": "tests/unit/test_procedural_shortcuts.py::test_v15_to_v16_upgrade",
+          "error": "sql...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_pytest_run_tool.py::TestLocatePytest::test_locates_pytest_when_available",
+        "details": {
+          "id": "tests/unit/test_pytest_run_tool.py::TestLocatePytest::test_locates_pytest_when_available",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_pytest_run_tool.py::TestExecute::test_run_with_mixed_results",
+        "details": {
+          "id": "tests/unit/test_pytest_run_tool.py::TestExecute::test_run_with_mixed_results",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_pytest_run_tool.py::TestExecute::test_run_all_pass",
+        "details": {
+          "id": "tests/unit/test_pytest_run_tool.py::TestExecute::test_run_all_pass",
+          "error": "f...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_pytest_run_tool.py::TestExecute::test_no_tests_collected",
+        "details": {
+          "id": "tests/unit/test_pytest_run_tool.py::TestExecute::test_no_tests_collected",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_pytest_run_tool.py::TestExecute::test_metadata_records_invocation",
+        "details": {
+          "id": "tests/unit/test_pytest_run_tool.py::TestExecute::test_metadata_records_invocation",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_reality_anchor_corrections.py::test_schema_version_is_21",
+        "details": {
+          "id": "tests/unit/test_reality_anchor_corrections.py::test_schema_version_is_21",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_registry.py::TestBootstrap::test_fresh_db_creates_schema",
+        "details": {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_fresh_db_creates_schema",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_registry.py::TestBootstrap::test_reopen_existing_db_is_idempotent",
+        "details": {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_reopen_existing_db_is_idempotent",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_registry.py::TestBootstrap::test_empty_existing_file_gets_schema",
+        "details": {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_empty_existing_file_gets_schema",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_registry.py::TestBootstrap::test_v1_to_v2_forward_migration_preserves_data",
+        "details": {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_v1_to_v2_forward_migration_preserves_data",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_registry.py::TestBootstrap::test_v10_to_v11_forward_migration",
+        "details": {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_v10_to_v11_forward_migration",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_route_to_domain.py::test_execute_planned_with_override_routes_and_records_flag",
+        "details": {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_planned_with_override_routes_and_records_flag",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_route_to_domain.py::test_execute_emits_domain_routed_before_delegate",
+        "details": {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_emits_domain_routed_before_delegate",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_route_to_domain.py::test_execute_marks_known_vs_unknown_capability",
+        "details": {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_marks_known_vs_unknown_capability",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_route_to_domain.py::test_execute_succeeded_outcome_marshals",
+        "details": {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_succeeded_outcome_marshals",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_route_to_domain.py::test_execute_failed_outcome_marshals",
+        "details": {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_failed_outcome_marshals",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ruff_lint_tool.py::TestLocateRuff::test_locates_ruff_when_available",
+        "details": {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestLocateRuff::test_locates_ruff_when_available",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_file_with_findings",
+        "details": {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_file_with_findings",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_clean_file_returns_no_findings",
+        "details": {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_clean_file_returns_no_findings",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_directory",
+        "details": {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_directory",
+          "error": "...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ruff_lint_tool.py::TestExecute::test_max_findings_truncates",
+        "details": {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_max_findings_truncates",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ruff_lint_tool.py::TestExecute::test_metadata_records_invocation",
+        "details": {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_metadata_records_invocation",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_ruff_lint_tool.py::TestExecute::test_findings_have_complete_shape",
+        "details": {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_findings_have_complete_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_scheduler_scale.py::test_schema_version_is_v22",
+        "details": {
+          "id": "tests/unit/test_scheduler_scale.py::test_schema_version_is_v22",
+          "error": "asser...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_trait_engine.py::TestLoading::test_expected_role_count",
+        "details": {
+          "id": "tests/unit/test_trait_engine.py::TestLoading::test_expected_role_count",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      }
+    ],
+    "pytest_summary": {
+      "passed": 5400,
+      "failed": 77,
+      "errors": 0,
+      "skipped": 19,
+      "xfailed": 1,
+      "xpassed": 0,
+      "warnings": 34,
+      "failed_tests": [
+        {
+          "id": "tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_catalog_reachable",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_entry_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section1_tool_dispatch.py::test_section1_mcp_call_v1_present",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section2_audit_chain.py::test_section2_jsonl_line_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section2_audit_chain.py::test_section2_seq_monotonic",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section2_audit_chain.py::test_section2_hash_chain_integrity",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section3_plugin_manifest.py::test_section3_per_plugin_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section4_constitution.py::test_section4_agent_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/tools]",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/pending-calls]",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/conformance/test_section7_schema.py::test_section7_healthz_reports_ok",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/integration/test_genre_floor_and_audit_ordering.py::test_traits_endpoint_lists_44_roles",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_b377_telemetry_chain_hookup.py::TestVerify::test_verify_mismatch_on_store_tampering",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_cli_encrypt.py::test_summarize_audit_chain_counts_mixed",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_cli_encrypt.py::test_decrypt_event_encrypted_entry",
+          "error": "a...",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_cli_encrypt.py::test_rotate_audit_chain_reencrypts_under_new_key",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_cli_plugin_author.py::test_read_only_tier_keeps_echo_exemplar",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_cli_provenance.py::test_list_empty_files",
+          "error": "AttributeEr...",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_cli_provenance.py::test_list_with_loaded_preferences_text",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_cli_provenance.py::test_list_json_output",
+          "error": "AttributeEr...",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_d4_advanced_rollout.py::test_release_gatekeeper_audit_weight_is_max",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_daemon_readonly.py::TestHealth::test_healthz_reports_local_provider",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_classifies_routable",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_classifies_ambiguous_below_threshold",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_classifies_no_match_for_unknown_domain",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_classifies_planned_domain",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_decompose_intent.py::test_execute_audit_payload_is_pii_safe",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_domain_orchestrator_role.py::test_trait_tree_has_domain_orchestrator",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_domain_orchestrator_role.py::test_constitution_template_present",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_domain_orchestrator_role.py::test_singleton_set_includes_domain_orchestrator",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_git_local_scan.py::test_execute_on_clean_repo_passes",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_real_catalog_loads_without_errors",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_id_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_statement_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_domain_keywords_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_canonical_terms_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_invalid_severity_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_duplicate_id_second_skipped",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_home_state_snapshot.py::TestExecution::test_simple_two_room_snapshot",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_memory.py::TestRecallVisibleToErrors::test_recall_modes_constant_excludes_realm",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_append_encrypts_content_on_disk",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_recall_decrypts_transparently",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_get_decrypts_transparently",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_digest_computed_over_plaintext",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_memory_encryption.py::TestMixedTable::test_legacy_row_reads_without_decrypt",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_encrypted_row_read_without_config_raises",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_wrong_key_on_recall_raises_decrypt_error",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_memory_personal_scope.py::test_consented_mode_does_not_see_personal_rows",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_operator_profile_write.py::test_write_no_op_when_value_unchanged",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_plugin_grants.py::test_schema_version_is_21",
+          "error": "assert 2...",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_procedural_shortcuts.py::test_schema_version_is_21",
+          "error": "a...",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_procedural_shortcuts.py::test_v15_to_v16_upgrade",
+          "error": "sql...",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_pytest_run_tool.py::TestLocatePytest::test_locates_pytest_when_available",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_pytest_run_tool.py::TestExecute::test_run_with_mixed_results",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_pytest_run_tool.py::TestExecute::test_run_all_pass",
+          "error": "f...",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_pytest_run_tool.py::TestExecute::test_no_tests_collected",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_pytest_run_tool.py::TestExecute::test_metadata_records_invocation",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_reality_anchor_corrections.py::test_schema_version_is_21",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_fresh_db_creates_schema",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_reopen_existing_db_is_idempotent",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_empty_existing_file_gets_schema",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_v1_to_v2_forward_migration_preserves_data",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_registry.py::TestBootstrap::test_v10_to_v11_forward_migration",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_planned_with_override_routes_and_records_flag",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_emits_domain_routed_before_delegate",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_marks_known_vs_unknown_capability",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_succeeded_outcome_marshals",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_route_to_domain.py::test_execute_failed_outcome_marshals",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestLocateRuff::test_locates_ruff_when_available",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_file_with_findings",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_clean_file_returns_no_findings",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_directory",
+          "error": "...",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_max_findings_truncates",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_metadata_records_invocation",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_ruff_lint_tool.py::TestExecute::test_findings_have_complete_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_scheduler_scale.py::test_schema_version_is_v22",
+          "error": "asser...",
+          "kind": "FAILED"
+        },
+        {
+          "id": "tests/unit/test_trait_engine.py::TestLoading::test_expected_role_count",
+          "error": "",
+          "kind": "FAILED"
+        }
+      ]
+    }
+  },
+  "plan": {
+    "auto_fix": [
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section3_plugin_manifest.py::test_section3_per_plugin_shape",
+        "details": {
+          "id": "tests/conformance/test_section3_plugin_manifest.py::test_section3_per_plugin_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section4_constitution.py::test_section4_agent_shape",
+        "details": {
+          "id": "tests/conformance/test_section4_constitution.py::test_section4_agent_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section7_schema.py::test_section7_healthz_reports_ok",
+        "details": {
+          "id": "tests/conformance/test_section7_schema.py::test_section7_healthz_reports_ok",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/integration/test_genre_floor_and_audit_ordering.py::test_traits_endpoint_lists_44_roles",
+        "details": {
+          "id": "tests/integration/test_genre_floor_and_audit_ordering.py::test_traits_endpoint_lists_44_roles",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_b377_telemetry_chain_hookup.py::TestVerify::test_verify_mismatch_on_store_tampering",
+        "details": {
+          "id": "tests/unit/test_b377_telemetry_chain_hookup.py::TestVerify::test_verify_mismatch_on_store_tampering",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_cli_plugin_author.py::test_read_only_tier_keeps_echo_exemplar",
+        "details": {
+          "id": "tests/unit/test_cli_plugin_author.py::test_read_only_tier_keeps_echo_exemplar",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_d4_advanced_rollout.py::test_release_gatekeeper_audit_weight_is_max",
+        "details": {
+          "id": "tests/unit/test_d4_advanced_rollout.py::test_release_gatekeeper_audit_weight_is_max",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_daemon_readonly.py::TestHealth::test_healthz_reports_local_provider",
+        "details": {
+          "id": "tests/unit/test_daemon_readonly.py::TestHealth::test_healthz_reports_local_provider",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_git_local_scan.py::test_execute_on_clean_repo_passes",
+        "details": {
+          "id": "tests/unit/test_git_local_scan.py::test_execute_on_clean_repo_passes",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_home_state_snapshot.py::TestExecution::test_simple_two_room_snapshot",
+        "details": {
+          "id": "tests/unit/test_home_state_snapshot.py::TestExecution::test_simple_two_room_snapshot",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory.py::TestRecallVisibleToErrors::test_recall_modes_constant_excludes_realm",
+        "details": {
+          "id": "tests/unit/test_memory.py::TestRecallVisibleToErrors::test_recall_modes_constant_excludes_realm",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_personal_scope.py::test_consented_mode_does_not_see_personal_rows",
+        "details": {
+          "id": "tests/unit/test_memory_personal_scope.py::test_consented_mode_does_not_see_personal_rows",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_operator_profile_write.py::test_write_no_op_when_value_unchanged",
+        "details": {
+          "id": "tests/unit/test_operator_profile_write.py::test_write_no_op_when_value_unchanged",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_plugin_grants.py::test_schema_version_is_21",
+        "details": {
+          "id": "tests/unit/test_plugin_grants.py::test_schema_version_is_21",
+          "error": "assert 2...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_reality_anchor_corrections.py::test_schema_version_is_21",
+        "details": {
+          "id": "tests/unit/test_reality_anchor_corrections.py::test_schema_version_is_21",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_scheduler_scale.py::test_schema_version_is_v22",
+        "details": {
+          "id": "tests/unit/test_scheduler_scale.py::test_schema_version_is_v22",
+          "error": "asser...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_trait_engine.py::TestLoading::test_expected_role_count",
+        "details": {
+          "id": "tests/unit/test_trait_engine.py::TestLoading::test_expected_role_count",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/conformance/test_section1_tool_dispatch.py",
+        "details": {
+          "module": "tests/conformance/test_section1_tool_dispatch.py",
+          "count": 3,
+          "tests": [
+            "tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_catalog_reachable",
+            "tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_entry_shape",
+            "tests/conformance/test_section1_tool_dispatch.py::test_section1_mcp_call_v1_present"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/conformance/test_section2_audit_chain.py",
+        "details": {
+          "module": "tests/conformance/test_section2_audit_chain.py",
+          "count": 3,
+          "tests": [
+            "tests/conformance/test_section2_audit_chain.py::test_section2_jsonl_line_shape",
+            "tests/conformance/test_section2_audit_chain.py::test_section2_seq_monotonic",
+            "tests/conformance/test_section2_audit_chain.py::test_section2_hash_chain_integrity"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "2 failures in tests/conformance/test_section5_http_api.py",
+        "details": {
+          "module": "tests/conformance/test_section5_http_api.py",
+          "count": 2,
+          "tests": [
+            "tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/tools]",
+            "tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/pending-calls]"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/unit/test_cli_encrypt.py",
+        "details": {
+          "module": "tests/unit/test_cli_encrypt.py",
+          "count": 3,
+          "tests": [
+            "tests/unit/test_cli_encrypt.py::test_summarize_audit_chain_counts_mixed",
+            "tests/unit/test_cli_encrypt.py::test_decrypt_event_encrypted_entry",
+            "tests/unit/test_cli_encrypt.py::test_rotate_audit_chain_reencrypts_under_new_key"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/unit/test_cli_provenance.py",
+        "details": {
+          "module": "tests/unit/test_cli_provenance.py",
+          "count": 3,
+          "tests": [
+            "tests/unit/test_cli_provenance.py::test_list_empty_files",
+            "tests/unit/test_cli_provenance.py::test_list_with_loaded_preferences_text",
+            "tests/unit/test_cli_provenance.py::test_list_json_output"
+          ],
+          "sample_error": "AttributeEr..."
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "5 failures in tests/unit/test_decompose_intent.py",
+        "details": {
+          "module": "tests/unit/test_decompose_intent.py",
+          "count": 5,
+          "tests": [
+            "tests/unit/test_decompose_intent.py::test_execute_classifies_routable",
+            "tests/unit/test_decompose_intent.py::test_execute_classifies_ambiguous_below_threshold",
+            "tests/unit/test_decompose_intent.py::test_execute_classifies_no_match_for_unknown_domain",
+            "tests/unit/test_decompose_intent.py::test_execute_classifies_planned_domain",
+            "tests/unit/test_decompose_intent.py::test_execute_audit_payload_is_pii_safe"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/unit/test_domain_orchestrator_role.py",
+        "details": {
+          "module": "tests/unit/test_domain_orchestrator_role.py",
+          "count": 3,
+          "tests": [
+            "tests/unit/test_domain_orchestrator_role.py::test_trait_tree_has_domain_orchestrator",
+            "tests/unit/test_domain_orchestrator_role.py::test_constitution_template_present",
+            "tests/unit/test_domain_orchestrator_role.py::test_singleton_set_includes_domain_orchestrator"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "7 failures in tests/unit/test_ground_truth.py",
+        "details": {
+          "module": "tests/unit/test_ground_truth.py",
+          "count": 7,
+          "tests": [
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_real_catalog_loads_without_errors",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_id_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_statement_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_domain_keywords_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_canonical_terms_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_invalid_severity_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_duplicate_id_second_skipped"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "7 failures in tests/unit/test_memory_encryption.py",
+        "details": {
+          "module": "tests/unit/test_memory_encryption.py",
+          "count": 7,
+          "tests": [
+            "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_append_encrypts_content_on_disk",
+            "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_recall_decrypts_transparently",
+            "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_get_decrypts_transparently",
+            "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_digest_computed_over_plaintext",
+            "tests/unit/test_memory_encryption.py::TestMixedTable::test_legacy_row_reads_without_decrypt",
+            "tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_encrypted_row_read_without_config_raises",
+            "tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_wrong_key_on_recall_raises_decrypt_error"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "2 failures in tests/unit/test_procedural_shortcuts.py",
+        "details": {
+          "module": "tests/unit/test_procedural_shortcuts.py",
+          "count": 2,
+          "tests": [
+            "tests/unit/test_procedural_shortcuts.py::test_schema_version_is_21",
+            "tests/unit/test_procedural_shortcuts.py::test_v15_to_v16_upgrade"
+          ],
+          "sample_error": "a..."
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "5 failures in tests/unit/test_pytest_run_tool.py",
+        "details": {
+          "module": "tests/unit/test_pytest_run_tool.py",
+          "count": 5,
+          "tests": [
+            "tests/unit/test_pytest_run_tool.py::TestLocatePytest::test_locates_pytest_when_available",
+            "tests/unit/test_pytest_run_tool.py::TestExecute::test_run_with_mixed_results",
+            "tests/unit/test_pytest_run_tool.py::TestExecute::test_run_all_pass",
+            "tests/unit/test_pytest_run_tool.py::TestExecute::test_no_tests_collected",
+            "tests/unit/test_pytest_run_tool.py::TestExecute::test_metadata_records_invocation"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "5 failures in tests/unit/test_registry.py",
+        "details": {
+          "module": "tests/unit/test_registry.py",
+          "count": 5,
+          "tests": [
+            "tests/unit/test_registry.py::TestBootstrap::test_fresh_db_creates_schema",
+            "tests/unit/test_registry.py::TestBootstrap::test_reopen_existing_db_is_idempotent",
+            "tests/unit/test_registry.py::TestBootstrap::test_empty_existing_file_gets_schema",
+            "tests/unit/test_registry.py::TestBootstrap::test_v1_to_v2_forward_migration_preserves_data",
+            "tests/unit/test_registry.py::TestBootstrap::test_v10_to_v11_forward_migration"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "5 failures in tests/unit/test_route_to_domain.py",
+        "details": {
+          "module": "tests/unit/test_route_to_domain.py",
+          "count": 5,
+          "tests": [
+            "tests/unit/test_route_to_domain.py::test_execute_planned_with_override_routes_and_records_flag",
+            "tests/unit/test_route_to_domain.py::test_execute_emits_domain_routed_before_delegate",
+            "tests/unit/test_route_to_domain.py::test_execute_marks_known_vs_unknown_capability",
+            "tests/unit/test_route_to_domain.py::test_execute_succeeded_outcome_marshals",
+            "tests/unit/test_route_to_domain.py::test_execute_failed_outcome_marshals"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "7 failures in tests/unit/test_ruff_lint_tool.py",
+        "details": {
+          "module": "tests/unit/test_ruff_lint_tool.py",
+          "count": 7,
+          "tests": [
+            "tests/unit/test_ruff_lint_tool.py::TestLocateRuff::test_locates_ruff_when_available",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_file_with_findings",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_clean_file_returns_no_findings",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_directory",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_max_findings_truncates",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_metadata_records_invocation",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_findings_have_complete_shape"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      }
+    ],
+    "flagged": []
+  },
+  "outcomes": [
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section3_plugin_manifest.py::test_section3_per_plugin_shape",
+        "details": {
+          "id": "tests/conformance/test_section3_plugin_manifest.py::test_section3_per_plugin_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "model returned NO_FIX or empty response"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section4_constitution.py::test_section4_agent_shape",
+        "details": {
+          "id": "tests/conformance/test_section4_constitution.py::test_section4_agent_shape",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "patch failed --check: error: patch failed: tests/conformance/test_section4_constitution.py:18\nerror: tests/conformance/test_section4_constitution.py: patch does not apply"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/conformance/test_section7_schema.py::test_section7_healthz_reports_ok",
+        "details": {
+          "id": "tests/conformance/test_section7_schema.py::test_section7_healthz_reports_ok",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "model returned NO_FIX or empty response"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/integration/test_genre_floor_and_audit_ordering.py::test_traits_endpoint_lists_44_roles",
+        "details": {
+          "id": "tests/integration/test_genre_floor_and_audit_ordering.py::test_traits_endpoint_lists_44_roles",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_b377_telemetry_chain_hookup.py::TestVerify::test_verify_mismatch_on_store_tampering",
+        "details": {
+          "id": "tests/unit/test_b377_telemetry_chain_hookup.py::TestVerify::test_verify_mismatch_on_store_tampering",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_cli_plugin_author.py::test_read_only_tier_keeps_echo_exemplar",
+        "details": {
+          "id": "tests/unit/test_cli_plugin_author.py::test_read_only_tier_keeps_echo_exemplar",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_d4_advanced_rollout.py::test_release_gatekeeper_audit_weight_is_max",
+        "details": {
+          "id": "tests/unit/test_d4_advanced_rollout.py::test_release_gatekeeper_audit_weight_is_max",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_daemon_readonly.py::TestHealth::test_healthz_reports_local_provider",
+        "details": {
+          "id": "tests/unit/test_daemon_readonly.py::TestHealth::test_healthz_reports_local_provider",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_git_local_scan.py::test_execute_on_clean_repo_passes",
+        "details": {
+          "id": "tests/unit/test_git_local_scan.py::test_execute_on_clean_repo_passes",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_home_state_snapshot.py::TestExecution::test_simple_two_room_snapshot",
+        "details": {
+          "id": "tests/unit/test_home_state_snapshot.py::TestExecution::test_simple_two_room_snapshot",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory.py::TestRecallVisibleToErrors::test_recall_modes_constant_excludes_realm",
+        "details": {
+          "id": "tests/unit/test_memory.py::TestRecallVisibleToErrors::test_recall_modes_constant_excludes_realm",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_memory_personal_scope.py::test_consented_mode_does_not_see_personal_rows",
+        "details": {
+          "id": "tests/unit/test_memory_personal_scope.py::test_consented_mode_does_not_see_personal_rows",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_operator_profile_write.py::test_write_no_op_when_value_unchanged",
+        "details": {
+          "id": "tests/unit/test_operator_profile_write.py::test_write_no_op_when_value_unchanged",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_plugin_grants.py::test_schema_version_is_21",
+        "details": {
+          "id": "tests/unit/test_plugin_grants.py::test_schema_version_is_21",
+          "error": "assert 2...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_reality_anchor_corrections.py::test_schema_version_is_21",
+        "details": {
+          "id": "tests/unit/test_reality_anchor_corrections.py::test_schema_version_is_21",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_scheduler_scale.py::test_schema_version_is_v22",
+        "details": {
+          "id": "tests/unit/test_scheduler_scale.py::test_schema_version_is_v22",
+          "error": "asser...",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure",
+        "severity": "HIGH",
+        "summary": "FAILED tests/unit/test_trait_engine.py::TestLoading::test_expected_role_count",
+        "details": {
+          "id": "tests/unit/test_trait_engine.py::TestLoading::test_expected_role_count",
+          "error": "",
+          "kind": "FAILED"
+        },
+        "source": "run_pytest"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/conformance/test_section1_tool_dispatch.py",
+        "details": {
+          "module": "tests/conformance/test_section1_tool_dispatch.py",
+          "count": 3,
+          "tests": [
+            "tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_catalog_reachable",
+            "tests/conformance/test_section1_tool_dispatch.py::test_section1_tool_entry_shape",
+            "tests/conformance/test_section1_tool_dispatch.py::test_section1_mcp_call_v1_present"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/conformance/test_section2_audit_chain.py",
+        "details": {
+          "module": "tests/conformance/test_section2_audit_chain.py",
+          "count": 3,
+          "tests": [
+            "tests/conformance/test_section2_audit_chain.py::test_section2_jsonl_line_shape",
+            "tests/conformance/test_section2_audit_chain.py::test_section2_seq_monotonic",
+            "tests/conformance/test_section2_audit_chain.py::test_section2_hash_chain_integrity"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "2 failures in tests/conformance/test_section5_http_api.py",
+        "details": {
+          "module": "tests/conformance/test_section5_http_api.py",
+          "count": 2,
+          "tests": [
+            "tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/tools]",
+            "tests/conformance/test_section5_http_api.py::test_section5_read_endpoint_responds_200[/pending-calls]"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/unit/test_cli_encrypt.py",
+        "details": {
+          "module": "tests/unit/test_cli_encrypt.py",
+          "count": 3,
+          "tests": [
+            "tests/unit/test_cli_encrypt.py::test_summarize_audit_chain_counts_mixed",
+            "tests/unit/test_cli_encrypt.py::test_decrypt_event_encrypted_entry",
+            "tests/unit/test_cli_encrypt.py::test_rotate_audit_chain_reencrypts_under_new_key"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/unit/test_cli_provenance.py",
+        "details": {
+          "module": "tests/unit/test_cli_provenance.py",
+          "count": 3,
+          "tests": [
+            "tests/unit/test_cli_provenance.py::test_list_empty_files",
+            "tests/unit/test_cli_provenance.py::test_list_with_loaded_preferences_text",
+            "tests/unit/test_cli_provenance.py::test_list_json_output"
+          ],
+          "sample_error": "AttributeEr..."
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "5 failures in tests/unit/test_decompose_intent.py",
+        "details": {
+          "module": "tests/unit/test_decompose_intent.py",
+          "count": 5,
+          "tests": [
+            "tests/unit/test_decompose_intent.py::test_execute_classifies_routable",
+            "tests/unit/test_decompose_intent.py::test_execute_classifies_ambiguous_below_threshold",
+            "tests/unit/test_decompose_intent.py::test_execute_classifies_no_match_for_unknown_domain",
+            "tests/unit/test_decompose_intent.py::test_execute_classifies_planned_domain",
+            "tests/unit/test_decompose_intent.py::test_execute_audit_payload_is_pii_safe"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "3 failures in tests/unit/test_domain_orchestrator_role.py",
+        "details": {
+          "module": "tests/unit/test_domain_orchestrator_role.py",
+          "count": 3,
+          "tests": [
+            "tests/unit/test_domain_orchestrator_role.py::test_trait_tree_has_domain_orchestrator",
+            "tests/unit/test_domain_orchestrator_role.py::test_constitution_template_present",
+            "tests/unit/test_domain_orchestrator_role.py::test_singleton_set_includes_domain_orchestrator"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "7 failures in tests/unit/test_ground_truth.py",
+        "details": {
+          "module": "tests/unit/test_ground_truth.py",
+          "count": 7,
+          "tests": [
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_real_catalog_loads_without_errors",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_id_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_statement_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_domain_keywords_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_fact_missing_canonical_terms_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_invalid_severity_skipped",
+            "tests/unit/test_ground_truth.py::TestLoadGroundTruth::test_duplicate_id_second_skipped"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "7 failures in tests/unit/test_memory_encryption.py",
+        "details": {
+          "module": "tests/unit/test_memory_encryption.py",
+          "count": 7,
+          "tests": [
+            "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_append_encrypts_content_on_disk",
+            "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_recall_decrypts_transparently",
+            "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_get_decrypts_transparently",
+            "tests/unit/test_memory_encryption.py::TestEncryptedWriteRoundTrip::test_digest_computed_over_plaintext",
+            "tests/unit/test_memory_encryption.py::TestMixedTable::test_legacy_row_reads_without_decrypt",
+            "tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_encrypted_row_read_without_config_raises",
+            "tests/unit/test_memory_encryption.py::TestEncryptedReadWithoutKey::test_wrong_key_on_recall_raises_decrypt_error"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "2 failures in tests/unit/test_procedural_shortcuts.py",
+        "details": {
+          "module": "tests/unit/test_procedural_shortcuts.py",
+          "count": 2,
+          "tests": [
+            "tests/unit/test_procedural_shortcuts.py::test_schema_version_is_21",
+            "tests/unit/test_procedural_shortcuts.py::test_v15_to_v16_upgrade"
+          ],
+          "sample_error": "a..."
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "5 failures in tests/unit/test_pytest_run_tool.py",
+        "details": {
+          "module": "tests/unit/test_pytest_run_tool.py",
+          "count": 5,
+          "tests": [
+            "tests/unit/test_pytest_run_tool.py::TestLocatePytest::test_locates_pytest_when_available",
+            "tests/unit/test_pytest_run_tool.py::TestExecute::test_run_with_mixed_results",
+            "tests/unit/test_pytest_run_tool.py::TestExecute::test_run_all_pass",
+            "tests/unit/test_pytest_run_tool.py::TestExecute::test_no_tests_collected",
+            "tests/unit/test_pytest_run_tool.py::TestExecute::test_metadata_records_invocation"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "5 failures in tests/unit/test_registry.py",
+        "details": {
+          "module": "tests/unit/test_registry.py",
+          "count": 5,
+          "tests": [
+            "tests/unit/test_registry.py::TestBootstrap::test_fresh_db_creates_schema",
+            "tests/unit/test_registry.py::TestBootstrap::test_reopen_existing_db_is_idempotent",
+            "tests/unit/test_registry.py::TestBootstrap::test_empty_existing_file_gets_schema",
+            "tests/unit/test_registry.py::TestBootstrap::test_v1_to_v2_forward_migration_preserves_data",
+            "tests/unit/test_registry.py::TestBootstrap::test_v10_to_v11_forward_migration"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "5 failures in tests/unit/test_route_to_domain.py",
+        "details": {
+          "module": "tests/unit/test_route_to_domain.py",
+          "count": 5,
+          "tests": [
+            "tests/unit/test_route_to_domain.py::test_execute_planned_with_override_routes_and_records_flag",
+            "tests/unit/test_route_to_domain.py::test_execute_emits_domain_routed_before_delegate",
+            "tests/unit/test_route_to_domain.py::test_execute_marks_known_vs_unknown_capability",
+            "tests/unit/test_route_to_domain.py::test_execute_succeeded_outcome_marshals",
+            "tests/unit/test_route_to_domain.py::test_execute_failed_outcome_marshals"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    },
+    {
+      "finding": {
+        "kind": "test_failure_group",
+        "severity": "HIGH",
+        "summary": "7 failures in tests/unit/test_ruff_lint_tool.py",
+        "details": {
+          "module": "tests/unit/test_ruff_lint_tool.py",
+          "count": 7,
+          "tests": [
+            "tests/unit/test_ruff_lint_tool.py::TestLocateRuff::test_locates_ruff_when_available",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_file_with_findings",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_clean_file_returns_no_findings",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_lint_directory",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_max_findings_truncates",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_metadata_records_invocation",
+            "tests/unit/test_ruff_lint_tool.py::TestExecute::test_findings_have_complete_shape"
+          ],
+          "sample_error": ""
+        },
+        "source": "group_findings"
+      },
+      "status": "SKIPPED",
+      "changed_files": [],
+      "diff": "",
+      "error": "FIX phase aborted by circuit breaker"
+    }
+  ],
+  "validation": {},
+  "survival": {
+    "attempted_total": 31,
+    "survived": [],
+    "reverted": [],
+    "skipped": [
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/conformance/test_section3_plugin_manifest.py::test_section3_per_plugin_shape",
+        "files": [],
+        "error": "model returned NO_FIX or empty response"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/conformance/test_section4_constitution.py::test_section4_agent_shape",
+        "files": [],
+        "error": "patch failed --check: error: patch failed: tests/conformance/test_section4_constitution.py:18\nerror: tests/conformance/test_section4_constitution.py: patch does not apply"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/conformance/test_section7_schema.py::test_section7_healthz_reports_ok",
+        "files": [],
+        "error": "model returned NO_FIX or empty response"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/integration/test_genre_floor_and_audit_ordering.py::test_traits_endpoint_lists_44_roles",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_b377_telemetry_chain_hookup.py::TestVerify::test_verify_mismatch_on_store_tampering",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_cli_plugin_author.py::test_read_only_tier_keeps_echo_exemplar",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_d4_advanced_rollout.py::test_release_gatekeeper_audit_weight_is_max",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_daemon_readonly.py::TestHealth::test_healthz_reports_local_provider",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_git_local_scan.py::test_execute_on_clean_repo_passes",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_home_state_snapshot.py::TestExecution::test_simple_two_room_snapshot",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_memory.py::TestRecallVisibleToErrors::test_recall_modes_constant_excludes_realm",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_memory_personal_scope.py::test_consented_mode_does_not_see_personal_rows",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_operator_profile_write.py::test_write_no_op_when_value_unchanged",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_plugin_grants.py::test_schema_version_is_21",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_reality_anchor_corrections.py::test_schema_version_is_21",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_scheduler_scale.py::test_schema_version_is_v22",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure",
+        "summary": "FAILED tests/unit/test_trait_engine.py::TestLoading::test_expected_role_count",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "3 failures in tests/conformance/test_section1_tool_dispatch.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "3 failures in tests/conformance/test_section2_audit_chain.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "2 failures in tests/conformance/test_section5_http_api.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "3 failures in tests/unit/test_cli_encrypt.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "3 failures in tests/unit/test_cli_provenance.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "5 failures in tests/unit/test_decompose_intent.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "3 failures in tests/unit/test_domain_orchestrator_role.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "7 failures in tests/unit/test_ground_truth.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "7 failures in tests/unit/test_memory_encryption.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "2 failures in tests/unit/test_procedural_shortcuts.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "5 failures in tests/unit/test_pytest_run_tool.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "5 failures in tests/unit/test_registry.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "5 failures in tests/unit/test_route_to_domain.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      },
+      {
+        "kind": "test_failure_group",
+        "summary": "7 failures in tests/unit/test_ruff_lint_tool.py",
+        "files": [],
+        "error": "FIX phase aborted by circuit breaker"
+      }
+    ],
+    "attempts": [
+      {
+        "timestamp": "2026-05-24T12:38:37-07:00",
+        "kind": "ollama_fix",
+        "action": "SKIPPED",
+        "reason": "model returned NO_FIX or empty response",
+        "files": [],
+        "test_id": "tests/conformance/test_section3_plugin_manifest.py::test_section3_per_plugin_shape",
+        "model": "qwen3:8b"
+      },
+      {
+        "timestamp": "2026-05-24T12:39:37-07:00",
+        "kind": "ollama_fix",
+        "action": "SKIPPED",
+        "reason": "patch failed --check: error: patch failed: tests/conformance/test_section4_constitution.py:18\nerror: tests/conformance/test_section4_constitution.py: patch does not apply",
+        "files": [],
+        "test_id": "tests/conformance/test_section4_constitution.py::test_section4_agent_shape",
+        "model": "qwen3:8b"
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "ollama_fix",
+        "action": "SKIPPED",
+        "reason": "model returned NO_FIX or empty response",
+        "files": [],
+        "test_id": "tests/conformance/test_section7_schema.py::test_section7_healthz_reports_ok",
+        "model": "qwen3:8b"
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      },
+      {
+        "timestamp": "2026-05-24T12:41:32-07:00",
+        "kind": "test_failure_group",
+        "action": "ABORTED",
+        "reason": "circuit breaker tripped earlier in this run",
+        "files": [],
+        "test_id": "",
+        "model": ""
+      }
+    ],
+    "circuit_breaker": true,
+    "circuit_breaker_reason": "3 consecutive fix failures \u2014 likely hallucination pattern; aborting FIX phase"
+  },
+  "session": {
+    "start_commit_hash": "75219b482b63bac5b454e81b165f516460500691",
+    "branch_name": "self-improve/2026-05-24-123309",
+    "consecutive_failures_at_end": 3,
+    "aborted": true,
+    "abort_reason": "3 consecutive fix failures \u2014 likely hallucination pattern; aborting FIX phase"
+  }
+}

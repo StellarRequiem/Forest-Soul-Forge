@@ -84,6 +84,9 @@ from forest_soul_forge.daemon.routers import scheduler as scheduler_router
 from forest_soul_forge.daemon.routers import cycles as cycles_router
 from forest_soul_forge.daemon.routers import marketplace as marketplace_router
 from forest_soul_forge.daemon.routers import secrets as secrets_router
+from forest_soul_forge.daemon.routers import (
+    self_improve as self_improve_router,
+)
 from forest_soul_forge.daemon.routers import verifier as verifier_router
 from forest_soul_forge.daemon.routers import writes as writes_router
 from forest_soul_forge.registry import Registry
@@ -1253,6 +1256,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(secrets_router.router)
     app.include_router(marketplace_router.router)
     app.include_router(cycles_router.router)
+    app.include_router(self_improve_router.router)  # /self-improve/*
     return app
 
 

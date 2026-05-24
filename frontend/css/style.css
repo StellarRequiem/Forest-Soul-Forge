@@ -2778,3 +2778,37 @@ body { padding-bottom: 56px; }
   margin: 0;
   color: var(--fg-faint);
 }
+
+/* ============================================================== */
+/* Self-improvement findings — Approvals page subsection.        */
+/* Mirrors the per-call .pending-card pattern but compact: one    */
+/* row per finding with severity + category + per-row decision    */
+/* controls in a right-hand action column.                        */
+/* ============================================================== */
+.pill--info    { border-color: var(--accent); color: var(--accent); }
+.pill--success { border-color: var(--accent); color: var(--accent); }
+.pill--danger  { border-color: var(--danger); color: var(--danger); }
+
+.self-improve-summary {
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.self-improve-summary .danger { color: var(--danger); font-weight: 600; }
+
+.self-improve-list { display: block; }
+
+.self-improve-row {
+  background: var(--bg-card, var(--bg));
+}
+.self-improve-row[data-status="approved_for_fix"] { border-left: 3px solid var(--accent); }
+.self-improve-row[data-status="under_audit"]      { border-left: 3px solid #d2a23a; }
+.self-improve-row[data-status="implemented"]      { border-left: 3px solid var(--accent); opacity: 0.7; }
+.self-improve-row[data-status="rejected"]         { border-left: 3px solid var(--danger); opacity: 0.6; }
+.self-improve-row[data-status="pending"]          { border-left: 3px solid transparent; }
+
+.self-improve-row .btn--sm { min-width: 88px; }

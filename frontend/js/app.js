@@ -14,6 +14,7 @@ import * as toolsPanel from "./tools.js";
 import * as genresPanel from "./genres.js";
 import * as pendingPanel from "./pending.js";
 import * as forgedProposalsPanel from "./forged-proposals.js";  // B205
+import * as selfImprovePanel from "./self-improve.js";
 import * as catalogGrantsPanel from "./catalog-grants.js";       // B223 / ADR-0060 T6
 import * as marketplacePanel from "./marketplace.js";            // B228 / ADR-0055 M4
 import * as orchestratorPanel from "./orchestrator.js";          // B299 / ADR-0067 T7
@@ -79,6 +80,7 @@ async function boot() {
     auditPanel.start();
     pendingPanel.start();
     forgedProposalsPanel.start();  // B205
+    selfImprovePanel.start();
     catalogGrantsPanel.start();    // B223 / ADR-0060 T6
     marketplacePanel.start();      // B228 / ADR-0055 M4
     orchestratorPanel.start();     // B299 / ADR-0067 T7
@@ -164,6 +166,7 @@ async function boot() {
   // Adding them here is the symmetric fix — the catch branch
   // continues to wire them as a degraded-mode fallback.
   forgedProposalsPanel.start();   // B205 / ADR-0030 + ADR-0031
+  selfImprovePanel.start();
   catalogGrantsPanel.start();     // B223 / ADR-0060 T6
   marketplacePanel.start();       // B228 / ADR-0055 M4
   // ADR-0067 T7 (B299) — Orchestrator pane. Closes the
