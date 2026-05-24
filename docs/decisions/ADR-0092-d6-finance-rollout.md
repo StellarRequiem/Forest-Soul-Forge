@@ -1,6 +1,14 @@
 # ADR-0092 — D6 Personal Finance Guardian: rollout
 
-**Status:** Proposed (2026-05-24). Phase A in flight.
+**Status:** Accepted (2026-05-24). All four phases shipped:
+Phase A (budget_analyst + risk_advisor), Phase B
+(transaction_tracker + bill_steward +
+`transaction_categorize.v1` + `bill_recurrence_check.v1`),
+Phase C (investment_researcher + `investment_compare.v1`),
+Phase D (cascade wiring + umbrella birth + domain manifest
+flipped to `live`). **D6 closes the cross-domain rollout per
+ADR-0067 — all 10 domains shipped (D4 → D3 → D8 → D1 → D2 →
+D7 → D9 → D10 → D5 → D6).**
 **Date:** 2026-05-24
 **Tracks:** Domain Rollout / Personal Finance Substrate
 **Supersedes:** none
@@ -205,7 +213,7 @@ one dispatch.
 
 ## Phase plan
 
-### Phase A — budget + risk foundation (in flight)
+### Phase A — budget + risk foundation (SHIPPED 2026-05-24, commit e8d5604)
 
 - Add `budget_analyst` (researcher, GREEN) + `risk_advisor`
   (guardian, GREEN) to `trait_tree.yaml`, `genres.yaml`,
@@ -217,7 +225,7 @@ one dispatch.
   `dev-tools/birth-risk-advisor.command`.
 - Runbook: `docs/runbooks/d6-finance-ops.md`.
 
-### Phase B — transaction + bill stewardship
+### Phase B — transaction + bill stewardship (SHIPPED 2026-05-24, commit 879e4e2)
 
 - Add `transaction_tracker` (researcher, GREEN) + `bill_steward`
   (researcher, GREEN) to trait_tree / genres /
@@ -235,7 +243,7 @@ one dispatch.
 - Birth scripts: `dev-tools/birth-transaction-tracker.command`,
   `dev-tools/birth-bill-steward.command`.
 
-### Phase C — investment research
+### Phase C — investment research (SHIPPED 2026-05-24, commit 3522ca9)
 
 - Add `investment_researcher` (researcher, GREEN).
 - One new builtin tool:
@@ -245,7 +253,7 @@ one dispatch.
 - Skill manifest: `investment_research.v1`.
 - Birth script: `dev-tools/birth-investment-researcher.command`.
 
-### Phase D — cascade + umbrella + domain live
+### Phase D — cascade + umbrella + domain live (SHIPPED 2026-05-24)
 
 - No new roles or builtin tools.
 - Skill manifest: `finance_brain.v1` (umbrella composition).

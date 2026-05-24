@@ -14,7 +14,7 @@ that lands D6 Phase A (this runbook will grow as Phases B–D ship).
 | **A** | budget_analyst + risk_advisor | none — reuses existing | SHIPPED |
 | **B** | transaction_tracker + bill_steward | transaction_categorize.v1 + bill_recurrence_check.v1 | SHIPPED |
 | **C** | investment_researcher | investment_compare.v1 | SHIPPED |
-| **D** | (cascade + umbrella + live) | none | pending |
+| **D** | (cascade + umbrella + live) | none | SHIPPED |
 
 Each phase = one commit + one push, so the operator can verify
 phase N before phase N+1 fires.
@@ -207,9 +207,88 @@ operator-supplied candidate_action attestation and re-dispatch.
 
 ---
 
-## Beyond Phase A
+## Phases B + C — additional roles + tools
 
-Phases B–D will append sections to this runbook as they ship.
-For the current state of D6 (which phases have closed, which
-roles are alive, which tools are registered), check the table
-at the top + `STATE.md`'s D6 row.
+**Phase B** added `transaction_tracker` (researcher, GREEN) and
+`bill_steward` (researcher, GREEN), plus the deterministic tools
+`transaction_categorize.v1` (rule-based categorization; first-
+match-wins; merchant/description/amount predicates) and
+`bill_recurrence_check.v1` (monthly/quarterly/annual cycle
+detection with operator-tolerable day_drift; next-due
+projection; missing-cycle flagging).
+
+Births:
+
+```bash
+./dev-tools/birth-transaction-tracker.command
+./dev-tools/birth-bill-steward.command
+```
+
+**Phase C** added `investment_researcher` (researcher, GREEN) +
+`investment_compare.v1` (deterministic side-by-side comparison
+composer; per-dimension winners + per-option deltas across
+lower_is_better / higher_is_better / info_only dimension
+classes; **NEVER advises which option to pick** — the tool
+explicitly refuses to emit a "recommended option" field; the
+operator decides).
+
+Birth:
+
+```bash
+./dev-tools/birth-investment-researcher.command
+```
+
+## Phase D — cascades + umbrella + live
+
+D6 is now LIVE. The umbrella births all five agents in order:
+
+```bash
+./dev-tools/birth-d6-finance.command
+```
+
+The umbrella skill `finance_brain.v1` composes a single
+observation pass: TransactionTracker categorizes a batch,
+BillSteward checks recurrence, BudgetAnalyst composes the
+burn-rate report. Anti-recommendation arbitration
+(`risk_analysis.v1`) and investment research
+(`investment_research.v1`) are operator-explicit dispatches
+because they're operator-curiosity-driven, not scheduled
+observation work.
+
+**Active cascades wired in `config/handoffs.yaml`:**
+
+- `d5_smart_home.energy_optimization` → `d6_finance.transaction_monitoring`
+  — was INERT per ADR-0091 Phase D until D6 shipped; energy
+  anomaly attestations now seed the transaction-monitoring
+  lane so a power-bill spike enters the operator's burn-rate
+  window.
+- `d6_finance.bill_management` → `d2_daily_life_os.reminder` —
+  bill-due attestations seed D2's `schedule_reminder.v1` for
+  fire-time delivery.
+- `d6_finance.tax_season_summary` → `d8_compliance.compliance_scan`
+  — tax-season summaries feed the audit packet pipeline so
+  self-employed operators have continuous audit-readiness.
+
+**Inert cascades documented in handoffs.yaml comments:**
+
+- `d2.reminder → d6.bill_reminder` — direction is reversed
+  (d6→d2 is live above); D2 reminder is the fire-time lane,
+  D6 is the recurrence detector upstream.
+- `d6.transaction_monitoring → d1.knowledge_curation` — D1's
+  librarian handles "you asked about X 3x" via memory_recall
+  over conversation attestations; no D6-emitted surface is
+  required.
+- `d6.transaction_monitoring → d3.anomaly_correlation` —
+  recursive with d5→d6 (D3 already sees the upstream energy
+  anomaly via D5).
+
+D6 closes the cross-domain rollout per ADR-0067
+(D4 → D3 → D8 → D1 → D2 → D7 → D9 → D10 → D5 → **D6**).
+
+## Hard rule
+
+D6 NEVER executes transactions. The actuating surface (bank,
+broker, bill-pay) is operator-only by manifest contract. D6's
+deliverable is analysis + drafts; the operator decides what to
+do. This is the load-bearing constitutional discipline that
+makes D6 the first all-GREEN domain in the rollout.

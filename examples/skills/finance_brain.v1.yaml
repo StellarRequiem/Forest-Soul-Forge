@@ -1,0 +1,159 @@
+schema_version: 1
+name: finance_brain
+version: '1'
+description: |
+  D6 Personal Finance Guardian umbrella skill. Composes a single
+  end-to-end observation pass over the operator's finance ledger
+  by dispatching all five D6 sub-skills via delegate.v1. Each
+  sub-skill is dispatched as a separate delegate so per-role
+  attestations stand alongside in the audit chain (same
+  "outputs aren't averaged; both stand" discipline as ADR-0090
+  Decision 3 and ADR-0091 Decision 3).
+
+  Five-step pipeline (after operator_context + chain check):
+    1. operator_context — operator_profile_read fetches
+       currency + fiscal_year + areas_of_focus. Same lens
+       applied to every sub-skill below.
+    2. verify_chain_integrity — audit_chain_verify confirms
+       the chain is hash-linked end-to-end. If broken, the
+       umbrella halts BEFORE delegating; sub-skills also
+       check, but the umbrella's check is the load-bearing
+       fast-fail.
+    3. categorize_transactions — delegate to
+       TransactionTracker-D6's transaction_monitoring.v1 with
+       the batch_slug + transactions + rules.
+    4. check_bill_recurrence — delegate to BillSteward-D6's
+       bill_management.v1 with the ledger_slug + bills +
+       today_iso. The d6→d2 cascade routes the resulting
+       attestation into D2's schedule_reminder.
+    5. analyze_burn_rate — delegate to BudgetAnalyst-D6's
+       budget_analysis.v1 with the window_slug. Reads the
+       categorization + bill attestations the prior two steps
+       wrote.
+    6. write_umbrella_attestation — memory_write scope=private
+       records the cross-role correlation (categorization +
+       recurrence + burn-rate entry_ids + attestor:D6-umbrella).
+
+  NEVER executes transactions. NEVER charges anything. NEVER
+  fires reminders directly. Anti-recommendation arbitration
+  (risk_advisor) + investment research (investment_researcher)
+  are operator-explicit dispatches — the umbrella is the
+  scheduled observation pass; the advisor + researcher
+  dispatches are operator-curiosity-driven.
+
+requires:
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - operator_profile_read.v1
+  - delegate.v1
+
+inputs:
+  type: object
+  required: [window_slug, batch_slug, transactions, rules, ledger_slug, bills, today_iso]
+  properties:
+    window_slug:
+      type: string
+      description: >
+        Time-bucket slug the burn-rate report binds to (e.g.
+        "fiscal-month-2026-05").
+    batch_slug:
+      type: string
+      description: >
+        Identifier for the transaction categorization batch.
+    transactions:
+      type: array
+      description: >
+        Operator-supplied transactions for categorization.
+    rules:
+      type: array
+      description: >
+        Operator-supplied category rules.
+    ledger_slug:
+      type: string
+      description: >
+        Identifier for the bill recurrence check.
+    bills:
+      type: array
+      description: >
+        Operator-supplied historical bill ledger.
+    today_iso:
+      type: string
+      description: >
+        Operator-supplied "today" anchor date (YYYY-MM-DD,
+        Pacific time).
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: categorize_transactions
+    tool: delegate.v1
+    args:
+      target_role: transaction_tracker
+      skill: transaction_monitoring.v1
+      inputs:
+        batch_slug: ${inputs.batch_slug}
+        transactions: ${inputs.transactions}
+        rules: ${inputs.rules}
+        operator_reason: "umbrella pass — ${inputs.operator_reason}"
+
+  - id: check_bill_recurrence
+    tool: delegate.v1
+    args:
+      target_role: bill_steward
+      skill: bill_management.v1
+      inputs:
+        ledger_slug: ${inputs.ledger_slug}
+        bills: ${inputs.bills}
+        today_iso: ${inputs.today_iso}
+        operator_reason: "umbrella pass — ${inputs.operator_reason}"
+
+  - id: analyze_burn_rate
+    tool: delegate.v1
+    args:
+      target_role: budget_analyst
+      skill: budget_analysis.v1
+      inputs:
+        window_slug: ${inputs.window_slug}
+        operator_reason: "umbrella pass — ${inputs.operator_reason}"
+
+  - id: write_umbrella_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        D6 umbrella pass complete for window ${inputs.window_slug}
+        Categorization entry: ${categorize_transactions.out.attestation_entry_id}
+        Recurrence entry:     ${check_bill_recurrence.out.attestation_entry_id}
+        Burn-rate entry:      ${analyze_burn_rate.out.report_entry_id}
+        Operator reason: ${inputs.operator_reason}
+        Chain status: ${verify_chain_integrity.out.status}
+
+        NOTE: this umbrella is the scheduled observation pass.
+        Anti-recommendation arbitration (risk_analysis) +
+        investment research (investment_research) are operator-
+        curiosity dispatches against their own skills — D6's
+        manifest hard rule means nothing in this pass executes
+        a transaction.
+      layer: episodic
+      scope: private
+      tags:
+        - "d6_umbrella_pass"
+        - "umbrella_pass:${inputs.window_slug}"
+        - "attestor:D6-umbrella"
+
+output:
+  window_slug: ${inputs.window_slug}
+  categorization_entry_id: ${categorize_transactions.out.attestation_entry_id}
+  recurrence_entry_id: ${check_bill_recurrence.out.attestation_entry_id}
+  burn_rate_entry_id: ${analyze_burn_rate.out.report_entry_id}
+  chain_status: ${verify_chain_integrity.out.status}
+  umbrella_entry_id: ${write_umbrella_attestation.out.entry_id}

@@ -377,6 +377,55 @@ default_skill_per_capability:
     skill_name: smart_home
     skill_version: "1"
 
+  # D6 Personal Finance Guardian — ADR-0092 Phase D (2026-05-24).
+  # All entry capabilities + handoff alias entries get live skills.
+  - domain: d6_finance
+    capability: budget_analysis
+    skill_name: budget_analysis
+    skill_version: "1"
+  - domain: d6_finance
+    capability: risk_analysis
+    skill_name: risk_analysis
+    skill_version: "1"
+  - domain: d6_finance
+    capability: transaction_monitoring
+    skill_name: transaction_monitoring
+    skill_version: "1"
+  - domain: d6_finance
+    capability: bill_management
+    skill_name: bill_management
+    skill_version: "1"
+  - domain: d6_finance
+    capability: investment_research
+    skill_name: investment_research
+    skill_version: "1"
+  # ADR-0092 Decision 5 — capability aliases for the manifest's
+  # extra-capability entries. burn_rate_forecast + tax_season_summary
+  # alias to budget_analysis (both are window-level burn-rate-style
+  # synthesis surfaces; same skill drives them with different
+  # window_slug conventions). receipt_ocr aliases to
+  # transaction_monitoring — receipt OCR is a connector concern
+  # (forest-finance plugin's Apple Vision wrapper); D6 reads the
+  # ingested transactions the same way it reads CSV-imported ones.
+  # finance_brain routes to the umbrella that composes all five
+  # primary skills in one dispatch.
+  - domain: d6_finance
+    capability: burn_rate_forecast
+    skill_name: budget_analysis
+    skill_version: "1"
+  - domain: d6_finance
+    capability: tax_season_summary
+    skill_name: budget_analysis
+    skill_version: "1"
+  - domain: d6_finance
+    capability: receipt_ocr
+    skill_name: transaction_monitoring
+    skill_version: "1"
+  - domain: d6_finance
+    capability: finance_brain
+    skill_name: finance_brain
+    skill_version: "1"
+
 # Cascade rules — engineer-defined, code-reviewed via PR.
 #
 # Each rule: when a route to (source_domain, source_capability)
@@ -688,6 +737,59 @@ cascade_rules:
       picks queue records up manually + the D2 reminder is the
       only fire-time prompt.
 
+  # ADR-0092 Phase D — D6 Personal Finance Guardian cascades.
+  #
+  # ACTIVATING the cascade declared INERT in ADR-0091 Phase D's
+  # downstream-cascade notes: D5's energy_optimization now flows
+  # into D6's transaction_monitoring so a power-bill spike enters
+  # the operator's burn-rate window via the transaction
+  # categorization lane. Plus two NEW D6→ rails: bill-due
+  # attestations seed D2's schedule_reminder for fire-time
+  # delivery, and tax-season summaries seed D8's compliance
+  # scanner so self-employed audit-readiness is continuous,
+  # not annual.
+  - source_domain: d5_smart_home
+    source_capability: energy_optimization
+    target_domain: d6_finance
+    target_capability: transaction_monitoring
+    reason: |
+      Every D5 energy anomaly attestation cascades into a D6
+      transaction_monitoring trigger. TransactionTracker-D6
+      reads recent energy_anomaly attestations + surfaces them
+      as transaction-monitoring signals (a power-bill spike on
+      the energy ledger is a transaction-monitoring datum on
+      the finance ledger). Was declared INERT in ADR-0091
+      Phase D's downstream-cascade notes; activating now that
+      D6 ships. Completes the "energy visibility feeds burn-
+      rate framing" arc the D6 manifest's value-prop named
+      (power-bill anomalies inform the budget_analyst's
+      window).
+
+  - source_domain: d6_finance
+    source_capability: bill_management
+    target_domain: d2_daily_life_os
+    target_capability: reminder
+    reason: |
+      Every D6 bill-recurrence attestation cascades into a D2
+      reminder trigger. TimeSteward-D2 reads recent
+      bill_recurrence attestations + schedules a reminder at
+      the projected next_due_iso so the operator gets a
+      heads-up before the bill is due. Mirrors the d5→d2 rail's
+      shape — D6 detects + projects, D2 fires.
+
+  - source_domain: d6_finance
+    source_capability: tax_season_summary
+    target_domain: d8_compliance
+    target_capability: compliance_scan
+    reason: |
+      Every D6 tax-season summary cascades into a D8 compliance
+      scan trigger. Compliance scanner reads recent
+      tax_season_summary attestations + folds them into the
+      ongoing audit packet so self-employed operators have
+      continuous audit-readiness rather than an annual sweep.
+      Mirrors the d4→d8 + d3→d8 rails' "continuous compliance
+      discipline" framing.
+
 # ADR-0086 Phase D — INERT d1→downstream cascades.
 #
 # The D1 manifest at config/domains/d1_knowledge_forge.yaml
@@ -754,7 +856,9 @@ cascade_rules:
 #   d1_knowledge_forge  # routines indexed for "when did I last…" queries
 #   d6_finance          # power-bill anomaly hand-off
 #
-# d1 + d6 cascades stay inert:
+# As of ADR-0092 Phase D the d5→d6 rail is LIVE (routed to
+# transaction_monitoring per ADR-0092 Decision 4); the d5→d1
+# rail stays inert:
 #   - d5 → d1 (routines_index): d1 has no `routines_index`
 #     capability; "when did I last X" queries can already be
 #     answered against the routine_queued attestations in
@@ -762,19 +866,42 @@ cascade_rules:
 #     to add. If a future operator wants explicit routine
 #     indexing in the catalog, librarian-D1 can subscribe via a
 #     separate cascade rule.
-#   - d5 → d6 (power_bill_anomaly): D6 doesn't ship yet (final
-#     domain in the rollout order). The energy_warden's
-#     spike/drift attestations are ready for D6 to consume when
-#     it lands.
+#
+# Remaining inert cascade:
+#   d5.routine_management     → d1.routines_index       (deferred; capability TBD)
+
+# ADR-0092 Phase D — INERT cascades involving D6.
+#
+# The D6 manifest at config/domains/d6_finance.yaml names four
+# handoff_targets:
+#   d2_daily_life_os    # bill due-date reminders (handled via d6→d2 active cascade above)
+#   d8_compliance       # tax season summaries     (handled via d6→d8 active cascade above)
+#   d1_knowledge_forge  # "you asked about X 3x" curation
+#   d3_local_soc        # power-bill anomalies (cross-domain)
+#
+# d2.reminder → d6.bill_reminder stays INERT — direction is
+# D6→D2 (recurrence detection seeds reminder), not D2→D6. The
+# d2_daily_life_os manifest's old INERT note (deferred from
+# ADR-0087 Phase D) is superseded by ADR-0092 Decision 4: the
+# correct rail is d6.bill_management → d2.reminder, which IS
+# live above.
+#
+# d6 → d1 ("you asked about X 3x" curation) stays inert: d1's
+# librarian handles operator-curiosity curation via memory_recall
+# over conversation attestations, not via a D6-emitted "you
+# asked" surface. The signal exists in memory; the cascade is
+# not required for D1 to surface it.
+#
+# d6 → d3 (power-bill anomaly cross-domain) is already covered
+# in the reverse direction via the d5→d6 cascade above (energy
+# anomaly cascades INTO transaction monitoring); a D6→D3
+# back-direction would create a recursive loop the cascade
+# discipline forbids. Declare inert.
 #
 # Pending cascades, declared inert:
-#   d5.energy_optimization    → d6.power_bill_anomaly   (deferred until D6 ships)
-#   d5.routine_management     → d1.routines_index       (deferred; capability TBD)
-#
-# Each pending cascade will land as a real cascade_rules entry
-# when its target capability exists. Until then they are
-# documentation, not configuration — same INERT pattern as
-# ADR-0086's downstream-cascade notes.
+#   d2.reminder              → d6.bill_reminder         (superseded by d6→d2 direction per ADR-0092 Decision 4)
+#   d6.transaction_monitoring → d1.knowledge_curation   (d1 has no "you asked about X" surface; query-level memory recall is the answer)
+#   d6.transaction_monitoring → d3.anomaly_correlation  (recursive with d5→d6; D3 already sees the energy anomaly upstream)
 
 # ADR-0088 Phase D — INERT cascades involving D7.
 #

@@ -4,7 +4,7 @@
 # makes investment decisions. Analysis + drafts only.
 domain_id: d6_finance
 name: Personal Finance Guardian
-status: planned
+status: live
 
 description: |
   Budgeting + expense categorization + bill stewardship + investment
