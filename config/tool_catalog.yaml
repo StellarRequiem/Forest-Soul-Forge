@@ -4364,6 +4364,48 @@ archetypes:
       # (critic's lane). Pure orchestration kit — the moderator
       # ORDERS turns; it never takes one (forbid_substantive_contribution).
 
+  # ---- ADR-0091 Phase A — D5 Smart Home Brain steward + sentinel ----
+  # home_steward + home_sentinel kits. Both read_only. The
+  # steward is researcher-genre but its kit is read_only by
+  # construction (no web_fetch — home_state comes from
+  # operator-supplied snapshots OR the forest-home-assistant
+  # connector's memory_writes, not from outbound network). The
+  # sentinel is guardian-genre; same read_only by construction.
+  # No new builtin tools land in Phase A — both roles reuse
+  # existing kit (state composition + alert composition are LLM-
+  # driven over recall + write). Phase B + C introduce the four
+  # builtin tools D5 needs (energy_anomaly_scan, comfort_recommend,
+  # routine_compose, home_state_snapshot).
+  home_steward:
+    standard_tools:
+      - llm_think.v1                  # state composition + cross-domain narrative reasoning is the load-bearing tool
+      - memory_recall.v1              # walk home_state snapshots + prior reports + cross-domain D2/D3 attestations
+      - memory_write.v1               # write state-of-the-home report attestations to private memory
+      - delegate.v1                   # hand off to energy_warden / comfort_optimizer / home_sentinel / routine_composer
+      - audit_chain_verify.v1         # chain integrity before publishing report
+      - text_summarize.v1             # condense long snapshot sets into per-room synopses
+      - operator_profile_read.v1      # ADR-0068 — home address + routines frame the report
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      # No web_fetch (D5 has no outbound network surface — home_state
+      # arrives via memory_writes from connectors). No shell_exec. No
+      # code_edit. No device-actuation tools (routine_composer's lane).
+      # No alert tools (home_sentinel's lane). Pure state-report kit.
+
+  home_sentinel:
+    standard_tools:
+      - llm_think.v1                  # anomaly pattern matching + alert framing is the load-bearing tool
+      - memory_recall.v1              # walk home_state snapshots + prior alerts + steward reports
+      - memory_write.v1               # write alert attestations tagged for operator + d3_local_soc cascade
+      - delegate.v1                   # hand off to operator review / d3 incident_correlator
+      - audit_chain_verify.v1         # chain integrity before publishing alert
+      - text_summarize.v1             # condense long snapshot diffs into per-alert spans
+      - operator_profile_read.v1      # ADR-0068 — home address + routines frame anomaly thresholds
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index
+      - verify_claim.v1               # ADR-0063 — Reality Anchor cross-check on alert claims (e.g. "front door opened at 03:14" is a verifiable claim against the snapshot)
+      # No web_fetch. No shell_exec. No code_edit. No device-actuation
+      # tools (routine_composer's lane). No optimization tools
+      # (energy_warden + comfort_optimizer's lanes). Pure alert kit.
+
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard
   # guardian read-only support set. The scanner reads framework

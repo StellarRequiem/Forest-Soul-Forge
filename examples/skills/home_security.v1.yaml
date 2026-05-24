@@ -1,0 +1,188 @@
+schema_version: 1
+name: home_security
+version: '1'
+description: |
+  HomeSentinel-D5's primary skill. Reads recent home_state
+  attestations + composes alert memory_writes for anomalous
+  events (unfamiliar front-door presence, vacation-mode-state
+  inconsistency, sensor drift). Read-only — the alert
+  attestation is the deliverable; gated for operator review +
+  d3_local_soc cascade pickup.
+
+  Composition + attestation only — the sentinel NEVER acts on
+  devices (routine_composer's lane) + NEVER mutates home state
+  + NEVER recommends optimization (energy_warden +
+  comfort_optimizer's lanes). Alert attestations land in
+  private memory tagged for downstream pickup
+  (home_security_alert:${window_slug}).
+
+  Seven-step pipeline:
+    1. operator_context — operator_profile_read fetches home
+       address + known household names + vacation-mode flag.
+       Lens for anomaly thresholds (a front-door event from a
+       known operator is normal; from an unfamiliar name
+       string is suspicious).
+    2. recall_home_state_snapshots — memory_recall scope=lineage
+       for home_state snapshot attestations within
+       window_minutes (default 60). Without snapshots the
+       sentinel composes a "no recent home_state — surveillance
+       gap" alert (flagged for operator to refresh ingestion).
+    3. recall_prior_alerts — memory_recall scope=private for
+       prior alert attestations on this window_slug + prior
+       suppression markers. The sentinel respects operator-
+       suppressed patterns rather than re-alerting.
+    4. recall_steward_report — memory_recall scope=lineage for
+       the matching state-of-the-home report (cross-validates
+       the sentinel's anomaly call against the steward's
+       narrative — the two attestations stand alongside per
+       ADR-0091 Decision 3).
+    5. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. An alert attested on a
+       broken chain inherits the brokenness + the d3 cascade
+       will refuse it.
+    6. compose_alerts — llm_think composes a structured alert
+       set: per-anomaly, classify (unfamiliar_presence /
+       vacation_inconsistency / sensor_drift / unknown), record
+       severity (low / medium / high), bind to the source
+       snapshot + matched pattern. NEVER actuates devices.
+    7. write_alert_attestation — memory_write scope=private
+       records the alert set tagged for operator + d3 cascade
+       pickup (home_security_alert:${window_slug} +
+       attestor:HomeSentinel-D5).
+
+  NEVER actuates devices. forbid_device_action policy enforces
+  this at governance layer regardless of posture. The d5→d3
+  cascade (Phase D) routes alerts to d3_local_soc's
+  incident_response capability via the internal handoff, not by
+  external transmission.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [window_slug]
+  properties:
+    window_slug:
+      type: string
+      description: >
+        Time-bucket slug this alert set binds to. Matches the
+        steward's report tag so the two attestations join.
+    window_minutes:
+      type: integer
+      default: 60
+      description: >
+        How far back to walk home_state snapshots, in minutes.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the alert attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_home_state_snapshots
+    tool: memory_recall.v1
+    args:
+      query: "home_state_snapshot"
+      mode: lineage
+      limit: 50
+
+  - id: recall_prior_alerts
+    tool: memory_recall.v1
+    args:
+      query: "home_security_alert:${inputs.window_slug}"
+      mode: private
+      limit: 10
+
+  - id: recall_steward_report
+    tool: memory_recall.v1
+    args:
+      query: "home_state_report:${inputs.window_slug}"
+      mode: lineage
+      limit: 3
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_alerts
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are HomeSentinel-D5, the D5 Smart Home Brain
+        household-security watcher. Compose a structured alert
+        set for window "${inputs.window_slug}".
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Window: ${inputs.window_slug} (last ${inputs.window_minutes} minutes)
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Recent home_state snapshots (most recent first):
+        ${recall_home_state_snapshots.out.entries}
+
+        Prior alerts on this window (most recent first):
+        ${recall_prior_alerts.out.entries}
+
+        Matching steward report (cross-validates):
+        ${recall_steward_report.out.entries}
+
+        Produce a structured alert set:
+        1. Per-anomaly records — for each detected anomaly,
+           include: alert_kind (one of:
+           unfamiliar_presence / vacation_inconsistency /
+           sensor_drift / surveillance_gap / unknown),
+           severity (low / medium / high), source_snapshot_id,
+           matched_pattern (one-sentence description of what
+           triggered the alert), recommended_handoff (operator
+           review vs. d3 incident_correlator).
+        2. Suppression check — if a prior alert with the same
+           kind + matched_pattern already exists in
+           recall_prior_alerts AND was operator-suppressed, OMIT
+           it (record the suppression in the attestation
+           metadata).
+        3. Summary — one paragraph the operator can scan to
+           decide whether to escalate.
+
+        NEVER actuate a device. NEVER recommend an energy or
+        comfort action — those are downstream lanes. The
+        deliverable is THIS attestation; operator decides
+        whether to dispatch routine_composer to respond.
+
+        Halt warning if chain status != "ok" — refuse to compose
+        the alert set and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_alert_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_alerts.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d5_home_security_alert"
+        - "home_security_alert:${inputs.window_slug}"
+        - "attestor:HomeSentinel-D5"
+
+output:
+  window_slug: ${inputs.window_slug}
+  alert_text: ${compose_alerts.out.response}
+  snapshot_count: ${recall_home_state_snapshots.out.count}
+  prior_alert_count: ${recall_prior_alerts.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  alert_entry_id: ${write_alert_attestation.out.entry_id}

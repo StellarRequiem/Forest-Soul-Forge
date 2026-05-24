@@ -1,0 +1,190 @@
+schema_version: 1
+name: home_orchestration
+version: '1'
+description: |
+  HomeSteward-D5's primary skill. Reads recent home_state
+  attestations (operator-supplied snapshots OR the
+  forest-home-assistant connector once it ships) + composes a
+  structured state-of-the-home report attestation the
+  energy_warden + comfort_optimizer + home_sentinel +
+  routine_composer downstream roles consume.
+
+  Composition + attestation only — the steward NEVER acts on
+  devices (routine_composer's lane) + NEVER raises security
+  alerts (home_sentinel's lane) + NEVER optimizes energy
+  (energy_warden's lane). Report attestations land in private
+  memory tagged for downstream pickup
+  (home_state_report:${window_slug}).
+
+  Seven-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       home address + routines + areas_of_focus. Lens for the
+       report (a routine flagged "morning" gets surfaced more
+       prominently between 06:00–10:00 Pacific).
+    2. recall_home_state_snapshots — memory_recall scope=lineage
+       for home_state snapshot attestations within
+       window_minutes (default 60). When no snapshots exist, the
+       steward composes a "no recent home_state" report flagging
+       the gap so the operator knows to refresh the connector
+       ingestion or supply a snapshot.
+    3. recall_prior_reports — memory_recall scope=private for
+       prior state-of-the-home reports tagged this window_slug.
+       The steward extends rather than duplicates; recent
+       reports are surfaced for diff-style narration.
+    4. recall_cross_domain_signals — memory_recall scope=lineage
+       for D2 morning_briefing attestations + D3 incident
+       attestations. Cross-domain awareness is the manifest's
+       value-prop (calendar [Travel] event → vacation-mode
+       framing; SOC sees you're not home → tightens posture).
+    5. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. A report attested on a
+       broken chain inherits the brokenness.
+    6. compose_report — llm_think composes a structured report
+       with per-room + per-device sections, a presence flag, a
+       cross-domain narrative (which D2/D3 signals matter right
+       now), and a downstream-action hint (operator pickup vs.
+       routine_composer dispatch vs. home_sentinel review).
+       NEVER actuates devices.
+    7. write_report_attestation — memory_write scope=private
+       records the report tagged for downstream pickup
+       (home_state_report:${window_slug} + attestor:HomeSteward-D5).
+
+  NEVER actuates devices. forbid_device_action policy enforces
+  this at governance layer regardless of posture.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [window_slug]
+  properties:
+    window_slug:
+      type: string
+      description: >
+        Time-bucket slug this report binds to. Convention:
+        lowercase kebab-case (e.g. "evening-2026-05-23",
+        "morning-2026-05-24"). Used as the
+        home_state_report:${slug} memory tag so downstream roles
+        pick it up.
+    window_minutes:
+      type: integer
+      default: 60
+      description: >
+        How far back to walk home_state snapshots, in minutes.
+        Default 60 (one hour). Snapshots older than this are
+        surfaced as "stale" rather than current state.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the report attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_home_state_snapshots
+    tool: memory_recall.v1
+    args:
+      query: "home_state_snapshot"
+      mode: lineage
+      limit: 50
+
+  - id: recall_prior_reports
+    tool: memory_recall.v1
+    args:
+      query: "home_state_report:${inputs.window_slug}"
+      mode: private
+      limit: 5
+
+  - id: recall_cross_domain_signals
+    tool: memory_recall.v1
+    args:
+      query: "morning_briefing OR d3_incident OR vacation_mode"
+      mode: lineage
+      limit: 15
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_report
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are HomeSteward-D5, the D5 Smart Home Brain home-
+        state orchestrator. Compose a structured state-of-the-
+        home report for window "${inputs.window_slug}".
+
+        Operator profile:
+          areas_of_focus: ${operator_context.out.areas_of_focus}
+          timezone:       ${operator_context.out.timezone}
+
+        Window: ${inputs.window_slug} (last ${inputs.window_minutes} minutes)
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Recent home_state snapshots (most recent first):
+        ${recall_home_state_snapshots.out.entries}
+
+        Prior reports on this window (most recent first):
+        ${recall_prior_reports.out.entries}
+
+        Cross-domain signals (D2 briefings + D3 incidents):
+        ${recall_cross_domain_signals.out.entries}
+
+        Produce a structured report:
+        1. Per-room section — for each room represented in the
+           snapshots: device list, last-update timestamp
+           (Pacific), notable state changes since the prior
+           report.
+        2. Presence flag — best-effort summary of who is home
+           (operator-known names from operator profile +
+           detected presence sensors). Flag any "presence
+           uncertain" cases.
+        3. Cross-domain narrative — which D2 calendar / D3
+           SOC signals matter for this window. E.g. "operator
+           has Travel block 2026-05-24..2026-05-28; D3 posture
+           shifted to vacation-tightened."
+        4. Downstream-action hint — operator pickup vs.
+           routine_composer dispatch vs. home_sentinel review
+           vs. energy_warden lookup vs. comfort_optimizer
+           recommendation. Be specific about which downstream
+           role to dispatch to.
+
+        NEVER actuate a device. NEVER recommend an energy or
+        comfort action — those are downstream lanes; you
+        narrate that downstream is the next step.
+
+        Halt warning if chain status != "ok" — refuse to compose
+        the report and explain why.
+
+        All timestamps are Pacific time, never UTC.
+
+  - id: write_report_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_report.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d5_home_state_report"
+        - "home_state_report:${inputs.window_slug}"
+        - "attestor:HomeSteward-D5"
+
+output:
+  window_slug: ${inputs.window_slug}
+  report_text: ${compose_report.out.response}
+  snapshot_count: ${recall_home_state_snapshots.out.count}
+  cross_domain_count: ${recall_cross_domain_signals.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  report_entry_id: ${write_report_attestation.out.entry_id}

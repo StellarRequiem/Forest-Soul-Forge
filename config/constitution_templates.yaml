@@ -3080,6 +3080,191 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  home_steward:
+    # ADR-0091 Phase A — D5 Smart Home Brain home-state
+    # orchestrator role. Researcher genre, read_only ceiling.
+    # Reads home_state attestations (operator-supplied snapshots
+    # OR forest-home-assistant connector once it ships) +
+    # composes a state-of-the-home report attestation the
+    # energy_warden + comfort_optimizer + home_sentinel +
+    # routine_composer downstream roles consume. NEVER acts on
+    # devices (routine_composer's lane), NEVER raises security
+    # alerts (home_sentinel's lane), NEVER optimizes energy
+    # (energy_warden's lane). GREEN posture per ADR-0091
+    # Decision 1 — orchestration is non-acting; the report
+    # attestation is the deliverable.
+    policies:
+      - id: forbid_device_action
+        rule: forbid
+        triggers: [actuate_device, trigger_routine, push_scene, set_thermostat, lock_unlock]
+        rationale: |
+          Device actuation is routine_composer's exclusive lane
+          (D5 Phase C). The steward composes the STATE REPORT but
+          NEVER reaches into a device. Letting the steward
+          actuate would conflate orchestration with action +
+          bypass the routine_composer's YELLOW posture +
+          operator-approval discipline, which is the only path
+          devices can be touched in D5.
+      - id: forbid_security_alert
+        rule: forbid
+        triggers: [emit_security_alert, raise_anomaly, escalate_to_soc]
+        rationale: |
+          Security alerting is home_sentinel's exclusive lane
+          (D5 Phase A). The steward surfaces state; flagging an
+          anomaly would conflate orchestration with sentinel
+          discipline + bypass the alert provenance attestation
+          (triggering_snapshot + matched_pattern) the sentinel
+          binds to every alert. Both attestations stand alongside
+          per ADR-0091 Decision 3.
+      - id: forbid_energy_optimization
+        rule: forbid
+        triggers: [recommend_energy_action, predict_consumption, label_anomaly]
+        rationale: |
+          Energy optimization is energy_warden's exclusive lane
+          (D5 Phase B). The steward composes a state snapshot;
+          labeling energy patterns or recommending tuning would
+          conflate orchestration with the warden's
+          energy_anomaly_scan-driven discipline.
+      - id: require_report_attestation
+        rule: require
+        triggers: [emit_home_state_report, finalize_orchestration]
+        rationale: |
+          Every state-of-the-home report emits a memory_write
+          attestation with (window_start, window_end, source
+          snapshot ids, room_count, device_count, presence_flag,
+          cross_domain_signals, attestor, ts). Without the
+          attestation, downstream D5 roles can't trace which
+          snapshot a recommendation rests on + the operator can't
+          replay which state shaped a given report.
+      - id: require_chain_integrity_before_report
+        rule: require
+        triggers: [emit_home_state_report]
+        rationale: |
+          The report rests on memory + chain content (prior
+          snapshots, cross-domain signals from D2/D3). A report
+          attested on a broken chain inherits the brokenness +
+          its provenance can't be re-verified.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_report_external, post_home_state_to_external_service]
+        rationale: |
+          State reports are private/lineage scope. Household
+          presence + device state are sensitive. Operator-driven
+          sharing is a separate explicit action; the steward
+          never crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - actuate_device
+      - trigger_routine
+      - emit_security_alert
+      - recommend_energy_action
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the steward as your household status pane — the report is real; device actions go through routine_composer (YELLOW) with explicit approval."
+      - "Audit report attestations weekly — a steward that consistently composes reports with stale snapshots is a signal the home_state ingestion (forest-home-assistant or operator-supplied) needs refreshing."
+      - "Cross-domain signals (D2 calendar, D3 SOC posture) are advisory — the steward narrates them; nothing in D5 mutates downstream domains."
+      - "Treat a chain_broken halt as an emergency — reports attested on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  home_sentinel:
+    # ADR-0091 Phase A — D5 Smart Home Brain household-security
+    # watcher role. Guardian genre, read_only ceiling. Reads
+    # home_state attestations + composes alert memory_writes for
+    # anomalous events (unfamiliar front-door presence, vacation-
+    # mode-state inconsistency, sensor drift). Read-only — the
+    # alert attestation is the deliverable; gated for operator
+    # review + d3_local_soc cascade pickup. NEVER acts on devices
+    # (routine_composer's lane), NEVER optimizes (energy_warden +
+    # comfort_optimizer's lanes), NEVER mutates home state.
+    # GREEN posture per ADR-0091 Decision 1 — alerts are non-
+    # acting attestations.
+    policies:
+      - id: forbid_device_action
+        rule: forbid
+        triggers: [actuate_device, trigger_routine, push_scene, set_thermostat, lock_unlock]
+        rationale: |
+          Device actuation is routine_composer's exclusive lane
+          (D5 Phase C). The sentinel surfaces alerts; touching a
+          device would conflate alerting with response. Even a
+          "lock the door because front-door anomaly detected"
+          reflex MUST flow through routine_composer's YELLOW
+          posture so the operator approves the actuation
+          explicitly.
+      - id: forbid_state_mutation
+        rule: forbid
+        triggers: [rewrite_home_state, mutate_snapshot, replace_state_attestation]
+        rationale: |
+          The home_state attestation is read-only from the
+          sentinel's perspective. The sentinel composes alerts;
+          it never rewrites the state. Mutating the snapshot
+          would corrupt the provenance chain the alert rests on +
+          erase the snapshot-vs-alert separation downstream
+          roles depend on.
+      - id: forbid_optimization
+        rule: forbid
+        triggers: [recommend_energy_action, recommend_comfort_action, label_efficiency]
+        rationale: |
+          Energy + comfort optimization are energy_warden +
+          comfort_optimizer's exclusive lanes (D5 Phase B). The
+          sentinel flags security anomalies; cross-lane
+          recommendations would conflate alerting with tuning +
+          bypass the per-lane attestation discipline.
+      - id: require_alert_attestation
+        rule: require
+        triggers: [emit_security_alert, finalize_anomaly]
+        rationale: |
+          Every alert emits a memory_write attestation with
+          (window_start, window_end, source_snapshot_id,
+          alert_kind, alert_summary, severity, matched_pattern,
+          attestor, ts). Without the attestation, the operator +
+          d3_local_soc cascade can't trace which snapshot a
+          given alert rests on or replay the matched pattern.
+      - id: require_chain_integrity_before_alert
+        rule: require
+        triggers: [emit_security_alert]
+        rationale: |
+          The alert rests on memory + chain content (the steward's
+          state reports + prior alerts). An alert attested on a
+          broken chain inherits the brokenness + its provenance
+          can't be re-verified by the d3_local_soc handoff.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_alert_external, post_alert_to_external_service]
+        rationale: |
+          Alerts are private/lineage scope. Operator-driven
+          sharing (escalating to a household member, posting to
+          an external monitoring service) is a separate explicit
+          action; the sentinel never crosses the external
+          boundary itself. The d5→d3 cascade routes via the
+          internal handoff, not by external transmission.
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - actuate_device
+      - rewrite_home_state
+      - recommend_energy_action
+      - recommend_comfort_action
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the sentinel as your alert lane — alerts are real attestations; device responses go through routine_composer (YELLOW) with explicit approval."
+      - "Audit alert attestations weekly — a sentinel that produces high-volume low-severity alerts is a signal the matched_pattern threshold needs tuning."
+      - "The d5→d3 cascade (security alerts → SOC incident response) routes via internal handoff; the sentinel never posts externally itself."
+      - "Treat a chain_broken halt as an emergency — alerts attested on a broken chain inherit the brokenness + d3's incident_correlator will refuse them."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

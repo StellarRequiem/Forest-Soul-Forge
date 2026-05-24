@@ -1302,6 +1302,45 @@ roles:
       emotional: 0.6    # moderation tone is read-then-respond
       embodiment: 0.4
 
+  # ---- ADR-0091 Phase A — D5 Smart Home Brain (steward + sentinel) ----
+  # home_steward: researcher-genre home-state orchestrator. Reads
+  # home_state attestations (operator-supplied snapshots OR the
+  # forest-home-assistant connector once it ships) + composes a
+  # "state of the home" report attestation the energy_warden +
+  # comfort_optimizer + home_sentinel + routine_composer pick up.
+  # NEVER acts on devices (routine_composer's lane); NEVER alerts on
+  # security anomalies (home_sentinel's lane); NEVER optimizes
+  # energy (energy_warden's lane). GREEN posture per ADR-0091
+  # Decision 1 — orchestration is non-acting; the attestation is
+  # the deliverable.
+  home_steward:
+    description: "Home-state orchestrator researcher. Reads home_state attestations (operator-supplied snapshots or forest-home-assistant connector) + composes a state-of-the-home report attestation downstream D5 roles consume. NEVER acts on devices (routine_composer's lane) + NEVER raises security alerts (home_sentinel's lane) + NEVER optimizes energy (energy_warden's lane). GREEN posture. Genre: researcher. ADR-0091 Phase A."
+    domain_weights:
+      security: 1.0     # home_state visibility carries household-privacy floor
+      audit: 2.5        # every report attests to source snapshots + cross-domain context
+      cognitive: 2.3    # state composition + cross-domain narrative reasoning
+      communication: 1.9 # reports are operator + downstream-role consumed
+      emotional: 0.7    # home presence framing has affective tone
+      embodiment: 0.5
+
+  # home_sentinel: guardian-genre home-security watcher. Reads
+  # home_state attestations + composes alert memory_writes for
+  # anomalous events (unfamiliar front-door presence, vacation-
+  # mode-state inconsistency, sensor drift). Read-only —
+  # alerting is the action surface; gated separately. NEVER acts
+  # on devices (routine_composer's lane) + NEVER optimizes
+  # (energy_warden + comfort_optimizer's lanes). GREEN posture per
+  # ADR-0091 Decision 1 — alerts are non-acting attestations.
+  home_sentinel:
+    description: "Home-security watcher guardian. Reads home_state attestations + composes alert attestations for anomalous events (unfamiliar presence, vacation-mode inconsistency, sensor drift). NEVER acts on devices (routine_composer's lane) + NEVER optimizes (energy_warden + comfort_optimizer's lanes) + NEVER mutates home state. GREEN posture. Genre: guardian. ADR-0091 Phase A."
+    domain_weights:
+      security: 2.6     # household-security floor + alert provenance discipline are load-bearing
+      audit: 2.7        # every alert attests to triggering snapshot + matched pattern
+      cognitive: 2.0    # anomaly detection + alert-framing reasoning
+      communication: 1.5 # alerts are operator + d3_local_soc consumed
+      emotional: 0.7    # alert tone is read-then-respond
+      embodiment: 0.4
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so
