@@ -1398,6 +1398,43 @@ roles:
       emotional: 0.7    # routine framing has affective tone (morning vs sleep)
       embodiment: 0.6   # routines touch physical-presence devices
 
+  # ---- ADR-0092 Phase A — D6 Personal Finance Guardian (budget + risk) ----
+  # budget_analyst: researcher-genre burn-rate analysis role. Reads
+  # transaction lineage + operator-supplied baselines + composes
+  # burn-rate-vs-baseline reports. NEVER charges anything; NEVER
+  # executes transactions (manifest hard rule); NEVER advises on
+  # investments (investment_researcher's lane); NEVER classifies
+  # individual transactions (transaction_tracker's lane). GREEN
+  # posture per ADR-0092 Decision 1 — burn-rate composition is
+  # non-acting.
+  budget_analyst:
+    description: "Burn-rate analysis researcher. Reads transaction lineage + operator-supplied baselines + composes burn-rate-vs-baseline reports tagged for risk_advisor + operator pickup. NEVER charges anything (manifest hard rule) + NEVER classifies individual transactions (transaction_tracker's lane) + NEVER advises on investments (investment_researcher's lane). GREEN posture. Genre: researcher. ADR-0092 Phase A."
+    domain_weights:
+      security: 1.2     # transaction visibility carries privacy floor
+      audit: 2.6        # every burn-rate report attests to source transactions + baseline + window
+      cognitive: 2.3    # baseline comparison + cross-window pattern reasoning
+      communication: 1.8 # reports are operator + risk_advisor consumed
+      emotional: 0.5    # finance framing is read-then-respond
+      embodiment: 0.3
+
+  # risk_advisor: guardian-genre anti-recommendation arbiter. Reads
+  # candidate-operator-action attestations + composes "this is
+  # out-of-pattern" alerts. NEVER blocks the operator (same
+  # discipline as reality_anchor — operator decides); NEVER acts
+  # on devices or accounts (manifest hard rule); NEVER advises on
+  # specific instruments (investment_researcher's lane). GREEN
+  # posture per ADR-0092 Decision 2 — anti-recommendation
+  # arbitration is non-acting.
+  risk_advisor:
+    description: "Anti-recommendation arbiter guardian. Reads candidate-operator-action attestations + composes 'this is out-of-pattern' alerts tagged for operator pickup. NEVER blocks the operator (same discipline as reality_anchor — operator decides) + NEVER executes transactions (manifest hard rule) + NEVER advises on specific instruments (investment_researcher's lane). GREEN posture. Genre: guardian. ADR-0092 Phase A."
+    domain_weights:
+      security: 1.6     # candidate-action visibility + anti-recommendation discipline carry operator-financial-privacy floor
+      audit: 2.7        # every alert attests to triggering candidate + matched pattern + 90-day window
+      cognitive: 2.1    # pattern matching + out-of-pattern threshold reasoning
+      communication: 1.6 # alerts are operator-facing prose
+      emotional: 0.6    # anti-recommendation tone is read-then-respond
+      embodiment: 0.3
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so

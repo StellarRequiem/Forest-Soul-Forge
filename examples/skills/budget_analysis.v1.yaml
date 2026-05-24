@@ -1,0 +1,194 @@
+schema_version: 1
+name: budget_analysis
+version: '1'
+description: |
+  BudgetAnalyst-D6's primary skill. Reads recent transaction
+  attestations (operator-supplied imports OR the forest-finance
+  connector once it ships) + composes a structured burn-rate-vs-
+  baseline report attestation the risk_advisor + operator pick
+  up.
+
+  Composition + attestation only — the analyst NEVER charges
+  anything (manifest hard rule); NEVER categorizes individual
+  transactions (transaction_tracker's lane); NEVER advises on
+  investments (investment_researcher's lane). Burn-rate report
+  attestations land in private memory tagged for downstream
+  pickup (burn_rate_report:${window_slug}).
+
+  Seven-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       currency + fiscal_year + areas_of_focus. Lens for the
+       report (a Travel month frames the report differently
+       than a focus-work month).
+    2. recall_transactions — memory_recall scope=lineage for
+       transaction_categorized attestations within
+       window_minutes (default operator's fiscal-month). When
+       no transactions exist, the analyst composes a "no recent
+       transactions" report flagging the gap so the operator
+       knows to refresh the forest-finance ingestion or supply
+       a CSV.
+    3. recall_baseline — memory_recall scope=lineage for the
+       operator-supplied baseline attestation. The analyst
+       extends rather than re-derives; an explicit baseline is
+       the load-bearing input.
+    4. recall_cross_domain_signals — memory_recall scope=lineage
+       for D5 energy_anomaly attestations (power-bill spike =
+       transaction-monitoring signal) + D2 morning_briefing
+       attestations (Travel block = expense window framing).
+       Cross-domain awareness is the manifest's value-prop.
+    5. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. A report attested on a
+       broken chain inherits the brokenness.
+    6. compose_report — llm_think composes a structured report
+       with per-category sections, baseline-vs-actual delta,
+       drift_magnitude, cross-domain narrative (which D5/D2
+       signals matter), and a downstream-action hint (operator
+       pickup vs. risk_advisor review vs. transaction_tracker
+       follow-up). NEVER recommends an instrument or executes
+       a transaction.
+    7. write_report_attestation — memory_write scope=private
+       records the report tagged for downstream pickup
+       (burn_rate_report:${window_slug} + attestor:BudgetAnalyst-D6).
+
+  NEVER executes transactions. forbid_transaction_execution
+  policy enforces this at governance layer regardless of
+  posture.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [window_slug]
+  properties:
+    window_slug:
+      type: string
+      description: >
+        Time-bucket slug this report binds to. Convention:
+        lowercase kebab-case (e.g. "fiscal-month-2026-05",
+        "quarter-2026-q2"). Used as the
+        burn_rate_report:${slug} memory tag so downstream roles
+        pick it up.
+    window_minutes:
+      type: integer
+      default: 43200
+      description: >
+        How far back to walk transaction attestations, in
+        minutes. Default 43200 (30 days). Operator override per
+        call when fiscal calendars don't align with calendar
+        months.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the report attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_transactions
+    tool: memory_recall.v1
+    args:
+      query: "transaction_categorized"
+      mode: lineage
+      limit: 100
+
+  - id: recall_baseline
+    tool: memory_recall.v1
+    args:
+      query: "burn_rate_baseline"
+      mode: lineage
+      limit: 3
+
+  - id: recall_cross_domain_signals
+    tool: memory_recall.v1
+    args:
+      query: "energy_anomaly OR morning_briefing"
+      mode: lineage
+      limit: 15
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compose_report
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are BudgetAnalyst-D6, the D6 Personal Finance
+        Guardian burn-rate analyst. Compose a structured burn-
+        rate report for window "${inputs.window_slug}".
+
+        Operator profile:
+          currency:        ${operator_context.out.currency}
+          areas_of_focus:  ${operator_context.out.areas_of_focus}
+          timezone:        ${operator_context.out.timezone}
+
+        Window: ${inputs.window_slug} (last ${inputs.window_minutes} minutes)
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Recent transactions (most recent first):
+        ${recall_transactions.out.entries}
+
+        Operator-supplied baseline:
+        ${recall_baseline.out.entries}
+
+        Cross-domain signals (D5 energy + D2 briefings):
+        ${recall_cross_domain_signals.out.entries}
+
+        Produce a structured report:
+        1. Per-category section — for each category in the
+           transactions: total + count + baseline + delta +
+           drift_magnitude. Surface categories outside the
+           baseline tolerance prominently.
+        2. Overall burn-rate — total / window_days, currency-
+           formatted to the operator's currency.
+        3. Cross-domain narrative — which D5 power-bill
+           anomalies or D2 travel blocks shaped the window.
+           "Operator had Travel block 2026-05-01..05-07; D5
+           flagged power-bill spike on 05-15."
+        4. Downstream-action hint — operator pickup vs.
+           risk_advisor review (out-of-pattern spike triggers
+           the advisor's anti-recommendation check) vs.
+           transaction_tracker follow-up (uncategorized count >
+           threshold).
+
+        NEVER execute a transaction. NEVER recommend a specific
+        instrument — that's investment_researcher's lane and
+        even there the manifest forbids advice. NEVER block the
+        operator — surface the data; operator decides.
+
+        Halt warning if chain status != "ok" — refuse to compose
+        the report and explain why.
+
+        All timestamps + amounts are operator-currency,
+        Pacific time, never UTC.
+
+  - id: write_report_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_report.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d6_burn_rate_report"
+        - "burn_rate_report:${inputs.window_slug}"
+        - "attestor:BudgetAnalyst-D6"
+
+output:
+  window_slug: ${inputs.window_slug}
+  report_text: ${compose_report.out.response}
+  transaction_count: ${recall_transactions.out.count}
+  cross_domain_count: ${recall_cross_domain_signals.out.count}
+  chain_status: ${verify_chain_integrity.out.status}
+  report_entry_id: ${write_report_attestation.out.entry_id}

@@ -4667,6 +4667,48 @@ archetypes:
       # connector consumes the queue; D5 never touches Home Assistant
       # entities directly.
 
+  # ---- ADR-0092 Phase A — D6 Personal Finance Guardian (budget + risk) ----
+  # budget_analyst + risk_advisor kits. Both read_only by
+  # construction. budget_analyst is researcher-genre but its kit
+  # is read_only (no web_fetch — transactions arrive via operator-
+  # supplied memory_writes OR forest-finance connector once it
+  # ships). risk_advisor is guardian-genre; same read_only by
+  # construction. No new builtin tools land in Phase A — both
+  # roles reuse existing kit (burn-rate composition + anti-
+  # recommendation composition are LLM-driven over recall + write).
+  # Phase B + C introduce the three builtin tools D6 needs
+  # (transaction_categorize, bill_recurrence_check, investment_compare).
+  budget_analyst:
+    standard_tools:
+      - llm_think.v1                  # burn-rate composition + cross-window pattern reasoning is the load-bearing tool
+      - memory_recall.v1              # walk transaction lineage + prior reports + cross-domain D5 power-bill attestations
+      - memory_write.v1               # write burn-rate report attestations to private memory
+      - delegate.v1                   # hand off to risk_advisor / transaction_tracker / operator
+      - audit_chain_verify.v1         # chain integrity before publishing report
+      - text_summarize.v1             # condense long transaction sets into per-category synopses
+      - operator_profile_read.v1      # ADR-0068 — currency + fiscal_year + areas_of_focus frame the report
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index (prior burn-rate windows)
+      # No web_fetch (D6 has no outbound network surface in Phase A —
+      # transactions arrive via memory_writes from operator/connector).
+      # No shell_exec. No code_edit. No transaction-execution tools
+      # (manifest hard rule). Pure burn-rate-report kit.
+
+  risk_advisor:
+    standard_tools:
+      - llm_think.v1                  # out-of-pattern arbitration + matched-pattern composition is the load-bearing tool
+      - memory_recall.v1              # walk candidate-action attestations + prior alerts + operator 90-day window
+      - memory_write.v1               # write anti-recommendation alert attestations to private memory
+      - delegate.v1                   # hand off to operator review
+      - audit_chain_verify.v1         # chain integrity before publishing alert
+      - text_summarize.v1             # condense long pattern sets into per-alert spans
+      - operator_profile_read.v1      # ADR-0068 — currency + areas_of_focus frame pattern thresholds
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index (prior patterns)
+      - verify_claim.v1               # ADR-0063 — Reality Anchor cross-check on candidate-action claims (e.g. "operator typically spends $50/wk on groceries" is verifiable)
+      # No web_fetch. No shell_exec. No code_edit. No transaction-
+      # execution tools (manifest hard rule). No operator-blocking
+      # tools (operator decides — same discipline as reality_anchor).
+      # Pure anti-recommendation kit.
+
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard
   # guardian read-only support set. The scanner reads framework

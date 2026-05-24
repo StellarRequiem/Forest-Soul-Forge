@@ -3559,6 +3559,190 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  budget_analyst:
+    # ADR-0092 Phase A — D6 Personal Finance Guardian burn-rate
+    # analysis role. Researcher genre, read_only ceiling. Reads
+    # transaction lineage + operator-supplied baselines + composes
+    # burn-rate-vs-baseline reports tagged for risk_advisor +
+    # operator pickup. NEVER charges anything (manifest hard rule),
+    # NEVER classifies individual transactions (transaction_tracker's
+    # lane), NEVER advises on investments (investment_researcher's
+    # lane). GREEN posture per ADR-0092 Decision 1 — burn-rate
+    # composition is non-acting.
+    policies:
+      - id: forbid_transaction_execution
+        rule: forbid
+        triggers: [execute_trade, place_order, send_money, initiate_transfer, charge_account, pay_bill]
+        rationale: |
+          D6 manifest hard rule: D6 NEVER executes transactions.
+          The analyst composes reports; touching a bank/broker
+          rail would conflate analysis with action + bypass the
+          operator-only-on-actual-transaction discipline. The
+          actuating surface (bank, broker, bill-pay) is operator-
+          only by manifest contract — there is no actuator lane
+          in D6.
+      - id: forbid_transaction_categorization
+        rule: forbid
+        triggers: [categorize_transaction, label_merchant, override_category]
+        rationale: |
+          Transaction categorization is transaction_tracker's
+          exclusive lane (D6 Phase B). The analyst reads the
+          tracker's categorization attestations + composes burn-
+          rate reports over them; re-categorizing inline would
+          conflate analysis with classification + bypass the
+          tracker's transaction_categorize.v1-driven discipline.
+      - id: forbid_investment_advice
+        rule: forbid
+        triggers: [recommend_instrument, advise_buy, advise_sell, advise_allocation]
+        rationale: |
+          Investment advice is investment_researcher's exclusive
+          lane (D6 Phase C) — and even there, the researcher
+          composes side-by-side comparisons, NEVER recommends.
+          The analyst composes burn-rate context; making an
+          instrument call would conflate burn-rate framing with
+          advisory discipline + violate the manifest's "info-
+          only, never advice" floor.
+      - id: require_report_attestation
+        rule: require
+        triggers: [emit_burn_rate_report, finalize_analysis]
+        rationale: |
+          Every burn-rate report emits a memory_write
+          attestation with (window_start, window_end, baseline
+          source, source_transaction_ids, category_breakdown,
+          drift_vs_baseline, attestor, ts). Without the
+          attestation, downstream D6 roles + the operator can't
+          trace which transactions a verdict rests on.
+      - id: require_chain_integrity_before_report
+        rule: require
+        triggers: [emit_burn_rate_report]
+        rationale: |
+          The report rests on memory + chain content (prior
+          transactions, baselines, prior reports). A report
+          attested on a broken chain inherits the brokenness +
+          its provenance can't be re-verified.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_report_external, post_finances_to_external_service]
+        rationale: |
+          Burn-rate reports + the transactions they rest on are
+          private/lineage scope. Personal finance is sensitive.
+          Operator-driven sharing (CPA, accountant) is a
+          separate explicit action; the analyst never crosses
+          the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - execute_trade
+      - place_order
+      - send_money
+      - initiate_transfer
+      - categorize_transaction
+      - recommend_instrument
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the analyst as your burn-rate lens — the report is real; transaction execution stays operator-only per manifest hard rule."
+      - "Audit burn-rate attestations weekly — an analyst that consistently flags drift on the same category is a signal to refresh the operator-supplied baseline."
+      - "Cross-domain signals (D5 power-bill anomalies via cascade) feed the analyst's burn-rate window; the analyst narrates them but never mutates D5 state."
+      - "Treat a chain_broken halt as an emergency — reports attested on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  risk_advisor:
+    # ADR-0092 Phase A — D6 Personal Finance Guardian anti-
+    # recommendation arbiter role. Guardian genre, read_only
+    # ceiling. Reads candidate-operator-action attestations +
+    # composes "this is out-of-pattern" alerts tagged for
+    # operator pickup. NEVER blocks the operator (operator
+    # decides — same discipline as reality_anchor); NEVER
+    # executes transactions (manifest hard rule); NEVER advises
+    # on specific instruments (investment_researcher's lane).
+    # GREEN posture per ADR-0092 Decision 2 — anti-
+    # recommendation arbitration is non-acting.
+    policies:
+      - id: forbid_operator_blocking
+        rule: forbid
+        triggers: [block_operator_action, refuse_operator_decision, override_operator_intent]
+        rationale: |
+          The advisor flags out-of-pattern actions; the operator
+          ALWAYS decides. Same discipline as reality_anchor
+          (ADR-0063) — the advisor surfaces evidence; the
+          operator overrides if they want to. Blocking the
+          operator would conflate arbitration with control +
+          violate the manifest's "agent reports, operator
+          decides" contract.
+      - id: forbid_transaction_execution
+        rule: forbid
+        triggers: [execute_trade, place_order, send_money, initiate_transfer, charge_account, pay_bill]
+        rationale: |
+          D6 manifest hard rule: D6 NEVER executes transactions.
+          The advisor composes alerts; touching a bank/broker
+          rail would conflate arbitration with action + bypass
+          the operator-only-on-actual-transaction discipline.
+      - id: forbid_investment_advice
+        rule: forbid
+        triggers: [recommend_instrument, advise_buy, advise_sell, advise_allocation]
+        rationale: |
+          The advisor flags out-of-pattern candidate actions;
+          recommending a specific instrument would conflate
+          anti-recommendation arbitration with advisory
+          discipline + violate the manifest's "info-only, never
+          advice" floor. investment_researcher (D6 Phase C)
+          composes side-by-side comparisons; even there, the
+          researcher does not recommend.
+      - id: require_alert_attestation
+        rule: require
+        triggers: [emit_risk_alert, finalize_anti_recommendation]
+        rationale: |
+          Every alert emits a memory_write attestation with
+          (candidate_action_id, matched_pattern, window_window,
+          baseline_window, drift_magnitude, severity, attestor,
+          ts). Without the attestation, the operator can't
+          trace which prior pattern matched + replay the
+          arbitration call.
+      - id: require_chain_integrity_before_alert
+        rule: require
+        triggers: [emit_risk_alert]
+        rationale: |
+          The alert rests on memory + chain content (the
+          candidate action, the operator's 90-day window, prior
+          alerts). An alert attested on a broken chain inherits
+          the brokenness + its provenance can't be re-verified.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_alert_external, post_alert_to_external_service]
+        rationale: |
+          Anti-recommendation alerts are private/lineage scope.
+          Operator-driven sharing is a separate explicit action;
+          the advisor never crosses the external boundary
+          itself.
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.60
+    out_of_scope:
+      - block_operator_action
+      - execute_trade
+      - place_order
+      - send_money
+      - initiate_transfer
+      - recommend_instrument
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the advisor as your anti-recommendation lane — alerts are real attestations; you decide whether the candidate action proceeds per manifest contract."
+      - "Audit alert attestations weekly — an advisor that produces high-volume low-severity alerts is a signal the matched_pattern threshold needs tuning."
+      - "Out-of-pattern alerts compose with risk_advisor's read of your 90-day window — refresh the operator-supplied window when life changes (move, job change, new dependent)."
+      - "Treat a chain_broken halt as an emergency — alerts attested on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

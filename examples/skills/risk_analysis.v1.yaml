@@ -1,0 +1,206 @@
+schema_version: 1
+name: risk_analysis
+version: '1'
+description: |
+  RiskAdvisor-D6's primary skill. Reads candidate-operator-action
+  attestations (operator-supplied or surfaced by other D6 roles)
+  + composes structured "this is out-of-pattern" alert
+  attestations the operator picks up to inform their decision.
+
+  Composition + attestation only — the advisor NEVER blocks the
+  operator (operator ALWAYS decides — same discipline as
+  reality_anchor); NEVER executes transactions (manifest hard
+  rule); NEVER advises on specific instruments
+  (investment_researcher's lane). Anti-recommendation
+  attestations land in private memory tagged for operator pickup
+  (risk_alert:${candidate_id}).
+
+  Seven-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       currency + areas_of_focus. Lens for pattern thresholds
+       (a Travel-month $400 grocery spend is different from a
+       focus-month one).
+    2. recall_candidate_action — memory_recall scope=lineage
+       for the candidate_action attestation matching
+       inputs.candidate_id. Without the candidate, the advisor
+       composes a "candidate not found" attestation flagging
+       the gap.
+    3. recall_baseline_window — memory_recall scope=lineage for
+       the operator's 90-day pattern attestations (prior
+       burn-rate reports OR prior transaction categorizations
+       in the same category). The baseline window is the
+       comparison reference.
+    4. recall_prior_alerts — memory_recall scope=private for
+       prior alerts on the same candidate or matched_pattern
+       within the suppression window. Respects operator-
+       suppressed patterns rather than re-alerting.
+    5. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end. An alert attested on a
+       broken chain inherits the brokenness.
+    6. verify_candidate_claim — verify_claim runs the Reality
+       Anchor cross-check on the candidate-action description
+       to ground "operator is about to do X" in a verifiable
+       fact rather than a halluciation.
+    7. compose_alert — llm_think composes a structured alert:
+       matched_pattern (description), drift_magnitude,
+       severity (low / medium / high), baseline_window
+       reference, downstream-action hint. ALWAYS frames the
+       alert as "here is evidence; you decide" — never blocks.
+    8. write_alert_attestation — memory_write scope=private
+       records the alert tagged for operator pickup
+       (risk_alert:${candidate_id} + attestor:RiskAdvisor-D6).
+
+  NEVER blocks the operator. NEVER executes transactions.
+  forbid_operator_blocking + forbid_transaction_execution
+  policies enforce this at governance layer regardless of
+  posture.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - llm_think.v1
+  - operator_profile_read.v1
+  - verify_claim.v1
+
+inputs:
+  type: object
+  required: [candidate_id]
+  properties:
+    candidate_id:
+      type: string
+      description: >
+        Identifier of the candidate-operator-action attestation
+        the advisor arbitrates over. Convention: lowercase
+        kebab-case (e.g. "groceries-2026-05-23-tj-400usd").
+        Used as the risk_alert:${candidate_id} memory tag.
+    baseline_window_days:
+      type: integer
+      default: 90
+      description: >
+        How far back to walk the operator's pattern history,
+        in days. Default 90.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the alert attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_candidate_action
+    tool: memory_recall.v1
+    args:
+      query: "candidate_action:${inputs.candidate_id}"
+      mode: lineage
+      limit: 3
+
+  - id: recall_baseline_window
+    tool: memory_recall.v1
+    args:
+      query: "burn_rate_report OR transaction_categorized"
+      mode: lineage
+      limit: 50
+
+  - id: recall_prior_alerts
+    tool: memory_recall.v1
+    args:
+      query: "risk_alert:${inputs.candidate_id}"
+      mode: private
+      limit: 10
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: verify_candidate_claim
+    tool: verify_claim.v1
+    args:
+      claim: "Operator is about to take the candidate action described in candidate_id=${inputs.candidate_id}."
+
+  - id: compose_alert
+    tool: llm_think.v1
+    args:
+      prompt: |
+        You are RiskAdvisor-D6, the D6 Personal Finance Guardian
+        anti-recommendation arbiter. Compose a structured anti-
+        recommendation alert for candidate_id
+        "${inputs.candidate_id}".
+
+        Operator profile:
+          currency:        ${operator_context.out.currency}
+          areas_of_focus:  ${operator_context.out.areas_of_focus}
+          timezone:        ${operator_context.out.timezone}
+
+        Baseline window: ${inputs.baseline_window_days} days
+        Operator reason: ${inputs.operator_reason}
+
+        Audit chain integrity:
+          status: ${verify_chain_integrity.out.status}
+
+        Reality Anchor verdict on the candidate claim:
+          status: ${verify_candidate_claim.out.verdict}
+
+        Candidate action (most recent first):
+        ${recall_candidate_action.out.entries}
+
+        Baseline window pattern (most recent first):
+        ${recall_baseline_window.out.entries}
+
+        Prior alerts on this candidate (suppression check):
+        ${recall_prior_alerts.out.entries}
+
+        Produce a structured alert:
+        1. Matched pattern — what category / merchant / size
+           bucket does the candidate fall into? What does the
+           baseline window say about the operator's pattern in
+           that bucket?
+        2. Drift magnitude — quantify the deviation (e.g. "$400
+           candidate vs. $52/wk 90-day median = 7.7x drift").
+        3. Severity — low / medium / high. Use the operator
+           profile's areas_of_focus as a tiebreaker (a
+           "vacation" focus shifts thresholds permissively;
+           "saving for house" shifts them tighter).
+        4. Suppression check — if a prior alert on the same
+           candidate + matched_pattern already exists in
+           recall_prior_alerts AND was operator-suppressed,
+           note the suppression in the alert metadata + lower
+           the severity by one tier.
+        5. Downstream-action hint — frame as "here is the
+           evidence; you decide" — NEVER as "stop" or "do not
+           proceed." The operator's autonomy is the manifest
+           contract.
+
+        NEVER block the operator. NEVER recommend an action;
+        only flag the deviation. NEVER recommend a specific
+        instrument — that's investment_researcher's lane.
+
+        Halt warning if chain status != "ok" — refuse to compose
+        the alert and explain why.
+
+        All timestamps + amounts are operator-currency,
+        Pacific time, never UTC.
+
+  - id: write_alert_attestation
+    tool: memory_write.v1
+    args:
+      content: ${compose_alert.out.response}
+      layer: episodic
+      scope: private
+      tags:
+        - "d6_risk_alert"
+        - "risk_alert:${inputs.candidate_id}"
+        - "attestor:RiskAdvisor-D6"
+
+output:
+  candidate_id: ${inputs.candidate_id}
+  alert_text: ${compose_alert.out.response}
+  baseline_count: ${recall_baseline_window.out.count}
+  prior_alert_count: ${recall_prior_alerts.out.count}
+  reality_anchor_verdict: ${verify_candidate_claim.out.verdict}
+  chain_status: ${verify_chain_integrity.out.status}
+  alert_entry_id: ${write_alert_attestation.out.entry_id}
