@@ -90,6 +90,12 @@ from forest_soul_forge.tools.builtin.energy_anomaly_scan import (
 from forest_soul_forge.tools.builtin.comfort_recommend import (
     ComfortRecommendTool,
 )
+from forest_soul_forge.tools.builtin.home_state_snapshot import (
+    HomeStateSnapshotTool,
+)
+from forest_soul_forge.tools.builtin.routine_compose import (
+    RoutineComposeTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -649,3 +655,23 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # the attestation on top. Recommendations queue for operator
     # review; nothing actuates.
     registry.register(ComfortRecommendTool())
+    # ADR-0091 Phase C — home_state_snapshot.v1. Deterministic per-
+    # room rollup over operator-supplied or connector-supplied
+    # device records: active/inactive/stale buckets per room,
+    # presence indicator, anomaly hints. Read-only. routine_composer
+    # (D5) is the primary consumer — every routine envelope is
+    # composed against a snapshot for forensic replay. home_steward
+    # + home_sentinel follow-ups also cross-validate LLM-composed
+    # reports against the deterministic rollup.
+    registry.register(HomeStateSnapshotTool())
+    # ADR-0091 Phase C — routine_compose.v1. Deterministic routine
+    # envelope composer + queue writer for vacation_mode /
+    # morning_sequence / focus_mode / sleep_mode / custom. Appends
+    # to data/d5/routine_queue.jsonl (filesystem class; YELLOW
+    # posture on routine_composer requires per-call operator
+    # approval). The forest-home-assistant connector (when
+    # installed) consumes the queue + writes home_state_snapshot
+    # attestations back into memory — D5 itself never touches
+    # devices directly. Same queue-driven pattern as D7's
+    # publish_schedule.v1 + D9's spaced_repetition_schedule.v1.
+    registry.register(RoutineComposeTool())

@@ -1378,6 +1378,26 @@ roles:
       emotional: 0.9    # comfort framing carries affective tone (warmth, light)
       embodiment: 0.5
 
+  # ---- ADR-0091 Phase C — D5 Smart Home Brain (routine queueing) ----
+  # routine_composer: actuator-genre routine queue writer. The
+  # ONLY acting role in D5. Dispatches home_state_snapshot.v1 +
+  # routine_compose.v1 to compose deterministic routine envelopes
+  # (vacation_mode / morning_sequence / focus_mode / sleep_mode /
+  # custom) into data/d5/routine_queue.jsonl. NEVER fires routines
+  # directly — queue → operator pickup OR forest-home-assistant
+  # connector consumption is the load-bearing separation. YELLOW
+  # posture per ADR-0091 Decision 2 — every routine is operator-
+  # approved per-call before queueing.
+  routine_composer:
+    description: "Routine queue writer actuator. Dispatches home_state_snapshot.v1 + routine_compose.v1 to compose deterministic routine envelopes (vacation_mode / morning_sequence / focus_mode / sleep_mode / custom) into data/d5/routine_queue.jsonl. NEVER fires routines directly — queue → operator pickup OR forest-home-assistant connector handoff is the load-bearing separation. YELLOW posture (the only acting role in D5). Genre: actuator. ADR-0091 Phase C."
+    domain_weights:
+      security: 1.7     # queueing actions on household devices carries operator-presence floor
+      audit: 2.7        # every queued routine attests to source snapshot + actions + scope
+      cognitive: 1.9    # envelope composition + scope decomposition reasoning
+      communication: 1.5 # routine names + reasons are operator-facing prose
+      emotional: 0.7    # routine framing has affective tone (morning vs sleep)
+      embodiment: 0.6   # routines touch physical-presence devices
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so

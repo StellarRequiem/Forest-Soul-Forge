@@ -3445,6 +3445,120 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  routine_composer:
+    # ADR-0091 Phase C — D5 Smart Home Brain routine queue writer
+    # role. Actuator genre, filesystem ceiling. The ONLY acting
+    # role in D5. Dispatches home_state_snapshot.v1 (read_only)
+    # + routine_compose.v1 (filesystem) to compose deterministic
+    # routine envelopes (vacation_mode / morning_sequence /
+    # focus_mode / sleep_mode / custom) into
+    # data/d5/routine_queue.jsonl. NEVER fires routines directly
+    # — queue → operator pickup OR forest-home-assistant connector
+    # consumption is the load-bearing separation. YELLOW posture
+    # per ADR-0091 Decision 2 — every routine is operator-approved
+    # per-call before queueing.
+    policies:
+      - id: forbid_direct_device_action
+        rule: forbid
+        triggers: [actuate_device, push_scene, set_thermostat_direct, lock_unlock_direct]
+        rationale: |
+          Direct device actuation is forbidden per ADR-0091
+          Decision 2 — queue-driven actuation is the only path.
+          The composer writes routine envelopes to the queue; the
+          forest-home-assistant connector OR operator consumes
+          them. Even a "lock the door now" intent gets queued
+          with scheduled_for=now; the queue is the audit trail
+          + the operator-approval surface.
+      - id: forbid_security_alert
+        rule: forbid
+        triggers: [emit_security_alert, raise_anomaly, escalate_to_soc]
+        rationale: |
+          Security alerting is home_sentinel's exclusive lane
+          (D5 Phase A). The composer queues actions; raising a
+          security alert would conflate routine queueing with
+          sentinel discipline + bypass the alert provenance
+          attestation discipline.
+      - id: forbid_energy_classification
+        rule: forbid
+        triggers: [classify_energy_anomaly, label_spike, label_drift]
+        rationale: |
+          Energy anomaly classification is energy_warden's
+          exclusive lane (D5 Phase B). The composer reads
+          energy attestations + queues responses if appropriate;
+          re-classifying the anomaly itself would conflate
+          composition with analysis + bypass the warden's
+          energy_anomaly_scan-driven discipline.
+      - id: require_snapshot_before_routine
+        rule: require
+        triggers: [emit_routine, finalize_queue_entry]
+        rationale: |
+          Every routine envelope MUST cite a source_snapshot_id
+          (the home_state_snapshot.v1 output the envelope was
+          composed against). Skipping the snapshot binding would
+          let routines queue without provenance + break the
+          forensic-replay contract (operator must be able to
+          answer "which state shaped this routine?" from the
+          audit chain alone).
+      - id: require_routine_attestation
+        rule: require
+        triggers: [emit_routine, finalize_queue_entry]
+        rationale: |
+          Every routine envelope emits a memory_write attestation
+          with (routine_id, routine_kind, scheduled_for,
+          action_count, scope, source_snapshot_id, attestor, ts).
+          Without the attestation, the operator can't replay
+          which routine queueing event corresponded to which
+          queue record + the connector can't trace queue records
+          back to their authorizing agent.
+      - id: require_human_approval_per_routine
+        rule: require
+        triggers: [emit_routine, finalize_queue_entry]
+        rationale: |
+          YELLOW posture per ADR-0091 Decision 2 — every routine
+          queue write requires explicit operator approval at
+          dispatch time. The composer never bypasses approval
+          even for "obviously safe" routines (a morning lights
+          routine still gets approved per-call). This is the
+          load-bearing discipline that makes D5 safe to ship
+          before the forest-home-assistant connector exists.
+      - id: require_chain_integrity_before_routine
+        rule: require
+        triggers: [emit_routine, finalize_queue_entry]
+        rationale: |
+          The routine envelope rests on memory + chain content
+          (the snapshot, prior routines, sentinel alerts). A
+          routine queued on a broken chain inherits the
+          brokenness + the connector will refuse it.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_routine_external, post_queue_to_external_service]
+        rationale: |
+          Routine envelopes are private/lineage scope. The queue
+          file lives under data/d5/ on the operator's box; the
+          connector reads it locally. Posting routines to an
+          external service would corrupt the local-first
+          discipline ADR-0091 builds on.
+    risk_thresholds:
+      auto_halt_risk: 0.65
+      escalate_risk: 0.30
+      min_confidence_to_act: 0.65
+    out_of_scope:
+      - actuate_device
+      - push_scene
+      - emit_security_alert
+      - classify_energy_anomaly
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the composer as a routine queue — every queue write is YOUR action; the composer drafts + queues but you approve per-call."
+      - "Audit routine attestations weekly — a composer that queues routines that consistently exceed your appetite is a signal to tighten the energy_warden + comfort_optimizer recommendation thresholds."
+      - "When forest-home-assistant ships, the connector consumes the queue; until then, the operator picks queue records up manually. Either way the queue is the durable record."
+      - "Treat a chain_broken halt as an emergency — routine envelopes queued on a broken chain inherit the brokenness + the connector will refuse them."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

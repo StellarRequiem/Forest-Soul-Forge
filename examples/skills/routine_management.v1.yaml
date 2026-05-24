@@ -1,0 +1,183 @@
+schema_version: 1
+name: routine_management
+version: '1'
+description: |
+  RoutineComposer-D5's primary skill. Composes a deterministic
+  routine envelope (vacation_mode / morning_sequence / focus_mode
+  / sleep_mode / custom) from current home_state +
+  operator-supplied actions + scheduling intent, queues it to
+  data/d5/routine_queue.jsonl for operator pickup OR
+  forest-home-assistant connector consumption.
+
+  Queueing only — the composer NEVER fires routines directly
+  (forbid_direct_device_action policy enforces this regardless
+  of posture). The queue is the audit trail + the operator-
+  approval surface; routine_compose.v1 itself
+  requires_human_approval=True so every queue write is
+  operator-approved at dispatch time.
+
+  Eight-step pipeline:
+    1. operator_context — operator_profile_read fetches home
+       address + routines + areas_of_focus. Frames scope (the
+       operator's known rooms drive scope decomposition).
+    2. recall_state_records — memory_recall scope=lineage for
+       recent home_state per-device records (operator-supplied
+       snapshots OR forest-home-assistant connector writes).
+       The records feed home_state_snapshot.v1 for the source
+       snapshot binding.
+    3. recall_prior_routines — memory_recall scope=private for
+       prior routine attestations matching this routine_kind.
+       Lets the composer extend rather than duplicate.
+    4. recall_optimizer_recommendations — memory_recall
+       scope=lineage for comfort_optimizer recommendation
+       attestations. The composer reads recommendations + folds
+       approved ones into the action set.
+    5. verify_chain_integrity — audit_chain_verify confirms
+       hash-linkage end-to-end. A routine queued on a broken
+       chain inherits the brokenness + the connector will
+       refuse it.
+    6. build_snapshot — home_state_snapshot.v1 aggregates the
+       recalled records into a deterministic per-room rollup.
+       The output's identity becomes the source_snapshot_id the
+       routine envelope binds to.
+    7. queue_routine — routine_compose.v1 writes the envelope
+       to data/d5/routine_queue.jsonl. Filesystem class;
+       requires per-call operator approval (YELLOW posture).
+    8. write_routine_attestation — memory_write scope=private
+       records the routine tagged for operator audit
+       (routine_queued:${routine_id} + attestor:RoutineComposer-D5).
+
+  NEVER actuates devices directly. NEVER raises security alerts
+  (home_sentinel's lane). NEVER classifies energy anomalies
+  (energy_warden's lane).
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - home_state_snapshot.v1
+  - routine_compose.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [routine_kind, name, scheduled_for, actions]
+  properties:
+    routine_kind:
+      type: string
+      enum: [vacation_mode, morning_sequence, focus_mode, sleep_mode, custom]
+    name:
+      type: string
+      description: >
+        Operator-facing label (e.g. "weekday morning sequence",
+        "weekend vacation mode").
+    scheduled_for:
+      type: string
+      description: >
+        Fire window start, Pacific-zoned ISO timestamp per
+        CLAUDE.md. The connector may delay up to fire_window_min
+        minutes before applying.
+    actions:
+      type: array
+      description: >
+        Per-device action records. Each item: device_id +
+        command + optional args dict.
+      items:
+        type: object
+        required: [device_id, command]
+    scope:
+      type: string
+      default: "all"
+      description: >
+        "all" OR comma-separated room list constraining which
+        rooms the envelope applies to.
+    fire_window_minutes:
+      type: integer
+      default: 10
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_state_records
+    tool: memory_recall.v1
+    args:
+      query: "home_state_record"
+      mode: lineage
+      limit: 100
+
+  - id: recall_prior_routines
+    tool: memory_recall.v1
+    args:
+      query: "routine_queued AND routine_kind:${inputs.routine_kind}"
+      mode: private
+      limit: 10
+
+  - id: recall_optimizer_recommendations
+    tool: memory_recall.v1
+    args:
+      query: "comfort_recommendation OR energy_anomaly_alert"
+      mode: lineage
+      limit: 15
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: build_snapshot
+    tool: home_state_snapshot.v1
+    args:
+      records: ${recall_state_records.out.records_as_devices}
+      window_slug: "${inputs.routine_kind}-${inputs.scheduled_for}"
+
+  - id: queue_routine
+    tool: routine_compose.v1
+    args:
+      routine_kind: ${inputs.routine_kind}
+      name: ${inputs.name}
+      scheduled_for: ${inputs.scheduled_for}
+      actions: ${inputs.actions}
+      scope: ${inputs.scope}
+      fire_window_minutes: ${inputs.fire_window_minutes}
+      source_snapshot_id: ${build_snapshot.out.built_at}
+      operator_reason: ${inputs.operator_reason}
+
+  - id: write_routine_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        Routine queued: ${queue_routine.out.routine_id}
+        Kind: ${inputs.routine_kind}
+        Name: ${inputs.name}
+        Scheduled for (Pacific): ${inputs.scheduled_for}
+        Scope: ${inputs.scope}
+        Action count: ${queue_routine.out.action_count}
+        Source snapshot: ${build_snapshot.out.built_at}
+        Snapshot device_count: ${build_snapshot.out.device_count}
+        Snapshot room_count: ${build_snapshot.out.room_count}
+        Snapshot presence_flag: ${build_snapshot.out.presence_flag}
+        Operator reason: ${inputs.operator_reason}
+        Chain status: ${verify_chain_integrity.out.status}
+      layer: episodic
+      scope: private
+      tags:
+        - "d5_routine_queued"
+        - "routine_queued:${queue_routine.out.routine_id}"
+        - "routine_kind:${inputs.routine_kind}"
+        - "attestor:RoutineComposer-D5"
+
+output:
+  routine_id: ${queue_routine.out.routine_id}
+  routine_kind: ${inputs.routine_kind}
+  scheduled_for: ${queue_routine.out.scheduled_for}
+  action_count: ${queue_routine.out.action_count}
+  queue_path: ${queue_routine.out.queue_path}
+  source_snapshot_built_at: ${build_snapshot.out.built_at}
+  snapshot_presence_flag: ${build_snapshot.out.presence_flag}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_entry_id: ${write_routine_attestation.out.entry_id}

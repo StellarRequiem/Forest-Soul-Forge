@@ -3578,6 +3578,99 @@ tools:
     side_effects: read_only
     archetype_tags: [comfort_optimizer]
 
+  # ---- ADR-0091 Phase C — D5 Smart Home Brain snapshot + routine ----
+  home_state_snapshot.v1:
+    name: home_state_snapshot
+    version: "1"
+    description: |
+      ADR-0091 Phase C state aggregator. Deterministic rollup
+      over a list of operator-supplied OR connector-supplied
+      home_state records: per-room buckets of
+      active/inactive/stale devices, presence indicator,
+      anomaly hints. Read-only. routine_composer (D5 Phase C)
+      is the primary consumer — every routine envelope is
+      composed against a snapshot so the operator can audit
+      which state shaped which routine. home_steward + home_
+      sentinel follow-ups also use it to cross-validate LLM-
+      composed reports against the deterministic rollup.
+    input_schema:
+      type: object
+      required: [records]
+      properties:
+        records:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [device_id, room, state, observed_at]
+            properties:
+              device_id: {type: string}
+              room: {type: string}
+              state: {type: string}
+              observed_at: {type: string}
+              device_kind: {type: string}
+              value: {type: number}
+        reference_time: {type: string}
+        stale_window_minutes:
+          type: integer
+          minimum: 1
+          maximum: 43200
+        window_slug: {type: string}
+    side_effects: read_only
+    archetype_tags: [routine_composer, home_steward, home_sentinel]
+
+  routine_compose.v1:
+    name: routine_compose
+    version: "1"
+    description: |
+      ADR-0091 Phase C routine envelope composer + queue writer.
+      Composes deterministic routine envelopes (vacation_mode /
+      morning_sequence / focus_mode / sleep_mode / custom) into
+      a queue file at data/d5/routine_queue.jsonl for operator
+      pickup OR forest-home-assistant connector consumption.
+      side_effects=filesystem; YELLOW posture on routine_composer
+      requires per-call operator approval. The forest-home-
+      assistant connector (when installed) consumes the queue +
+      writes home_state_snapshot attestations back into memory —
+      D5 itself never touches devices directly. Same queue-driven
+      pattern as D7's publish_schedule.v1 + D9's
+      spaced_repetition_schedule.v1.
+    input_schema:
+      type: object
+      required: [routine_kind, name, scheduled_for, actions]
+      properties:
+        routine_kind:
+          type: string
+          enum: [vacation_mode, morning_sequence, focus_mode, sleep_mode, custom]
+        name:
+          type: string
+          maxLength: 200
+        scheduled_for:
+          type: string
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [device_id, command]
+            properties:
+              device_id: {type: string, maxLength: 200}
+              command: {type: string, maxLength: 100}
+              args: {type: object}
+        scope: {type: string, maxLength: 1000}
+        fire_window_minutes:
+          type: integer
+          minimum: 0
+          maximum: 1440
+        source_snapshot_id: {type: string}
+        operator_reason: {type: string, maxLength: 2000}
+        queue_path: {type: string}
+    side_effects: filesystem
+    requires_human_approval: true
+    archetype_tags: [routine_composer]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
@@ -4547,6 +4640,32 @@ archetypes:
       # tools (routine_composer's lane). No energy classification tools
       # (energy_warden's lane). No alert tools (home_sentinel's lane).
       # Pure recommendation-attestation kit.
+
+  # ---- ADR-0091 Phase C — D5 Smart Home Brain routine composer ----
+  # routine_composer kit. The ONLY acting role in D5. Actuator
+  # genre, filesystem ceiling. Dispatches home_state_snapshot.v1
+  # (read_only) to aggregate the current state + routine_compose.v1
+  # (filesystem; requires_human_approval=True) to queue the
+  # envelope. NEVER fires routines directly — queue →
+  # forest-home-assistant connector OR operator pickup is the
+  # load-bearing separation per ADR-0091 Decision 2.
+  routine_composer:
+    standard_tools:
+      - routine_compose.v1            # ADR-0091 Phase C — load-bearing filesystem queue writer (requires_human_approval=True)
+      - home_state_snapshot.v1        # ADR-0091 Phase C — deterministic snapshot aggregator (source_snapshot_id binding is required per policy)
+      - llm_think.v1                  # envelope composition + scope-decomposition reasoning
+      - memory_recall.v1              # walk steward reports + sentinel alerts + warden anomalies + optimizer recommendations
+      - memory_write.v1               # write routine-queue attestations + source-snapshot bindings
+      - delegate.v1                   # hand off to operator review or sibling D5 roles for follow-up
+      - audit_chain_verify.v1         # chain integrity before queueing a routine
+      - text_summarize.v1             # condense long action sets into per-routine synopses
+      - operator_profile_read.v1      # ADR-0068 — routines + home address frame envelope composition
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index (prior routines, prior approvals)
+      # No web_fetch. No shell_exec. No code_edit. No direct
+      # device-actuation tools — queue-driven actuation is the only
+      # path per ADR-0091 Decision 2. The forest-home-assistant
+      # connector consumes the queue; D5 never touches Home Assistant
+      # entities directly.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

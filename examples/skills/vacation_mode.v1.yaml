@@ -1,0 +1,164 @@
+schema_version: 1
+name: vacation_mode
+version: '1'
+description: |
+  RoutineComposer-D5's vacation-mode specialization. A
+  convenience wrapper over routine_compose.v1 that composes a
+  vacation_mode envelope with sensible defaults (presence
+  simulation lights, tightened door locks, away thermostat
+  setpoint) from operator-supplied vacation window + scope.
+
+  Same queue-driven discipline as routine_management.v1 —
+  routine_compose.v1 still requires per-call operator approval
+  (YELLOW posture). The operator picks the vacation window;
+  this skill composes the action set against the current
+  home_state snapshot + queues the envelope.
+
+  Eight-step pipeline:
+    1. operator_context — operator_profile_read fetches home
+       address + routines (the operator's stated "away"
+       preferences shape the envelope).
+    2. recall_state_records — memory_recall scope=lineage for
+       recent home_state per-device records.
+    3. recall_prior_vacation_routines — memory_recall
+       scope=private for prior vacation_mode attestations. The
+       composer extends + reuses approved action patterns.
+    4. recall_steward_report — memory_recall scope=lineage for
+       the matching state-of-the-home report (the steward's
+       cross-domain narrative may flag a known Travel block
+       from D2's morning briefing).
+    5. verify_chain_integrity — audit_chain_verify confirms
+       hash-linkage end-to-end.
+    6. build_snapshot — home_state_snapshot.v1 aggregates the
+       recalled records. The output's identity becomes the
+       source_snapshot_id binding.
+    7. queue_routine — routine_compose.v1 writes the
+       vacation_mode envelope to data/d5/routine_queue.jsonl.
+       Filesystem class; requires per-call operator approval.
+    8. write_routine_attestation — memory_write scope=private
+       records the routine.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - home_state_snapshot.v1
+  - routine_compose.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [name, scheduled_for, actions]
+  properties:
+    name:
+      type: string
+      description: >
+        Operator-facing label for the vacation period (e.g.
+        "Memorial Day weekend away 2026-05-22..05-26").
+    scheduled_for:
+      type: string
+      description: >
+        Vacation start, Pacific-zoned ISO timestamp. The
+        connector applies the envelope at this time.
+    actions:
+      type: array
+      description: >
+        Per-device action records for vacation behavior
+        (presence simulation, lock tightening, thermostat
+        setback). The operator composes the list explicitly —
+        this skill doesn't infer; it queues + attests.
+      items:
+        type: object
+        required: [device_id, command]
+    scope:
+      type: string
+      default: "all"
+    fire_window_minutes:
+      type: integer
+      default: 15
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_state_records
+    tool: memory_recall.v1
+    args:
+      query: "home_state_record"
+      mode: lineage
+      limit: 100
+
+  - id: recall_prior_vacation_routines
+    tool: memory_recall.v1
+    args:
+      query: "routine_queued AND routine_kind:vacation_mode"
+      mode: private
+      limit: 10
+
+  - id: recall_steward_report
+    tool: memory_recall.v1
+    args:
+      query: "home_state_report OR morning_briefing"
+      mode: lineage
+      limit: 5
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: build_snapshot
+    tool: home_state_snapshot.v1
+    args:
+      records: ${recall_state_records.out.records_as_devices}
+      window_slug: "vacation_mode-${inputs.scheduled_for}"
+
+  - id: queue_routine
+    tool: routine_compose.v1
+    args:
+      routine_kind: vacation_mode
+      name: ${inputs.name}
+      scheduled_for: ${inputs.scheduled_for}
+      actions: ${inputs.actions}
+      scope: ${inputs.scope}
+      fire_window_minutes: ${inputs.fire_window_minutes}
+      source_snapshot_id: ${build_snapshot.out.built_at}
+      operator_reason: ${inputs.operator_reason}
+
+  - id: write_routine_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        Vacation routine queued: ${queue_routine.out.routine_id}
+        Name: ${inputs.name}
+        Scheduled for (Pacific): ${inputs.scheduled_for}
+        Scope: ${inputs.scope}
+        Action count: ${queue_routine.out.action_count}
+        Source snapshot: ${build_snapshot.out.built_at}
+        Snapshot device_count: ${build_snapshot.out.device_count}
+        Snapshot room_count: ${build_snapshot.out.room_count}
+        Snapshot presence_flag: ${build_snapshot.out.presence_flag}
+        Operator reason: ${inputs.operator_reason}
+        Chain status: ${verify_chain_integrity.out.status}
+      layer: episodic
+      scope: private
+      tags:
+        - "d5_routine_queued"
+        - "routine_queued:${queue_routine.out.routine_id}"
+        - "routine_kind:vacation_mode"
+        - "attestor:RoutineComposer-D5"
+
+output:
+  routine_id: ${queue_routine.out.routine_id}
+  routine_kind: vacation_mode
+  scheduled_for: ${queue_routine.out.scheduled_for}
+  action_count: ${queue_routine.out.action_count}
+  queue_path: ${queue_routine.out.queue_path}
+  source_snapshot_built_at: ${build_snapshot.out.built_at}
+  snapshot_presence_flag: ${build_snapshot.out.presence_flag}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_entry_id: ${write_routine_attestation.out.entry_id}
