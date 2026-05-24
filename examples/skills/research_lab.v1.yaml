@@ -1,0 +1,184 @@
+schema_version: 1
+name: research_lab
+version: '1'
+description: |
+  ADR-0090 Phase D umbrella skill. Composes the full D10 Research
+  Lab pipeline end-to-end via delegate.v1 to each role's primary
+  skill. The operator dispatches research_lab.v1 with a topic +
+  research question; the umbrella routes the lab through the five
+  phases in order:
+
+    1. Gatherer-D10 — source_gathering.v1 — pulls source material
+       via allowlisted web_fetch + D1 catalog reads, writes a
+       source bundle attestation.
+    2. Analyst-D10 — deep_analysis.v1 — consumes the bundle +
+       composes per-claim decompositions with verify_claim.v1
+       verdicts.
+    3. Critic-D10 — adversarial_critique.v1 — surfaces counter-
+       arguments per claim, preserved alongside the decomposition.
+    4. Lab_Synthesizer-D10 — research_synthesis.v1 — aggregates
+       decomposition + counters into a synthesis report with
+       citation graph + per-conclusion confidence band.
+    5. Debate_Moderator-D10 — debate_moderation.v1 — runs one
+       deterministic turn-orchestration pass to surface the next
+       turn the operator should sponsor (typically a follow-up
+       sub-claim worth deeper attention).
+
+  The umbrella is the operator's "do the full lab pass on topic X"
+  affordance. For a single-phase pass (e.g., just gathering),
+  dispatch the per-role skill directly.
+
+requires:
+  - delegate.v1
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [topic_slug, research_question]
+  properties:
+    topic_slug:
+      type: string
+      description: >
+        Topic the lab will research. Convention: lowercase
+        kebab-case. Shared across every phase's attestation tags.
+    research_question:
+      type: string
+      description: >
+        The operator's research question. The gatherer composes
+        the source bundle around it + the analyst decomposes from
+        it.
+    primary_claim:
+      type: string
+      default: ""
+      description: >
+        Optional operator-stated primary claim. If omitted, the
+        analyst derives one from the research_question; the
+        critic + synthesizer chain off whatever the analyst
+        landed on.
+    primary_conclusion:
+      type: string
+      default: ""
+      description: >
+        Optional operator-stated primary conclusion the synthesis
+        should frame around. If omitted, the synthesizer derives
+        one from the analyst's decomposition.
+    debate_roles:
+      type: array
+      default:
+        - analyst
+        - critic
+        - lab_synthesizer
+      description: >
+        Role-set for the debate orchestrator's single turn pass
+        at the end. Order matters for round_robin.
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded on every phase's
+        delegation attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: delegate_gather
+    tool: delegate.v1
+    args:
+      target_role: gatherer
+      target_agent_name: Gatherer-D10
+      handoff_kind: source_gathering
+      payload: |
+        Topic: ${inputs.topic_slug}
+        Research question: ${inputs.research_question}
+        Operator reason: ${inputs.operator_reason}
+      reason: research_lab umbrella — Phase 1 gather
+
+  - id: delegate_analyze
+    tool: delegate.v1
+    args:
+      target_role: analyst
+      target_agent_name: Analyst-D10
+      handoff_kind: deep_analysis
+      payload: |
+        Topic: ${inputs.topic_slug}
+        Primary claim: ${inputs.primary_claim}
+        Operator reason: ${inputs.operator_reason}
+      reason: research_lab umbrella — Phase 2 decompose
+
+  - id: delegate_critique
+    tool: delegate.v1
+    args:
+      target_role: critic
+      target_agent_name: Critic-D10
+      handoff_kind: adversarial_critique
+      payload: |
+        Topic: ${inputs.topic_slug}
+        Operator reason: ${inputs.operator_reason}
+      reason: research_lab umbrella — Phase 3 critique
+
+  - id: delegate_synthesize
+    tool: delegate.v1
+    args:
+      target_role: lab_synthesizer
+      target_agent_name: Lab_Synthesizer-D10
+      handoff_kind: research_synthesis
+      payload: |
+        Topic: ${inputs.topic_slug}
+        Primary conclusion: ${inputs.primary_conclusion}
+        Operator reason: ${inputs.operator_reason}
+      reason: research_lab umbrella — Phase 4 synthesize
+
+  - id: delegate_moderate
+    tool: delegate.v1
+    args:
+      target_role: debate_moderator
+      target_agent_name: Debate_Moderator-D10
+      handoff_kind: debate_moderation
+      payload: |
+        Topic: ${inputs.topic_slug}
+        Question: ${inputs.research_question}
+        Roles: ${inputs.debate_roles}
+        Operator reason: ${inputs.operator_reason}
+      reason: research_lab umbrella — Phase 5 moderate one turn
+
+  - id: write_umbrella_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        Research lab umbrella pass on topic ${inputs.topic_slug}.
+        Research question: ${inputs.research_question}
+        Primary claim: ${inputs.primary_claim}
+        Primary conclusion: ${inputs.primary_conclusion}
+        Chain status: ${verify_chain_integrity.out.status}
+        Gather handoff:    ${delegate_gather.out.handoff_id}
+        Analyze handoff:   ${delegate_analyze.out.handoff_id}
+        Critique handoff:  ${delegate_critique.out.handoff_id}
+        Synthesize handoff: ${delegate_synthesize.out.handoff_id}
+        Moderate handoff:  ${delegate_moderate.out.handoff_id}
+        Operator reason: ${inputs.operator_reason}
+      layer: episodic
+      scope: private
+      tags:
+        - "d10_umbrella"
+        - "umbrella:${inputs.topic_slug}"
+        - "attestor:research_lab.v1"
+
+output:
+  topic_slug: ${inputs.topic_slug}
+  chain_status: ${verify_chain_integrity.out.status}
+  gather_handoff: ${delegate_gather.out.handoff_id}
+  analyze_handoff: ${delegate_analyze.out.handoff_id}
+  critique_handoff: ${delegate_critique.out.handoff_id}
+  synthesize_handoff: ${delegate_synthesize.out.handoff_id}
+  moderate_handoff: ${delegate_moderate.out.handoff_id}
+  umbrella_entry_id: ${write_umbrella_attestation.out.entry_id}

@@ -1,23 +1,25 @@
 # Domain D10 — Multi-Agent Research Lab
-# ADR-0067 T1 manifest. Status: planned. Builds on experimenter
-# substrate (ADR-0056 shipped). The most structured-debate-heavy
-# domain.
+# ADR-0067 T1 manifest. Status: live (ADR-0090 Phase D, 2026-05-23).
+# Builds on experimenter substrate (ADR-0056 shipped). The most
+# structured-debate-heavy domain.
 domain_id: d10_research_lab
 name: Multi-Agent Research Lab
-status: planned
+status: live
 
 description: |
   Structured multi-agent debate on any topic. analyst vs. critic
-  vs. synthesizer in formal turn-based exchange — operator reads
-  the transcript. Adversarial collaboration mode: "make the
+  vs. lab_synthesizer in formal turn-based exchange — operator
+  reads the transcript. Adversarial collaboration mode: "make the
   strongest case for X" then "make the strongest case for not-X" —
   outputs aren't averaged, both stand. Citation-graph reasoning:
-  every claim has provenance back to a source; synthesizer reports
-  include the citation graph as a deliverable. Experimenter-driven
-  hypothesis testing — when the lab forms a hypothesis, the
-  experimenter agent (ADR-0056) runs a short-horizon test if
-  testable. Confidence scoring: every conclusion with explicit
-  uncertainty + the sources that would move the needle.
+  every claim has provenance back to a source; lab_synthesizer
+  reports include the citation graph as a deliverable.
+  Experimenter-driven hypothesis testing — when the lab forms a
+  hypothesis, the experimenter agent (ADR-0056) runs a short-
+  horizon test if testable (the hypothesis_testing.v1 skill
+  delegates rather than re-creating per ADR-0090 Decision 4).
+  Confidence scoring: every conclusion with explicit uncertainty
+  + the sources that would move the needle.
 
 entry_agents:
   - role: gatherer
@@ -26,9 +28,9 @@ entry_agents:
     capability: deep_analysis
   - role: critic
     capability: adversarial_critique
-  - role: synthesizer
+  - role: lab_synthesizer        # ADR-0090 Decision 2 — renamed from manifest's "synthesizer" to avoid collision with D1's synthesizer
     capability: research_synthesis
-  - role: experimenter
+  - role: experimenter           # ADR-0090 Decision 4 — references existing ADR-0056 substrate; hypothesis_testing.v1 delegates
     capability: hypothesis_testing
   - role: debate_moderator
     capability: debate_moderation

@@ -290,6 +290,52 @@ default_skill_per_capability:
     skill_name: curriculum_design
     skill_version: "1"
 
+  # D10 Multi-Agent Research Lab — ADR-0090 Phase D (2026-05-23).
+  # All 8 entry capabilities now have live skills.
+  - domain: d10_research_lab
+    capability: source_gathering
+    skill_name: source_gathering
+    skill_version: "1"
+  - domain: d10_research_lab
+    capability: deep_analysis
+    skill_name: deep_analysis
+    skill_version: "1"
+  - domain: d10_research_lab
+    capability: adversarial_critique
+    skill_name: adversarial_critique
+    skill_version: "1"
+  - domain: d10_research_lab
+    capability: research_synthesis
+    skill_name: research_synthesis
+    skill_version: "1"
+  - domain: d10_research_lab
+    capability: debate_moderation
+    skill_name: debate_moderation
+    skill_version: "1"
+  - domain: d10_research_lab
+    capability: hypothesis_testing
+    skill_name: hypothesis_testing
+    skill_version: "1"
+  - domain: d10_research_lab
+    capability: citation_graph
+    skill_name: citation_graph
+    skill_version: "1"
+  # ADR-0090 Decision 5 — capability alias for confidence_scoring;
+  # the per-conclusion band is composed inside research_synthesis,
+  # not a free-standing skill (the operator dispatches the
+  # synthesis skill, which embeds the score).
+  - domain: d10_research_lab
+    capability: confidence_scoring
+    skill_name: research_synthesis
+    skill_version: "1"
+  # ADR-0090 Phase D alias — d10's research entry-point used by
+  # the d9 inert cascade. Routes to research_synthesis (the
+  # canonical entry skill for a research request).
+  - domain: d10_research_lab
+    capability: research
+    skill_name: research_synthesis
+    skill_version: "1"
+
 # Cascade rules — engineer-defined, code-reviewed via PR.
 #
 # Each rule: when a route to (source_domain, source_capability)
@@ -433,6 +479,75 @@ cascade_rules:
       operator's other obligations rather than as a separate
       stream.
 
+  # ADR-0090 Phase D — D10 Multi-Agent Research Lab cascades.
+  #
+  # ACTIVATING four cascades that complete the cross-domain
+  # research arc:
+  #   d1 → d10 (knowledge_summarize → source_gathering): a D1
+  #     librarian summarize-request seeds a D10 deep-research pass
+  #     so the operator's "go deeper on topic X" intent flows
+  #     directly into the lab's gatherer.
+  #   d10 → d1 (research_synthesis → knowledge_curation): a D10
+  #     lab synthesis cascades back into D1's librarian catalog
+  #     so the corpus stays enriched with the lab's structured
+  #     conclusions.
+  #   d10 → d9 (research_synthesis → curriculum_module): a D10
+  #     lab synthesis cascades into D9's curriculum designer so
+  #     research conclusions seed new learning modules.
+  #   d10 → d7 (research_synthesis → content_drafting): a D10
+  #     lab synthesis cascades into D7's writer so research
+  #     conclusions seed long-form drafts.
+  - source_domain: d1_knowledge_forge
+    source_capability: knowledge_summarize
+    target_domain: d10_research_lab
+    target_capability: source_gathering
+    reason: |
+      Every D1 librarian summarize request cascades into a D10
+      source_gathering trigger. Gatherer-D10 reads recent
+      knowledge_summarize attestations from lineage memory +
+      surfaces them as topics the operator wants the lab to dig
+      deeper on. This is the "the librarian flagged this topic
+      as summary-worthy; the lab takes it deeper" arc. Was
+      declared INERT in ADR-0086 Decision 4's downstream-cascade
+      notes; activating now that D10 ships.
+
+  - source_domain: d10_research_lab
+    source_capability: research_synthesis
+    target_domain: d1_knowledge_forge
+    target_capability: knowledge_curation
+    reason: |
+      Every D10 lab synthesis cascades into a D1 knowledge
+      curation trigger. Librarian-D1 reads recent
+      synthesis:<slug> attestations from lineage memory + folds
+      the lab's structured conclusions (with citation graph +
+      confidence band) into the catalog. The operator's knowledge
+      corpus grows with the lab's audited research output.
+
+  - source_domain: d10_research_lab
+    source_capability: research_synthesis
+    target_domain: d9_learning_coach
+    target_capability: curriculum_module
+    reason: |
+      Every D10 lab synthesis cascades into a D9 curriculum
+      module trigger. CurriculumDesigner-D9 reads recent
+      synthesis attestations from lineage memory + surfaces the
+      synthesis as a candidate curriculum module (the lab's
+      "this is what we know about X" becomes the operator's
+      "this is how to learn X"). Completes the research →
+      curriculum arc named in the D10 + D9 manifests.
+
+  - source_domain: d10_research_lab
+    source_capability: research_synthesis
+    target_domain: d7_content_studio
+    target_capability: content_drafting
+    reason: |
+      Every D10 lab synthesis cascades into a D7 content drafting
+      trigger. Writer-D7 reads recent synthesis attestations
+      from lineage memory + uses them as research briefs for
+      long-form drafts (the lab's structured conclusions become
+      the writer's source material). Completes the research →
+      content arc named in the D10 + D7 manifests.
+
   # ADR-0087 Phase D — D2 Daily Life OS cascades.
   #
   # ACTIVATING the cascade that was declared INERT in
@@ -474,15 +589,14 @@ cascade_rules:
 # Phase D (SOAR playbooks).
 #
 # Pending cascades, declared inert:
-#   d1.knowledge_contradiction_flag → d9.curriculum_design
-#   d1.knowledge_summarize          → d10.deep_research
-#   d1.knowledge_curation           → d7.content_drafting
-#   d1.daily_knowledge_delta        → d2.morning_briefing
+#   d1.knowledge_contradiction_flag → d9.curriculum_design  (ACTIVATED in ADR-0089 Phase D)
+#   d1.knowledge_summarize          → d10.deep_research     (ACTIVATED in ADR-0090 Phase D as d1.knowledge_summarize → d10.source_gathering)
+#   d1.knowledge_curation           → d7.content_drafting   (ACTIVATED in ADR-0088 Phase D)
+#   d1.daily_knowledge_delta        → d2.morning_briefing   (ACTIVATED in ADR-0087 Phase D)
 #
-# Each pending cascade will land as a real cascade_rules entry
-# when its target domain ships. Until then they are
-# documentation, not configuration — the operator who wants
-# them earlier can opt in manually.
+# As of ADR-0090 Phase D all four D1 downstream cascades are live;
+# this block remains as historical documentation of the INERT
+# pattern + its progressive activation across the domain rollout.
 
 # ADR-0087 Phase D — INERT d2→downstream cascades.
 #
@@ -582,12 +696,71 @@ cascade_rules:
 # Pending cascades, declared inert:
 #   d9.assessment_feedback     → d1.knowledge_curation     (d1 side needs new content-type)
 #   d9.skill_certification     → d7.content_drafting       (d7 side needs new capability)
-#   d9.deep_research_request   → d10.research              (d10 not yet shipped)
+#   d9.deep_research_request   → d10.research              (declared INERT in ADR-0090 below; d10 ships but d9 lacks deep_research_request capability)
 #
 # Each pending cascade will land as a real cascade_rules entry
 # when its target capability ships. Until then they are
 # documentation, not configuration — same INERT pattern as
 # ADR-0086 + ADR-0087 + ADR-0088's downstream-cascade notes.
+
+# ADR-0090 Phase D — INERT cascades involving D10.
+#
+# The D10 manifest at config/domains/d10_research_lab.yaml names
+# four handoff_targets:
+#   d1_knowledge_forge   # archives the report (handled via d10→d1 active cascade above)
+#   d9_learning_coach    # research → curriculum (handled via d10→d9 active cascade above)
+#   d7_content_studio    # research → publishable content (handled via d10→d7 active cascade above)
+#   d4_code_review       # research as input to ADR proposals
+#
+# Three remaining INERT declarations after Phase D:
+#
+# d9 → d10 (deep_research_request → research): the D9 manifest
+# notes that "operator-curiosity-driven topics the assessor flags
+# as needs-deeper-than-curriculum" should cascade into D10. The
+# D10 side ships (research capability resolves to research_synthesis),
+# but the D9 side does NOT ship a deep_research_request capability —
+# the assessor's flag attestations live in lineage memory but there
+# is no dedicated assessor → deep-research-request emitter. Adding
+# the cascade would require either:
+#   - a new D9 capability (deep_research_request) wired to a new
+#     skill on the assessor's side, OR
+#   - rewiring assessor's existing assessment skill to emit a
+#     route-eligible event when low-mastery is detected.
+# Either path is bigger than this phase's scope; the operator can
+# opt in manually by dispatching source_gathering directly.
+#
+# d10 → d4 (adr_proposal → review_signoff): the D10 manifest's
+# handoff_targets named d4 for "research as input to ADR proposals".
+# The cascade would have the lab synthesis seed an ADR proposal
+# draft the code_reviewer can pick up. But neither side ships the
+# adr_proposal capability today — D10's lab_synthesizer produces a
+# research synthesis (not an ADR shape), and D4's reviewer expects
+# PR-diff input (not a synthesis). Adding the cascade would require
+# a new D7-style drafting capability that converts synthesis →
+# ADR template. Declare inert; the operator can manually compose
+# an ADR proposal from the synthesis output.
+#
+# verifier_loop → d10 (contradiction → deep_research): the
+# verifier_loop role (ADR-0036) flags memory contradictions; a
+# cascade would seed a D10 deep-research pass to resolve the
+# contradiction with external sources. But verifier_loop is a
+# substrate role, not a domain capability, so the
+# (source_domain, source_capability) shape doesn't fit the
+# cascade_rules table. The cascade is operator-triggered: when
+# verifier_loop's flag attestation lands, the operator can
+# dispatch source_gathering or the full research_synthesis skill
+# directly. Declare inert; this is structural, not pending.
+#
+# Pending cascades, declared inert:
+#   d9.deep_research_request   → d10.research          (d9 side needs new capability)
+#   d10.adr_proposal           → d4.review_signoff     (both sides need adr_proposal capability)
+#   verifier_loop → d10                                (structural — substrate role, not a domain capability)
+#
+# Each pending cascade will land as a real cascade_rules entry
+# when its prerequisite capability ships. Until then they are
+# documentation, not configuration — same INERT pattern as
+# ADR-0086 + ADR-0087 + ADR-0088 + ADR-0089's downstream-cascade
+# notes.
 
 # ADR-0078 Phase A — NO new cascade rules from forensic_archive.
 # Deliberate. The ADR's Decision 4 named three cascades on the

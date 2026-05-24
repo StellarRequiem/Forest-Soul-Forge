@@ -1,9 +1,11 @@
 # ADR-0090 — D10 Multi-Agent Research Lab: rollout
 
-**Status:** Proposed (2026-05-23). Phase A IN FLIGHT — gatherer +
-analyst roles landed (researcher genre, GREEN posture, no new
-builtin tools; two skill manifests `source_gathering.v1` +
-`deep_analysis.v1`). Phases B–D pending.
+**Status:** Accepted (2026-05-23). All four phases shipped:
+Phase A (gatherer + analyst), Phase B (critic + lab_synthesizer +
+`citation_graph_build.v1` + `confidence_score.v1`), Phase C
+(debate_moderator + `claim_provenance.v1` + `debate_orchestrate.v1`),
+Phase D (cascade wiring + umbrella birth + domain manifest flipped
+to `live`).
 **Date:** 2026-05-23
 **Tracks:** Domain Rollout / Multi-Agent Research Substrate
 **Supersedes:** none
@@ -164,7 +166,7 @@ governance surface = different tool ceiling.
 
 ## Phase plan
 
-### Phase A — gathering + analysis foundation (this commit)
+### Phase A — gathering + analysis foundation (SHIPPED 2026-05-23)
 
 - Add `gatherer` (researcher, GREEN) + `analyst` (researcher,
   GREEN) to `trait_tree.yaml`, `genres.yaml`,
@@ -175,7 +177,7 @@ governance surface = different tool ceiling.
   `dev-tools/birth-analyst.command`.
 - Runbook: `docs/runbooks/d10-research-lab-ops.md`.
 
-### Phase B — adversarial critique + synthesis (pending)
+### Phase B — adversarial critique + synthesis (SHIPPED 2026-05-23)
 
 - Add `critic` (guardian, GREEN) + `lab_synthesizer` (researcher,
   GREEN) to trait_tree / genres / constitution_templates /
@@ -192,7 +194,7 @@ governance surface = different tool ceiling.
 - Birth scripts: `dev-tools/birth-critic.command`,
   `dev-tools/birth-lab-synthesizer.command`.
 
-### Phase C — debate moderation + hypothesis testing (pending)
+### Phase C — debate moderation + hypothesis testing (SHIPPED 2026-05-23)
 
 - Add `debate_moderator` (researcher, GREEN).
 - Two new builtin tools:
@@ -205,7 +207,7 @@ governance surface = different tool ceiling.
   via `delegate.v1`).
 - Birth script: `dev-tools/birth-debate-moderator.command`.
 
-### Phase D — cascade + umbrella + domain live (pending)
+### Phase D — cascade + umbrella + domain live (SHIPPED 2026-05-23)
 
 - No new roles or builtin tools.
 - Skill manifest: `research_lab.v1` (umbrella composition).
