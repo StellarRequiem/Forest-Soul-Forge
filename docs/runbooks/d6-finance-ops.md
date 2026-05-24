@@ -11,8 +11,8 @@ that lands D6 Phase A (this runbook will grow as Phases B–D ship).
 
 | Phase | New agent(s) | New builtin tool | Status |
 |---|---|---|---|
-| **A** | budget_analyst + risk_advisor | none — reuses existing | IN FLIGHT |
-| **B** | transaction_tracker + bill_steward | transaction_categorize.v1 + bill_recurrence_check.v1 | pending |
+| **A** | budget_analyst + risk_advisor | none — reuses existing | SHIPPED |
+| **B** | transaction_tracker + bill_steward | transaction_categorize.v1 + bill_recurrence_check.v1 | SHIPPED |
 | **C** | investment_researcher | investment_compare.v1 | pending |
 | **D** | (cascade + umbrella + live) | none | pending |
 

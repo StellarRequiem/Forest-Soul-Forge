@@ -3743,6 +3743,184 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  transaction_tracker:
+    # ADR-0092 Phase B — D6 Personal Finance Guardian transaction
+    # categorization role. Researcher genre, read_only ceiling.
+    # Dispatches transaction_categorize.v1 over operator-supplied
+    # transaction batches + operator-supplied category rules +
+    # composes categorization attestations tagged for
+    # budget_analyst + risk_advisor pickup. NEVER charges anything
+    # (manifest hard rule), NEVER composes burn-rate narratives
+    # (budget_analyst's lane), NEVER advises on investments
+    # (investment_researcher's lane). GREEN posture per ADR-0092
+    # Decision 1 — categorization is non-acting.
+    policies:
+      - id: forbid_transaction_execution
+        rule: forbid
+        triggers: [execute_trade, place_order, send_money, initiate_transfer, charge_account, pay_bill]
+        rationale: |
+          D6 manifest hard rule: D6 NEVER executes transactions.
+          The tracker categorizes; touching a bank/broker rail
+          would conflate categorization with action + bypass the
+          operator-only-on-actual-transaction discipline.
+      - id: forbid_burn_rate_composition
+        rule: forbid
+        triggers: [emit_burn_rate_report, compose_burn_rate_narrative]
+        rationale: |
+          Burn-rate composition is budget_analyst's exclusive lane
+          (D6 Phase A). The tracker categorizes individual
+          transactions + emits a categorization attestation;
+          composing a burn-rate narrative inline would conflate
+          per-transaction labeling with window-level synthesis +
+          bypass the analyst's baseline-vs-actual discipline.
+      - id: forbid_investment_advice
+        rule: forbid
+        triggers: [recommend_instrument, advise_buy, advise_sell, advise_allocation]
+        rationale: |
+          Investment advice is investment_researcher's exclusive
+          lane (D6 Phase C) — and even there, the researcher
+          composes side-by-side comparisons, NEVER recommends.
+          The tracker categorizes transactions; making an
+          instrument call would conflate categorization with
+          advisory discipline + violate the manifest's "info-
+          only, never advice" floor.
+      - id: require_categorization_attestation
+        rule: require
+        triggers: [emit_categorization, finalize_batch]
+        rationale: |
+          Every categorization batch emits a memory_write
+          attestation with (batch_slug, source_transaction_ids,
+          rule_corpus_hash, per_category_counts,
+          uncategorized_count, attestor, ts). Without the
+          attestation, downstream D6 roles + the operator can't
+          trace which transactions a categorization rests on +
+          which rules applied.
+      - id: require_chain_integrity_before_categorization
+        rule: require
+        triggers: [emit_categorization]
+        rationale: |
+          The categorization rests on memory + chain content
+          (rule corpus + prior categorizations). A categorization
+          attested on a broken chain inherits the brokenness +
+          its provenance can't be re-verified.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_categorization_external, post_transactions_to_external_service]
+        rationale: |
+          Categorization attestations + the transactions they
+          rest on are private/lineage scope. Personal finance is
+          sensitive. Operator-driven sharing (CPA, accountant)
+          is a separate explicit action; the tracker never
+          crosses the external boundary.
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - execute_trade
+      - place_order
+      - send_money
+      - initiate_transfer
+      - emit_burn_rate_report
+      - recommend_instrument
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the tracker as your categorization lane — the attestation is real; transaction execution stays operator-only per manifest hard rule."
+      - "Audit categorization attestations weekly — a tracker that consistently produces high uncategorized counts is a signal to extend the rule corpus."
+      - "Rule ordering matters — first match wins. Put high-amount or merchant-specific rules first; generic rules last."
+      - "Treat a chain_broken halt as an emergency — categorization attestations on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
+  bill_steward:
+    # ADR-0092 Phase B — D6 Personal Finance Guardian bill
+    # stewardship role. Researcher genre, read_only ceiling.
+    # Dispatches bill_recurrence_check.v1 over operator-supplied
+    # historical bill ledgers + composes recurrence + due-date
+    # attestations tagged for budget_analyst + d6→d2 cascade
+    # pickup. NEVER pays bills (manifest hard rule), NEVER fires
+    # reminders directly (D2's schedule_reminder is the fire-time
+    # lane via cascade), NEVER composes burn-rate narratives
+    # (budget_analyst's lane). GREEN posture per ADR-0092
+    # Decision 1 — recurrence detection is non-acting.
+    policies:
+      - id: forbid_bill_payment
+        rule: forbid
+        triggers: [pay_bill, execute_payment, send_money, initiate_transfer, charge_account]
+        rationale: |
+          D6 manifest hard rule: D6 NEVER pays bills or executes
+          transactions. The steward detects recurrence patterns
+          + projects due dates; touching a bill-pay rail would
+          conflate stewardship with action + bypass the
+          operator-only-on-actual-transaction discipline.
+      - id: forbid_direct_reminder_fire
+        rule: forbid
+        triggers: [fire_reminder, send_notification, schedule_alert]
+        rationale: |
+          Direct reminder firing is D2's schedule_reminder.v1
+          lane (ADR-0087). The steward composes the due-date
+          attestation + the d6→d2 cascade routes it; firing the
+          reminder inline would bypass the cascade discipline +
+          duplicate D2's TimeSteward responsibilities.
+      - id: forbid_burn_rate_composition
+        rule: forbid
+        triggers: [emit_burn_rate_report, compose_burn_rate_narrative]
+        rationale: |
+          Burn-rate composition is budget_analyst's exclusive lane
+          (D6 Phase A). The steward composes bill-cycle
+          attestations; emitting a burn-rate narrative inline
+          would conflate stewardship with window-level synthesis.
+      - id: require_recurrence_attestation
+        rule: require
+        triggers: [emit_recurrence_report, finalize_check]
+        rationale: |
+          Every recurrence check emits a memory_write attestation
+          with (ledger_slug, per_series verdicts, median_intervals,
+          next_due dates, missing_cycle_flags, source_bills,
+          attestor, ts). Without the attestation, the operator +
+          the d6→d2 cascade can't trace which bills a verdict
+          rests on or replay the projection.
+      - id: require_chain_integrity_before_attestation
+        rule: require
+        triggers: [emit_recurrence_report]
+        rationale: |
+          The attestation rests on memory + chain content (the
+          historical ledger). An attestation on a broken chain
+          inherits the brokenness + the d6→d2 cascade will
+          refuse it.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_attestation_external, post_bills_to_external_service]
+        rationale: |
+          Recurrence attestations + the bill ledger they rest on
+          are private/lineage scope. Operator-driven sharing is
+          a separate explicit action; the steward never crosses
+          the external boundary itself. The d6→d2 cascade routes
+          via internal handoff, not by external transmission.
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - pay_bill
+      - send_money
+      - fire_reminder
+      - emit_burn_rate_report
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the steward as your recurrence + due-date lane — the attestation is real; bill payment stays operator-only per manifest hard rule."
+      - "Audit recurrence attestations weekly — a steward that consistently flags missing_cycle on bills you actually paid is a signal to refresh the ledger ingestion."
+      - "The d6→d2 cascade (Phase D) routes due-date attestations into D2's schedule_reminder.v1 for fire-time delivery; the steward never fires reminders itself."
+      - "Treat a chain_broken halt as an emergency — recurrence attestations on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

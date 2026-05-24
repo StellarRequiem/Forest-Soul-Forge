@@ -1,0 +1,151 @@
+schema_version: 1
+name: bill_management
+version: '1'
+description: |
+  BillSteward-D6's primary skill. Dispatches
+  bill_recurrence_check.v1 over an operator-supplied historical
+  bill ledger, composes a structured recurrence + due-date
+  attestation the d6→d2 cascade (Phase D) picks up to seed D2's
+  schedule_reminder.v1.
+
+  Composition + attestation only — the steward NEVER pays bills
+  (manifest hard rule); NEVER fires reminders directly (D2's
+  schedule_reminder is the fire-time lane via cascade); NEVER
+  composes burn-rate narratives (budget_analyst's lane).
+  Recurrence attestations land in private memory tagged for
+  downstream pickup (bill_recurrence:${ledger_slug}).
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       currency + fiscal_year + timezone.
+    2. recall_prior_recurrence — memory_recall scope=private for
+       prior recurrence attestations on this ledger_slug. The
+       steward extends rather than duplicates.
+    3. recall_bill_ledger — memory_recall scope=lineage for the
+       most recent operator-supplied bill_ledger attestation.
+       The ledger is the source of truth — the operator refreshes
+       it when new bills arrive (CSV import or forest-finance
+       connector once it ships).
+    4. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end.
+    5. check_recurrence — bill_recurrence_check.v1 groups bills
+       by bill_slug, computes median intervals, classifies each
+       series (monthly / quarterly / annual / irregular /
+       insufficient_history), projects next-due dates, flags
+       missing-cycle anomalies. Read-only.
+    6. write_recurrence_attestation — memory_write scope=private
+       records the verdicts tagged for downstream pickup
+       (bill_recurrence:${ledger_slug} +
+       attestor:BillSteward-D6).
+
+  NEVER pays bills. forbid_bill_payment policy enforces this at
+  governance layer regardless of posture. The d6→d2 cascade
+  (Phase D) routes attestations to D2's schedule_reminder.v1 via
+  internal handoff, not by external transmission.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - bill_recurrence_check.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [ledger_slug, bills, today_iso]
+  properties:
+    ledger_slug:
+      type: string
+      description: >
+        Identifier this recurrence check binds to (e.g.
+        "bills-2026-05"). Used as the
+        bill_recurrence:${slug} memory tag.
+    today_iso:
+      type: string
+      description: >
+        Operator-supplied "today" anchor date (YYYY-MM-DD) in
+        Pacific time.
+    bills:
+      type: array
+      minItems: 1
+      maxItems: 1000
+      items:
+        type: object
+        required: [bill_slug, bill_date]
+        properties:
+          bill_slug: {type: string}
+          bill_date: {type: string}
+          amount: {type: number}
+          label: {type: string}
+    min_history:
+      type: integer
+      default: 2
+    day_drift_overrides:
+      type: object
+    operator_reason:
+      type: string
+      default: ""
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_prior_recurrence
+    tool: memory_recall.v1
+    args:
+      query: "bill_recurrence:${inputs.ledger_slug}"
+      mode: private
+      limit: 3
+
+  - id: recall_bill_ledger
+    tool: memory_recall.v1
+    args:
+      query: "bill_ledger"
+      mode: lineage
+      limit: 5
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: check_recurrence
+    tool: bill_recurrence_check.v1
+    args:
+      ledger_slug: ${inputs.ledger_slug}
+      bills: ${inputs.bills}
+      today_iso: ${inputs.today_iso}
+      min_history: ${inputs.min_history}
+      day_drift_overrides: ${inputs.day_drift_overrides}
+
+  - id: write_recurrence_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        Bill recurrence check ${inputs.ledger_slug}:
+        today=${inputs.today_iso}
+        series_count=${check_recurrence.out.summary.series_count}
+        matched=${check_recurrence.out.summary.matched_count}
+        irregular=${check_recurrence.out.summary.irregular_count}
+        insufficient=${check_recurrence.out.summary.insufficient_count}
+        missing_cycle=${check_recurrence.out.summary.missing_cycle_count}
+        series=${check_recurrence.out.series}
+        operator_reason=${inputs.operator_reason}
+        chain_status=${verify_chain_integrity.out.status}
+      layer: episodic
+      scope: private
+      tags:
+        - "d6_bill_recurrence"
+        - "bill_recurrence:${inputs.ledger_slug}"
+        - "attestor:BillSteward-D6"
+
+output:
+  ledger_slug: ${inputs.ledger_slug}
+  today_iso: ${inputs.today_iso}
+  series_count: ${check_recurrence.out.summary.series_count}
+  matched_count: ${check_recurrence.out.summary.matched_count}
+  missing_cycle_count: ${check_recurrence.out.summary.missing_cycle_count}
+  series: ${check_recurrence.out.series}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_entry_id: ${write_recurrence_attestation.out.entry_id}

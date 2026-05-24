@@ -3671,6 +3671,118 @@ tools:
     requires_human_approval: true
     archetype_tags: [routine_composer]
 
+  transaction_categorize.v1:
+    name: transaction_categorize
+    version: "1"
+    description: |
+      ADR-0092 Phase B — D6 Personal Finance Guardian deterministic
+      rule-based transaction categorizer. For each transaction the
+      tool walks operator-supplied rules in order; first match wins.
+      A rule matches when all its active predicates pass
+      (merchant_contains / description_contains / amount_min /
+      amount_max). Unmatched transactions fall to ``uncategorized``.
+      Read-only. The transaction_monitoring.v1 skill wraps this tool
+      with memory_recall + memory_write of the attestation; LLM-driven
+      anomaly narrative is layered separately. transaction_tracker
+      (D6) is the primary consumer. Same shape as D8's
+      framework_check.v1 — operator-supplied rule corpus +
+      deterministic apply.
+    input_schema:
+      type: object
+      required: [batch_slug, transactions, rules]
+      properties:
+        batch_slug:
+          type: string
+          description: "Identifier this categorization batch binds to (e.g. fiscal-month-2026-05)."
+        transactions:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [txn_id, amount]
+            properties:
+              txn_id: {type: string, maxLength: 200}
+              merchant: {type: string, maxLength: 500}
+              description: {type: string, maxLength: 500}
+              amount: {type: number}
+              currency: {type: string, maxLength: 500}
+        rules:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [category]
+            properties:
+              category: {type: string, maxLength: 200}
+              merchant_contains:
+                type: array
+                maxItems: 50
+                items: {type: string}
+              description_contains:
+                type: array
+                maxItems: 50
+                items: {type: string}
+              amount_min: {type: number}
+              amount_max: {type: number}
+    side_effects: read_only
+    archetype_tags: [transaction_tracker]
+
+  bill_recurrence_check.v1:
+    name: bill_recurrence_check
+    version: "1"
+    description: |
+      ADR-0092 Phase B — D6 Personal Finance Guardian deterministic
+      bill recurrence detector. Groups bills by ``bill_slug``,
+      computes the median interval between consecutive dates, +
+      classifies the series as monthly (30 ± 3d) / quarterly
+      (91 ± 3d) / annual (365 ± 10d) / irregular /
+      insufficient_history. Operator can override per-cycle
+      day_drift. Projects next_due_iso = last_date +
+      median_interval; flags missing_cycle_flag when
+      today_iso - last_date > median + drift. Read-only. The
+      bill_management.v1 skill wraps this tool with memory_recall +
+      memory_write of the due-date attestation. bill_steward (D6)
+      is the primary consumer. The d6→d2 cascade (Phase D) routes
+      detected due-date attestations into D2's schedule_reminder.v1
+      for fire-time delivery — D6 never queues a "pay the bill"
+      action.
+    input_schema:
+      type: object
+      required: [ledger_slug, bills, today_iso]
+      properties:
+        ledger_slug:
+          type: string
+          description: "Identifier for this recurrence check (e.g. bills-2026-05)."
+        today_iso:
+          type: string
+          description: "Operator-supplied 'today' anchor (YYYY-MM-DD)."
+        bills:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [bill_slug, bill_date]
+            properties:
+              bill_slug: {type: string, maxLength: 200}
+              bill_date: {type: string}
+              amount: {type: number}
+              label: {type: string, maxLength: 500}
+        min_history:
+          type: integer
+          minimum: 2
+          maximum: 100
+          default: 2
+        day_drift_overrides:
+          type: object
+          properties:
+            monthly: {type: integer, minimum: 0, maximum: 60}
+            quarterly: {type: integer, minimum: 0, maximum: 60}
+            annual: {type: integer, minimum: 0, maximum: 60}
+    side_effects: read_only
+    archetype_tags: [bill_steward]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
@@ -4708,6 +4820,43 @@ archetypes:
       # execution tools (manifest hard rule). No operator-blocking
       # tools (operator decides — same discipline as reality_anchor).
       # Pure anti-recommendation kit.
+
+  # ---- ADR-0092 Phase B — D6 Personal Finance Guardian (transactions + bills) ----
+  # transaction_tracker + bill_steward kits. Both researcher-genre,
+  # both read_only. Each role's load-bearing tool is the matching
+  # Phase B builtin (transaction_categorize / bill_recurrence_check);
+  # everything else mirrors the budget_analyst's read_only support
+  # set.
+  transaction_tracker:
+    standard_tools:
+      - transaction_categorize.v1     # ADR-0092 Phase B — the load-bearing deterministic per-batch categorizer
+      - llm_think.v1                  # anomaly narrative + uncategorized-cohort reasoning
+      - memory_recall.v1              # walk recent transaction batches + rule corpora + prior categorizations
+      - memory_write.v1               # write categorization attestations tagged for budget_analyst + risk_advisor pickup
+      - delegate.v1                   # hand off to budget_analyst / risk_advisor / operator
+      - audit_chain_verify.v1         # chain integrity before publishing attestation
+      - text_summarize.v1             # condense long transaction sets into per-category synopses
+      - operator_profile_read.v1      # ADR-0068 — currency + areas_of_focus shape categorization narrative
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index (prior categorization decisions)
+      # No web_fetch. No shell_exec. No code_edit. No transaction-
+      # execution tools (manifest hard rule). No investment-research
+      # tools (investment_researcher's lane). Pure categorization kit.
+
+  bill_steward:
+    standard_tools:
+      - bill_recurrence_check.v1      # ADR-0092 Phase B — the load-bearing deterministic recurrence detector
+      - llm_think.v1                  # due-date narrative + recurrence-classification reasoning
+      - memory_recall.v1              # walk historical bill ledger + prior recurrence attestations
+      - memory_write.v1               # write recurrence + due-date attestations tagged for d6→d2 cascade pickup
+      - delegate.v1                   # hand off to budget_analyst / operator / cascade to D2 schedule_reminder
+      - audit_chain_verify.v1         # chain integrity before publishing attestation
+      - text_summarize.v1             # condense long bill ledgers into per-series synopses
+      - operator_profile_read.v1      # ADR-0068 — currency + fiscal_year frame recurrence narrative
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index (prior bill patterns)
+      # No web_fetch. No shell_exec. No code_edit. No bill-pay
+      # tools (manifest hard rule — D2 reminder is the fire-time
+      # lane via cascade). No transaction-execution tools.
+      # Pure recurrence-detection + due-date attestation kit.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

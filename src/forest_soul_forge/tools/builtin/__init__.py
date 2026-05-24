@@ -96,6 +96,12 @@ from forest_soul_forge.tools.builtin.home_state_snapshot import (
 from forest_soul_forge.tools.builtin.routine_compose import (
     RoutineComposeTool,
 )
+from forest_soul_forge.tools.builtin.transaction_categorize import (
+    TransactionCategorizeTool,
+)
+from forest_soul_forge.tools.builtin.bill_recurrence_check import (
+    BillRecurrenceCheckTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -675,3 +681,25 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # devices directly. Same queue-driven pattern as D7's
     # publish_schedule.v1 + D9's spaced_repetition_schedule.v1.
     registry.register(RoutineComposeTool())
+    # ADR-0092 Phase B — transaction_categorize.v1. Deterministic
+    # rule-based categorization over an operator-supplied
+    # transaction batch + operator-supplied category rules
+    # (merchant / description / amount predicates; first-match
+    # wins). Unmatched transactions fall to ``uncategorized``.
+    # Read-only. transaction_tracker (D6) is the primary
+    # consumer; the wrapping transaction_monitoring.v1 skill
+    # layers memory_recall (recent rule corpora + prior
+    # categorizations) + memory_write of the attestation +
+    # LLM-driven anomaly narrative on top.
+    registry.register(TransactionCategorizeTool())
+    # ADR-0092 Phase B — bill_recurrence_check.v1. Deterministic
+    # recurrence detection (monthly / quarterly / annual ±
+    # operator-tolerable day_drift) over a historical bill
+    # ledger; flags missing-cycle anomalies + projects next-due
+    # dates. Read-only. bill_steward (D6) is the primary
+    # consumer; the wrapping bill_management.v1 skill layers
+    # memory_recall + memory_write of the due-date attestation.
+    # The d6→d2 cascade (Phase D) routes detected due-date
+    # attestations into D2's schedule_reminder.v1 for fire-time
+    # delivery — D6 never queues a "pay the bill" action.
+    registry.register(BillRecurrenceCheckTool())

@@ -1435,6 +1435,44 @@ roles:
       emotional: 0.6    # anti-recommendation tone is read-then-respond
       embodiment: 0.3
 
+  # ---- ADR-0092 Phase B — D6 Personal Finance Guardian (transactions + bills) ----
+  # transaction_tracker: researcher-genre transaction categorization
+  # role. Dispatches transaction_categorize.v1 over operator-supplied
+  # batches + operator-supplied category rules + composes
+  # categorization attestations. NEVER charges anything (manifest
+  # hard rule); NEVER composes burn-rate narratives
+  # (budget_analyst's lane); NEVER advises on investments
+  # (investment_researcher's lane). GREEN posture per ADR-0092
+  # Decision 1 — categorization is non-acting.
+  transaction_tracker:
+    description: "Transaction categorization researcher. Dispatches transaction_categorize.v1 over operator-supplied transaction batches + operator-supplied category rules + composes categorization attestations tagged for budget_analyst + risk_advisor pickup. NEVER charges anything (manifest hard rule) + NEVER composes burn-rate narratives (budget_analyst's lane) + NEVER advises on investments (investment_researcher's lane). GREEN posture. Genre: researcher. ADR-0092 Phase B."
+    domain_weights:
+      security: 1.3     # transaction visibility carries operator-financial-privacy floor
+      audit: 2.6        # every categorization attests to source transactions + matched rules + uncategorized cohort
+      cognitive: 2.0    # rule application + uncategorized-cohort pattern reasoning
+      communication: 1.6 # attestations are operator + budget_analyst + risk_advisor consumed
+      emotional: 0.4    # categorization framing is read-then-respond
+      embodiment: 0.3
+
+  # bill_steward: researcher-genre bill stewardship role. Dispatches
+  # bill_recurrence_check.v1 over operator-supplied bill ledgers +
+  # composes recurrence + due-date attestations the d6→d2 cascade
+  # picks up as schedule_reminder seeds. NEVER pays bills (manifest
+  # hard rule); NEVER fires reminders directly (D2's
+  # schedule_reminder is the fire-time lane via cascade); NEVER
+  # composes burn-rate narratives (budget_analyst's lane). GREEN
+  # posture per ADR-0092 Decision 1 — recurrence detection is
+  # non-acting.
+  bill_steward:
+    description: "Bill stewardship researcher. Dispatches bill_recurrence_check.v1 over operator-supplied historical bill ledgers + composes recurrence + due-date attestations tagged for budget_analyst pickup + d6→d2 cascade into D2's schedule_reminder. NEVER pays bills (manifest hard rule) + NEVER fires reminders directly (D2's schedule_reminder is the fire-time lane via cascade) + NEVER composes burn-rate narratives (budget_analyst's lane). GREEN posture. Genre: researcher. ADR-0092 Phase B."
+    domain_weights:
+      security: 1.4     # bill ledger visibility carries operator-financial-privacy floor
+      audit: 2.7        # every due-date attests to source ledger + cycle classification + median interval + drift
+      cognitive: 2.0    # recurrence classification + median-interval reasoning
+      communication: 1.7 # attestations are operator + d2 schedule_reminder consumed via cascade
+      emotional: 0.5    # bill framing is read-then-respond
+      embodiment: 0.3
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so
