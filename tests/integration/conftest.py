@@ -59,6 +59,22 @@ import pytest
 from forest_soul_forge.daemon.config import DaemonSettings
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Register tier markers used by test_d10_research_tiered.py.
+
+    The repo-wide ``addopts = --strict-markers`` (pyproject.toml) rejects
+    unknown markers. Each tier of the D10 integration test is
+    independently runnable via ``-m tier1`` … ``-m tier5``; without
+    registration here those selections would error rather than filter.
+    """
+    for tier in ("tier1", "tier2", "tier3", "tier4", "tier5"):
+        config.addinivalue_line(
+            "markers",
+            f"{tier}: D10 research-lab tiered integration test, "
+            f"tier {tier[-1]} of 5",
+        )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _disable_b148_token_for_integration(tmp_path_factory):
     """Strip the B148 auto-token so integration tests can hit
