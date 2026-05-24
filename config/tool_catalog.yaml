@@ -3783,6 +3783,57 @@ tools:
     side_effects: read_only
     archetype_tags: [bill_steward]
 
+  investment_compare.v1:
+    name: investment_compare
+    version: "1"
+    description: |
+      ADR-0092 Phase C — D6 Personal Finance Guardian deterministic
+      side-by-side comparison composer. Walks operator-supplied
+      option records + operator-supplied dimensions (each tagged
+      lower_is_better / higher_is_better / info_only) + emits
+      per-dimension winners + per-option deltas + missing-data
+      gaps. Tie-breaking on higher_is_better is alphabetically-
+      first-slug for determinism. NEVER advises which option to
+      pick — the deliverable is the comparison table; operator
+      decides. Read-only. investment_researcher (D6) is the
+      primary consumer; the wrapping investment_research.v1 skill
+      layers memory_recall + memory_write of the attestation +
+      LLM-driven narrative context. Same info-only discipline as
+      D10's citation_graph_build.v1.
+    input_schema:
+      type: object
+      required: [comparison_slug, options, dimensions]
+      properties:
+        comparison_slug:
+          type: string
+          description: "Identifier this comparison binds to (e.g. index-funds-2026-05)."
+        options:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required: [option_slug, fields]
+            properties:
+              option_slug: {type: string, maxLength: 200}
+              label: {type: string, maxLength: 500}
+              fields: {type: object}
+        dimensions:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            type: object
+            required: [field, class]
+            properties:
+              field: {type: string, maxLength: 500}
+              class:
+                type: string
+                enum: [lower_is_better, higher_is_better, info_only]
+              label: {type: string, maxLength: 500}
+    side_effects: read_only
+    archetype_tags: [investment_researcher]
+
 # Per-archetype standard kits. Each role's kit is the default tool
 # surface for a freshly-birthed agent of that role; per-request
 # tools_add / tools_remove on /birth or /spawn override it.
@@ -4857,6 +4908,33 @@ archetypes:
       # tools (manifest hard rule — D2 reminder is the fire-time
       # lane via cascade). No transaction-execution tools.
       # Pure recurrence-detection + due-date attestation kit.
+
+  # ---- ADR-0092 Phase C — D6 Personal Finance Guardian (investment research) ----
+  # investment_researcher kit. Researcher-genre, read_only.
+  # Load-bearing tool is investment_compare.v1; everything else
+  # mirrors the budget_analyst's read_only support set. NEVER
+  # advises — composes side-by-side comparison + the operator
+  # decides. Manifest's "info-only, never advice" floor is
+  # enforced both at the constitution layer
+  # (forbid_investment_advice) and at the tool layer (the tool
+  # explicitly refuses to emit a "recommended option" field).
+  investment_researcher:
+    standard_tools:
+      - investment_compare.v1         # ADR-0092 Phase C — the load-bearing deterministic side-by-side comparator
+      - llm_think.v1                  # research narrative + cross-option context reasoning
+      - memory_recall.v1              # walk operator-supplied option corpora + prior research briefs
+      - memory_write.v1               # write research-brief attestations to private memory
+      - delegate.v1                   # hand off to budget_analyst / operator
+      - audit_chain_verify.v1         # chain integrity before publishing brief
+      - text_summarize.v1             # condense long option sets into per-option synopses
+      - operator_profile_read.v1      # ADR-0068 — currency + fiscal_year + areas_of_focus frame research context
+      - personal_recall.v1            # ADR-0076 T4 — hybrid retrieval over the personal index (prior research, prior preferences)
+      # No web_fetch (D6 has no outbound network surface — option
+      # records arrive via memory_writes from operator/connector).
+      # No shell_exec. No code_edit. No transaction-execution tools
+      # (manifest hard rule). NO recommendation surface — the tool
+      # emits comparison + the role attests; nothing in this kit
+      # composes a "buy X" verdict.
 
   # ---- ADR-0085 Phase B — D8 Compliance scanner -------------------------
   # compliance_scanner kit: framework_check.v1 + the standard

@@ -1473,6 +1473,26 @@ roles:
       emotional: 0.5    # bill framing is read-then-respond
       embodiment: 0.3
 
+  # ---- ADR-0092 Phase C — D6 Personal Finance Guardian (investment research) ----
+  # investment_researcher: researcher-genre investment research role.
+  # Dispatches investment_compare.v1 over operator-supplied option
+  # records + composes side-by-side comparison attestations. NEVER
+  # advises which option to pick (manifest's "info-only, never
+  # advice" floor); NEVER executes trades (manifest hard rule);
+  # NEVER composes burn-rate narratives (budget_analyst's lane);
+  # NEVER categorizes transactions (transaction_tracker's lane).
+  # GREEN posture per ADR-0092 Decision 1 — comparison composition
+  # is non-acting and info-only.
+  investment_researcher:
+    description: "Investment research researcher. Dispatches investment_compare.v1 over operator-supplied option records + composes side-by-side comparison attestations for operator pickup. NEVER advises which option to pick (manifest's 'info-only, never advice' floor) + NEVER executes trades (manifest hard rule) + NEVER composes burn-rate narratives (budget_analyst's lane) + NEVER categorizes transactions (transaction_tracker's lane). GREEN posture. Genre: researcher. ADR-0092 Phase C."
+    domain_weights:
+      security: 1.2     # investment-option corpus visibility carries operator-financial-privacy floor
+      audit: 2.6        # every comparison attests to source options + dimensions + winners + deltas
+      cognitive: 2.2    # cross-option reasoning + dimension-tradeoff framing without advisory verdict
+      communication: 1.7 # comparisons are operator-facing prose
+      emotional: 0.4    # research framing is read-then-respond
+      embodiment: 0.3
+
   # ============================================================
   # ADR-0044 Burst 124 — role expansion arc (24 new roles)
   # Wires the previously-aspirational roles in genres.yaml so

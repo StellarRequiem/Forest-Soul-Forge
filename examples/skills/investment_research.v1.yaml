@@ -1,0 +1,159 @@
+schema_version: 1
+name: investment_research
+version: '1'
+description: |
+  InvestmentResearcher-D6's primary skill. Dispatches
+  investment_compare.v1 over an operator-supplied set of
+  investment option records + operator-supplied dimensions,
+  composes a structured side-by-side comparison attestation
+  the operator picks up. The deliverable is the comparison —
+  the researcher NEVER recommends which option to choose.
+
+  Composition + attestation only — the researcher NEVER advises
+  (manifest's "info-only, never advice" floor); NEVER executes
+  trades (manifest hard rule); NEVER composes burn-rate
+  narratives (budget_analyst's lane); NEVER categorizes
+  transactions (transaction_tracker's lane). Research-brief
+  attestations land in private memory tagged for operator
+  pickup (investment_brief:${comparison_slug}).
+
+  Six-step pipeline:
+    1. operator_context — operator_profile_read fetches
+       currency + fiscal_year + areas_of_focus. Lens for the
+       brief framing (a "saving for house" focus surfaces
+       expense-ratio + holding-period dimensions more
+       prominently than a "retirement" focus).
+    2. recall_option_corpus — memory_recall scope=lineage for
+       the operator-supplied option_corpus attestation.
+    3. recall_prior_briefs — memory_recall scope=private for
+       prior briefs on this comparison_slug. The researcher
+       extends rather than duplicates.
+    4. verify_chain_integrity — audit_chain_verify confirms the
+       chain is hash-linked end-to-end.
+    5. compare_options — investment_compare.v1 walks the option
+       set deterministically against operator-supplied
+       dimensions; emits per-dimension winners + per-option
+       deltas + missing-data flags. Read-only.
+    6. write_brief_attestation — memory_write scope=private
+       records the brief tagged for operator pickup
+       (investment_brief:${comparison_slug} +
+       attestor:InvestmentResearcher-D6).
+
+  NEVER advises. forbid_investment_advice policy enforces the
+  manifest's info-only floor at governance layer regardless of
+  posture. The investment_compare.v1 tool itself refuses to
+  emit a "recommended option" field — same discipline at both
+  layers.
+
+requires:
+  - memory_recall.v1
+  - memory_write.v1
+  - audit_chain_verify.v1
+  - investment_compare.v1
+  - operator_profile_read.v1
+
+inputs:
+  type: object
+  required: [comparison_slug, options, dimensions]
+  properties:
+    comparison_slug:
+      type: string
+      description: >
+        Identifier this comparison binds to (e.g.
+        "index-funds-2026-05"). Used as the
+        investment_brief:${slug} memory tag.
+    options:
+      type: array
+      minItems: 1
+      maxItems: 50
+      items:
+        type: object
+        required: [option_slug, fields]
+        properties:
+          option_slug: {type: string}
+          label: {type: string}
+          fields: {type: object}
+    dimensions:
+      type: array
+      minItems: 1
+      maxItems: 30
+      items:
+        type: object
+        required: [field, class]
+        properties:
+          field: {type: string}
+          class:
+            type: string
+            enum: [lower_is_better, higher_is_better, info_only]
+          label: {type: string}
+    operator_reason:
+      type: string
+      default: ""
+      description: >
+        Audit-readable prose recorded in the attestation.
+
+steps:
+  - id: operator_context
+    tool: operator_profile_read.v1
+    args: {}
+
+  - id: recall_option_corpus
+    tool: memory_recall.v1
+    args:
+      query: "option_corpus"
+      mode: lineage
+      limit: 5
+
+  - id: recall_prior_briefs
+    tool: memory_recall.v1
+    args:
+      query: "investment_brief:${inputs.comparison_slug}"
+      mode: private
+      limit: 3
+
+  - id: verify_chain_integrity
+    tool: audit_chain_verify.v1
+    args:
+      max_unknown_to_report: 20
+
+  - id: compare_options
+    tool: investment_compare.v1
+    args:
+      comparison_slug: ${inputs.comparison_slug}
+      options: ${inputs.options}
+      dimensions: ${inputs.dimensions}
+
+  - id: write_brief_attestation
+    tool: memory_write.v1
+    args:
+      content: |
+        Investment research brief ${inputs.comparison_slug}:
+        option_count=${compare_options.out.option_count}
+        dimension_count=${compare_options.out.dimension_count}
+        compared_dimensions=${compare_options.out.summary.compared_dimension_count}
+        missing_data_cells=${compare_options.out.summary.total_missing_data_cells}
+        dimensions=${compare_options.out.dimensions}
+        options=${compare_options.out.options}
+        operator_reason=${inputs.operator_reason}
+        chain_status=${verify_chain_integrity.out.status}
+
+        NOTE: this brief surfaces winners + deltas per dimension.
+        The buy/hold/sell decision stays operator-only per the
+        D6 manifest's info-only, never-advice floor.
+      layer: episodic
+      scope: private
+      tags:
+        - "d6_investment_brief"
+        - "investment_brief:${inputs.comparison_slug}"
+        - "attestor:InvestmentResearcher-D6"
+
+output:
+  comparison_slug: ${inputs.comparison_slug}
+  option_count: ${compare_options.out.option_count}
+  dimension_count: ${compare_options.out.dimension_count}
+  compared_dimension_count: ${compare_options.out.summary.compared_dimension_count}
+  missing_data_cells: ${compare_options.out.summary.total_missing_data_cells}
+  dimensions: ${compare_options.out.dimensions}
+  options: ${compare_options.out.options}
+  chain_status: ${verify_chain_integrity.out.status}
+  attestation_entry_id: ${write_brief_attestation.out.entry_id}

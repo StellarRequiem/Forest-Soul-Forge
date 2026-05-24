@@ -3921,6 +3921,107 @@ role_base:
       max_profile_deviation: 0
       on_drift: halt
 
+  investment_researcher:
+    # ADR-0092 Phase C — D6 Personal Finance Guardian investment
+    # research role. Researcher genre, read_only ceiling.
+    # Dispatches investment_compare.v1 over operator-supplied
+    # investment option records + composes side-by-side
+    # comparison attestations for operator pickup. NEVER advises
+    # which option to pick (manifest's "info-only, never advice"
+    # floor — the load-bearing constitutional discipline for D6),
+    # NEVER executes trades (manifest hard rule), NEVER composes
+    # burn-rate narratives (budget_analyst's lane), NEVER
+    # categorizes transactions (transaction_tracker's lane).
+    # GREEN posture per ADR-0092 Decision 1 — comparison
+    # composition is non-acting + info-only.
+    policies:
+      - id: forbid_investment_advice
+        rule: forbid
+        triggers: [recommend_instrument, advise_buy, advise_sell, advise_allocation, emit_buy_verdict, emit_sell_verdict]
+        rationale: |
+          D6 manifest's load-bearing floor: investment_research
+          is "info-only, never advice." The researcher composes
+          side-by-side comparisons + per-dimension winners; it
+          NEVER recommends which option the operator should
+          choose. The investment_compare.v1 tool itself refuses
+          to emit a "recommended option" field — same discipline
+          at both layers.
+      - id: forbid_transaction_execution
+        rule: forbid
+        triggers: [execute_trade, place_order, send_money, initiate_transfer, charge_account]
+        rationale: |
+          D6 manifest hard rule: D6 NEVER executes transactions.
+          The researcher composes research briefs; touching a
+          broker rail would conflate research with action +
+          bypass the operator-only-on-actual-transaction
+          discipline.
+      - id: forbid_burn_rate_composition
+        rule: forbid
+        triggers: [emit_burn_rate_report, compose_burn_rate_narrative]
+        rationale: |
+          Burn-rate composition is budget_analyst's exclusive lane
+          (D6 Phase A). The researcher composes investment briefs;
+          emitting burn-rate framing inline would conflate
+          research with window-level finance analysis.
+      - id: forbid_transaction_categorization
+        rule: forbid
+        triggers: [categorize_transaction, label_merchant]
+        rationale: |
+          Transaction categorization is transaction_tracker's
+          exclusive lane (D6 Phase B). The researcher composes
+          investment briefs; categorizing transactions inline
+          would conflate research with categorization discipline.
+      - id: require_research_attestation
+        rule: require
+        triggers: [emit_investment_brief, finalize_comparison]
+        rationale: |
+          Every research brief emits a memory_write attestation
+          with (comparison_slug, source_option_ids,
+          dimension_set, per_dimension_winners,
+          per_option_deltas, missing_data_cells, attestor, ts).
+          Without the attestation, the operator can't trace
+          which options + dimensions a brief rests on or replay
+          the comparison.
+      - id: require_chain_integrity_before_brief
+        rule: require
+        triggers: [emit_investment_brief]
+        rationale: |
+          The brief rests on memory + chain content (option
+          corpus + prior research). A brief attested on a broken
+          chain inherits the brokenness + its provenance can't
+          be re-verified.
+      - id: forbid_external_disclosure
+        rule: forbid
+        triggers: [send_brief_external, post_research_to_external_service]
+        rationale: |
+          Research briefs + the option corpora they rest on are
+          private/lineage scope. Operator-driven sharing
+          (financial advisor consultation) is a separate
+          explicit action; the researcher never crosses the
+          external boundary itself.
+    risk_thresholds:
+      auto_halt_risk: 0.70
+      escalate_risk: 0.35
+      min_confidence_to_act: 0.55
+    out_of_scope:
+      - recommend_instrument
+      - advise_buy
+      - execute_trade
+      - place_order
+      - emit_burn_rate_report
+      - categorize_transaction
+      - send_message_external
+      - modify_production_systems
+    operator_duties:
+      - "Treat the researcher as your comparison lane — the attestation surfaces winners + deltas; the BUY/SELL decision stays operator-only per manifest's 'info-only, never advice' floor."
+      - "Refresh the option corpus when new candidates surface — the researcher only sees what you've fed in via memory_write."
+      - "Audit research attestations for missing_data_cells — a high missing-cell count is a signal the option corpus needs richer fields before the comparison is trustworthy."
+      - "Treat a chain_broken halt as an emergency — research briefs on a broken chain inherit the brokenness."
+    drift_monitoring:
+      profile_hash_check: per_turn
+      max_profile_deviation: 0
+      on_drift: halt
+
   domain_orchestrator:
     # ADR-0067 T5 — Cross-Domain Orchestrator singleton role.
     # Companion genre, read_only ceiling. Sits behind the

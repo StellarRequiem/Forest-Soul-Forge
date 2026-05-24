@@ -102,6 +102,9 @@ from forest_soul_forge.tools.builtin.transaction_categorize import (
 from forest_soul_forge.tools.builtin.bill_recurrence_check import (
     BillRecurrenceCheckTool,
 )
+from forest_soul_forge.tools.builtin.investment_compare import (
+    InvestmentCompareTool,
+)
 from forest_soul_forge.tools.builtin.honeypot_local import HoneypotLocalTool
 from forest_soul_forge.tools.builtin.isolate_process import IsolateProcessTool
 from forest_soul_forge.tools.builtin.jit_access import JitAccessTool
@@ -703,3 +706,15 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # attestations into D2's schedule_reminder.v1 for fire-time
     # delivery — D6 never queues a "pay the bill" action.
     registry.register(BillRecurrenceCheckTool())
+    # ADR-0092 Phase C — investment_compare.v1. Deterministic
+    # side-by-side comparison composer over operator-supplied
+    # option records: per-dimension winners + per-option deltas
+    # across lower_is_better / higher_is_better numeric classes
+    # + info_only context fields. NEVER advises which option to
+    # pick — the deliverable is the comparison table; the operator
+    # decides. Read-only. investment_researcher (D6) is the
+    # primary consumer; the wrapping investment_research.v1 skill
+    # layers memory_recall + memory_write of the attestation +
+    # LLM-driven narrative context on top. Same info-only
+    # discipline as D10's citation_graph_build.v1.
+    registry.register(InvestmentCompareTool())

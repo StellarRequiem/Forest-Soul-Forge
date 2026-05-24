@@ -13,7 +13,7 @@ that lands D6 Phase A (this runbook will grow as Phases B–D ship).
 |---|---|---|---|
 | **A** | budget_analyst + risk_advisor | none — reuses existing | SHIPPED |
 | **B** | transaction_tracker + bill_steward | transaction_categorize.v1 + bill_recurrence_check.v1 | SHIPPED |
-| **C** | investment_researcher | investment_compare.v1 | pending |
+| **C** | investment_researcher | investment_compare.v1 | SHIPPED |
 | **D** | (cascade + umbrella + live) | none | pending |
 
 Each phase = one commit + one push, so the operator can verify
