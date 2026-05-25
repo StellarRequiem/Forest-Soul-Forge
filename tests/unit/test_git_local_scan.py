@@ -79,8 +79,10 @@ def test_validate_rejects_bad_max_commits():
 
 def test_execute_on_clean_repo_passes(tmp_path):
     """A fresh repo with .gitignore + a benign commit + no upstream
-    should return non-critical findings only (the gitignore missing-
-    pattern INFOs are the typical noise; nothing CRITICAL/HIGH).
+    should produce no CRITICAL findings, no committed secrets, and
+    no missing gitignore patterns. ADR-0084 Tier 1 escalated unsigned
+    commits to HIGH; the test rig doesn't sign, so one HIGH finding
+    from the signing check is expected and explicitly carved out.
     """
     repo = _make_repo(tmp_path)
     # Healthy .gitignore covering the operator-secret patterns
@@ -93,13 +95,16 @@ def test_execute_on_clean_repo_passes(tmp_path):
     tool = GitLocalScanTool()
     result = asyncio.run(tool.execute({}, _ctx_for(repo)))
     out = result.output
-    # No critical/high findings
+    # No critical findings on a clean repo.
     assert out["summary"]["critical_findings"] == 0
-    assert out["summary"]["high_findings"] == 0
-    # Secrets scan found nothing
+    # Secrets scan found nothing.
     assert out["secrets"]["findings"] == []
-    # Gitignore: all expected patterns present
+    # Gitignore: all expected patterns present.
     assert out["gitignore"]["missing_patterns"] == []
+    # Signing check flags the unsigned commit as the only HIGH.
+    # Anything beyond that on a "clean" repo is a regression.
+    assert out["signing"]["unsigned_count"] >= 1
+    assert out["summary"]["high_findings"] == out["signing"]["unsigned_count"]
 
 
 def test_execute_detects_committed_github_pat(tmp_path):

@@ -330,7 +330,11 @@ def _run_decrypt_event(args: argparse.Namespace) -> int:
 
     config = EncryptionConfig(master_key=master_key)
     try:
-        plaintext = decrypt_event_data(target_entry, config)
+        # decrypt_event_data wants the envelope (``alg``/``kid``/
+        # ``nonce``/``ct``), not the wrapping entry. The on-disk
+        # encrypted entry carries that envelope under the
+        # ``encryption`` key alongside plaintext seq/prev_hash/etc.
+        plaintext = decrypt_event_data(target_entry["encryption"], config)
     except Exception as e:  # noqa: BLE001
         print(
             f"decrypt failed for seq={seq_target}: {type(e).__name__}: {e}",
@@ -500,12 +504,19 @@ def _rotate_audit_chain(
             continue
         entry = json.loads(s)
         if is_encrypted_entry(entry):
-            plaintext = decrypt_event_data(entry, old_cfg)
+            # decrypt/encrypt_event_data work on the envelope and the
+            # plaintext event_data respectively, not on the wrapping
+            # entry. Decrypt under the old key, re-encrypt under the
+            # new one, and stitch the new envelope back into the
+            # entry's "encryption" slot so the rest of the entry
+            # (seq, prev_hash, entry_hash) survives byte-identical.
+            plaintext = decrypt_event_data(entry["encryption"], old_cfg)
+            new_envelope = encrypt_event_data(plaintext, new_cfg)
             new_entry = dict(entry)
-            new_entry.pop("encryption", None)
-            new_entry["event_data"] = plaintext
-            new_entry = encrypt_event_data(new_entry, new_cfg)
-            rotated_lines.append(json.dumps(new_entry, sort_keys=True))
+            new_entry["encryption"] = new_envelope
+            rotated_lines.append(
+                json.dumps(new_entry, sort_keys=True, separators=(",", ":"))
+            )
         else:
             # Plaintext entries (pre-T3 era) stay plaintext per ADR
             # Decision 6 — re-encrypting them would change entry_hash

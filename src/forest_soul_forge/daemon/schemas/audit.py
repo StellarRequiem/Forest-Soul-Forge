@@ -21,6 +21,14 @@ class AuditEventOut(BaseModel):
     instance_id: str | None
     event_type: str
     event_json: str
+    # Spec §2.1 (kernel-api-v0.6) requires the structured object form
+    # alongside the serialized form. ``event_json`` is the historical
+    # field (string) preserved for backwards compatibility; readers
+    # that follow the spec consume ``event_data``.
+    event_data: dict[str, Any] | None = None
+    # Spec §2.1 + §2.2 — every entry carries prev_hash so the chain
+    # integrity check can validate linkage from the API alone.
+    prev_hash: str | None = None
     entry_hash: str
 
 class AuditListOut(BaseModel):

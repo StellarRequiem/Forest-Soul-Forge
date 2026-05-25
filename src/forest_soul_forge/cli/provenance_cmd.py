@@ -178,17 +178,25 @@ def _run_list(args: argparse.Namespace) -> int:
 
     # Load both. A missing file isn't fatal — load_*() returns an
     # empty config so the operator can see "no preferences yet".
+    # Both loaders return ``(config, errors)``; we surface the
+    # config to the rest of the printer and report soft errors to
+    # stderr so an operator listing a partially-malformed YAML still
+    # sees the loadable entries.
     try:
-        prefs = load_preferences(pref_path)
+        prefs, pref_errors = load_preferences(pref_path)
     except BehaviorProvenanceError as e:
         print(f"error loading preferences: {e}", file=sys.stderr)
         return 2
+    for msg in pref_errors:
+        print(f"preferences: {msg}", file=sys.stderr)
 
     try:
-        rules = load_learned_rules(rules_path)
+        rules, rule_errors = load_learned_rules(rules_path)
     except BehaviorProvenanceError as e:
         print(f"error loading learned rules: {e}", file=sys.stderr)
         return 2
+    for msg in rule_errors:
+        print(f"learned rules: {msg}", file=sys.stderr)
 
     def _pref_to_dict(p):
         return {

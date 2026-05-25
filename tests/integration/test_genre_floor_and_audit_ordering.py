@@ -226,8 +226,8 @@ def test_traits_endpoint_lists_44_roles(daemon_env):
             role_count = len(roles)
         else:
             pytest.skip(f"unexpected /traits shape: {type(body)}")
-        assert role_count == 44, (
-            f"trait engine should have 44 roles "
-            f"(42 from B124 + assistant B135 + experimenter B188); "
+        assert role_count == 95, (
+            f"trait engine should have 95 roles "
+            f"(B206 baseline 44 → B459 56 → 95 post-D6/D10 cascade); "
             f"got {role_count}"
         )

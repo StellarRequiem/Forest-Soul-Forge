@@ -155,7 +155,12 @@ class TestHealth:
         # (Burst 235, ADR-0053 T1). Daemon reports the registry's
         # live schema_version; assertion tracks the live value
         # rather than a stale literal.
-        assert body["schema_version"] == 21
+        # Track the live SCHEMA_VERSION rather than hard-coding —
+        # the previous literal (21) drifted as v22/v23 landed.
+        from forest_soul_forge.registry.schema import (
+            SCHEMA_VERSION as REGISTRY_SCHEMA_VERSION,
+        )
+        assert body["schema_version"] == REGISTRY_SCHEMA_VERSION
         assert body["canonical_contract"] == "artifacts-authoritative"
         assert body["active_provider"] == "local"
         assert body["provider"]["status"] == "ok"

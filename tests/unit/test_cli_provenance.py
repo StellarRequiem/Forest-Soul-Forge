@@ -209,6 +209,7 @@ def test_list_json_output(parser, tmp_path):
             "domain": "memory",
             "proposer_agent_dna": "dna_abc",
             "created_at": "2026-05-02T00:00:00+00:00",
+            "status": "pending_activation",
         },
     ])
     args = parser.parse_args([

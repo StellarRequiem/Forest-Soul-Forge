@@ -19,6 +19,11 @@ class AgentOut(BaseModel):
     dna: str
     dna_full: str
     role: str
+    # Spec kernel-api-v0.6 §4.1 lists ``genre`` alongside role as a
+    # required top-level field. Derived from the role's genre on
+    # serialization; None for legacy rows whose role isn't claimed
+    # by any genre at the time the payload is built.
+    genre: str | None = None
     agent_name: str
     parent_instance: str | None = None
     owner_id: str | None = None

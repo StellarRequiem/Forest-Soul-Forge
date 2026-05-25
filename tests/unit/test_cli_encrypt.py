@@ -57,16 +57,21 @@ def _make_args(**kwargs):
 def test_summarize_audit_chain_counts_mixed(tmp_path):
     chain = tmp_path / "audit_chain.jsonl"
     cfg = EncryptionConfig(master_key=b"\xaa" * 32, kid="t")
-    entries = [
-        {"seq": 1, "event_data": {"hi": 1}, "prev_hash": "GENESIS",
-         "entry_hash": "x", "agent_dna": "d", "event_type": "t"},
-        {"seq": 2, "event_data": {"hi": 2}, "prev_hash": "x",
-         "entry_hash": "y", "agent_dna": "d", "event_type": "t"},
-    ]
-    # Encrypt the second entry.
-    enc_entry = encrypt_event_data(entries[1], cfg)
+    plain_entry = {
+        "seq": 1, "event_data": {"hi": 1}, "prev_hash": "GENESIS",
+        "entry_hash": "x", "agent_dna": "d", "event_type": "t",
+    }
+    # Encrypted on-disk shape (mirrors audit_chain._encrypted_json_line):
+    # the envelope replaces event_data and goes under the ``encryption``
+    # key alongside the unencrypted seq/prev_hash/entry_hash fields.
+    envelope = encrypt_event_data({"hi": 2}, cfg)
+    enc_entry = {
+        "seq": 2, "prev_hash": "x", "entry_hash": "y",
+        "agent_dna": "d", "event_type": "t",
+        "encryption": envelope,
+    }
     lines = [
-        json.dumps(entries[0]),
+        json.dumps(plain_entry),
         json.dumps(enc_entry),
         "{not valid json",  # malformed
     ]
@@ -160,12 +165,17 @@ def test_decrypt_event_encrypted_entry(tmp_path, capsys, monkeypatch):
     cache so we don't touch a real backend."""
     from forest_soul_forge.security import master_key as mk
     chain = tmp_path / "audit_chain.jsonl"
-    cfg = EncryptionConfig(master_key=b"\xbb" * 32, kid="default")
-    entry = encrypt_event_data({
-        "seq": 7, "event_data": {"secret": "shhh"},
-        "prev_hash": "GENESIS", "entry_hash": "x",
+    # Use the default kid so the CLI's resolver-based config (which
+    # also defaults to DEFAULT_KID) matches without rotation handling.
+    cfg = EncryptionConfig(master_key=b"\xbb" * 32)
+    envelope = encrypt_event_data({"secret": "shhh"}, cfg)
+    # On-disk shape: seq/prev_hash/entry_hash stay plaintext; the
+    # encryption envelope replaces event_data.
+    entry = {
+        "seq": 7, "prev_hash": "GENESIS", "entry_hash": "x",
         "agent_dna": "d", "event_type": "e",
-    }, cfg)
+        "encryption": envelope,
+    }
     chain.write_text(json.dumps(entry) + "\n")
 
     # Seed the resolver's cache so decrypt_event finds the key.
@@ -235,11 +245,12 @@ def test_rotate_audit_chain_reencrypts_under_new_key(tmp_path):
         "prev_hash": "GENESIS", "entry_hash": "x",
         "agent_dna": "d", "event_type": "e",
     }
-    enc_entry = encrypt_event_data({
-        "seq": 2, "event_data": {"secret": "yes"},
-        "prev_hash": "x", "entry_hash": "y",
+    enc_envelope = encrypt_event_data({"secret": "yes"}, old_cfg)
+    enc_entry = {
+        "seq": 2, "prev_hash": "x", "entry_hash": "y",
         "agent_dna": "d", "event_type": "e",
-    }, old_cfg)
+        "encryption": enc_envelope,
+    }
     chain.write_text(
         json.dumps(plain_entry) + "\n" + json.dumps(enc_entry) + "\n"
     )
@@ -251,14 +262,19 @@ def test_rotate_audit_chain_reencrypts_under_new_key(tmp_path):
     # because shutil.copy2 happens before mutation).
     assert (tmp_path / "audit_chain.jsonl.pre-rotate").exists()
 
-    # New chain: line 1 still plaintext, line 2 decryptable under new key.
+    # New chain: line 1 still plaintext, line 2 has a re-encrypted
+    # envelope decryptable under new key. _rotate_audit_chain operates
+    # on the on-disk shape (encryption envelope under "encryption"
+    # alongside plaintext seq/prev_hash/entry_hash).
     from forest_soul_forge.core.at_rest_encryption import (
         decrypt_event_data,
     )
     lines = chain.read_text().strip().splitlines()
     assert json.loads(lines[0])["event_data"] == {"plain": True}
-    new_enc = json.loads(lines[1])
-    assert decrypt_event_data(new_enc, new_cfg) == {"secret": "yes"}
+    new_entry = json.loads(lines[1])
+    assert decrypt_event_data(new_entry["encryption"], new_cfg) == {
+        "secret": "yes",
+    }
 
 
 def test_rotate_soul_files_reencrypts_enc_variants(tmp_path):

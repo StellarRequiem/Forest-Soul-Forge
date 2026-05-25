@@ -62,7 +62,9 @@ def _chain_entry_to_out(entry: ChainEntry) -> AuditEventOut:
 
     ``event_json`` matches the registry's canonical-ish dump (sorted keys,
     no whitespace) so two events compared across the two endpoints
-    serialize identically.
+    serialize identically. ``event_data`` is the same content as a structured
+    object, surfaced per kernel-api-v0.6 §2.1 so the conformance suite can
+    recompute ``entry_hash`` from the API response alone.
     """
     instance_id = entry.event_data.get("instance_id")
     return AuditEventOut(
@@ -72,6 +74,8 @@ def _chain_entry_to_out(entry: ChainEntry) -> AuditEventOut:
         instance_id=str(instance_id) if instance_id is not None else None,
         event_type=entry.event_type,
         event_json=json.dumps(entry.event_data, sort_keys=True, separators=(",", ":")),
+        event_data=dict(entry.event_data),
+        prev_hash=entry.prev_hash,
         entry_hash=entry.entry_hash,
     )
 
@@ -86,7 +90,10 @@ async def audit_tail(
     Reads the canonical JSONL directly so runtime events are visible
     without waiting for a lifespan restart to re-ingest them.
     """
-    entries = chain.tail(n)
+    # ``chain.tail`` returns newest-first; spec §2.1 requires the events
+    # array to be in strictly-increasing seq order (oldest first), so
+    # callers can validate the prev_hash → entry_hash linkage.
+    entries = list(reversed(chain.tail(n)))
     return AuditListOut(
         count=len(entries),
         events=[_chain_entry_to_out(e) for e in entries],

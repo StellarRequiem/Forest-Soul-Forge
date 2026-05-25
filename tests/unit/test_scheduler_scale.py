@@ -41,9 +41,10 @@ from forest_soul_forge.registry.schema import (
 # Schema substrate
 # ---------------------------------------------------------------------------
 
-def test_schema_version_is_v22():
-    """Schema version bumped to v22 for the ADR-0075 T1 migration."""
-    assert SCHEMA_VERSION == 22
+def test_schema_version_is_v23():
+    """Schema version bumped past v22 (ADR-0075 T1) to v23 as further
+    migrations landed. Renamed each bump for honesty."""
+    assert SCHEMA_VERSION == 23
 
 
 def test_v22_migration_present():

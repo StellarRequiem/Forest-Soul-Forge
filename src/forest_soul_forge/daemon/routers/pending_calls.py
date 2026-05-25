@@ -94,6 +94,29 @@ def _row_to_out(row: dict[str, Any]) -> PendingApprovalOut:
 
 
 @router.get(
+    "/pending-calls",
+    response_model=PendingApprovalListOut,
+)
+async def list_all_pending_calls(
+    status_filter: str = Query(
+        "pending",
+        alias="status",
+        description="Filter — 'pending' (default) or 'all'.",
+    ),
+    registry: Registry = Depends(get_registry),
+) -> PendingApprovalListOut:
+    """Cross-agent approval queue listing per kernel-api-v0.6 §5.3.
+
+    Spec-required ungated read endpoint. Returns every pending
+    approval ticket across all born agents, oldest first.
+    """
+    filter_ = None if status_filter == "all" else "pending"
+    rows = registry.list_all_pending_approvals(status=filter_)
+    out = [_row_to_out(r) for r in rows]
+    return PendingApprovalListOut(count=len(out), pending_calls=out)
+
+
+@router.get(
     "/agents/{instance_id}/pending_calls",
     response_model=PendingApprovalListOut,
 )

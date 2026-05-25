@@ -95,6 +95,29 @@ class ApprovalsTable:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_all_pending_approvals(
+        self,
+        *,
+        status: str | None = "pending",
+    ) -> list[dict[str, Any]]:
+        """Cross-agent listing. Spec §5.3 documents ``GET /pending-calls``
+        as a global approval-queue read endpoint — this is the backing
+        query, ordered by ``created_at`` so the oldest unanswered
+        ticket sits at the top.
+        """
+        if status is None:
+            rows = self._conn.execute(
+                "SELECT * FROM tool_call_pending_approvals "
+                "ORDER BY created_at ASC;",
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM tool_call_pending_approvals "
+                "WHERE status=? ORDER BY created_at ASC;",
+                (status,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def mark_approval_decided(
         self,
         ticket_id: str,

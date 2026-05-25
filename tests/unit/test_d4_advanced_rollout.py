@@ -87,19 +87,22 @@ def test_role_weights_in_plausible_range(trait_engine, role):
         )
 
 
-def test_release_gatekeeper_audit_weight_is_max(trait_engine):
-    """release_gatekeeper.audit = 2.6 is the highest audit weight in
-    the system (matches reality_anchor's ceiling per the calibration
-    rationale in the draft review)."""
+def test_release_gatekeeper_audit_weight_at_calibrated_floor(trait_engine):
+    """release_gatekeeper.audit = 2.6 sits at the calibrated D4 floor
+    for audit weight on the gatekeeper. The post-D6/D10 rollout added
+    audit-heavy roles that legitimately exceed 2.6 (knowledge_verifier
+    and the audit_archivist family at 2.8) — the gatekeeper's
+    relative position in the leaderboard isn't the invariant; its
+    floor is. A drop below 2.6 would weaken the gatekeeper's audit
+    posture and must surface as a test failure."""
     audits = {
         role: role_def.domain_weights.get("audit", 0.0)
         for role, role_def in trait_engine.roles.items()
     }
     rg_audit = audits["release_gatekeeper"]
-    higher = [r for r, a in audits.items() if a > rg_audit]
-    assert higher == [], (
-        f"release_gatekeeper.audit ({rg_audit}) should be max; "
-        f"these roles exceed it: {higher}"
+    assert rg_audit >= 2.6, (
+        f"release_gatekeeper.audit ({rg_audit}) dropped below the "
+        f"calibrated floor of 2.6"
     )
 
 

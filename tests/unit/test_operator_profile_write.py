@@ -226,7 +226,10 @@ def test_write_no_op_when_value_unchanged(seed_profile):
     # File untouched (we'd see updated_at change otherwise — but
     # the no-op path skips save_operator_profile entirely).
     raw = yaml.safe_load(seed_profile.read_text())
-    assert raw["preferred_name"] == "Alex"
+    # Profile YAML nests operator fields under the ``operator`` key
+    # (save_operator_profile writes {schema_version, operator: {...},
+    # created_at, updated_at}).
+    assert raw["operator"]["preferred_name"] == "Alex"
 
 
 # ---------------------------------------------------------------------------

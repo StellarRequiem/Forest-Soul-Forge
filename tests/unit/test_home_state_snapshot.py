@@ -118,7 +118,14 @@ class TestExecution:
             _rec("d2", "kitchen", "off", device_kind="light"),
             _rec("d3", "bedroom", "off", device_kind="light"),
         ]
-        out = _run({"records": recs, "window_slug": "test-w"})
+        # Pin reference_time alongside _rec's hard-coded observed_at
+        # so the 60-minute default stale window doesn't drift the
+        # assertion as wall-clock days pass.
+        out = _run({
+            "records": recs,
+            "window_slug": "test-w",
+            "reference_time": "2026-05-24T18:30:00Z",
+        })
         body = out.output
         assert body["window_slug"] == "test-w"
         assert body["device_count"] == 3

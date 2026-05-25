@@ -33,9 +33,10 @@ from forest_soul_forge.registry.tables.reality_anchor_corrections import (
 )
 
 
-def test_schema_version_is_21():
-    """ADR-0063 T6 — schema bump 19→20 adds reality_anchor_corrections."""
-    assert SCHEMA_VERSION == 21
+def test_schema_version_is_23():
+    """ADR-0063 T6 introduced reality_anchor_corrections at v20; the
+    schema has since bumped through v21/v22/v23. Renamed for honesty."""
+    assert SCHEMA_VERSION == 23
 
 
 def test_event_type_registered():

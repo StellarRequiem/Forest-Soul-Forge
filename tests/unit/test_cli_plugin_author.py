@@ -219,7 +219,12 @@ def test_read_only_tier_keeps_echo_exemplar(tmp_path):
     _ast.parse(src)
     assert "echo" in src
     assert "urllib" not in src
-    assert "subprocess" not in src
+    # The read_only exemplar's docstring may *mention* subprocess
+    # (as in "no subprocesses, no network writes") — what it must
+    # NOT contain is an actual `import subprocess` or a `subprocess.`
+    # API call. Match the executable form rather than the substring.
+    assert "import subprocess" not in src
+    assert "subprocess." not in src
     assert "_is_within" not in src
 
 

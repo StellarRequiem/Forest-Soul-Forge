@@ -39,6 +39,12 @@ class StartupDiagnostic(BaseModel):
 
 class HealthOut(BaseModel):
     ok: bool
+    # Spec-style coarse status field: "ok" when the daemon booted
+    # cleanly, otherwise an explanatory verb (degraded/down) per the
+    # kernel-api-v0.6 §7 conformance hook. Defaults derived from
+    # ``ok`` for backwards compatibility — older callers reading
+    # ``body["ok"]`` see no behavior change.
+    status: str = "ok"
     schema_version: int
     canonical_contract: str
     active_provider: str

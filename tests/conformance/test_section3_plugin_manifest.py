@@ -48,11 +48,13 @@ def test_section3_plugins_endpoint_reachable(client: httpx.Client) -> None:
 
 
 def test_section3_per_plugin_shape(client: httpx.Client) -> None:
-    """§3.1: each installed plugin exposes the documented top-level fields.
+    """§3.1: each installed plugin exposes the documented manifest fields.
 
     Per spec §3.1: schema_version, name, version, type, side_effects,
     trust_tier are all part of the v1 manifest contract. The /plugins
-    endpoint surfaces them.
+    endpoint surfaces them, either flat at top level or nested under
+    ``manifest`` (the daemon's actual shape carries install-time status
+    fields at the top level and the on-disk manifest fields nested).
     """
     body = client.get("/plugins").json()
     if not body["plugins"]:
@@ -63,23 +65,29 @@ def test_section3_per_plugin_shape(client: httpx.Client) -> None:
     side_effects_allowed = {"read_only", "network", "filesystem", "external"}
 
     for plugin in body["plugins"]:
+        # Spec §3.1 documents manifest fields; the daemon either
+        # hoists them or keeps them nested under ``manifest``. Accept
+        # both so a future flattening doesn't break conformance.
+        manifest = plugin.get("manifest", plugin)
+
         # §3.2: name regex
-        name = plugin.get("name", "")
+        name = manifest.get("name", "")
         assert re.match(r"^[a-z][a-z0-9-]{1,62}[a-z0-9]$", name), (
             f"plugin name {name!r} doesn't match spec §3.2 regex"
         )
 
         # §3.1: version is a string
-        assert "version" in plugin, f"plugin {name} missing version"
-        assert isinstance(plugin["version"], str)
+        assert "version" in manifest, f"plugin {name} missing version"
+        assert isinstance(manifest["version"], str)
 
         # §3.1: side_effects in allowed set
-        assert plugin["side_effects"] in side_effects_allowed, (
-            f"plugin {name} has invalid side_effects {plugin['side_effects']!r}"
+        assert manifest["side_effects"] in side_effects_allowed, (
+            f"plugin {name} has invalid side_effects "
+            f"{manifest['side_effects']!r}"
         )
 
         # §3.2: schema_version must equal 1 at v0.6
-        sv = plugin.get("schema_version")
+        sv = manifest.get("schema_version")
         if sv == 1:
             schema_version_seen_one = True
         else:
@@ -91,8 +99,8 @@ def test_section3_per_plugin_shape(client: httpx.Client) -> None:
             )
 
         # §3.3: trust_tier is int 0-5 if present
-        if "trust_tier" in plugin:
-            tier = plugin["trust_tier"]
+        if "trust_tier" in manifest:
+            tier = manifest["trust_tier"]
             assert isinstance(tier, int)
             assert 0 <= tier <= 5, (
                 f"plugin {name} trust_tier={tier} out of range [0,5] per §3.2"

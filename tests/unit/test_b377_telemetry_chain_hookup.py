@@ -303,10 +303,14 @@ class TestVerify:
         # look similar (sqlite editor, file mutation).
         import sqlite3
         con = sqlite3.connect(tmp_path / "telemetry.sqlite")
+        # Standard sqlite3 builds omit SQLITE_ENABLE_UPDATE_DELETE_LIMIT,
+        # so the LIMIT clause on UPDATE is a syntax error; emulate it
+        # with a min-rowid subquery.
         con.execute(
             "UPDATE telemetry_events SET payload_json = ? "
-            "WHERE batch_id = ? LIMIT 1",
-            ('{"line": "tampered"}', batch_id),
+            "WHERE batch_id = ? AND rowid = ("
+            "SELECT MIN(rowid) FROM telemetry_events WHERE batch_id = ?)",
+            ('{"line": "tampered"}', batch_id, batch_id),
         )
         con.commit()
         con.close()

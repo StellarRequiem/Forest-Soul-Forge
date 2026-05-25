@@ -38,15 +38,16 @@ from forest_soul_forge.registry.tables.procedural_shortcuts import (
 # Schema version + table presence
 # ---------------------------------------------------------------------------
 
-def test_schema_version_is_21():
+def test_schema_version_is_23():
     """v16 was introduced by ADR-0054 T1. Subsequent migrations:
     v17 (ADR-0060 T1, B219, agent_catalog_grants), v18 (ADR-0053
     T1, B235, agent_plugin_grants.tool_name), v19 (ADR-0049 T4,
     B243, agents.public_key), v20 (ADR-0063 T6, B255,
-    reality_anchor_corrections). Each migration bump should add a
+    reality_anchor_corrections), v21, v22 (ADR-0075 T1,
+    scheduler_persistence), v23. Each migration bump should add a
     clear MIGRATIONS[N] entry + update DDL_STATEMENTS — the test
     itself bumps to track."""
-    assert SCHEMA_VERSION == 21
+    assert SCHEMA_VERSION == 23
 
 
 def test_fresh_install_creates_procedural_shortcuts_table(tmp_path: Path):
@@ -583,7 +584,98 @@ def test_v15_to_v16_upgrade(tmp_path: Path):
     #         undo it
     #   v19 → DROP COLUMN agents.public_key (SQLite 3.35+ supports
     #         this, modern macOS + sandbox both qualify)
+    #   v20 → DROP TABLE reality_anchor_corrections
+    #   v21 → DROP COLUMN memory_entries.content_encrypted
+    #   v22 → DROP COLUMN scheduled_task_state.budget_per_minute
+    #         (+ the partial index that goes with it)
+    #   v23 → DROP COLUMN memory_entries.consolidation_state,
+    #         consolidated_into, consolidation_run (+ partial indexes)
     reg = Registry.bootstrap(db)
+    # CONNECTION_PRAGMAS enables foreign_keys; SQLite re-validates the
+    # whole table's FK clauses on every ALTER, and consolidated_into
+    # has a self-FK to memory_entries(entry_id) (v23) that can't be
+    # peeled off by ALTER TABLE DROP COLUMN. Turn pragmas off, do a
+    # table-rebuild on memory_entries down to the v20 shape (drops
+    # v21 content_encrypted + all three v23 consolidation columns at
+    # once), then continue.
+    reg._conn.execute("PRAGMA foreign_keys = OFF;")
+    reg._conn.execute(
+        "DROP INDEX IF EXISTS idx_memory_consolidation_pending;"
+    )
+    reg._conn.execute(
+        "DROP INDEX IF EXISTS idx_memory_consolidated_into;"
+    )
+    reg._conn.execute(
+        """
+        CREATE TABLE memory_entries_pre_v21 (
+            entry_id        TEXT PRIMARY KEY,
+            instance_id     TEXT NOT NULL,
+            agent_dna       TEXT NOT NULL,
+            layer           TEXT NOT NULL,
+            scope           TEXT NOT NULL DEFAULT 'private',
+            content         TEXT NOT NULL,
+            content_digest  TEXT NOT NULL,
+            tags_json       TEXT NOT NULL DEFAULT '[]',
+            consented_to_json TEXT NOT NULL DEFAULT '[]',
+            created_at      TEXT NOT NULL,
+            deleted_at      TEXT,
+            disclosed_from_entry TEXT,
+            disclosed_summary    TEXT,
+            disclosed_at         TEXT,
+            claim_type      TEXT NOT NULL DEFAULT 'observation'
+                              CHECK (claim_type IN (
+                                  'observation', 'user_statement',
+                                  'agent_inference', 'preference',
+                                  'promise', 'external_fact'
+                              )),
+            confidence      TEXT NOT NULL DEFAULT 'medium'
+                              CHECK (confidence IN ('low', 'medium', 'high')),
+            last_challenged_at TEXT,
+            FOREIGN KEY (instance_id) REFERENCES agents(instance_id),
+            FOREIGN KEY (disclosed_from_entry) REFERENCES memory_entries_pre_v21(entry_id)
+        );
+        """
+    )
+    reg._conn.execute(
+        "INSERT INTO memory_entries_pre_v21 SELECT "
+        "entry_id, instance_id, agent_dna, layer, scope, content, "
+        "content_digest, tags_json, consented_to_json, created_at, "
+        "deleted_at, disclosed_from_entry, disclosed_summary, "
+        "disclosed_at, claim_type, confidence, last_challenged_at "
+        "FROM memory_entries;"
+    )
+    reg._conn.execute("DROP TABLE memory_entries;")
+    reg._conn.execute(
+        "ALTER TABLE memory_entries_pre_v21 RENAME TO memory_entries;"
+    )
+    reg._conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_instance "
+        "ON memory_entries(instance_id);"
+    )
+    reg._conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_layer "
+        "ON memory_entries(layer);"
+    )
+    reg._conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_created "
+        "ON memory_entries(created_at);"
+    )
+    reg._conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_disclosed_from "
+        "ON memory_entries(disclosed_from_entry);"
+    )
+    # v22: scheduler scale columns
+    reg._conn.execute(
+        "DROP INDEX IF EXISTS idx_scheduled_task_state_next_run_at;"
+    )
+    reg._conn.execute(
+        "ALTER TABLE scheduled_task_state DROP COLUMN budget_per_minute;"
+    )
+    # v20: reality_anchor_corrections
+    reg._conn.execute(
+        "DROP TABLE IF EXISTS reality_anchor_corrections;"
+    )
+    # v16-v19 (original drops):
     reg._conn.execute("DROP TABLE memory_procedural_shortcuts;")
     reg._conn.execute("DROP TABLE IF EXISTS agent_catalog_grants;")
     reg._conn.execute("ALTER TABLE agents DROP COLUMN public_key;")
@@ -603,9 +695,10 @@ def test_v15_to_v16_upgrade(tmp_path: Path):
         )
         assert cur.fetchone() is not None
         # Current schema floor — v16 was the ADR-0054 introduction
-        # version; later migrations (v17 ADR-0060, v18 ADR-0053)
-        # are additive. Track the live SCHEMA_VERSION so this test
-        # is honest after each bump.
-        assert reg.schema_version() == 19
+        # version; later migrations (v17 ADR-0060, v18 ADR-0053,
+        # v19 ADR-0049, v20 ADR-0063, v21 ADR-0050, v22 ADR-0075,
+        # v23 ADR-0074) are additive. Track the live SCHEMA_VERSION
+        # so this test is honest after each bump.
+        assert reg.schema_version() == SCHEMA_VERSION
     finally:
         reg.close()

@@ -678,6 +678,11 @@ class Registry:
     ) -> list[dict[str, Any]]:
         return self.approvals.list_pending_approvals(instance_id, status=status)
 
+    def list_all_pending_approvals(
+        self, *, status: str | None = "pending"
+    ) -> list[dict[str, Any]]:
+        return self.approvals.list_all_pending_approvals(status=status)
+
     def mark_approval_decided(
         self,
         ticket_id: str,

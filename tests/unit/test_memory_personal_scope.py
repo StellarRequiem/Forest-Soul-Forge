@@ -57,6 +57,24 @@ def _fresh_db() -> sqlite3.Connection:
     )
     for stmt in MIGRATIONS[23]:
         conn.execute(stmt)
+    # memory_consents was added in v7 — recall_visible_to(mode='consented')
+    # joins through it, so the personal-scope test fixture has to mint
+    # it too. Schema mirrors the live registry's CREATE TABLE (v7 +
+    # later additions: granted_by, revoked_at).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_consents (
+            entry_id           TEXT NOT NULL,
+            recipient_instance TEXT NOT NULL,
+            granted_at         TEXT NOT NULL,
+            granted_by         TEXT NOT NULL,
+            revoked_at         TEXT,
+            PRIMARY KEY (entry_id, recipient_instance),
+            FOREIGN KEY (entry_id) REFERENCES memory_entries(entry_id),
+            FOREIGN KEY (recipient_instance) REFERENCES agents(instance_id)
+        )
+        """
+    )
     for inst in ("comp_1", "asst_1", "obs_1"):
         conn.execute("INSERT INTO agents (instance_id) VALUES (?)", (inst,))
     conn.commit()

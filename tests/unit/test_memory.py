@@ -411,8 +411,10 @@ class TestRecallVisibleToErrors:
     def test_recall_modes_constant_excludes_realm(self):
         # The exposed RECALL_MODES tuple must NOT include 'realm' until
         # federation lands. Pinning this guards against a quiet drift.
+        # 'personal' was added per the personal-scope rollout; 'realm'
+        # is still intentionally absent (federation, Horizon 3).
         assert "realm" not in RECALL_MODES
-        assert set(RECALL_MODES) == {"private", "lineage", "consented"}
+        assert set(RECALL_MODES) == {"private", "lineage", "consented", "personal"}
 
 
 class TestDisclosedCopyMetadata:

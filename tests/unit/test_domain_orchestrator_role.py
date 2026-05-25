@@ -30,7 +30,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_trait_tree_has_domain_orchestrator():
     path = REPO_ROOT / "config" / "trait_tree.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    roles = data.get("role_base", {})
+    # Top-level key is ``roles`` — the trait_engine loader reads
+    # ``self._raw.get("roles")``. The ``role_base`` name from the
+    # original B283 draft was never the on-disk key.
+    roles = data.get("roles", {})
     assert "domain_orchestrator" in roles, (
         "domain_orchestrator role missing from config/trait_tree.yaml"
     )
@@ -75,7 +78,10 @@ def test_companion_genre_claims_domain_orchestrator():
 def test_constitution_template_present():
     path = REPO_ROOT / "config" / "constitution_templates.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    templates = data.get("role_templates", {})
+    # Top-level key is ``role_base`` (constitution_templates.yaml
+    # schema_version 1); the original B283 draft used
+    # ``role_templates`` but the YAML on disk has never used that name.
+    templates = data.get("role_base", {})
     tpl = templates.get("domain_orchestrator")
     assert tpl is not None, (
         "domain_orchestrator template missing from constitution_templates.yaml"
@@ -113,12 +119,20 @@ def test_constitution_template_present():
 # ---------------------------------------------------------------------------
 def test_singleton_set_includes_domain_orchestrator():
     """Both reality_anchor and domain_orchestrator are in the
-    _SINGLETON_ROLES enforcement set in writes/birth.py."""
+    _SINGLETON_ROLES enforcement set in writes/birth.py. The set
+    has grown past B283 (wiring_sentinel was added later) so the
+    test checks membership rather than literal equality."""
     path = REPO_ROOT / "src" / "forest_soul_forge" / "daemon" / "routers" / "writes" / "birth.py"
     src = path.read_text(encoding="utf-8")
-    # The literal set construction we wrote in B283.
-    assert '_SINGLETON_ROLES = {"reality_anchor", "domain_orchestrator"}' in src, (
-        "_SINGLETON_ROLES set in birth.py must include both "
-        "reality_anchor (ADR-0063 T4) and domain_orchestrator "
-        "(ADR-0067 T5)"
+    # Find the _SINGLETON_ROLES line; the assertion below tolerates
+    # additional roles being added without churning this test.
+    import re
+    match = re.search(r"_SINGLETON_ROLES\s*=\s*\{([^}]*)\}", src)
+    assert match is not None, "_SINGLETON_ROLES assignment not found in birth.py"
+    members = {m.strip().strip('"').strip("'") for m in match.group(1).split(",") if m.strip()}
+    assert "reality_anchor" in members, (
+        "_SINGLETON_ROLES must include reality_anchor (ADR-0063 T4)"
+    )
+    assert "domain_orchestrator" in members, (
+        "_SINGLETON_ROLES must include domain_orchestrator (ADR-0067 T5)"
     )

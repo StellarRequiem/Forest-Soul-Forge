@@ -62,6 +62,7 @@ def _bundle_to_out(b) -> ArchetypeBundleOut:  # noqa: ANN001
 
 
 @router.get("/tools/catalog", response_model=ToolCatalogOut)
+@router.get("/tools", response_model=ToolCatalogOut)
 async def get_catalog(
     catalog: ToolCatalog = Depends(get_tool_catalog),
 ) -> ToolCatalogOut:
@@ -71,6 +72,11 @@ async def get_catalog(
     lifespan startup and never mutated. Tools and archetypes are
     enumerated in their declaration order (the YAML keys' iteration order
     in Python 3.7+, which is insertion order).
+
+    Reachable at both ``/tools`` (kernel-api-v0.6 §5.3 spec path) and
+    ``/tools/catalog`` (the original implementation path) — keeping
+    both avoids breaking the in-tree frontend while letting the
+    conformance suite hit the spec URL.
     """
     return ToolCatalogOut(
         version=catalog.version,
