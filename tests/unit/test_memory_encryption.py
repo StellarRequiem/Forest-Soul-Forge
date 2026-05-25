@@ -29,6 +29,8 @@ from forest_soul_forge.core.at_rest_encryption import (
 from forest_soul_forge.core.memory import Memory
 from forest_soul_forge.registry.registry import Registry
 
+from tests.unit.conftest import seed_stub_agent
+
 
 def _key(byte: int = 0xAB) -> bytes:
     return bytes([byte]) * 32
@@ -48,17 +50,11 @@ def _make_memory(tmp_path: Path, *, encrypted: bool = True) -> Memory:
     # plain SQLite so the test doesn't require sqlcipher3 installed.
     reg = Registry.bootstrap(db)
     cfg = EncryptionConfig(master_key=_key(0xAB)) if encrypted else None
-    # Required: seed an agent row to satisfy the FK.
-    reg.agents.register_birth(
-        instance_id="ag1",
-        dna="aaaaaaaaaaaa",
-        role="experimenter",
-        constitution_hash="c" * 64,
-        soul_md="seed",
-        created_at="2026-05-13T00:00:00Z",
-        approved_by="test",
-        constitution_yaml="agent: {role: experimenter}\n",
-    )
+    # Required: seed an agent row to satisfy the FK. The shared helper
+    # bypasses register_birth (which demands a full ParsedSoul +
+    # on-disk artifacts) and inserts a minimal row directly — exactly
+    # what these tests need for the FK target.
+    seed_stub_agent(reg, instance_id="ag1", role="experimenter")
     return Memory(conn=reg._conn, encryption_config=cfg)
 
 

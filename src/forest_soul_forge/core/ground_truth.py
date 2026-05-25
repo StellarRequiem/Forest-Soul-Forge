@@ -93,9 +93,19 @@ def load_ground_truth(
     Missing file is benign: returns ``([], ["catalog file not
     found: ..."])`` so the Reality Anchor degrades to "no
     facts to check against" rather than crashing the dispatcher.
+
+    The operator-profile merge (B278) is only attempted when the
+    catalog being loaded is the canonical default one. Callers
+    that pass an explicit ``path`` (tests, ad-hoc tooling) get
+    just the literal file contents — no implicit profile injection.
+    Mixing profile seeds into a test-supplied catalog would surface
+    spurious collisions for any test catalog that happens to use
+    profile-reserved ids, and would force every test fixture to
+    accept the operator's real personal data as extra rows.
     """
     errors: list[str] = []
     resolved = _resolve_default_path(path)
+    merge_operator_profile = path is None
     try:
         text = resolved.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -140,6 +150,12 @@ def load_ground_truth(
     # operator-global catalog still loads, and the merge is purely
     # additive. errors get the non-fatal note so /reality-anchor/status
     # (T7) surfaces the gap without crashing dispatch.
+    #
+    # Only merge when loading the canonical default catalog. An
+    # explicit ``path`` argument (tests, tooling) means the caller
+    # wants the literal file, not the operator's identity rolled in.
+    if not merge_operator_profile:
+        return facts, errors
     try:
         from forest_soul_forge.core.operator_profile import (
             OperatorProfileError,

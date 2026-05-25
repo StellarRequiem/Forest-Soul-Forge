@@ -260,30 +260,39 @@ class RuffLintTool:
 # ---------------------------------------------------------------------------
 def _locate_ruff() -> tuple[str, ...] | None:
     """Find a working ruff invocation. Tries `ruff` on PATH first, then
-    `python3 -m ruff`. Returns the argv prefix tuple, or None if neither
-    works.
+    the current interpreter as `<sys.executable> -m ruff`, then a bare
+    `python3 -m ruff` as last resort. Returns the argv prefix tuple, or
+    None if none work.
 
     Why prefer `ruff` on PATH: the Rust binary direct invocation skips
     Python startup (~80ms saved on lint runs that hit the no-findings
     fast path).
+
+    Why try `sys.executable -m ruff` before bare `python3`: when ruff
+    is installed inside a venv but the venv's bin/ isn't on PATH, only
+    the running interpreter can see the module. Bare `python3` on PATH
+    is typically the system Python which won't have ruff installed.
     """
+    import sys
+
     if shutil.which("ruff"):
         return ("ruff",)
-    # Fallback: invoke as Python module. This works whenever `pip install
-    # ruff` succeeded but the entry-point script didn't end up on PATH
-    # (common in venv'd environments where the agent's PATH may not
-    # include the venv's bin/).
-    try:
-        proc = subprocess.run(
-            ["python3", "-m", "ruff", "--version"],
-            capture_output=True,
-            timeout=5,
-            check=False,
-        )
-        if proc.returncode == 0:
-            return ("python3", "-m", "ruff")
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
+    candidates: list[tuple[str, ...]] = []
+    if sys.executable:
+        candidates.append((sys.executable, "-m", "ruff"))
+    candidates.append(("python3", "-m", "ruff"))
+    for invocation in candidates:
+        try:
+            proc = subprocess.run(
+                [*invocation, "--version"],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+            if proc.returncode == 0:
+                return invocation
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            continue
     return None
 
 

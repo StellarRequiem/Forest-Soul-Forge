@@ -322,8 +322,11 @@ class TestExecute:
         # Forensic value: operator can see exactly which ruff invocation ran
         assert "ruff_invocation" in result.metadata
         assert isinstance(result.metadata["ruff_invocation"], list)
-        # First arg is either "ruff" (PATH) or "python3" (module fallback)
-        assert result.metadata["ruff_invocation"][0] in ("ruff", "python3")
+        # First arg is either "ruff" (PATH) or a Python interpreter path
+        # (module fallback — either bare "python3" or an absolute path
+        # like sys.executable inside a venv).
+        first = result.metadata["ruff_invocation"][0]
+        assert first == "ruff" or "python" in first.lower()
 
     def test_findings_have_complete_shape(self, env):
         ctx, fp = env
