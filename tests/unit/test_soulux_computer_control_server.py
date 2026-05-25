@@ -430,12 +430,20 @@ class TestActionToolArgValidation:
         assert result.get("isError") is True
         assert result["error"]["code"] in {"scheme_disallowed", "platform_unsupported"}
 
+    @pytest.mark.skipif(
+        platform.system() == "Darwin",
+        reason=(
+            "would shell out to `open https://example.com` on macOS, "
+            "popping a real browser window. On non-Darwin platforms "
+            "the scheme-acceptance check fires before the launch path, "
+            "so the test is replaced by the platform_unsupported check "
+            "in TestActionToolsOnNonMacOS::test_launch_url."
+        ),
+    )
     def test_launch_url_accepts_https(self):
-        """https:// passes the scheme allowlist; on Linux the
-        platform_unsupported error is what fires (no `open`); on
-        macOS the actual launch path runs. Either is a valid
-        non-rejection signal that the URL itself wasn't refused for
-        scheme reasons."""
+        """https:// passes the scheme allowlist; on non-Darwin the
+        platform_unsupported error is what fires before any real
+        ``open`` invocation, which is the only signal we want here."""
         resp, _ = _invoke_server({
             "jsonrpc": "2.0",
             "id": 49,
@@ -447,14 +455,16 @@ class TestActionToolArgValidation:
         })
         assert resp is not None
         result = resp["result"]
-        if platform.system() != "Darwin":
-            # platform_unsupported is the expected non-Darwin response.
-            assert result.get("isError") is True
-            assert result["error"]["code"] == "platform_unsupported"
-        # On macOS we don't assert anything beyond "didn't reject for
-        # scheme" — actually launching a browser tab as a side-effect
-        # of a unit test is rude.
+        assert result.get("isError") is True
+        assert result["error"]["code"] == "platform_unsupported"
 
+    @pytest.mark.skipif(
+        platform.system() == "Darwin",
+        reason=(
+            "would shell out to `open mailto:...` on macOS, popping the "
+            "operator's mail client. Same carve-out as the https variant."
+        ),
+    )
     def test_launch_url_accepts_mailto(self):
         resp, _ = _invoke_server({
             "jsonrpc": "2.0",
@@ -467,8 +477,7 @@ class TestActionToolArgValidation:
         })
         assert resp is not None
         result = resp["result"]
-        if platform.system() != "Darwin":
-            assert result["error"]["code"] == "platform_unsupported"
+        assert result["error"]["code"] == "platform_unsupported"
 
 
 # ---------------------------------------------------------------------------
