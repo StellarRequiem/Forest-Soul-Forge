@@ -202,7 +202,7 @@ def test_execute_planned_with_override_routes_and_records_flag(tmp_path, monkeyp
         "skill_version": "1", "intent": "hi", "reason": "test",
         "allow_planned": True,
     }, ctx))
-    assert result.success
+    assert result.metadata["succeeded"]
     # The override is recorded in the audit event
     event_type, payload, _dna = audit.events[0]
     assert event_type == "domain_routed"
@@ -275,7 +275,7 @@ def test_execute_succeeded_outcome_marshals(tmp_path, monkeypatch):
         "skill_name": "do_thing", "skill_version": "1",
         "intent": "do thing", "reason": "test",
     }, ctx))
-    assert result.success
+    assert result.metadata["succeeded"]
     assert result.output["status"] == "succeeded"
     assert result.output["delegate_output"]["output"] == {"result": "ok"}
 
@@ -292,7 +292,7 @@ def test_execute_failed_outcome_marshals(tmp_path, monkeypatch):
         "skill_name": "do_thing", "skill_version": "1",
         "intent": "do thing", "reason": "test",
     }, ctx))
-    assert not result.success  # status='failed' → success=False
+    assert not result.metadata["succeeded"]  # status='failed' → succeeded=False
     assert result.output["status"] == "failed"
     assert result.output["delegate_output"]["failure_reason"] == "provider timeout"
 

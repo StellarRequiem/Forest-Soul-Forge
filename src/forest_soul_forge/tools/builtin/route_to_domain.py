@@ -255,15 +255,15 @@ class RouteToDomainTool:
         }
 
         return ToolResult(
-            success=outcome_dict.get("status") == "succeeded",
             output=result_output,
-            audit_payload={
+            metadata={
                 "target_domain": target_domain_id,
                 "target_capability": target_capability,
                 "target_instance_id": args["target_instance_id"],
                 "intent_hash": intent_hash,
                 "confidence": confidence,
                 "delegate_status": outcome_dict.get("status"),
+                "succeeded": outcome_dict.get("status") == "succeeded",
             },
         )
 

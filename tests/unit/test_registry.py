@@ -133,7 +133,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 21
+            assert r.schema_version() == 23
             assert r.list_agents() == []
             assert r.audit_tail() == []
         assert db.exists()
@@ -147,7 +147,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 21
+            assert r.schema_version() == 23
 
     def test_empty_existing_file_gets_schema(self, tmp_path: Path):
         db = tmp_path / "reg.sqlite"
@@ -158,7 +158,7 @@ class TestBootstrap:
             # The assertion is kept as a guard so any future version
             # bump forces a matching update here — not a free-floating
             # number.
-            assert r.schema_version() == 21
+            assert r.schema_version() == 23
 
     def test_schema_downgrade_raises(self, tmp_path: Path):
         """A file stamped at a version *newer* than the code refuses to open.
@@ -262,7 +262,7 @@ class TestBootstrap:
         # disclosure). The assertion tests that all migration steps
         # landed on the same pass.
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 21
+            assert r.schema_version() == 23
 
             # Data survives.
             row = r.get_agent(pre_existing)
@@ -416,7 +416,7 @@ class TestBootstrap:
 
         # Reopen — bootstrap should run MIGRATIONS[7].
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 21
+            assert r.schema_version() == 23
 
             raw = sqlite3.connect(str(db))
             raw.execute("PRAGMA foreign_keys = ON")
@@ -484,7 +484,15 @@ class TestBootstrap:
         # Stamp it back to v10 by dropping the v11 columns and the new
         # memory_contradictions table, then setting schema_version=10.
         conn = sqlite3.connect(str(db))
-        conn.execute("PRAGMA foreign_keys = ON")
+        # foreign_keys OFF for the rollback only — SQLite's
+        # ALTER TABLE DROP COLUMN internally rebuilds the table, and
+        # dropping consolidated_into (which carries a self-FK to
+        # memory_entries.entry_id) trips the FK validator mid-rebuild
+        # while the new table shape is being assembled. Toggling
+        # foreign_keys off bypasses that validator; the test
+        # re-enables it after stamping back to v10 so the actual
+        # migration runs under the same FK regime as production.
+        conn.execute("PRAGMA foreign_keys = OFF")
         # Drop indexes that reference v11 columns first — SQLite's
         # ALTER TABLE DROP COLUMN errors out if any index (including the
         # partial idx_memory_last_challenged) names the column being
@@ -492,6 +500,71 @@ class TestBootstrap:
         # recreates them via CREATE INDEX IF NOT EXISTS.
         conn.execute("DROP INDEX IF EXISTS idx_memory_last_challenged;")
         conn.execute("DROP INDEX IF EXISTS idx_memory_claim_type;")
+        # v20-v23 additions: drop everything added after v19 so the
+        # forward migration replays cleanly. Test rolls the schema
+        # back to v10 by deleting newer additive columns, tables, and
+        # indexes one-by-one.
+        # v23 (ADR-0074 T1 memory consolidation): three columns +
+        # two indexes on memory_entries. Drop indexes first so the
+        # ALTER TABLE DROP COLUMNs aren't blocked by partial-index
+        # references on the dropped columns.
+        conn.execute("DROP INDEX IF EXISTS idx_memory_consolidation_pending;")
+        conn.execute("DROP INDEX IF EXISTS idx_memory_consolidated_into;")
+        # ALTER TABLE DROP COLUMN refuses to drop consolidated_into
+        # because the v0.3 schema declares a table-level FOREIGN KEY on
+        # it (self-FK to memory_entries.entry_id). SQLite's rebuild
+        # leaves the FK clause in the new CREATE TABLE shape and then
+        # errors that the referenced column is unknown. The way around
+        # is to rewrite the schema row in sqlite_master directly via
+        # PRAGMA writable_schema — a hack reserved for forensic and
+        # test-only contexts. Production migrations never need this
+        # because they go forward, not backward.
+        conn.execute("PRAGMA writable_schema = ON;")
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' "
+            "AND name='memory_entries'"
+        ).fetchone()
+        rewritten = row[0]
+        # Strip the consolidated_into FK clause (with optional trailing
+        # comma) so the rebuilt table has no FK reference to the
+        # column we're about to drop.
+        import re
+        rewritten = re.sub(
+            r",\s*FOREIGN KEY\s*\(\s*consolidated_into\s*\)\s*"
+            r"REFERENCES\s+memory_entries\s*\(\s*entry_id\s*\)",
+            "",
+            rewritten,
+            flags=re.IGNORECASE,
+        )
+        conn.execute(
+            "UPDATE sqlite_master SET sql=? WHERE type='table' "
+            "AND name='memory_entries'",
+            (rewritten,),
+        )
+        conn.execute("PRAGMA writable_schema = OFF;")
+        # Force SQLite to re-parse the schema by reopening the
+        # connection. Without this, the table_info cache still
+        # carries the old FK and DROP COLUMN re-errors.
+        conn.commit()
+        conn.close()
+        conn = sqlite3.connect(str(db))
+        conn.execute("PRAGMA foreign_keys = OFF")
+        for col in ("consolidation_run", "consolidated_into", "consolidation_state"):
+            conn.execute(f"ALTER TABLE memory_entries DROP COLUMN {col};")
+        # v22 (ADR-0075 T1 scheduler scale): budget_per_minute column +
+        # next_run_at partial index on scheduled_task_state.
+        conn.execute("DROP INDEX IF EXISTS idx_scheduled_task_state_next_run_at;")
+        conn.execute(
+            "ALTER TABLE scheduled_task_state DROP COLUMN budget_per_minute;"
+        )
+        # v21 (ADR-0050 T4 at-rest encryption): content_encrypted column
+        # on memory_entries.
+        conn.execute(
+            "ALTER TABLE memory_entries DROP COLUMN content_encrypted;"
+        )
+        # v20 (ADR-0063 T6 Reality Anchor correction memory): table +
+        # three indexes. DROP TABLE handles the indexes implicitly.
+        conn.execute("DROP TABLE IF EXISTS reality_anchor_corrections;")
         # ADR-0049 (v19): drop the agents.public_key column so the
         # MIGRATIONS[19] ADD COLUMN runs against a clean shape.
         conn.execute("ALTER TABLE agents DROP COLUMN public_key;")
@@ -563,7 +636,7 @@ class TestBootstrap:
 
         # Reopen through bootstrap — should run MIGRATIONS[11].
         with Registry.bootstrap(db) as r:
-            assert r.schema_version() == 21
+            assert r.schema_version() == 23
 
             raw = sqlite3.connect(str(db))
             raw.execute("PRAGMA foreign_keys = ON")

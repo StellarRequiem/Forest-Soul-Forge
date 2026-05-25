@@ -220,7 +220,6 @@ def test_execute_classifies_routable(tmp_path, monkeypatch):
     result = asyncio.run(tool.execute(
         {"utterance": "do the live thing"}, _ctx(provider),
     ))
-    assert result.success
     subs = result.output["subintents"]
     assert subs[0]["status"] == "routable"
     assert result.output["ambiguity_count"] == 0
@@ -297,10 +296,10 @@ def test_execute_audit_payload_is_pii_safe(tmp_path, monkeypatch):
     result = asyncio.run(tool.execute(
         {"utterance": utterance}, _ctx(provider),
     ))
-    assert "utterance" not in result.audit_payload
-    assert "utterance_hash" in result.audit_payload
+    assert "utterance" not in result.metadata
+    assert "utterance_hash" in result.metadata
     # Hash is deterministic + short (16 chars per the impl).
-    assert len(result.audit_payload["utterance_hash"]) == 16
+    assert len(result.metadata["utterance_hash"]) == 16
 
 
 def test_execute_refuses_without_provider(tmp_path, monkeypatch):

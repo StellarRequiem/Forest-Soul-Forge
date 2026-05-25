@@ -129,8 +129,10 @@ class TestLocatePytest:
         invocation = _locate_pytest()
         assert invocation is not None
         assert isinstance(invocation, tuple)
-        # Either python3 -m pytest or pytest
-        assert invocation[0] in ("python3", "pytest")
+        # Either bare "pytest" on PATH or a Python interpreter
+        # (sys.executable or "python3") followed by "-m pytest".
+        first = invocation[0]
+        assert first == "pytest" or "python" in first.lower()
 
     def test_returns_none_when_unavailable(self):
         # Simulate complete absence: subprocess.run fails for python3 -m

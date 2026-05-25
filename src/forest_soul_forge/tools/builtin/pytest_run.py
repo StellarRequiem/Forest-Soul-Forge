@@ -296,23 +296,31 @@ class PytestRunTool:
 def _locate_pytest() -> tuple[str, ...] | None:
     """Find a working pytest invocation.
 
-    Prefers `python3 -m pytest` (venv-friendly; same Python that imports
-    test modules). Falls back to `pytest` on PATH.
+    Prefers the running interpreter as ``<sys.executable> -m pytest``
+    (venv-friendly; this is the Python that actually imported the test
+    modules to begin with). Falls back to bare ``python3 -m pytest``,
+    then ``pytest`` on PATH. The running interpreter wins because
+    when pytest is installed in a venv but the venv's bin/ isn't on
+    PATH, only the running interpreter can see the module.
     """
-    # Try `python3 -m pytest --version` first — works in any venv that
-    # has pytest installed regardless of whether the entry-point script
-    # made it to PATH.
-    try:
-        proc = subprocess.run(
-            ["python3", "-m", "pytest", "--version"],
-            capture_output=True,
-            timeout=5,
-            check=False,
-        )
-        if proc.returncode == 0:
-            return ("python3", "-m", "pytest")
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
+    import sys
+
+    candidates: list[tuple[str, ...]] = []
+    if sys.executable:
+        candidates.append((sys.executable, "-m", "pytest"))
+    candidates.append(("python3", "-m", "pytest"))
+    for invocation in candidates:
+        try:
+            proc = subprocess.run(
+                [*invocation, "--version"],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+            if proc.returncode == 0:
+                return invocation
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            continue
     # Fall back to PATH lookup.
     if shutil.which("pytest"):
         return ("pytest",)

@@ -178,7 +178,6 @@ class DecomposeIntentTool:
         model_name = _extract_model_name(response)
 
         return ToolResult(
-            success=True,
             output={
                 "utterance": utterance,
                 "subintents": parsed,
@@ -186,7 +185,7 @@ class DecomposeIntentTool:
                 "model": model_name,
                 "elapsed_ms": elapsed_ms,
             },
-            audit_payload={
+            metadata={
                 "utterance_hash": _hash_utterance(utterance),
                 "subintent_count": len(parsed),
                 "ambiguity_count": ambiguity_count,
