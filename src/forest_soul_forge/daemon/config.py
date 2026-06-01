@@ -58,9 +58,22 @@ class DaemonSettings(BaseSettings):
         default=Path("examples"),
         description="Canonical artifacts root (soul.md / constitution.yaml files).",
     )
+    # NOTE (2026-06-01 harden pass): this default is the *tracked* canonical
+    # chain at examples/audit_chain.jsonl, which the live daemon also writes
+    # to — so a running daemon shows it as git-modified (cosmetic drift). That
+    # is intentional, not a bug to "fix" by repointing: the path is load-bearing
+    # as the live chain across the test suite + ~15 dev-tools/ ops scripts that
+    # read it, so changing the default is a breaking change, and untracking it
+    # breaks fresh-clone reproducibility (tests read the committed file).
+    # Operators who want a clean working tree override FSF_AUDIT_CHAIN_PATH to
+    # an ignored path; the drift also stops whenever the daemon is paused.
     audit_chain_path: Path = Field(
         default=Path("examples/audit_chain.jsonl"),
-        description="Audit chain JSONL file.",
+        description=(
+            "Audit chain JSONL file. Default is the tracked canonical chain "
+            "(also the live write target — see note above). Override via "
+            "FSF_AUDIT_CHAIN_PATH to write the live chain to an ignored path."
+        ),
     )
     scheduled_tasks_path: Path = Field(
         default=Path("config/scheduled_tasks.yaml"),
