@@ -1,5 +1,3 @@
-/Users/llm01/.pypirc
-
 # 🌲 Forest Soul Forge
 
 > ⚠️ **Experimental software — operator responsibility notice.** Forest Soul Forge is in active development and is provided for research, experimentation, and personal use. **The operator is responsible for every action committed by the agents they configure and run** — including financial, legal, communicative, irreversible, or otherwise consequential outcomes. Every tool invocation, skill execution, scheduled-task firing, and delegate-chain hop runs under the operator's identity and on the operator's hardware. The audit chain makes every action traceable; it does not absolve the operator of its consequences. **No warranty is provided.** See [`ADR-0046`](docs/decisions/ADR-0046-license-and-governance.md) for licensing terms.
@@ -7,6 +5,8 @@
 > **For developers:** the live state of the codebase — what's implemented, what's blocked, conventions, where to start contributing — lives in [`STATE.md`](STATE.md). It's the companion to this README; this one is product-oriented, that one is current-reality-oriented. Both refresh at every phase boundary.
 
 > **Strategic posture (ADR-0044, accepted 2026-05-05):** Forest is **the agent governance kernel** — substrate-shape, not product-shape. The flagship distribution that ships Forest with a polished operator experience is named **SoulUX** (Tauri shell + reference frontend; lives under `apps/desktop/` and `frontend/`). Forest:SoulUX is the same relationship as Linux:Ubuntu or Postgres:Supabase — kernel and distribution. Other distributions can build on the same Forest kernel; SoulUX is the reference one. See [`docs/decisions/ADR-0044-kernel-positioning-soulux.md`](docs/decisions/ADR-0044-kernel-positioning-soulux.md) for the full positioning + 7-phase roadmap to v1.0.
+
+> **⏱️ Current reality (2026-06-01).** The prose below documents the v0.6 kernel. The system has since grown to **10 live domains** (D1–D10: Code Review · 15-agent Local SOC · Compliance/SOC2 · Knowledge Forge · Daily-Life OS · Content Pipeline · Learning Coach · Smart Home · Finance Guardian · Research Lab), **72 agents**, schema **v23**, and a **self-improvement engine** that audits FSF's own codebase into its own Approvals UI — all running locally on **Qwen 3**. The headline numbers below are current; the deep architecture sections predate the D-track expansion. Full current picture: [`STATE.md`](STATE.md).
 
 **The agent governance kernel: every agent has cryptographically-signed identity, quantified personality, a tamper-evident behavior log, a constitutional rulebook compiled from sliders you set yourself, a runtime-mutable trust dial (green/yellow/red posture), per-(agent, plugin) trust grants, a versioned tool registry with per-tool human-approval gates, and a single governance pipeline every dispatch flows through — all gated, audited, reversible, locally-grounded.**
 
@@ -33,19 +33,19 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 
 | | |
 |---:|:---|
-| **Source LoC (Python)** | **56,113** across `src/` (was 44,648 at v0.4.0; +11,465 across v0.5 + v0.6 arcs; verified 2026-05-08 post-B199) |
-| **Tests (passing)** | **2,598** unit + integration (was 2,177 at v0.4.0; +421 across the v0.5 + v0.6 arcs, zero regressions) |
-| **ADRs filed** | **53** files / **51** unique numbers (`ADR-0001` → `ADR-0056` with 0009-0015 gap + ADR-003X open-web + ADR-003Y conversation runtime). v0.5 + v0.6 active ADRs: **ADR-0042** v0.5 Product Direction; **ADR-0043** MCP-First Plugin Protocol; **ADR-0044** Kernel Positioning + SoulUX; **ADR-0045** Agent Posture / Trust-Light System; **ADR-0046** License + Governance; **ADR-0047** Persistent Assistant Chat; **ADR-0049/0050/0051** Per-event signatures + Encryption-at-rest + Per-tool subprocess sandbox; **ADR-0052** Pluggable Secrets Storage; **ADR-0053** Per-Tool Plugin Grants; **ADR-0054** Procedural-Shortcut Dispatch (substrate DEFAULT OFF); **ADR-0055** Agentic Marketplace; **ADR-0056** Experimenter Agent. |
-| **Built-in tools registered** | **54** (catalog + builtin/ source in sync — was 53 at v0.5.0; +1 across Bursts 125-199). The change loop is agent-completable: code_read → static gates → code_edit → pytest_run → pip_install_isolated when a missing dep surfaces. |
+| **Source LoC (Python)** | **101,623** across `src/forest_soul_forge/` (was 56,113 at B199; +45k across the Phase α substrate + the D1–D10 domain rollout) |
+| **Tests (passing)** | **5,339** unit + integration (12 skipped — all environment-gated; 1 xfail — documented F-7) across **261 test files** (was 2,598 at B199) |
+| **ADRs filed** | **88** files / **86** unique numbers (`ADR-0001` → `ADR-0092`, gaps 0010-0015). Since B199: Phase α substrate (ADR-0050 + ADR-0067–0076) and the **D1–D10 domain rollout** (ADR-0077 + ADR-0085–0092) closed end-to-end. Full index: [`docs/decisions/`](docs/decisions/). |
+| **Built-in tools registered** | **100** (catalog + `builtin/` source in sync; was 54 at B199 — +46 across the D-track tool suites). The change loop is agent-completable: code_read → static gates → code_edit → pytest_run → pip_install_isolated. |
 | **Genres** | **13** (7 original + 3 security tiers + 3 web tiers); each genre carries `max_initiative_level` + `default_initiative_level` per ADR-0021-am §3 |
-| **Trait roles** | **44** (5 original + 9 swarm + 3 SW-track: system_architect / software_engineer / code_reviewer + 1 ADR-0036 verifier_loop + 24 Burst 124 expansion + ADR-0047 `assistant` + ADR-0056 `experimenter`) |
-| **Skill manifests** | **26 shipped** in `examples/skills/` (canonical authored set, unchanged Bursts 125-199); **0 currently installed** in `data/forge/skills/installed/` (reset post-2026-05-03; backup at `installed.bak.20260503-101637`). Skills load from examples/ via the catalog regardless. |
-| **Audit event types** | **71** in `KNOWN_EVENT_TYPES` post-B199 (was 57 pre-B199 / 62 documented at v0.4.0; +14 events the catalog had drifted out of sync with — corrected B199). |
-| **Registry schema version** | **v16** (v13: scheduled_task_state for ADR-0041 T5; v14: agent_plugin_grants for ADR-0043 follow-up #2; v15: agents.posture for ADR-0045 T1; **v16: across the v0.6 arc — assistant chat persistence + memory_procedural_shortcuts + per-event signature columns**) |
-| **Live audit chain** | **`examples/audit_chain.jsonl`** per `daemon/config.py` (override via `FSF_AUDIT_CHAIN_PATH`); ~3,840 entries on 2026-05-08 (was 1,083 on 2026-05-03; +2,757 dominated by `dashboard_watcher` polling every 5 minutes). 6 historical fork seqs at 3728/3735-3738/3740 documented in `docs/audits/2026-05-08-chain-fork-incident.md`; race fixed in B199. Going forward no new forks should appear. |
-| **Frontend modules (vanilla JS)** | **26** (`frontend/js/`; +4 since v0.5.0 for ADR-0047 chat / ADR-0054 thumbs UI / ADR-0056 cycles pane / ADR-0048 allowances pane) |
+| **Trait roles** | **95** templates (original 5 + 9 Security Swarm + 3 SW-track + the ~50 D1–D10 domain roles; was 44 at B199) — catalog in [`config/trait_tree.yaml`](config/trait_tree.yaml) |
+| **Skill manifests** | **102** in `examples/skills/` (**39** installed); was 26 at B199. Skills load from `examples/` via the catalog regardless of install state. |
+| **Audit event types** | **107** in `KNOWN_EVENT_TYPES` (was 71 at B199; grew with the D-track + self-improvement events) |
+| **Registry schema version** | **v23** (post-Phase α: encryption-at-rest + vector index + behavior provenance + per-event signatures + memory consolidation; was v16 at B199) |
+| **Live audit chain** | **`examples/audit_chain.jsonl`** per `daemon/config.py` (override via `FSF_AUDIT_CHAIN_PATH`); ~27k entries committed — the live runtime chain grows continuously beyond that (dominated by `dashboard_watcher` polling) |
+| **Frontend modules (vanilla JS)** | **38** (`frontend/js/`; was 26 at B199) |
 | **Frontend tabs** | **8** (Forge / Agents / Approvals / Skills / Tools / Memory / Audit / **Chat**) |
-| **Operator `.command` scripts** | **59 at repo root** (was 43 at v0.5.0; +16 across Bursts 125-199 incl. force-restart-daemon, scenario test drivers) plus **172 archived** in `dev-tools/commit-bursts/` (was 100 at Burst 128; +72 per-burst commit scripts) plus **16 in `dev-tools/`** (drift / lock-clearing / rebuild helpers). |
+| **Operator `.command` scripts** | **30 at repo root** (consolidated per ADR-0082 Kernel-Freeze posture; was 59 at B199) plus archived per-burst scripts under `dev-tools/commit-bursts/` |
 | **Demo scenarios** | 2 (synthetic-incident + fresh-forge, with presenter scripts) |
 | **Isolated demo dir** | `demo/` (start-demo.command points here; prod state untouched) |
 | **Distribution** | `dist/build.command` → `forest-soul-forge-<sha>-<date>.zip` |
@@ -114,9 +114,9 @@ Seven shipped with ADR-0021; three more (`security_low / mid / high`) added with
 
 Spawning across an incompatible genre boundary requires `--override-genre-spawn-rule` and emits a dedicated `spawn_genre_override` audit event.
 
-### 🛠️ Seventeen trait roles — including the SW-track triune
+### 🛠️ Trait roles — 95 templates including the SW-track triune
 
-The role catalog spans 17 templates: 5 original (network_watcher / log_analyst / anomaly_investigator / incident_communicator / operator_companion), 9 Security Swarm (low/mid/high tiers, ADR-0033), and **3 SW-track** added with [ADR-0034](docs/decisions/ADR-0034-software-engineering-track.md):
+The role catalog now spans **95 templates** — the original 5 (network_watcher / log_analyst / anomaly_investigator / incident_communicator / operator_companion), the 9 Security Swarm tiers (ADR-0033), the 3 SW-track roles below ([ADR-0034](docs/decisions/ADR-0034-software-engineering-track.md)), and the ~50 roles added across the D1–D10 domain rollout (knowledge / daily-life / content / learning / compliance / finance / smart-home / research). The SW-track triune is illustrative:
 
 | SW-track role | Genre claim | What it does |
 |---|---|---|
@@ -486,6 +486,8 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 
 ## ✅ What's running today
 
+> The sections below catalog the v0.6 kernel. **Since then — Phase α substrate + the D1–D10 rollout — all 10 cross-domain agent teams are live:** D4 Code Review · D3 Local SOC (15 agents) · D8 Compliance (SOC2) · D1 Knowledge Forge · D2 Daily-Life OS · D7 Content Pipeline · D9 Learning Coach · D5 Smart Home · D6 Finance Guardian · D10 Research Lab — plus a **self-improvement engine** (`scripts/self_improve.py`) that audits FSF's own codebase into the Approvals UI. Per-domain detail in [`STATE.md`](STATE.md).
+
 ### Foundation (Accepted)
 - Trait engine (29 traits, 6 domains, role-weighted grading)
 - Constitution builder + content-addressed hash
@@ -566,22 +568,16 @@ Don't trust the doc — trust the code. Every Accepted ADR has a corresponding i
 
 ## 📅 What's next
 
-Per the [end-of-session stack review](docs/audits/2026-04-30-end-of-session-stack-review.md), ranked by leverage. v0.1.0 is tagged; v0.2 priorities below:
+The kernel build-out is **complete** — the Phase α substrate and all 10 domains (D1–D10) are live, the suite is green (5,339 tests), and per **ADR-0082 (Kernel Freeze Posture)** no new top-level subsystems ship without external-integrator demand. The remaining path to **v1.0** is outward, not more code:
 
 | Priority | Item | Why |
 |---|---|---|
-| **1** | Cross-subsystem integration test trio | dispatcher + memory + delegate round-trip · approval-queue resume · conversation→llm_think→audit-chain coherence. Today: 1 integration test exists |
-| **2** | R2 — extract `birth_pipeline.py` from `daemon/routers/writes.py` | R3 closed `dispatcher.py`; `writes.py` is the next 1100-LoC god object |
-| **3** | Frontend Vitest scaffold | 22 frontend modules, ~3,500 LoC JS, 0 tests. Add 1-2 fixtures to unblock contributor PRs |
-| **4** | README + STATE prose tightening + ADR-0023 benchmark fixture v1 | Snapshot-as-of-v0.1 polish |
-| **5** | Open-web hardening (ADR-003X) — secrets store + suggest_agent.v1 | `web_fetch / browser_action / mcp_call` are wired; per-agent encrypted secrets store + agent-suggester are the next dependencies for real open-web work |
-| **6** | JSONSchema input defaults at runtime in the skill engine | So manifests can rely on declared defaults instead of hard-coding values inline |
-| **7** | `mfa_check.v1` | Deferred — operator hasn't scoped what "MFA posture" means |
-| **8** | Pytest version of `security-smoke.sh` (E2) | Shell suffices for the operator loop; pytest fixture would let CI gate on the chain |
-| **9** | Frontend Swarm tab (E3) | Per-tier agent listing + recent chain events viewer |
-| **10** | Companion-tier real-time A/V interaction | Mission pillar 2 — accessibility-first |
-| **11** | HSM hardware adapter for VaultWarden's `key_rotate.v1` | Gated on operator hardware decision |
-| **12** | External product MCP adapters (Wazuh / Suricata / Defender / etc.) | Gated on operator install |
+| **1** | External-integrator validation (ADR-0044 P6 → P7) | The single v1.0 gate: an outside party runs `tests/conformance/` against their own Forest-kernel build and reports PASS. Recruiting effort — months, not bursts. Pitch + quickstart shipped (`docs/integrator-pitch.md`). |
+| **2** | Dogfood the D1–D10 domains on real operator work | Turn "live" into "relied-upon"; generate real audit trails that prove the domains in practice rather than in tests. |
+| **3** | Apple Developer account → ADR-0042 T5 | Unblocks Tauri code-signing + auto-updater for the SoulUX distribution. Operator decision. |
+| **4** | Plugin secrets storage (ADR-0052) | Closes ADR-0043 follow-up #4 (`plugin_secret_set`). |
+
+_Current preserved-state status + open items: [`SESSION-HANDOFF.md`](SESSION-HANDOFF.md)._
 
 ---
 
