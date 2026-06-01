@@ -121,20 +121,29 @@ def scan_install_or_refuse(
     if catalog_path is not None:
         args["catalog_path"] = str(catalog_path)
 
-    # The tool is async; run it inline. We can't `await` because
-    # the caller may be a sync handler.
+    # The tool is async; run it inline. We can't `await` because the caller
+    # may be a sync handler. Detect a running loop FIRST, then build the
+    # coroutine exactly once in the right context. The old code created the
+    # coroutine *before* the loop check (inside asyncio.run's argument), so
+    # on the in-loop path asyncio.run raised RuntimeError before awaiting it,
+    # orphaning the coroutine ("coroutine 'SecurityScanTool.execute' was
+    # never awaited"). Detecting the loop explicitly also stops a RuntimeError
+    # raised by the scan *logic* from being miscaught + silently retried.
+    def _run_scan() -> Any:
+        return asyncio.run(tool.execute(args, ctx))
+
     try:
-        result = asyncio.run(tool.execute(args, ctx))
+        asyncio.get_running_loop()
     except RuntimeError:
-        # Already inside an event loop (FastAPI async handler).
-        # Use a thread-isolated loop to drive the coroutine.
+        # No running loop — safe to drive the coroutine directly.
+        result = _run_scan()
+    else:
+        # Already inside an event loop (FastAPI async handler) — drive it on
+        # a thread-isolated loop so we don't reenter the running one.
         import concurrent.futures
 
-        def _run_in_thread() -> Any:
-            return asyncio.run(tool.execute(args, ctx))
-
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            result = ex.submit(_run_in_thread).result()
+            result = ex.submit(_run_scan).result()
 
     findings: list[dict] = list(result.output["findings"])
     by_severity: dict[str, int] = dict(result.output["by_severity"])
