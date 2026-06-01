@@ -4,6 +4,23 @@ A self-contained snapshot for a developer joining the project. What's implemente
 
 > **Refresh cadence:** this doc + [`README.md`](README.md) update together at every phase boundary (Phase A close, Phase B close, Phase D close, etc.) and after any meaningful architectural finding. The two are designed to stay in sync; STATE.md is the developer-facing current-reality view, README.md is the product-and-mission view.
 
+**Refresh marker (2026-06-01 — realignment session): the figures in the table directly below are re-measured against live disk + registry truth. The `self-improve/2026-05-24-123309` branch — self-improvement-findings-in-the-Approvals-UI (`a942878`) + UX keyboard nav + a now-COMPLETE test-stabilization arc (5 fix commits) — was fast-forward-merged into `main`; the unit+integration suite is fully green. Numbers not in this block remain as the 2026-05-19 (Burst 420) snapshot below until next re-measure.**
+
+| Surface | Live truth (2026-06-01) |
+|---:|:---|
+| HEAD | **`4b4cc3f`** on `main` (self-improve merged; was `077610c`) |
+| Commits on `main` | **670** |
+| Python LoC (`src/forest_soul_forge/`) | **101,623** |
+| ADRs filed | **88** |
+| Schema version | **v23** (daemon `/healthz`-confirmed) |
+| Test suite | **5,339 passing**, 12 skipped (all env-gated), 1 xfail (F-7) across **261 test files** — green in 3m25s |
+| Alive agents in registry | **67 active / 5 archived / 72 total** (D1–D10 cross-domain rollout complete) |
+| Audit chain entries | **27,184** committed at `examples/audit_chain.jsonl` (live runtime chain grows continuously beyond this) |
+| Model provider | **local Ollama** — `qwen3:8b` (classify / generate / safety_check / conversation / tool_use) + `nomic-embed-text` |
+| Realignment actions | stray Yggdrasil `BLUEPRINT.md` removed; audit-chain runtime append reverted; `.claude/` + `*.log` drift gitignored; `SESSION-HANDOFF.md` rewritten to current truth |
+
+_The 2026-05-19 (Burst 420) snapshot that follows remains the reference for any figure not re-measured above._
+
 **Refresh marker (B423, 2026-05-19): the body below freezes the post-B258 baseline; the appendix at the end of this doc reconciles every numeric claim against current disk-truth and lists every closed ADR since.**
 
 ---

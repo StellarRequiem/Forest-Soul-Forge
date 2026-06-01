@@ -162,3 +162,12 @@ apps/desktop/binaries/
 # binary). Both are operator-local outputs.
 dist/build/
 dist/dist/
+
+# Local Claude / Cowork session state — per-session config + worktrees,
+# never source-of-truth. (Realignment 2026-06-01.)
+.claude/
+
+# Operator run logs (commit-push helpers, health-check output, etc.).
+# Already-tracked files are unaffected; this only keeps ephemeral run
+# output out of git going forward. (Realignment 2026-06-01.)
+*.log
