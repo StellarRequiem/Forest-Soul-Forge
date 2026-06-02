@@ -1,9 +1,11 @@
 # Session handoff — 2026-06-01 (realignment + harden/preserve) → next session
 
-**Status: ✅ PRESERVED.** FSF is build-complete, verified, documented, and
-parked at a clean high-water mark. The operator's decision (2026-06-01) was to
-**harden & preserve** FSF as a finished artifact and concentrate active effort
-on Yggdrasil. This session realigned the stale docs, merged the outstanding
+**Status: ✅ PRESERVED + ⏸️ PAUSED.** FSF is build-complete, verified,
+documented, and parked at a clean high-water mark. The operator's decision
+(2026-06-01) was to **harden & preserve** FSF as a finished artifact and
+concentrate active effort on Yggdrasil. Its 24/7 footprint is now **wound
+down** — the daemon is `launchctl disable`d and `qwen3:8b` unloaded (~6 GB
+reclaimed for Yggdrasil). Resume path in §5.2.1. This session realigned the stale docs, merged the outstanding
 green branch, refreshed README/STATE, fixed the one real code smell, and
 documented the rest. Resume any time — nothing is half-done.
 
@@ -97,10 +99,17 @@ flywheel) remain open if the operator later changes FSF's role.
   `FSF_AUDIT_CHAIN_PATH`; the drift also stops whenever the daemon is paused.
 
 ### 5.2 Genuinely open (operator decisions / external)
-1. **Resource pause** — whether to wind down FSF's 24/7 daemon + Ollama
-   keep-alive (`launchctl disable` to survive KeepAlive) to reclaim RAM for
-   Yggdrasil, or keep it running idle. *Pending operator decision* (raised at
-   the end of the 2026-06-01 session).
+1. **Resource pause — DONE (2026-06-01).** FSF's 24/7 footprint was wound
+   down to reclaim ~6 GB for Yggdrasil: `dev.forest.daemon` was `launchctl
+   disable`d (survives KeepAlive) + booted out, and `qwen3:8b` unloaded from
+   Ollama. Yggdrasil (`dev.forest.yggdrasil.*`) and the `forest-blue-team-
+   guardian` API (`com.stellarrequiem.forest-api`, :7438) were left untouched.
+   **Resume FSF with:**
+   ```bash
+   launchctl enable gui/$(id -u)/dev.forest.daemon
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.forest.daemon.plist
+   # qwen3:8b reloads in Ollama on the daemon's first request
+   ```
 2. **External-integrator validation (ADR-0044 P6→P7)** — the v1.0 gate. Months,
    not bursts. Pitch materials at `docs/integrator-pitch.md`.
 3. **Apple Developer account** — gates ADR-0042 T5 (Tauri code-signing).
@@ -148,8 +157,8 @@ sqlite3 data/registry.sqlite "SELECT status, COUNT(*) FROM agents GROUP BY statu
 ## 9. Last conversational state
 
 The operator asked for a first-principles "what we started with vs what it is
-now" look at FSF, authorized a **full realignment**, then chose **harden &
-preserve** as FSF's role and asked to push everything + run a strategy session —
-all completed. The one open thread is the **resource-pause decision** (§5.2.1):
-whether to wind down FSF's 24/7 footprint for Yggdrasil, or leave it running.
-After that, focus returns to **Yggdrasil**.
+now" look at FSF, authorized a **full realignment**, chose **harden & preserve**
+as FSF's role, pushed everything, and **paused FSF's 24/7 footprint** (§5.2.1) to
+reclaim ~6 GB — all completed. **Focus now returns to Yggdrasil** (the active,
+milestone-bound project; note its head-to-head grain-validation checkpoint fires
+2026-06-03 → `Yggdrasil/logs/checkpoints/`).
