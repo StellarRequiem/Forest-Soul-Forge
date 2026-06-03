@@ -90,3 +90,13 @@ def test_readme_rows_all_parse(m):
     rows = state_canon.check_readme(m["repo"])
     unparsed = [k for k, _claimed, _disk, status in rows if status == "unparsed"]
     assert not unparsed, f"README rows no longer matched (update regex): {unparsed}"
+
+
+def test_readme_loc_tolerance_vs_exact_fields():
+    # LoC is tolerance-gated (within 1%) so a small src change doesn't force a
+    # README bump; egregious drift (the reviewer quoted a figure 41% off) still
+    # fails. Discrete counts stay exact — a stale one is a real oversight.
+    assert state_canon._readme_ok("python_loc", 101_000, 101_655)      # 655 off, <1% -> ok
+    assert not state_canon._readme_ok("python_loc", 60_000, 101_655)   # 41% off -> drift
+    assert state_canon._readme_ok("adr_files", 89, 89)                 # exact -> ok
+    assert not state_canon._readme_ok("adr_files", 88, 89)             # off by one -> drift

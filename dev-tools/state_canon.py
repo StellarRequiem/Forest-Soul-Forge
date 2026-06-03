@@ -87,6 +87,22 @@ README_CHECKS = {
     "builtin_tools": r"Built-in tools registered\*\*\s*\|\s*\*\*([\d,]+)\*\*",
 }
 
+# Fields whose README figure may be APPROXIMATE. LoC churns on every code edit,
+# so gating it exactly forces a README bump on every src commit (real friction —
+# observed the first time a one-line fix landed). A tolerance band still catches
+# the egregious drift this whole mechanism exists to stop (the external reviewer
+# quoted a LoC figure 41% off) while ignoring ±handful-of-lines churn. Discrete
+# counts (ADRs, tools, test files) stay EXACT: they move in deliberate, countable
+# steps, so a stale one is a genuine oversight worth failing on.
+README_TOLERANCE = {"python_loc": 0.01}   # README LoC is OK if within 1% of disk
+
+
+def _readme_ok(key: str, claimed: int, disk: int) -> bool:
+    tol = README_TOLERANCE.get(key)
+    if tol is not None and disk:
+        return abs(claimed - disk) <= tol * disk
+    return claimed == disk
+
 
 def _git(*args: str) -> str:
     try:
@@ -236,8 +252,8 @@ def check_readme(repo_live: dict) -> list:
             rows.append((key, None, repo_live[key], "unparsed"))
         else:
             claimed = int(m.group(1).replace(",", ""))
-            rows.append((key, claimed, repo_live[key],
-                         "ok" if claimed == repo_live[key] else "drift"))
+            ok = _readme_ok(key, claimed, repo_live[key])
+            rows.append((key, claimed, repo_live[key], "ok" if ok else "drift"))
     return rows
 
 
