@@ -66,6 +66,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CANON_JSON = ROOT / "dev-tools" / "state_canon.json"
 STATE_MD = ROOT / "STATE.md"
+README_MD = ROOT / "README.md"
 BEGIN = "<!-- CANON:BEGIN"   # prefix; full line carries a do-not-edit note
 END = "<!-- CANON:END -->"
 
@@ -73,6 +74,18 @@ END = "<!-- CANON:END -->"
 # is 0; there is no migrations/ dir or SCHEMA_VERSION constant). Operator-declared,
 # confirmed live via the daemon /healthz. One place, surfaced honestly as `declared`.
 DECLARED_SCHEMA_VERSION = "v23"
+
+# README "By the numbers" rows the gate enforces against disk. The README is the
+# public claim surface — these core counts MUST match disk (hard-gated). Each regex
+# pulls the bolded number from its row; a mismatch is a hard failure, a row that no
+# longer matches yields a WARNING (the README was reworded — update the pattern).
+README_CHECKS = {
+    "python_loc":    r"Source LoC \(Python\)\*\*\s*\|\s*\*\*([\d,]+)\*\*",
+    "test_files":    r"across \*\*([\d,]+) test files\*\*",
+    "adr_files":     r"ADRs filed\*\*\s*\|\s*\*\*([\d,]+)\*\* files",
+    "adr_unique":    r"\*\*([\d,]+)\*\* unique numbers",
+    "builtin_tools": r"Built-in tools registered\*\*\s*\|\s*\*\*([\d,]+)\*\*",
+}
 
 
 def _git(*args: str) -> str:
@@ -212,6 +225,22 @@ def emit() -> int:
     return 0
 
 
+def check_readme(repo_live: dict) -> list:
+    """Verify the README 'By the numbers' headline against disk. Returns rows of
+    (key, claimed, disk, status) where status is 'ok' | 'drift' | 'unparsed'."""
+    text = README_MD.read_text()
+    rows = []
+    for key, pat in README_CHECKS.items():
+        m = re.search(pat, text)
+        if not m:
+            rows.append((key, None, repo_live[key], "unparsed"))
+        else:
+            claimed = int(m.group(1).replace(",", ""))
+            rows.append((key, claimed, repo_live[key],
+                         "ok" if claimed == repo_live[key] else "drift"))
+    return rows
+
+
 def check() -> int:
     if not CANON_JSON.exists():
         print(f"⛔ no canon at {CANON_JSON.relative_to(ROOT)} — run --emit first")
@@ -230,6 +259,16 @@ def check() -> int:
             drift.append(k)
         tail = "" if ok else f"   canon={repo_c.get(k)!r}  DISK={repo_l.get(k)!r}"
         print(f"    {'✅' if ok else '⛔'} {k:<{width}}  {repo_l.get(k)}{tail}")
+
+    print("\n  README headline (hard-gated — public claim surface):")
+    for key, claimed, disk, status in check_readme(repo_l):
+        if status == "drift":
+            drift.append(f"README:{key}")
+            print(f"    ⛔ README:{key}  claim={claimed}  DISK={disk}")
+        elif status == "unparsed":
+            print(f"    ⚠️  README:{key}  row not found — update README_CHECKS regex")
+        else:
+            print(f"    ✅ README:{key}  {claimed}")
 
     print("\n  Informational (not gated — provenance + runtime):")
     for tier in ("provenance", "runtime"):

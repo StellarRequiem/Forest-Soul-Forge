@@ -77,3 +77,16 @@ def test_render_block_is_fenced_and_carries_measured_values(m):
     assert f"{m['repo']['python_loc']:,}" in render
     # provenance is labelled informational, present but not a gated row
     assert "informational, not gated" in render
+
+
+def test_readme_checks_keys_are_measured_repo_facts(m):
+    # The README gate may only enforce fields we actually measure — else KeyError.
+    assert set(state_canon.README_CHECKS) <= set(m["repo"])
+
+
+def test_readme_rows_all_parse(m):
+    # Every README_CHECKS regex must still match its row in the live README; a
+    # reworded row that silently stops matching would drop a field from the gate.
+    rows = state_canon.check_readme(m["repo"])
+    unparsed = [k for k, _claimed, _disk, status in rows if status == "unparsed"]
+    assert not unparsed, f"README rows no longer matched (update regex): {unparsed}"

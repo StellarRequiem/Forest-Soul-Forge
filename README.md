@@ -31,11 +31,13 @@ No cloud lock-in. No silent exfil. No "trust me bro." Every action chains to a t
 
 ## 🧮 By the numbers
 
+_The core counts here are gated against disk by [`dev-tools/state_canon.py`](dev-tools/state_canon.py) `--check` (CI per ADR-0093). The machine-generated source of truth is the **CANON** block in [`STATE.md`](STATE.md); narrative context (the `was N at B199` deltas) is human-maintained._
+
 | | |
 |---:|:---|
-| **Source LoC (Python)** | **101,623** across `src/forest_soul_forge/` (was 56,113 at B199; +45k across the Phase α substrate + the D1–D10 domain rollout) |
-| **Tests (passing)** | **5,339** unit + integration (12 skipped — all environment-gated; 1 xfail — documented F-7) across **261 test files** (was 2,598 at B199) |
-| **ADRs filed** | **88** files / **86** unique numbers (`ADR-0001` → `ADR-0092`, gaps 0010-0015). Since B199: Phase α substrate (ADR-0050 + ADR-0067–0076) and the **D1–D10 domain rollout** (ADR-0077 + ADR-0085–0092) closed end-to-end. Full index: [`docs/decisions/`](docs/decisions/). |
+| **Source LoC (Python)** | **101,645** across `src/forest_soul_forge/` (was 56,113 at B199; +45k across the Phase α substrate + the D1–D10 domain rollout) |
+| **Tests (passing)** | **5,339** unit + integration (12 skipped — all environment-gated; 1 xfail — documented F-7) across **262 test files** (was 2,598 at B199) |
+| **ADRs filed** | **89** files / **87** unique numbers (`ADR-0001` → `ADR-0093`, gaps 0010-0015). Since B199: Phase α substrate (ADR-0050 + ADR-0067–0076) and the **D1–D10 domain rollout** (ADR-0077 + ADR-0085–0092) closed end-to-end. Full index: [`docs/decisions/`](docs/decisions/). |
 | **Built-in tools registered** | **100** (catalog + `builtin/` source in sync; was 54 at B199 — +46 across the D-track tool suites). The change loop is agent-completable: code_read → static gates → code_edit → pytest_run → pip_install_isolated. |
 | **Genres** | **13** (7 original + 3 security tiers + 3 web tiers); each genre carries `max_initiative_level` + `default_initiative_level` per ADR-0021-am §3 |
 | **Trait roles** | **95** templates (original 5 + 9 Security Swarm + 3 SW-track + the ~50 D1–D10 domain roles; was 44 at B199) — catalog in [`config/trait_tree.yaml`](config/trait_tree.yaml) |
