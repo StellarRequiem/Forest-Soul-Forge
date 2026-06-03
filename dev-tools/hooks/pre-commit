@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# ADR-0093 pre-commit — block a commit whose documented counts have drifted
+# from disk (STATE.md CANON block / README headline vs the real source tree).
+#
+# Fix when it fires:  python3 dev-tools/state_canon.py --emit  &&  git add -u
+# Bypass for an unrelated WIP commit:  git commit --no-verify
+#
+# Checks the working tree (fast, ~0.2s, daemon-independent, reads disk only).
+# Activate this hook dir on a clone with:
+#   git config core.hooksPath dev-tools/hooks
+set -uo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+PY="$ROOT/.venv/bin/python3"; [ -x "$PY" ] || PY=python3
+LOG=$("$PY" "$ROOT/dev-tools/state_canon.py" --check 2>&1) && exit 0
+
+echo "✖ chronological-canon drift gate FAILED (ADR-0093) — commit blocked."
+echo "  Documented counts (STATE.md CANON / README headline) disagree with disk."
+echo "  Fix:  python3 dev-tools/state_canon.py --emit  &&  git add -u"
+echo "  Drift:"
+echo "$LOG" | grep -E "⛔|DRIFT|README:" | sed 's/^/    /'
+echo "  Bypass for an unrelated WIP commit:  git commit --no-verify"
+exit 1

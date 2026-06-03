@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ADR-0079 T6 umbrella — runs all 13 diagnostic sections + writes
+# ADR-0079 T6 umbrella — runs all diagnostic sections + writes
 # an aggregated summary.md to data/test-runs/diagnostic-all-<ts>/.
 #
 # Per ADR-0079 D3: fail loud per section but the umbrella runs
@@ -70,6 +70,10 @@ SECTIONS=(
   # B363/B392 gap class surfaces here within seconds of introduction.
   # Daemon-independent; reads disk only.
   "15-wiring-cross-check"
+  # ADR-0093 — chronological-canon drift gate. Re-measures disk and checks
+  # STATE.md's CANON block + the README headline for documented-count drift
+  # (LoC, ADRs, tools, test count, version, tag). Daemon-independent; disk only.
+  "16-canon-drift"
 )
 
 declare -a SECTION_RC=()
