@@ -45,9 +45,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install (dev extras)
+      - name: Install (dev + daemon extras)
+        # [daemon] carries the runtime stack (fastapi/pydantic/httpx/cryptography/
+        # sqlcipher3-binary) that tests/integration/conftest.py imports at collection.
+        # FSF's core deps are intentionally minimal (kernel-shape); the daemon stack
+        # is an opt-in extra — so CI must request it explicitly.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,daemon]"
       - name: Run suite (conformance excluded — it targets a live daemon)
         run: python -m pytest tests/unit tests/integration -q
