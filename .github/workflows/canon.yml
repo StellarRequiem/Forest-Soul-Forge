@@ -1,0 +1,53 @@
+name: canon
+
+# Two enforcement layers the external review prescribed:
+#   1. drift-gate — the docs' content counts must equal disk (chronological canon).
+#   2. tests      — the reproducible artifact behind the "N passing" claim.
+# The drift-gate is stdlib-only and deterministic. The tests job is the public
+# proof that the structural test count corresponds to a green suite.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: canon-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  drift-gate:
+    name: chronological-canon drift gate (docs vs disk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history + tags so latest_tag resolves
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # No install: dev-tools/state_canon.py is pure standard library by design.
+      # registry.sqlite is gitignored (absent here) and the audit chain is volatile;
+      # both are informational tiers, so their absence/movement never fails the gate.
+      - name: Verify STATE.md canon matches disk
+        run: python3 dev-tools/state_canon.py --check
+
+  tests:
+    name: unit + integration suite (the "N passing" proof)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run suite (conformance excluded — it targets a live daemon)
+        run: python -m pytest tests/unit tests/integration -q
