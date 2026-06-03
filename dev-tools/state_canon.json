@@ -1,8 +1,8 @@
 {
   "repo": {
     "python_loc": 101645,
-    "adr_files": 88,
-    "adr_unique": 86,
+    "adr_files": 89,
+    "adr_unique": 87,
     "test_files": 262,
     "test_functions": 5215,
     "builtin_tools": 100,
@@ -10,8 +10,8 @@
     "latest_tag": "v0.5.0"
   },
   "provenance": {
-    "head_sha": "31f74e2",
-    "commits_main": 678
+    "head_sha": "f8337c9",
+    "commits_main": 679
   },
   "runtime": {
     "agents_active": 67,
@@ -25,5 +25,5 @@
   "dynamic": {
     "suite_status": "structural count only \u2014 pass/GREEN is a CI artifact, not asserted here"
   },
-  "generated_at": "2026-06-03 21:10Z"
+  "generated_at": "2026-06-03 21:27Z"
 }
