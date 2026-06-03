@@ -5,6 +5,13 @@ session via the auto-memory system. It captures the conventions
 that have proved stable across iterations, so future sessions
 don't re-derive them from scratch.
 
+**[`~/OPERATOR_PROTOCOL.md`](/Users/llm01/OPERATOR_PROTOCOL.md) is the cross-project
+operating contract** — who the operator is, the red lines (facts-first, no
+fabrication, no belief without verification, single-writer, paper-before-real,
+audit-everything, VERIFIED-to-close), the detective discipline, and how to wield
+this agent. Read it at session start; it overrides default behavior and sits above
+these project-specific principles.
+
 ## Operating principles
 
 **§0 Hippocratic gate — every removal verified before action:**

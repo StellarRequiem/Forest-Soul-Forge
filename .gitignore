@@ -171,3 +171,9 @@ dist/dist/
 # Already-tracked files are unaffected; this only keeps ephemeral run
 # output out of git going forward. (Realignment 2026-06-01.)
 *.log
+
+*.command
+*.tmp
+.venv/
+node_modules/
+dist/
