@@ -216,10 +216,8 @@ class _ThreadLocalConn:
                 hex_key = _binascii.hexlify(self._master_key).decode("ascii")
                 try:
                     c.execute(f'PRAGMA key = "x\'{hex_key}\'"')
-                    # Probe — SQLCipher delays validation until first
-                    # read; querying cipher_version forces the key
-                    # check + surfaces a clean error if the file's
-                    # plaintext or the key's wrong.
+                    # A non-empty cipher_version confirms we linked against
+                    # a real SQLCipher build (plain SQLite returns nothing).
                     cipher_version = c.execute(
                         "PRAGMA cipher_version;"
                     ).fetchone()
@@ -230,6 +228,14 @@ class _ThreadLocalConn:
                             "linked against a non-SQLCipher build of "
                             "SQLite."
                         )
+                    # SQLCipher defers key validation until the first PAGE
+                    # read; PRAGMA cipher_version never touches a page, so a
+                    # wrong key — or a plaintext DB opened with a key — slips
+                    # past it and only blows up later, OUTSIDE this wrap,
+                    # leaking a raw sqlcipher3 DatabaseError to the caller.
+                    # Force a real read of page 1 here so a bad key raises
+                    # now and surfaces as a clean RegistryEncryptionError.
+                    c.execute("SELECT count(*) FROM sqlite_master;").fetchone()
                 except Exception as e:
                     try:
                         c.close()
@@ -242,13 +248,17 @@ class _ThreadLocalConn:
                         "may be plaintext (legacy) or the master key "
                         "doesn't match the one the DB was created with."
                     ) from e
+                # SQLCipher cursors need sqlcipher3's OWN Row factory;
+                # stdlib sqlite3.Row rejects a sqlcipher3 cursor with a
+                # TypeError on the first row fetch.
+                c.row_factory = _sqlcipher.Row
             else:
                 c = sqlite3.connect(
                     self._db_path,
                     isolation_level=None,
                     check_same_thread=False,
                 )
-            c.row_factory = sqlite3.Row
+                c.row_factory = sqlite3.Row
             for p in self._pragmas:
                 c.execute(p)
             self._local.conn = c
