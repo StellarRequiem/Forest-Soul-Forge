@@ -551,12 +551,13 @@ class TestBootstrap:
         conn.execute("PRAGMA foreign_keys = OFF")
         for col in ("consolidation_run", "consolidated_into", "consolidation_state"):
             conn.execute(f"ALTER TABLE memory_entries DROP COLUMN {col};")
-        # v22 (ADR-0075 T1 scheduler scale): budget_per_minute column +
-        # next_run_at partial index on scheduled_task_state.
-        conn.execute("DROP INDEX IF EXISTS idx_scheduled_task_state_next_run_at;")
-        conn.execute(
-            "ALTER TABLE scheduled_task_state DROP COLUMN budget_per_minute;"
-        )
+        # v22 (ADR-0075 T1) added budget_per_minute + a next_run_at index to
+        # scheduled_task_state. We deliberately do NOT reverse them column-wise:
+        # the whole table is dropped below (v13 teardown), so the column-drop is
+        # redundant — and a DROP COLUMN on scheduled_task_state isn't portable
+        # (older SQLite errors rebuilding the table, which carries the partial
+        # index idx_scheduled_task_state_breaker — "incomplete input" on CI).
+        # Dropping the table wholesale is both sufficient and version-safe.
         # v21 (ADR-0050 T4 at-rest encryption): content_encrypted column
         # on memory_entries.
         conn.execute(

@@ -664,13 +664,29 @@ def test_v15_to_v16_upgrade(tmp_path: Path):
         "CREATE INDEX IF NOT EXISTS idx_memory_disclosed_from "
         "ON memory_entries(disclosed_from_entry);"
     )
-    # v22: scheduler scale columns
+    # v22 (ADR-0075 T1): remove budget_per_minute from scheduled_task_state.
+    # The table survives at v15 (created at v13), so we can't drop it wholesale
+    # — but a bare DROP COLUMN isn't portable here: rebuilding the table forces
+    # SQLite to reconstruct its partial index (idx_scheduled_task_state_breaker),
+    # which older SQLite rejects ("incomplete input"). Rebuild the table without
+    # the column instead — a copy/swap that uses no DROP COLUMN and works on
+    # every SQLite version the suite runs on. (Table is empty in this fixture;
+    # the forward migration re-adds budget_per_minute + its index at v22.)
+    reg._conn.execute("DROP INDEX IF EXISTS idx_scheduled_task_state_next_run_at;")
+    reg._conn.execute("DROP INDEX IF EXISTS idx_scheduled_task_state_breaker;")
+    _info = list(reg._conn.execute("PRAGMA table_info(scheduled_task_state);"))
+    _keep = [(r[1], r[2]) for r in _info if r[1] != "budget_per_minute"]
+    _names = [n for n, _ in _keep]
+    reg._conn.execute("ALTER TABLE scheduled_task_state RENAME TO _sts_old;")
     reg._conn.execute(
-        "DROP INDEX IF EXISTS idx_scheduled_task_state_next_run_at;"
+        "CREATE TABLE scheduled_task_state (%s);"
+        % ", ".join(f"{n} {t}" for n, t in _keep)
     )
     reg._conn.execute(
-        "ALTER TABLE scheduled_task_state DROP COLUMN budget_per_minute;"
+        "INSERT INTO scheduled_task_state (%s) SELECT %s FROM _sts_old;"
+        % (", ".join(_names), ", ".join(_names))
     )
+    reg._conn.execute("DROP TABLE _sts_old;")
     # v20: reality_anchor_corrections
     reg._conn.execute(
         "DROP TABLE IF EXISTS reality_anchor_corrections;"
