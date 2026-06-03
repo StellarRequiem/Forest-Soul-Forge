@@ -14,6 +14,7 @@ from __future__ import annotations
 import pickle
 import sys
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 
