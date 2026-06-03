@@ -3,15 +3,15 @@
     "python_loc": 101655,
     "adr_files": 89,
     "adr_unique": 87,
-    "test_files": 262,
-    "test_functions": 5218,
+    "test_files": 263,
+    "test_functions": 5220,
     "builtin_tools": 100,
     "pyproject_version": "0.5.0",
     "latest_tag": "v0.5.0"
   },
   "provenance": {
-    "head_sha": "b609959",
-    "commits_main": 686
+    "head_sha": "e8b6288",
+    "commits_main": 687
   },
   "runtime": {
     "agents_active": 67,
@@ -25,5 +25,5 @@
   "dynamic": {
     "suite_status": "structural count only \u2014 pass/GREEN is a CI artifact, not asserted here"
   },
-  "generated_at": "2026-06-03 22:54Z"
+  "generated_at": "2026-06-03 23:31Z"
 }

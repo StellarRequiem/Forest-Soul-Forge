@@ -121,8 +121,10 @@ data/*
 
 # F7: isolated demo state (start-demo.command points the daemon here).
 # load-scenario.command --target=demo unpacks scenarios into this dir.
-# We never commit this — the canonical scenarios live in scenarios/.
-demo/
+# We never commit the runtime workspace — but demo/golden/ IS committed: it's
+# the version-controlled Golden Demo (the canonical "evaluate FSF in 60s" path).
+demo/*
+!demo/golden/
 
 # F4 + F7: backup files from reset.command + load-scenario.command.
 # These accumulate as you rehearse; clean them out manually when you
