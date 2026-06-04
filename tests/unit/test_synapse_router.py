@@ -82,7 +82,36 @@ def test_nodes_lists_sorted_nodes_and_classes():
     assert body["problem_classes"] == ["regulatory"]
 
 
+def test_route_recommends_and_is_reproducible_with_seed():
+    c = _app(_seeded())
+    a = c.get("/synapse/route", params={"problem_class": "regulatory", "seed": 7}).json()
+    b = c.get("/synapse/route", params={"problem_class": "regulatory", "seed": 7}).json()
+    assert a == b                                         # same seed → identical ranking
+    assert {r["node"] for r in a["ranking"]} == {"claude", "rotten"}
+    # claude (mean 0.6, n=3) should be exploited over rotten (confidently bad) across seeds
+    wins = sum(
+        c.get("/synapse/route", params={"problem_class": "regulatory", "seed": s})
+         .json()["recommended"] == "claude"
+        for s in range(200)
+    )
+    assert wins > 150                                     # exploit the proven node most of the time
+
+
+def test_route_respects_explicit_candidates():
+    c = _app(_seeded())
+    body = c.get("/synapse/route", params={
+        "problem_class": "regulatory", "candidates": "rotten", "seed": 1}).json()
+    assert body["candidates"] == ["rotten"] and body["recommended"] == "rotten"
+
+
+def test_route_empty_for_unknown_problem_class():
+    c = _app(_seeded())
+    body = c.get("/synapse/route", params={"problem_class": "no_such_class"}).json()
+    assert body["recommended"] is None and body["ranking"] == []
+
+
 def test_returns_503_when_synaptic_layer_unwired():
     c = _app(None)                                        # app.state.trust_graph = None
     for path in ("/synapse/trust", "/synapse/verify", "/synapse/nodes"):
         assert c.get(path).status_code == 503
+    assert c.get("/synapse/route", params={"problem_class": "x"}).status_code == 503

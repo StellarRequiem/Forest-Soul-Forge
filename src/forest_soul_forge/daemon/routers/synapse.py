@@ -7,6 +7,8 @@ or convert it into capability (that boundary is human-gated; ADR-0095).
 """
 from __future__ import annotations
 
+import random
+
 from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter(prefix="/synapse", tags=["synapse"])
@@ -61,6 +63,39 @@ def why(request: Request, node: str, problem_class: str):
     return {"node": node, "problem_class": problem_class, "n": len(outs),
             "outcomes": [{"seq": o.seq, "success": o.success, "weight": o.weight,
                           "evidence": o.evidence} for o in outs]}
+
+
+@router.get("/route")
+def route(request: Request, problem_class: str,
+          candidates: str | None = None, seed: int | None = None):
+    """Trust-based routing RECOMMENDATION (ADR-0095: routing *informs*; it never
+    selects an agent or runs a tool — that conversion of trust into capability is
+    human-gated). Thompson-samples each candidate's posterior for ``problem_class``
+    and ranks them: under-tested nodes get explored, proven nodes get exploited.
+
+    ``candidates`` is an optional CSV; the default is every node that already has a
+    track record for this problem_class. ``seed`` makes the sampling reproducible
+    (testing / "show me the same ranking"); omit it for live exploratory routing.
+    Read-only: the caller (human or agent) decides what to do with the ranking."""
+    tg = _graph(request)
+    if candidates:
+        cand = [c.strip() for c in candidates.split(",") if c.strip()]
+    else:
+        cand = sorted({s.node for s in tg.scores() if s.problem_class == problem_class})
+    if not cand:
+        return {"problem_class": problem_class, "recommended": None,
+                "ranking": [], "candidates": [],
+                "note": "no candidates with a track record for this problem_class"}
+    rng = random.Random(seed) if seed is not None else None
+    ranked = tg.rank(cand, problem_class, rng=rng)
+    return {
+        "problem_class": problem_class,
+        "recommended": ranked[0][0],
+        "ranking": [{"node": n, "sample": round(s, 4),
+                     "trust": round(tg.trust(n, problem_class).mean, 4)} for n, s in ranked],
+        "candidates": cand,
+        "note": "routing informs; capability stays human-gated (ADR-0095)",
+    }
 
 
 @router.get("/verify")
