@@ -68,6 +68,15 @@ def test_quarantined_surfaces_confident_low_trust_only():
     assert nodes == ["rotten"]                            # claude is fine; rotten is confidently bad
 
 
+def test_bounties_rank_by_uncertainty():
+    c = _app(_seeded())
+    body = c.get("/synapse/bounties").json()
+    assert body["count"] >= 1
+    us = [b["uncertainty"] for b in body["bounties"]]
+    assert us == sorted(us, reverse=True)                 # widest uncertainty first
+    assert all({"node", "problem_class", "uncertainty"} <= b.keys() for b in body["bounties"])
+
+
 def test_verify_reports_chain_integrity():
     c = _app(_seeded())
     body = c.get("/synapse/verify").json()

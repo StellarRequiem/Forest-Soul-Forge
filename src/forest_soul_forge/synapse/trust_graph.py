@@ -219,6 +219,29 @@ class TrustGraph:
         out.sort(key=lambda s: s.mean)
         return out
 
+    def uncertain(self, *, min_n: float = 0.0, top: int | None = None
+                  ) -> list[TrustScore]:
+        """The bounty board's targeting signal (ADR-0096): (node, problem_class)
+        pairs ranked by how UNCERTAIN their trust is — the credible-interval
+        width. The widest are the least-tested; testing them reduces the most
+        uncertainty. This completes the synaptic decision triad — best()/rank()
+        EXPLOIT the proven, quarantined() ISOLATES the collapsed, uncertain()
+        EXPLORES the unknown.
+
+        ``min_n`` filters out pairs below an observation floor; ``top`` caps the
+        list. Read-only — surfacing a bounty is analysis, not action; whether to
+        run it stays a human decision (ADR-0096)."""
+        scored: list[tuple[float, TrustScore]] = []
+        for (node, pc), (a, b) in list(self._post.items()):
+            s = TrustScore(node, pc, a, b)
+            if s.n < min_n:
+                continue
+            lo, hi = s.interval()
+            scored.append((hi - lo, s))
+        scored.sort(key=lambda t: (-t[0], t[1].n))   # widest first; ties → fewer obs first
+        out = [s for _w, s in scored]
+        return out[:top] if top else out
+
     def why(self, node: str, problem_class: str) -> list[Outcome]:
         """The provenance behind a trust value: every outcome that shaped it,
         in order. This is the answer to 'why is this node trusted 0.83?'"""

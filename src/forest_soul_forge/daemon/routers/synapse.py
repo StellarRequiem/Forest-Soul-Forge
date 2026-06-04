@@ -55,6 +55,24 @@ def quarantined(request: Request, threshold: float = 0.4, min_n: float = 5.0):
             for s in tg.quarantined(threshold=threshold, min_n=min_n)]}
 
 
+@router.get("/bounties")
+def bounties(request: Request, min_n: float = 0.0, top: int = 10):
+    """The bounty board (ADR-0096): (node, problem_class) pairs ranked by trust
+    UNCERTAINTY (credible-interval width) — the highest-value things to test next.
+    The explore-the-unknown counterpart to /trust (exploit) and /quarantined
+    (isolate). Read-only: surfacing a bounty is analysis; running it is a human
+    decision."""
+    tg = _graph(request)
+    out = []
+    for s in tg.uncertain(min_n=min_n, top=top):
+        d = _score(s)
+        lo, hi = s.interval()
+        d["uncertainty"] = round(hi - lo, 4)
+        out.append(d)
+    return {"count": len(out), "bounties": out,
+            "note": "ranked by trust uncertainty — testing the widest reduces the most (ADR-0096)"}
+
+
 @router.get("/why")
 def why(request: Request, node: str, problem_class: str):
     """The provenance behind a trust value: every audited outcome that shaped it."""

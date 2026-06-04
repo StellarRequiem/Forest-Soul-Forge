@@ -75,6 +75,28 @@ def test_quarantine_needs_confidence_not_just_a_low_mean():
     assert [s.node for s in q] == ["rotten"]
 
 
+def test_uncertain_ranks_least_tested_first():
+    g = TrustGraph()
+    for _ in range(100):
+        g.record("proven", "fx", True)         # well-tested → narrow interval
+    g.record("fresh1", "fx", True)             # barely tested → wide interval
+    g.record("fresh2", "code", False); g.record("fresh2", "code", True)
+    u = g.uncertain()
+    assert u[0].node in ("fresh1", "fresh2")   # widest (least-tested) first
+    assert u[-1].node == "proven"              # narrowest (most-tested) last
+    widths = [s.interval()[1] - s.interval()[0] for s in u]
+    assert widths == sorted(widths, reverse=True)
+
+
+def test_uncertain_respects_min_n_and_top():
+    g = TrustGraph()
+    g.record("a", "fx", True)                  # n=1
+    for _ in range(50):
+        g.record("b", "fx", True)              # n=50
+    assert [s.node for s in g.uncertain(min_n=10)] == ["b"]   # observation floor
+    assert len(g.uncertain(top=1)) == 1
+
+
 def test_why_surfaces_the_provenance():
     g = TrustGraph()
     g.record("a", "fx", True, evidence="audit:101")

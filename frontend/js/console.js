@@ -139,6 +139,36 @@ async function refreshTrust() {
 }
 
 // ---------------------------------------------------------------------------
+// Bounty board — what to test next (uncertainty-ranked)
+// ---------------------------------------------------------------------------
+async function refreshBounties() {
+  const root = document.getElementById("console-bounties");
+  if (!root) return;
+  root.textContent = "loading…";
+  try {
+    const r = await api.get("/synapse/bounties?top=10");
+    root.innerHTML = "";
+    if (!(r.bounties || []).length) {
+      root.textContent = "No bounties — every tracked (agent, class) pair is well-tested.";
+      root.style.color = "var(--muted,#888)";
+      return;
+    }
+    root.appendChild(el("div", "color:var(--muted,#888);font-size:11px;margin-bottom:6px;", r.note || ""));
+    for (const b of r.bounties) {
+      const row = el("div", "padding:3px 0;border-bottom:1px solid #1c2028;font-size:12px;");
+      row.innerHTML =
+        `<span style="font-family:var(--mono,monospace);color:#9fc5ff">${b.node}</span> @ ${b.problem_class} — ` +
+        `uncertainty <strong style="color:#f0d8ae">${Number(b.uncertainty).toFixed(2)}</strong> ` +
+        `<span style="color:#888">(trust ${Number(b.trust).toFixed(2)}, n ${b.observations})</span>`;
+      root.appendChild(row);
+    }
+  } catch (e) {
+    root.textContent = "failed to load bounties: " + e.message;
+    root.style.color = "var(--danger,#ff6b6b)";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Routing recommendation (trust informs; you decide)
 // ---------------------------------------------------------------------------
 async function recommend() {
@@ -176,7 +206,7 @@ async function recommend() {
 export function start() {
   const runBtn = document.getElementById("console-run-btn");
   if (!runBtn) return;  // tab not present (degraded HTML)
-  const refreshAll = () => Promise.all([refreshTasks(), refreshTrust()]);
+  const refreshAll = () => Promise.all([refreshTasks(), refreshTrust(), refreshBounties()]);
   runBtn.addEventListener("click", runLadder);
   const refreshBtn = document.getElementById("console-refresh-btn");
   if (refreshBtn) refreshBtn.addEventListener("click", refreshAll);
