@@ -125,6 +125,7 @@ data/*
 # the version-controlled Golden Demo (the canonical "evaluate FSF in 60s" path).
 demo/*
 !demo/golden/
+!demo/synapse/
 
 # F4 + F7: backup files from reset.command + load-scenario.command.
 # These accumulate as you rehearse; clean them out manually when you
