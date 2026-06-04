@@ -224,6 +224,13 @@ def build_or_get_tool_dispatcher(app):
         # table for queryable character-sheet roll-ups. The audit
         # chain is the source of truth; this is the indexed view.
         record_call=fsf_registry.record_tool_call,
+        # ADR-0095: the synaptic trust graph (or None if it failed to build
+        # at lifespan). Threaded in so _record_call_safe — the universal
+        # terminal-outcome sink — feeds trust for EVERY caller, not just the
+        # HTTP fast-path. Read at build time; the dispatcher builds lazily
+        # after the lifespan sets app.state.trust_graph, so the snapshot is
+        # the real graph, not None.
+        trust_graph=getattr(app.state, "trust_graph", None),
         # ADR-0019 T3: approval-queue persistence. Writes one row per
         # call gated by requires_human_approval. The endpoints
         # (list/detail/approve/reject) read and mutate them.

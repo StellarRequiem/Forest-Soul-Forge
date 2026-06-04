@@ -493,6 +493,14 @@ class ToolDispatcher:
     # skips the registry mirror and only emits to the audit chain.
     # Tests use ``None`` to keep the in-memory fakes simple.
     record_call: Any = None  # callable (kwargs) -> None | None
+    # ADR-0095: optional synaptic trust graph. When set, every TERMINAL
+    # dispatch outcome (succeeded/failed) from every caller — HTTP fast-path,
+    # scheduler, delegation, conversations, skills — records one audited
+    # outcome for (instance_id, tool_key) via _record_call_safe (the single
+    # universal sink). Pure belief update: never gates a dispatch, never
+    # raises into it. None in test contexts and when the daemon failed to
+    # build the graph. Routing-by-trust informs; capability stays human-gated.
+    trust_graph: Any = None
     # ADR-0019 T3: approval-queue persistence. Takes the same fields
     # as Registry.record_pending_approval. When None, the dispatcher
     # mints the ticket_id but does not persist — the approval queue
@@ -1472,7 +1480,13 @@ class ToolDispatcher:
         the mirror entirely (used by tests with in-memory fakes).
         Any exception is swallowed and would surface in the next chain
         verification — the audit chain remains the source of truth.
+
+        ADR-0095: this is also the single universal point every terminal
+        dispatch outcome converges on, so the synaptic trust graph is fed
+        here — *before* the record_call short-circuit, so trust recording
+        is independent of the registry mirror (which is None in tests).
         """
+        self._record_trust_safe(kwargs)
         if self.record_call is None:
             return
         try:
@@ -1481,6 +1495,37 @@ class ToolDispatcher:
             # Defensive — a registry write failure shouldn't break the
             # dispatch outcome the caller already observed in the chain.
             # Verify-on-boot will surface the mismatch.
+            pass
+
+    def _record_trust_safe(self, kwargs: dict) -> None:
+        """ADR-0095 — record one audited outcome into the synaptic layer.
+
+        ``kwargs`` is the same dict ``_record_call_safe`` mirrors to the
+        registry; every terminal outcome (succeeded/failed) from every
+        caller passes through here. Trust is contextual — per (instance_id,
+        tool_key) — and the evidence pointer ties it back to the audit seq,
+        so why() cross-links trust to the tamper-evident chain. Fully
+        guarded: a missing graph, a non-terminal status, or any error is a
+        silent no-op. The synaptic layer must never gate or break a dispatch.
+
+        This runs under the daemon write lock (every _record_call_safe call
+        site re-acquires it first), so concurrent record() appends to the
+        ledger are serialized.
+        """
+        tg = self.trust_graph
+        if tg is None:
+            return
+        status = kwargs.get("status")
+        if status not in ("succeeded", "failed"):
+            return
+        node = kwargs.get("instance_id")
+        tool_key = kwargs.get("tool_key")
+        if not node or not tool_key:
+            return
+        try:
+            tg.record(node, tool_key, status == "succeeded",
+                      evidence=f"audit:{kwargs.get('audit_seq')}")
+        except Exception:
             pass
 
     def _refuse(

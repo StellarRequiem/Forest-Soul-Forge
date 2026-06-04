@@ -243,22 +243,10 @@ async def call_tool(
             write_lock=write_lock,
         )
 
-    # ADR-0095 — feed the synaptic layer: a concrete dispatch outcome is an
-    # audited experience that moves this agent's trust for this tool class. Pure
-    # belief update (reversible, ADR-0095-safe); never gates the dispatch and
-    # never raises into it.
-    _tg = getattr(request.app.state, "trust_graph", None)
-    if _tg is not None and isinstance(outcome, (DispatchSucceeded, DispatchFailed)):
-        try:
-            _tg.record(
-                instance_id,
-                f"{payload.tool_name}.v{payload.tool_version}",
-                isinstance(outcome, DispatchSucceeded),
-                evidence=f"audit:{getattr(outcome, 'audit_seq', None)}",
-            )
-        except Exception:
-            pass
-
+    # ADR-0095 — trust recording happens inside the dispatcher's universal
+    # outcome sink (_record_call_safe), NOT here: that captures every caller
+    # (scheduler, delegation, conversations, skills), not just this HTTP path,
+    # and avoids double-counting the fast-path call.
     if isinstance(outcome, DispatchSucceeded):
         return ToolCallResponse(
             status="succeeded",

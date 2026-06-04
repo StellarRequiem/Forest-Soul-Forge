@@ -212,7 +212,7 @@ class TrustGraph:
         Per ADR-0095, surfacing a quarantine candidate is automatic; *releasing*
         one is a human-gated promotion, not something this method performs."""
         out = []
-        for (node, pc), (a, b) in self._post.items():
+        for (node, pc), (a, b) in list(self._post.items()):   # snapshot vs concurrent record()
             s = TrustScore(node, pc, a, b)
             if s.n >= min_n and s.interval()[1] < threshold:
                 out.append(s)
@@ -226,14 +226,19 @@ class TrustGraph:
                 if e.node == node and e.problem_class == problem_class]
 
     def nodes(self) -> list[str]:
-        return sorted({n for (n, _pc) in self._post})
+        return sorted({n for (n, _pc) in list(self._post)})   # snapshot vs concurrent record()
 
     def problem_classes(self) -> list[str]:
-        return sorted({pc for (_n, pc) in self._post})
+        return sorted({pc for (_n, pc) in list(self._post)})  # snapshot vs concurrent record()
 
     def scores(self) -> list[TrustScore]:
-        """Every (node, problem_class) trust score currently held, for display."""
-        return [TrustScore(n, pc, a, b) for (n, pc), (a, b) in self._post.items()]
+        """Every (node, problem_class) trust score currently held, for display.
+
+        Snapshots ``self._post`` (``list(...)`` is atomic under the GIL) so a
+        concurrent ``record()`` on the dispatch path — which may insert a new
+        (node, class) key — can't raise "dict changed size during iteration"
+        into a /synapse read."""
+        return [TrustScore(n, pc, a, b) for (n, pc), (a, b) in list(self._post.items())]
 
     # -- integrity --------------------------------------------------------
     def verify(self) -> tuple[bool, str | None]:

@@ -1802,3 +1802,58 @@ class TestWriteLockNarrowing:
             assert isinstance(outcome, DispatchSucceeded)
 
         _run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# ADR-0095 — synaptic trust recording at the universal outcome sink
+# ---------------------------------------------------------------------------
+class TestSynapticTrustRecording:
+    """Every terminal dispatch outcome feeds the trust graph through
+    _record_call_safe — so trust reflects ALL callers (HTTP, scheduler,
+    delegation, …), not just the HTTP fast-path. Recording is a guarded,
+    never-gating belief update."""
+
+    def test_real_dispatch_records_trust_with_audit_cross_link(self, dispatcher_env):
+        from forest_soul_forge.synapse import TrustGraph
+        g = TrustGraph()
+        dispatcher_env["dispatcher"].trust_graph = g
+        constitution = dispatcher_env["tmp_path"] / "constitution.yaml"
+        _write_constitution(constitution)
+        for _ in range(3):
+            outcome = _run(dispatcher_env["dispatcher"].dispatch(
+                instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+                genre="observer", session_id="s1", constitution_path=constitution,
+                tool_name="timestamp_window", tool_version="1",
+                args={"expression": "last 1 minutes"}))
+            assert isinstance(outcome, DispatchSucceeded)
+        s = g.trust("i1", "timestamp_window.v1")           # contextual: (instance, tool.vN)
+        assert s.n == 3 and s.mean > 0.5
+        prov = g.why("i1", "timestamp_window.v1")
+        assert [o.success for o in prov] == [True, True, True]
+        assert all(o.evidence and o.evidence.startswith("audit:") for o in prov)
+        assert g.verify()[0]
+
+    def test_sink_records_success_and_failure(self, dispatcher_env):
+        from forest_soul_forge.synapse import TrustGraph
+        g = TrustGraph()
+        d = dispatcher_env["dispatcher"]; d.trust_graph = g
+        d._record_call_safe(status="succeeded", instance_id="a", tool_key="x.v1", audit_seq=1)
+        d._record_call_safe(status="failed", instance_id="a", tool_key="x.v1", audit_seq=2)
+        s = g.trust("a", "x.v1")
+        assert (s.alpha, s.beta, s.n) == (2.0, 2.0, 2.0)    # 1 success + 1 failure over Beta(1,1)
+        assert [o.success for o in g.why("a", "x.v1")] == [True, False]
+
+    def test_sink_ignores_non_terminal_or_incomplete(self, dispatcher_env):
+        from forest_soul_forge.synapse import TrustGraph
+        g = TrustGraph()
+        d = dispatcher_env["dispatcher"]; d.trust_graph = g
+        d._record_call_safe(status="refused", instance_id="a", tool_key="x.v1", audit_seq=1)
+        d._record_call_safe(status="pending_approval", instance_id="a", tool_key="x.v1", audit_seq=2)
+        d._record_call_safe(status="succeeded", instance_id="", tool_key="x.v1", audit_seq=3)
+        d._record_call_safe(status="succeeded", instance_id="a", tool_key=None, audit_seq=4)
+        assert g.nodes() == [] and g.verify()[0]            # nothing recorded
+
+    def test_none_graph_is_a_safe_noop(self, dispatcher_env):
+        d = dispatcher_env["dispatcher"]
+        assert d.trust_graph is None
+        d._record_call_safe(status="succeeded", instance_id="a", tool_key="x.v1", audit_seq=1)  # no raise
