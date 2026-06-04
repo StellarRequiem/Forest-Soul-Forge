@@ -23,10 +23,10 @@ jobs:
     name: chronological-canon drift gate (docs vs disk)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0          # full history + tags so latest_tag resolves
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       # No install: dev-tools/state_canon.py is pure standard library by design.
@@ -39,10 +39,10 @@ jobs:
     name: unit + integration suite (the "N passing" proof)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install (dev + daemon extras)

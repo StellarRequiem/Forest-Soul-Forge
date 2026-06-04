@@ -70,10 +70,11 @@ daemon = [
     # sqlite3; opens encrypted DBs via the same Connection / Cursor
     # surface. Used ONLY when FSF_AT_REST_ENCRYPTION=true; the
     # import in registry/registry.py is lazy so operators who don't
-    # enable encryption never pay the wheel cost. Pre-built wheels
-    # available for macOS arm64+x86_64 and Linux x86_64+arm64; Windows
-    # operators may need to compile (out of scope for v1 per ADR
-    # Decision 2).
+    # enable encryption never pay the wheel cost. Pre-built wheels are
+    # published for Linux (x86_64 + aarch64); macOS + Windows had NO
+    # matching wheel for recent CPython in 2026-06 testing and may need to
+    # compile from source (out of scope for v1 per ADR Decision 2). CI
+    # installs the Linux wheel.
     "sqlcipher3-binary>=0.5.4",
 ]
 
