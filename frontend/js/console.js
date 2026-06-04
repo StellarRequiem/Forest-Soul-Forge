@@ -195,14 +195,29 @@ async function showWhy(node, problem_class) {
   root.style.color = "";
   root.textContent = `loading receipts for ${node} @ ${problem_class}…`;
   try {
-    const r = await api.get(
-      `/synapse/why?node=${encodeURIComponent(node)}&problem_class=${encodeURIComponent(problem_class)}`);
+    const q = `node=${encodeURIComponent(node)}&problem_class=${encodeURIComponent(problem_class)}`;
+    const [r, t] = await Promise.all([
+      api.get(`/synapse/why?${q}`),
+      api.get(`/synapse/trust?${q}`).catch(() => null),  // posterior is a bonus; receipts still show if it fails
+    ]);
     root.innerHTML = "";
-    const head = el("div", "margin-bottom:6px;font-size:12px;");
-    head.innerHTML =
-      `<span style="font-family:var(--mono,monospace);color:#9fc5ff">${node}</span> @ ${problem_class} — ` +
-      `<strong>${r.n}</strong> audited outcome${r.n === 1 ? "" : "s"} on the hash-chained ledger`;
+    const head = el("div", "margin-bottom:4px;font-size:12px;");
+    head.innerHTML = `<span style="font-family:var(--mono,monospace);color:#9fc5ff">${node}</span> @ ${problem_class}`;
     root.appendChild(head);
+    // The posterior (the belief): Beta-Bernoulli mean + 95% credible interval +
+    // α/β (ADR-0095). The outcomes below are the evidence that shaped it — so the
+    // drawer reads belief → evidence → (verify) proof.
+    const sc = t && t.trust;
+    if (sc && sc.interval) {
+      const post = el("div", "margin-bottom:6px;font-size:11px;color:#bcd;font-family:var(--mono,monospace);");
+      post.textContent =
+        `trust ${Number(sc.trust).toFixed(2)} · 95% CI [${Number(sc.interval[0]).toFixed(2)}, ${Number(sc.interval[1]).toFixed(2)}]` +
+        ` · α ${Number(sc.alpha).toFixed(2)} β ${Number(sc.beta).toFixed(2)} · n ${sc.observations}`;
+      root.appendChild(post);
+    }
+    const sub = el("div", "margin-bottom:6px;font-size:11px;color:#888;");
+    sub.textContent = `${r.n} audited outcome${r.n === 1 ? "" : "s"} on the hash-chained ledger — the evidence:`;
+    root.appendChild(sub);
     if (!(r.outcomes || []).length) {
       root.appendChild(el("div", "color:var(--muted,#888);font-size:12px;",
         "No outcomes yet — this pair is untested, which is exactly why it surfaces as a mission."));
