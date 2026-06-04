@@ -15,6 +15,17 @@ Everything runs locally in a throwaway temp dir, against Forest's **real**
 `core.audit_chain.AuditChain` and the same `cryptography` ed25519 the daemon
 itself uses. Nothing is mocked. Add `FSF_DEMO_SLOW=1` to pace it for a live audience.
 
+## Two demos, one story
+
+- **`golden_demo.py`** (above) — the **cryptographic core**: ed25519-signed, hash-chained, tamper-evident, with the forgery punchline. Deterministic, <1s, CI-tested.
+- **`golden_demo_live.py`** — the **real running daemon** over its HTTP API. It boots an isolated daemon on a free port, births a real agent (`POST /birth`), sets it RED posture, and dispatches a privileged tool — the *real governance pipeline* returns `tool_call_pending_approval`; you approve over `POST /pending_calls/{ticket}/approve`; it executes; then `AuditChain.verify()` runs on the daemon's actual chain file and a one-byte tamper is caught. Proof it's a **live system, not a script**.
+
+```sh
+.venv/bin/python demo/golden/golden_demo_live.py    # ~15s · spins its own isolated daemon · no cloud
+```
+
+The two are complementary: the live demo proves the real daemon enforces governance and writes a tamper-evident chain; the scripted demo proves the ed25519 **signature/provenance** layer (which the daemon wires per ADR-0049) down to the forgery punchline.
+
 ## What it shows
 
 | Phase | What happens | The primitive |
