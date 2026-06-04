@@ -895,6 +895,24 @@
     <!-- ========================================================== -->
     <!-- ADR-0096 — Operator Console: training ladder + fleet trust + trust-ranked routing. -->
     <section class="tab-panel" data-panel="console" role="tabpanel" hidden>
+      <!-- COMMAND mission-control: the board leads → assign → run → watch. -->
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">▣ Mission board — what needs doing</h2>
+          <div class="panel__actions"><span class="lbl ra-note">(agent, class) pairs ranked by trust uncertainty — test the widest first (ADR-0096)</span></div>
+        </div>
+        <div class="panel__body"><div id="console-bounties" class="ra-section">loading…</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Assign — who should handle a class?</h3>
+          <div class="panel__actions">
+            <input id="console-route-pc" type="text" placeholder="problem_class e.g. llm_think.v1" style="width:220px;padding:4px 8px;background:#0e1117;border:1px solid #2c303a;border-radius:4px;color:#ddd;font-size:12px;" />
+            <button class="btn btn--ghost btn--sm" id="console-route-btn" type="button">recommend</button>
+          </div>
+        </div>
+        <div class="panel__body"><div id="console-route" class="ra-section">Enter a problem_class and click <em>recommend</em> — trust ranks; you decide (capability stays human-gated, ADR-0095).</div></div>
+      </div>
       <div class="panel">
         <div class="panel__header">
           <h2 class="panel__title">Operator Console</h2>
@@ -920,23 +938,6 @@
           <div class="panel__actions"><span class="lbl ra-note">live synaptic layer · per (agent, problem_class)</span></div>
         </div>
         <div class="panel__body"><div id="console-trust" class="ra-section">loading…</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel__header">
-          <h3 class="panel__title">Routing — who should handle a class?</h3>
-          <div class="panel__actions">
-            <input id="console-route-pc" type="text" placeholder="problem_class e.g. llm_think.v1" style="width:220px;padding:4px 8px;background:#0e1117;border:1px solid #2c303a;border-radius:4px;color:#ddd;font-size:12px;" />
-            <button class="btn btn--ghost btn--sm" id="console-route-btn" type="button">recommend</button>
-          </div>
-        </div>
-        <div class="panel__body"><div id="console-route" class="ra-section">Enter a problem_class and click <em>recommend</em> — trust ranks; you decide (capability stays human-gated, ADR-0095).</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel__header">
-          <h3 class="panel__title">Bounty board — what to test next</h3>
-          <div class="panel__actions"><span class="lbl ra-note">(agent, class) pairs ranked by trust uncertainty (ADR-0096)</span></div>
-        </div>
-        <div class="panel__body"><div id="console-bounties" class="ra-section">loading…</div></div>
       </div>
     </section>
 
