@@ -740,37 +740,38 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
                 _agent_key_store = resolve_agent_key_store()
 
                 def _instance_id_for_dna(agent_dna: str) -> str | None:
-                    """Resolve agent_dna → instance_id via the agents
-                    table. The dna column is the short form (12 char);
-                    the audit chain stores the short form too."""
+                    """Resolve agent_dna → instance_id via the PUBLIC
+                    Registry accessor (thread-local connection), not a raw
+                    ``registry._conn`` query.
+
+                    B-2026-06-04 fix: the signer runs on the dispatch worker
+                    thread, but ``registry._conn`` is bound to the startup
+                    thread — a raw query there raised SQLite's cross-thread
+                    guard, which the closure caught and turned into ``None``,
+                    leaving every agent-emitted event silently UNSIGNED. The
+                    ADR-0049 sign-on-emit property was never actually exercised
+                    end-to-end in a live daemon (unit tests used a mock signer).
+                    ``get_agent_by_dna`` goes through the thread-local pool."""
                     try:
-                        row = registry._conn.execute(
-                            "SELECT instance_id FROM agents "
-                            "WHERE dna = ? LIMIT 1;",
-                            (agent_dna,),
-                        ).fetchone()
+                        rows = registry.get_agent_by_dna(agent_dna)
                     except Exception:
                         return None
-                    if row is None:
-                        return None
-                    return row[0]
+                    return rows[0].instance_id if rows else None
 
                 def _public_key_for_dna(agent_dna: str) -> bytes | None:
-                    """Resolve agent_dna → agents.public_key (base64
-                    string) → raw 32-byte ed25519 public-key bytes."""
+                    """Resolve agent_dna → agents.public_key → raw 32-byte
+                    ed25519 public-key bytes. Public accessor (thread-local
+                    connection), same cross-thread reason as above."""
                     try:
-                        row = registry._conn.execute(
-                            "SELECT public_key FROM agents "
-                            "WHERE dna = ? LIMIT 1;",
-                            (agent_dna,),
-                        ).fetchone()
+                        rows = registry.get_agent_by_dna(agent_dna)
                     except Exception:
                         return None
-                    if row is None or row[0] is None:
+                    pk = rows[0].public_key if rows else None
+                    if not pk:
                         return None
                     try:
                         return _b64_lifespan.b64decode(
-                            row[0].encode("ascii"), validate=True,
+                            pk.encode("ascii"), validate=True,
                         )
                     except Exception:
                         return None

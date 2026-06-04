@@ -158,7 +158,8 @@ def main() -> int:
                (tail or {}).get("events", (tail or {}).get("tail", [])))
         for e in ents:
             actor = "agent" if e.get("agent_dna") else "operator"
-            line(f"  seq={e.get('seq'):>2}  {e.get('event_type'):<28}{actor:<10}{e.get('entry_hash','')[:12]}")
+            sig = GREEN("ed25519 ✓") if e.get("signature") else DIM("—")
+            line(f"  seq={e.get('seq'):>2}  {e.get('event_type'):<26}{actor:<9}{e.get('entry_hash','')[:10]}  {sig}")
 
         phase("🔍", "VERIFY — FSF's AuditChain.verify() on the daemon's real chain file")
         from forest_soul_forge.core.audit_chain import AuditChain
@@ -183,8 +184,8 @@ def main() -> int:
         print(); print(BOLD("─" * 64))
         line(f"{GREEN('This was the real daemon')} — birth, the governance approval gate, the")
         line("approval, execution, and a tamper-evident audit chain, all over the live API.")
-        line(f"The ed25519 {BOLD('signature')} layer (provenance + the forgery punchline) is wired")
-        line(f"per ADR-0049 and shown cryptographically in {BOLD('golden_demo.py')}.")
+        line(f"Agent actions are {BOLD('ed25519-signed')} at emit (ADR-0049). The forgery punchline")
+        line(f"— fabricating a NEW signed event without the key — is in {BOLD('golden_demo.py')}.")
         print()
         return 0
     finally:
