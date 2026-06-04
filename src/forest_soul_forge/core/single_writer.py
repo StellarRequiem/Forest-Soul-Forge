@@ -29,6 +29,21 @@ from pathlib import Path
 DEFAULT_LOCK_PATH = Path("data/.fsf-writer.lock")
 
 
+def writer_lock_disabled() -> bool:
+    """True when the cross-process writer lock should be skipped.
+
+    The test harness sets ``FSF_DISABLE_WRITER_LOCK=1`` (root tests/conftest.py)
+    because the suite boots the app hundreds of times in one process — a single
+    global lock would have every boot after the first contend with itself.
+    Production leaves it unset, so the daemon and write-CLIs acquire normally.
+    The lock module's own unit tests call :class:`WriterLock` directly (not via
+    this gate), so they still exercise real locking.
+    """
+    return os.environ.get("FSF_DISABLE_WRITER_LOCK", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+
+
 class SingleWriterError(RuntimeError):
     """Raised when the writer lock is already held by another live process."""
 

@@ -153,11 +153,14 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         from forest_soul_forge.core.single_writer import (
             SingleWriterError as _SingleWriterError,
             WriterLock as _WriterLock,
+            writer_lock_disabled as _writer_lock_disabled,
         )
-        try:
-            app.state.writer_lock = _WriterLock(role="daemon").acquire()
-        except _SingleWriterError as _e:
-            raise RuntimeError(f"refusing to boot — {_e}") from _e
+        app.state.writer_lock = None
+        if not _writer_lock_disabled():
+            try:
+                app.state.writer_lock = _WriterLock(role="daemon").acquire()
+            except _SingleWriterError as _e:
+                raise RuntimeError(f"refusing to boot — {_e}") from _e
 
         # ADR-0050 T2 (B267): at-rest encryption gate. When
         # FSF_AT_REST_ENCRYPTION=true the registry bootstrap uses

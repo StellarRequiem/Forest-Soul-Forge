@@ -402,12 +402,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         from forest_soul_forge.core.single_writer import (
             SingleWriterError,
             assert_single_writer,
+            writer_lock_disabled,
         )
-        try:
-            _lock = assert_single_writer(role=f"cli:{args.cmd}")
-        except SingleWriterError as e:
-            print(f"refusing to run — {e}", file=sys.stderr)
-            return 3
+        if not writer_lock_disabled():
+            try:
+                _lock = assert_single_writer(role=f"cli:{args.cmd}")
+            except SingleWriterError as e:
+                print(f"refusing to run — {e}", file=sys.stderr)
+                return 3
 
     try:
         return int(runner(args) or 0)
