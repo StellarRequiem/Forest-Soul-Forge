@@ -31,12 +31,13 @@ function setCell(id, text, ok) {
 // HUD — the forest's vitals (daemon · model · units · missions · trust · chain)
 // ---------------------------------------------------------------------------
 async function refreshHud() {
-  const [h, a, c, v, b] = await Promise.allSettled([
+  const [h, a, c, v, b, sec] = await Promise.allSettled([
     api.get("/healthz"),
     api.get("/agents"),
     api.get("/audit/tail?n=1"),
     api.get("/synapse/verify"),
     api.get("/synapse/bounties?top=50"),
+    api.get("/security/status"),
   ]);
   const hd = h.status === "fulfilled" ? h.value : null;
   const providerOk = hd?.provider?.status === "ok" && !(hd?.provider?.details?.missing || []).length;
@@ -55,6 +56,13 @@ async function refreshHud() {
 
   const missions = b.status === "fulfilled" ? (b.value?.count ?? 0) : "—";
   setCell("hud-missions", String(missions));
+
+  // SHIELD — honest security signal from /security/status (no global posture
+  // endpoint exists, so we surface this rather than invent one).
+  const sv = sec.status === "fulfilled" ? sec.value : null;
+  const secure = sv ? (sv.critical_last_24h === 0 && sv.quarantined_count === 0) : false;
+  setCell("hud-shield", sv ? (secure ? "secure" : `${sv.critical_last_24h} crit`) : "—",
+          sv ? secure : undefined);
 
   return { agents, chain: ev?.seq, missions };
 }

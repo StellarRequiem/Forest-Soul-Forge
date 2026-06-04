@@ -49,12 +49,12 @@
         Welcome to Forest Soul Forge
       </div>
       <p class="welcome__text">
-        Drag the sliders below to shape an agent's personality &mdash;
-        29 traits across 6 domains. Click <strong>Birth</strong> when
-        you're ready to give them a soul. Then watch them work in the
-        <strong>Agents</strong>, <strong>Skills</strong>, and
-        <strong>Audit</strong> tabs. Everything runs locally; every
-        action lands in a hash-chained log.
+        This is your operations console. The bar up top is the fleet's live
+        state; the tiles below are your sections &mdash; <strong>Command</strong>
+        to run the loop (a mission &rarr; assign a trust-ranked unit &rarr; watch
+        it level up), <strong>Fleet</strong> to see your units and their
+        trust-levels, <strong>Build</strong> to recruit + smith. Everything runs
+        locally; every action lands in a hash-chained log.
       </p>
     </div>
     <button class="welcome__close" id="welcome-close" type="button"
@@ -82,6 +82,15 @@
         </button>
       </div>
 
+      <!-- COMMAND — mission control (the operator console). -->
+      <div class="tabs__group" data-group="command">
+        <div class="tabs__group-title">Command</div>
+        <button class="tab" data-tab="console" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M4.5 6.5 L6.5 8 L4.5 9.5 M8.5 9.5 L11 9.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="tab__label">Console</span>
+        </button>
+      </div>
+
       <div class="tabs__group" data-group="build">
         <div class="tabs__group-title">Build</div>
         <button class="tab" data-tab="forge" role="tab" aria-selected="false">
@@ -104,7 +113,7 @@
       </div>
 
       <div class="tabs__group" data-group="run">
-        <div class="tabs__group-title">Run</div>
+        <div class="tabs__group-title">Fleet</div>
         <button class="tab" data-tab="fleet" role="tab" aria-selected="false">
           <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/><rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/><rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/><rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
           <span class="tab__label">Fleet</span>
@@ -118,6 +127,10 @@
           <span class="tab__label">Approvals</span>
           <span class="tab__badge" id="pending-badge" hidden></span>
         </button>
+      </div>
+
+      <div class="tabs__group" data-group="comms">
+        <div class="tabs__group-title">Comms</div>
         <!-- ADR-003Y Y6 — Chat tab. Multi-turn conversations with agents. -->
         <button class="tab" data-tab="chat" role="tab" aria-selected="false">
           <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4 H14 V11 H8 L5 14 V11 H2 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
@@ -131,7 +144,7 @@
       </div>
 
       <div class="tabs__group" data-group="observe">
-        <div class="tabs__group-title">Observe</div>
+        <div class="tabs__group-title">Log</div>
         <button class="tab" data-tab="audit" role="tab" aria-selected="false">
           <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="5" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="11" cy="11" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.4 6.4 L9.6 9.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
           <span class="tab__label">Audit</span>
@@ -154,7 +167,7 @@
       </div>
 
       <div class="tabs__group" data-group="govern">
-        <div class="tabs__group-title">Govern</div>
+        <div class="tabs__group-title">Rules</div>
         <!-- ADR-0062 T6 (B258) — Security pane. -->
         <button class="tab" data-tab="security" role="tab" aria-selected="false">
           <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 L13 4 L13 9 C13 12 8 15 8 15 C8 15 3 12 3 9 L3 4 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>
@@ -169,11 +182,6 @@
         <button class="tab" data-tab="orchestrator" role="tab" aria-selected="false">
           <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.5 6.5 L4 4 M9.5 6.5 L12 4 M6.5 9.5 L4 12 M9.5 9.5 L12 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
           <span class="tab__label">Orchestrator</span>
-        </button>
-        <!-- ADR-0096 — Operator Console: tasks + trust-ranked assignment + live readouts. -->
-        <button class="tab" data-tab="console" role="tab" aria-selected="false">
-          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M4.5 6.5 L6.5 8 L4.5 9.5 M8.5 9.5 L11 9.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span class="tab__label">Console</span>
         </button>
         <!-- ADR-0068 T7b (B318) — Operator-context wizard pane. -->
         <button class="tab" data-tab="operator-wizard" role="tab" aria-selected="false">
@@ -221,6 +229,7 @@
           <div class="hud-cell" id="hud-units"><div class="hud-cell__label">Units</div><div class="hud-cell__value">…</div></div>
           <div class="hud-cell" id="hud-missions"><div class="hud-cell__label">Missions</div><div class="hud-cell__value">…</div></div>
           <div class="hud-cell" id="hud-trust" data-state="ok"><div class="hud-cell__label">Trust</div><div class="hud-cell__value">…</div></div>
+          <div class="hud-cell" id="hud-shield" data-state="ok"><div class="hud-cell__label">Shield</div><div class="hud-cell__value">…</div></div>
           <div class="hud-cell" id="hud-chain"><div class="hud-cell__label">Chain</div><div class="hud-cell__value">…</div></div>
           <div class="hud-cell" id="hud-activity"><div class="hud-cell__label">Activity</div><div class="hud-cell__value">…</div></div>
         </div>
