@@ -2034,12 +2034,26 @@ class ToolDispatcher:
                     side_effects = td.side_effects
             except Exception:
                 pass
+        # ADR-0094 follow-up: a runtime grant resolves to catalog defaults
+        # (empty constraints). Mirror the unconditional always-approval
+        # invariant into the granted constraints so `preview` and the grant's
+        # audit record agree with what the dispatch gate enforces. The gate
+        # already pends regardless (it derives the same side-effect set); this
+        # keeps the audit/preview view honest rather than understating it.
+        from forest_soul_forge.core.tool_policy import (
+            unconditional_approval_side_effects,
+        )
+        grant_constraints: dict = {}
+        applied = ["granted_via:catalog_grant"]
+        if side_effects in unconditional_approval_side_effects():
+            grant_constraints["requires_human_approval"] = True
+            applied.append(f"{side_effects}_always_human_approval")
         resolved = _ResolvedToolConstraints(
             name=tool_name,
             version=tool_version,
             side_effects=side_effects,
-            constraints={},
-            applied_rules=("granted_via:catalog_grant",),
+            constraints=grant_constraints,
+            applied_rules=tuple(applied),
         )
         return (resolved, grant.granted_at_seq, grant.trust_tier)
 
