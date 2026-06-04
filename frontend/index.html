@@ -74,9 +74,17 @@
     -->
     <nav class="tabs" role="tablist" aria-label="Forest Soul Forge navigation">
 
+      <!-- ADR-0096 era — HOME hub: the ops-console landing / "main menu". -->
+      <div class="tabs__group" data-group="home">
+        <button class="tab tab--home" data-tab="home" role="tab" aria-selected="true">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 7 L8 2 L14 7 M4 6.5 V13 H12 V6.5" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="tab__label">Home</span>
+        </button>
+      </div>
+
       <div class="tabs__group" data-group="build">
         <div class="tabs__group-title">Build</div>
-        <button class="tab" data-tab="forge" role="tab" aria-selected="true">
+        <button class="tab" data-tab="forge" role="tab" aria-selected="false">
           <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 14 L6 10 M9 3 L13 7 L7 13 L3 9 Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span class="tab__label">Forge</span>
         </button>
@@ -175,7 +183,48 @@
     <!-- ========================================================== -->
     <!-- Forge tab — birth / spawn / preview                         -->
     <!-- ========================================================== -->
-    <section class="tab-panel" data-panel="forge" role="tabpanel">
+    <!-- ADR-0096 era — HOME hub panel: ops-console HUD + section tiles. -->
+    <style id="home-styles">
+      .hud { display:flex; flex-wrap:wrap; background:linear-gradient(180deg,#0b0e14,#0e1219); border:1px solid #1c2733; border-radius:8px; overflow:hidden; position:relative; }
+      .hud::before { content:""; position:absolute; inset:0; background-image:repeating-linear-gradient(0deg,transparent 0 2px,rgba(80,220,200,.025) 2px 3px); pointer-events:none; }
+      .hud-cell { flex:1 1 120px; min-width:110px; padding:12px 16px; border-right:1px solid #1c2733; position:relative; }
+      .hud-cell:last-child { border-right:none; }
+      .hud-cell__label { font-family:var(--mono,ui-monospace,monospace); font-size:10px; letter-spacing:2px; color:#5a6b7a; text-transform:uppercase; }
+      .hud-cell__value { font-family:var(--mono,ui-monospace,monospace); font-size:18px; color:#aee9ff; margin-top:4px; text-shadow:0 0 8px rgba(120,220,255,.25); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .hud-cell[data-state="ok"] .hud-cell__value { color:#7cffb2; text-shadow:0 0 8px rgba(124,255,178,.3); }
+      .hud-cell[data-state="warn"] .hud-cell__value { color:#ffd47a; text-shadow:0 0 8px rgba(255,212,122,.3); }
+      .hud-cell[data-state]::after { content:""; position:absolute; top:13px; right:13px; width:6px; height:6px; border-radius:50%; background:#7cffb2; box-shadow:0 0 7px #7cffb2; }
+      .hud-cell[data-state="warn"]::after { background:#ffd47a; box-shadow:0 0 7px #ffd47a; }
+      .hub-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:18px; }
+      .hub-tile { text-align:left; font-family:inherit; color:inherit; background:linear-gradient(160deg,#0c1018,#0e131c); border:1px solid #1c2733; border-radius:10px; padding:18px 18px 34px; cursor:pointer; position:relative; overflow:hidden; transition:transform .15s,border-color .15s,box-shadow .15s; }
+      .hub-tile::before { content:""; position:absolute; inset:0; background:radial-gradient(130% 80% at 0% 0%,rgba(120,220,255,.06),transparent 60%); pointer-events:none; }
+      .hub-tile:hover { transform:translateY(-2px); border-color:#2dd4bf; box-shadow:0 0 0 1px rgba(45,212,191,.4),0 10px 30px rgba(45,212,191,.12); }
+      .hub-tile__label { font-family:var(--mono,ui-monospace,monospace); font-size:12px; letter-spacing:3px; color:#2dd4bf; }
+      .hub-tile__stat { font-family:var(--mono,ui-monospace,monospace); font-size:26px; color:#e8f5ff; margin:8px 0 4px; }
+      .hub-tile__desc { font-size:12px; color:#7a8a99; }
+      .hub-tile__enter { position:absolute; bottom:13px; right:16px; font-family:var(--mono,ui-monospace,monospace); font-size:11px; letter-spacing:1px; color:#3a4b5a; transition:color .15s; }
+      .hub-tile:hover .hub-tile__enter { color:#2dd4bf; }
+    </style>
+    <section class="tab-panel" data-panel="home" role="tabpanel">
+      <div class="panel" style="background:transparent;border:none;box-shadow:none;">
+        <div class="panel__header">
+          <h2 class="panel__title" style="letter-spacing:2px;">FOREST · OPERATIONS</h2>
+          <div class="panel__actions"><button class="btn btn--ghost btn--sm" id="hub-refresh-btn" type="button">refresh</button></div>
+        </div>
+        <div class="hud" id="home-hud">
+          <div class="hud-cell" id="hud-daemon" data-state="ok"><div class="hud-cell__label">Daemon</div><div class="hud-cell__value">…</div></div>
+          <div class="hud-cell" id="hud-provider" data-state="ok"><div class="hud-cell__label">Model</div><div class="hud-cell__value">…</div></div>
+          <div class="hud-cell" id="hud-units"><div class="hud-cell__label">Units</div><div class="hud-cell__value">…</div></div>
+          <div class="hud-cell" id="hud-missions"><div class="hud-cell__label">Missions</div><div class="hud-cell__value">…</div></div>
+          <div class="hud-cell" id="hud-trust" data-state="ok"><div class="hud-cell__label">Trust</div><div class="hud-cell__value">…</div></div>
+          <div class="hud-cell" id="hud-chain"><div class="hud-cell__label">Chain</div><div class="hud-cell__value">…</div></div>
+          <div class="hud-cell" id="hud-activity"><div class="hud-cell__label">Activity</div><div class="hud-cell__value">…</div></div>
+        </div>
+        <div class="hub-tiles" id="hub-tiles"></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="forge" role="tabpanel" hidden>
       <div class="forge-grid">
         <div class="forge-col forge-col--sliders">
           <div class="panel">

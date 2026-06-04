@@ -19,6 +19,7 @@ import * as catalogGrantsPanel from "./catalog-grants.js";       // B223 / ADR-0
 import * as marketplacePanel from "./marketplace.js";            // B228 / ADR-0055 M4
 import * as orchestratorPanel from "./orchestrator.js";          // B299 / ADR-0067 T7
 import * as consolePanel from "./console.js";                    // ADR-0096 — Operator Console
+import * as homePanel from "./home.js";                          // ADR-0096 era — HOME hub
 import * as operatorWizardPanel from "./operator-wizard.js";     // B318 / ADR-0068 T7b
 import * as voicePane from "./voice.js";                          // B326 / ADR-0070 T3
 import * as provenancePane from "./provenance.js";                // B330 / ADR-0072 T5
@@ -91,6 +92,7 @@ async function boot() {
     marketplacePanel.start();      // B228 / ADR-0055 M4
     orchestratorPanel.start();     // B299 / ADR-0067 T7
     consolePanel.start();          // ADR-0096 — Operator Console
+    homePanel.start();             // ADR-0096 era — HOME hub
     operatorWizardPanel.start();   // B318 / ADR-0068 T7b
     voicePane.initVoicePane();     // B326 / ADR-0070 T3
     provenancePane.initProvenancePane();  // B330 / ADR-0072 T5 — Phase α 10/10
@@ -184,6 +186,7 @@ async function boot() {
   // pane shows error toasts but the rest of the app is fine.
   orchestratorPanel.start();
   consolePanel.start();           // ADR-0096 — Operator Console
+  homePanel.start();              // ADR-0096 era — HOME hub
   // ADR-0068 T7b (B318) — Operator-context wizard pane.
   // Walks the operator through per-domain connector consent.
   // Lazy-loads on first tab activation. Non-fatal when
