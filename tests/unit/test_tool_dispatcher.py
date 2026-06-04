@@ -1882,3 +1882,74 @@ class TestSynapticTrustRecording:
         out = outcome.result.output
         assert out["recommended"] == "good_agent"            # read the live graph via ctx
         assert set(out["candidates"]) == {"good_agent", "bad_agent"}
+
+    def test_infra_failure_is_not_recorded_as_agent_incompetence(self, dispatcher_env):
+        """ADR-0095 refinement: a provider/model failure is the environment's
+        fault — it must NOT poison the agent's trust (the signal_listener case)."""
+        from forest_soul_forge.synapse import TrustGraph
+        g = TrustGraph()
+        d = dispatcher_env["dispatcher"]; d.trust_graph = g
+        d._record_call_safe(
+            status="failed", instance_id="a", tool_key="llm_think.v1", audit_seq=1,
+            exception_message="provider.complete failed: ProviderError('local model "
+                              "returned 404: model not found')")
+        assert g.nodes() == []                               # not recorded — infra, not capability
+
+    def test_genuine_tool_failure_still_counts(self, dispatcher_env):
+        from forest_soul_forge.synapse import TrustGraph
+        g = TrustGraph()
+        d = dispatcher_env["dispatcher"]; d.trust_graph = g
+        # a real tool/logic failure (bad args) is the agent's responsibility
+        d._record_call_safe(status="failed", instance_id="a", tool_key="x.v1",
+                            audit_seq=2, exception_message="prompt too long (5000 > 4000 max)")
+        assert g.trust("a", "x.v1").mean < 0.5               # recorded as a failure
+        # a failure with no message also counts (the honest default)
+        d._record_call_safe(status="failed", instance_id="b", tool_key="y.v1", audit_seq=3)
+        assert g.trust("b", "y.v1").n == 1
+
+    def test_is_infra_failure_classifier(self, dispatcher_env):
+        from forest_soul_forge.tools.dispatcher import _is_infra_failure
+        assert _is_infra_failure("ProviderError: local model returned 404") is True
+        assert _is_infra_failure("provider.complete failed: x") is True
+        assert _is_infra_failure("Connection refused") is True
+        assert _is_infra_failure("request timed out") is True
+        assert _is_infra_failure("prompt too long") is False   # agent's fault → counts
+        assert _is_infra_failure(None) is False
+        assert _is_infra_failure("") is False
+
+    def test_infra_vs_logic_failure_through_real_dispatch(self, dispatcher_env):
+        """End-to-end: a real dispatch that fails with a provider/model error
+        threads its message to the sink, which skips it (trust untouched); a
+        genuine logic failure (normal message) still records."""
+        from forest_soul_forge.synapse import TrustGraph
+
+        class _InfraRaisingTool:
+            name = "infra_dies"; version = "1"; side_effects = "read_only"
+            def validate(self, args): return None
+            async def execute(self, args, ctx):
+                raise ToolError("provider.complete failed: ProviderError("
+                                "'local model returned 404: model not found')")
+
+        g = TrustGraph()
+        d = dispatcher_env["dispatcher"]; d.trust_graph = g
+        dispatcher_env["registry"].register(_InfraRaisingTool())
+        dispatcher_env["registry"].register(_RaisingTool())            # logic failure
+        c_infra = dispatcher_env["tmp_path"] / "c_infra.yaml"
+        _write_constitution(c_infra, tool_name="infra_dies")
+        c_logic = dispatcher_env["tmp_path"] / "c_logic.yaml"
+        _write_constitution(c_logic, tool_name="raises")
+
+        out1 = _run(d.dispatch(instance_id="agent", agent_dna="d" * 12,
+                               role="network_watcher", genre="observer", session_id="s",
+                               constitution_path=c_infra, tool_name="infra_dies",
+                               tool_version="1", args={}))
+        assert isinstance(out1, DispatchFailed)
+        assert g.trust("agent", "infra_dies.v1").n == 0               # infra → skipped
+
+        out2 = _run(d.dispatch(instance_id="agent", agent_dna="d" * 12,
+                               role="network_watcher", genre="observer", session_id="s",
+                               constitution_path=c_logic, tool_name="raises",
+                               tool_version="1", args={}))
+        assert isinstance(out2, DispatchFailed)
+        assert g.trust("agent", "raises.v1").n == 1                   # logic failure → counts
+        assert g.trust("agent", "raises.v1").mean < 0.5

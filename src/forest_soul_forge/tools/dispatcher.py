@@ -475,6 +475,34 @@ def _sandbox_meta(
 _LOCK_FREE_EXECUTE_TOOLS: frozenset[str] = frozenset({"llm_think"})
 
 
+# ADR-0095 — markers that identify an INFRASTRUCTURE failure (the environment
+# failed, not the agent): provider/model/connection problems. A dispatch that
+# fails for one of these reasons is NOT a signal about the agent's capability, so
+# it must not be recorded as a trust failure. Conservative + specific: an unknown
+# failure does not match, so a genuine tool/logic failure still counts honestly.
+_INFRA_FAILURE_MARKERS: tuple[str, ...] = (
+    "providererror",
+    "provider.complete failed",
+    "model unreachable",
+    "model not found",
+    "local model returned",
+    "embedder unreachable",
+    "connection refused",
+    "timed out",
+    "timeout",
+)
+
+
+def _is_infra_failure(message: object) -> bool:
+    """True when a failure message indicates the environment failed (provider /
+    model / connection), not the agent. Conservative: empty / unknown messages
+    return False, so they record as real failures (the honest default)."""
+    if not message:
+        return False
+    m = str(message).lower()
+    return any(mark in m for mark in _INFRA_FAILURE_MARKERS)
+
+
 @dataclass
 class ToolDispatcher:
     """Fast-path dispatch coordinator.
@@ -1161,6 +1189,9 @@ class ToolDispatcher:
                 cost_usd=None,
                 side_effect_summary=None,
                 finished_at=failed_entry.timestamp,
+                # ADR-0095 — for infra-vs-capability trust classification (stripped
+                # before the registry mirror in _record_call_safe).
+                exception_message=str(e),
             )
             return DispatchFailed(
                 tool_key=key,
@@ -1193,6 +1224,9 @@ class ToolDispatcher:
                 cost_usd=None,
                 side_effect_summary=None,
                 finished_at=failed_entry.timestamp,
+                # ADR-0095 — for infra-vs-capability trust classification (stripped
+                # before the registry mirror in _record_call_safe).
+                exception_message=str(e),
             )
             return DispatchFailed(
                 tool_key=key,
@@ -1230,6 +1264,9 @@ class ToolDispatcher:
                 cost_usd=None,
                 side_effect_summary=None,
                 finished_at=failed_entry.timestamp,
+                # ADR-0095 — for infra-vs-capability trust classification (stripped
+                # before the registry mirror in _record_call_safe).
+                exception_message=str(e),
             )
             return DispatchFailed(
                 tool_key=key,
@@ -1490,6 +1527,9 @@ class ToolDispatcher:
         is independent of the registry mirror (which is None in tests).
         """
         self._record_trust_safe(kwargs)
+        # exception_message is for trust classification only (above) — strip it
+        # before the registry mirror, which has no such column.
+        kwargs.pop("exception_message", None)
         if self.record_call is None:
             return
         try:
@@ -1524,6 +1564,11 @@ class ToolDispatcher:
         node = kwargs.get("instance_id")
         tool_key = kwargs.get("tool_key")
         if not node or not tool_key:
+            return
+        # ADR-0095 refinement: an INFRASTRUCTURE failure (provider unreachable,
+        # model missing, timeout) is the environment's fault, not the agent's —
+        # don't let it poison trust. Genuine tool/logic failures still count.
+        if status == "failed" and _is_infra_failure(kwargs.get("exception_message")):
             return
         try:
             tg.record(node, tool_key, status == "succeeded",
