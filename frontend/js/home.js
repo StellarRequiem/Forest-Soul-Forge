@@ -3,6 +3,17 @@
 // a tile click just drives the corresponding tab. Read-only; polls while visible.
 
 import { api } from "./api.js";
+import { startLive, onChainEntryDebounced, onStatus } from "./live.js";
+
+// Reflect the real audit-stream connection in the hub's "live" pill — honest
+// signal, not decoration: ● live only when the stream is actually connected.
+function updateLivePill(s) {
+  const e = document.getElementById("hub-live");
+  if (!e) return;
+  if (s === "live") { e.textContent = "● live"; e.style.color = "#5cd6a8"; }
+  else if (s === "down") { e.textContent = "○ offline"; e.style.color = "#d68a8a"; }
+  else { e.textContent = "○ connecting"; e.style.color = "#caa86a"; }
+}
 
 function go(tab) {
   const t = document.querySelector(`.tab[data-tab="${tab}"]`);
@@ -114,4 +125,14 @@ export function start() {
     const panel = document.querySelector('.tab-panel[data-panel="home"]');
     if (panel && !panel.hidden) refreshAll();
   }, 15000);
+
+  // Live audit stream — the HUD ticks the instant a ledger entry lands instead
+  // of waiting for the 15s poll. The poll above stays as the fallback if the
+  // stream drops. Only refresh while Home is visible.
+  onStatus(updateLivePill);
+  startLive();
+  onChainEntryDebounced(() => {
+    const panel = document.querySelector('.tab-panel[data-panel="home"]');
+    if (panel && !panel.hidden) refreshAll();
+  });
 }

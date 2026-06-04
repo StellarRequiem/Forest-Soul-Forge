@@ -16,6 +16,7 @@
 
 import { api } from "./api.js";
 import { toast } from "./toast.js";
+import { startLive, onChainEntryDebounced } from "./live.js";
 
 const TIER_NAMES = {
   0: "Baseline", 1: "L1 determinism", 2: "L2 audit",
@@ -283,5 +284,14 @@ export function start() {
       bootstrapped = true;
       refreshAll();
     });
+  });
+
+  // Live audit stream — when COMMAND is open, re-rank the mission board and
+  // refresh fleet trust the instant a dispatch lands (the loop, live). The task
+  // ladder is a static catalog, so it's left out. No-op until bootstrapped.
+  startLive();
+  onChainEntryDebounced(() => {
+    const panel = document.querySelector('.tab-panel[data-panel="console"]');
+    if (bootstrapped && panel && !panel.hidden) { refreshBounties(); refreshTrust(); }
   });
 }
