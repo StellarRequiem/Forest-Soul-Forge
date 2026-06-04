@@ -228,6 +228,29 @@ async function showWhy(node, problem_class) {
   }
 }
 
+// Prove the ledger these receipts live on hasn't been tampered with: GET
+// /synapse/verify folds the whole hash chain and reports the first break, if any.
+// The receipts are the evidence; this is the proof that evidence wasn't forged.
+async function verifyLedger() {
+  const out = document.getElementById("console-verify-result");
+  if (!out) return;
+  out.textContent = "verifying…";
+  out.style.color = "#caa86a";
+  try {
+    const r = await api.get("/synapse/verify");
+    if (r.ok) {
+      out.textContent = `✓ untampered · ${r.outcomes} outcomes`;
+      out.style.color = "#5cd6a8";
+    } else {
+      out.textContent = `✗ BROKEN: ${r.reason || "chain integrity failure"}`;
+      out.style.color = "#d68a8a";
+    }
+  } catch (e) {
+    out.textContent = "verify failed: " + e.message;
+    out.style.color = "var(--danger,#ff6b6b)";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Routing recommendation (trust informs; you decide)
 // ---------------------------------------------------------------------------
@@ -272,6 +295,8 @@ export function start() {
   if (refreshBtn) refreshBtn.addEventListener("click", refreshAll);
   const routeBtn = document.getElementById("console-route-btn");
   if (routeBtn) routeBtn.addEventListener("click", recommend);
+  const verifyBtn = document.getElementById("console-verify-btn");
+  if (verifyBtn) verifyBtn.addEventListener("click", verifyLedger);
   const routeInput = document.getElementById("console-route-pc");
   if (routeInput) routeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") recommend(); });
 
