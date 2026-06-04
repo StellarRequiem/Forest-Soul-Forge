@@ -6,11 +6,17 @@ Single-writer-safe: it owns its own audit chain + trust ledger under a workspace
 dir; it never writes the live daemon's DB. This is the headless, repeatable
 self-test form. (The autonomous form is a daemon scheduler task-type that reuses
 the daemon's own dispatcher + trust graph in-process — the *same* runner.)
+
+Two flavors:
+  - the pure-function training ladder (TRAINING_TOOLS, no provider) — CI-safe;
+  - the LLM benchmark (BENCHMARK_TOOLS = llm_think, with a local provider) — needs
+    a live model (ollama), so operator-machine only.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -26,9 +32,10 @@ from forest_soul_forge.tools.dispatcher import (
 )
 from forest_soul_forge.training.runner import StepOutcome
 
-# Tools the shipped ladder uses; the training constitution grants exactly these,
-# read-only, no approval. Keep in sync with config/tasks/training.yaml.
+# Tools the shipped ladders use; the training constitution grants exactly these,
+# read-only, no approval. Keep in sync with config/tasks/*.yaml.
 TRAINING_TOOLS = (("timestamp_window", "1"), ("audit_chain_verify", "1"))
+BENCHMARK_TOOLS = (("llm_think", "1"),)
 TRAINING_AGENT_ID = "training_harness"
 TRAINING_AGENT_DNA = "trn0harness0"   # 12 chars — synthetic, never a real birth
 
@@ -40,6 +47,7 @@ class TrainingEnv:
     trust_graph: TrustGraph
     constitution_path: Path
     agent_id: str
+    provider: Any = None   # LocalProvider/etc. — threaded into provider-backed tools
 
     async def dispatch(self, agent_id: str, tool: str, version: str, args: dict) -> StepOutcome:
         """The runner's injected dispatch — drives the real ToolDispatcher and
@@ -49,7 +57,8 @@ class TrainingEnv:
             instance_id=agent_id, agent_dna=TRAINING_AGENT_DNA,
             role="network_watcher", genre="observer", session_id="training",
             constitution_path=self.constitution_path,
-            tool_name=tool, tool_version=version, args=args)
+            tool_name=tool, tool_version=version, args=args,
+            provider=self.provider)
         if isinstance(outcome, DispatchSucceeded):
             return StepOutcome("succeeded", outcome.result.output, outcome.audit_seq)
         if isinstance(outcome, DispatchFailed):
@@ -59,20 +68,22 @@ class TrainingEnv:
         return StepOutcome("error", None, None)
 
 
-def _write_training_constitution(path: Path) -> None:
+def _write_training_constitution(path: Path, tools_spec) -> None:
     tools = [{"name": n, "version": v, "side_effects": "read_only",
               "constraints": {"max_calls_per_session": 100000,
                               "requires_human_approval": False},
-              "applied_rules": []} for n, v in TRAINING_TOOLS]
+              "applied_rules": []} for n, v in tools_spec]
     path.write_text(yaml.safe_dump(
         {"schema_version": 1, "agent": {"role": "network_watcher"}, "tools": tools},
         sort_keys=False), encoding="utf-8")
 
 
-def build_env(workspace: str | Path, *, agent_id: str = TRAINING_AGENT_ID) -> TrainingEnv:
+def build_env(workspace: str | Path, *, agent_id: str = TRAINING_AGENT_ID,
+              tools: tuple = TRAINING_TOOLS, provider: Any = None) -> TrainingEnv:
     """Construct an isolated, real, in-process training environment under
-    ``workspace``. Registers all builtin tools (the ladder uses a read-only
-    subset), an audit chain, and a persistent trust graph."""
+    ``workspace``. ``tools`` grants the constitution; ``provider`` (a
+    LocalProvider/etc.) is threaded into every dispatch so provider-backed tools
+    like llm_think work (the benchmark). None for the pure-function ladder."""
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
     audit = AuditChain(ws / "training_audit.jsonl")
@@ -93,5 +104,15 @@ def build_env(workspace: str | Path, *, agent_id: str = TRAINING_AGENT_ID) -> Tr
         counter_get=get_count, counter_inc=inc_count,
         trust_graph=trust)  # ADR-0095 — tool dispatches also feed trust
     const = ws / "training_constitution.yaml"
-    _write_training_constitution(const)
-    return TrainingEnv(dispatcher, audit, trust, const, agent_id)
+    _write_training_constitution(const, tools)
+    return TrainingEnv(dispatcher, audit, trust, const, agent_id, provider)
+
+
+def build_local_provider():
+    """Construct the configured local (ollama) provider — for benchmark tasks that
+    dispatch llm_think. Reads base_url + the model map from settings, so it
+    benchmarks whatever model FSF is configured to use."""
+    from forest_soul_forge.daemon.config import DaemonSettings
+    from forest_soul_forge.daemon.providers.local import LocalProvider
+    s = DaemonSettings()
+    return LocalProvider(base_url=s.local_base_url, models=s.local_model_map())

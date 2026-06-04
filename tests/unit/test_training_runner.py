@@ -70,6 +70,20 @@ def test_multi_step_task_needs_all_steps():
     assert suite.results[0].steps[1].passed is False
 
 
+def test_benchmark_style_contains_scoring_with_fake_model():
+    """The benchmark path: a fake 'model' returns a response; tasks pass iff the
+    response contains the known answer (deterministic, no LLM grading)."""
+    tasks = [_task("right", 0, "benchmark.arithmetic", {"path": "response", "contains": "4"}),
+             _task("wrong", 0, "benchmark.arithmetic", {"path": "response", "contains": "99"})]
+
+    async def fake_model(agent, tool, ver, args):
+        return StepOutcome("succeeded", {"response": "Two plus two is 4."})
+
+    suite = _run(run_suite(tasks, fake_model, agent_id="bench"))
+    assert suite.results[0].passed is True    # response contains "4"
+    assert suite.results[1].passed is False   # response lacks "99"
+
+
 def test_report_renders_markdown_and_dict():
     tasks = [_task("a", 0, "p", {})]
 

@@ -27,10 +27,13 @@ def check_step(expect: dict[str, Any], status: str, output: Any) -> tuple[bool, 
     """Return ``(passed, reason)``.
 
     ``expect`` keys (all optional; all present ones must hold):
-      - ``status`` — required dispatch status (default ``"succeeded"``).
-      - ``path``   — dotted path into ``output`` to inspect.
-      - ``equals`` — ``output@path`` must ``==`` this (use with ``path``).
-      - ``truthy`` — bool: ``output@path`` must be truthy / falsy (use with ``path``).
+      - ``status``   — required dispatch status (default ``"succeeded"``).
+      - ``path``     — dotted path into ``output`` to inspect.
+      - ``equals``   — ``output@path`` must ``==`` this (use with ``path``).
+      - ``truthy``   — bool: ``output@path`` must be truthy / falsy (use with ``path``).
+      - ``contains`` — ``output@path`` (stringified) must contain this substring,
+                       case-insensitive. The deterministic correctness check for
+                       known-answer LLM benchmark tasks (e.g. "2+2" → contains "4").
     """
     want_status = expect.get("status", "succeeded")
     if status != want_status:
@@ -42,4 +45,10 @@ def check_step(expect: dict[str, Any], status: str, output: Any) -> tuple[bool, 
         if "truthy" in expect and bool(val) != bool(expect["truthy"]):
             return (False, f"{expect['path']}={val!r} (truthy={bool(val)}) "
                            f"!= expected truthy={bool(expect['truthy'])}")
+        if "contains" in expect:
+            sub = str(expect["contains"]).lower()
+            hay = str(val if val is not None else "").lower()
+            if sub not in hay:
+                return (False, f"{expect['path']}={str(val)[:60]!r} "
+                               f"does not contain {expect['contains']!r}")
     return (True, "ok")

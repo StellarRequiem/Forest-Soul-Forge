@@ -70,3 +70,23 @@ def test_acceptance_truthy_and_missing_path():
     assert check_step({"path": "n", "truthy": True}, "succeeded", {"n": 5})[0] is True
     assert check_step({"path": "n", "truthy": True}, "succeeded", {"n": 0})[0] is False
     assert check_step({"path": "a.b", "truthy": True}, "succeeded", {})[0] is False  # missing
+
+
+def test_acceptance_contains_case_insensitive():
+    # the deterministic correctness check for known-answer LLM benchmark tasks
+    assert check_step({"path": "response", "contains": "4"}, "succeeded",
+                      {"response": "The answer is 4."})[0] is True
+    assert check_step({"path": "response", "contains": "Paris"}, "succeeded",
+                      {"response": "paris"})[0] is True              # case-insensitive
+    ok, reason = check_step({"path": "response", "contains": "56"}, "succeeded",
+                            {"response": "forty-two"})
+    assert ok is False and "contain" in reason
+    assert check_step({"path": "response", "contains": "x"}, "succeeded", {})[0] is False
+
+
+def test_benchmark_catalog_loads():
+    cat = load_catalog(Path("config/tasks/benchmark.yaml"))
+    assert len(cat) >= 4
+    assert all(t.side_effects == "read_only" for t in cat)          # auto-run rail
+    assert all(t.steps[0].tool == "llm_think" for t in cat)         # the model under test
+    assert all("contains" in t.steps[0].expect for t in cat)        # deterministic scoring

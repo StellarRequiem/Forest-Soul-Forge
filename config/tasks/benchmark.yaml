@@ -1,0 +1,75 @@
+schema: fsf.training.v1
+# ADR-0096 — LLM benchmark catalog. Known-answer llm_think tasks with DETERMINISTIC
+# "contains" acceptance: correctness is measured by whether the model's response
+# contains the known answer (case-insensitive), so a model can be scored without
+# LLM-grading (which the protocol gates). Run this against any local model to
+# answer "is it the best?" with data. Needs a live provider (ollama) — operator
+# machine only, NOT CI. read_only, so safe to run autonomously.
+#
+# Tiers group by category, not difficulty: 0=arithmetic, 1=factual, 2=reasoning.
+tasks:
+  - id: bench_arith_add
+    tier: 0
+    problem_class: benchmark.arithmetic
+    description: "Arithmetic — 2+2."
+    side_effects: read_only
+    steps:
+      - tool: llm_think
+        version: "1"
+        args: {prompt: "What is 2 + 2? Reply with only the number.", max_tokens: 1000}
+        expect: {path: response, contains: "4"}
+
+  - id: bench_arith_mul
+    tier: 0
+    problem_class: benchmark.arithmetic
+    description: "Arithmetic — 7×8."
+    side_effects: read_only
+    steps:
+      - tool: llm_think
+        version: "1"
+        args: {prompt: "What is 7 multiplied by 8? Reply with only the number.", max_tokens: 1000}
+        expect: {path: response, contains: "56"}
+
+  - id: bench_fact_capital
+    tier: 1
+    problem_class: benchmark.factual
+    description: "Factual — capital of France."
+    side_effects: read_only
+    steps:
+      - tool: llm_think
+        version: "1"
+        args: {prompt: "What is the capital of France? Answer with one word.", max_tokens: 1000}
+        expect: {path: response, contains: "Paris"}
+
+  - id: bench_fact_sky
+    tier: 1
+    problem_class: benchmark.factual
+    description: "Factual — sky color."
+    side_effects: read_only
+    steps:
+      - tool: llm_think
+        version: "1"
+        args: {prompt: "On a clear day, what color is the sky? Answer with one word.", max_tokens: 1000}
+        expect: {path: response, contains: "blue"}
+
+  - id: bench_reason_apples
+    tier: 2
+    problem_class: benchmark.reasoning
+    description: "Reasoning — simple subtraction word problem."
+    side_effects: read_only
+    steps:
+      - tool: llm_think
+        version: "1"
+        args: {prompt: "I have 3 apples and I eat 1. How many apples are left? Reply with only the number.", max_tokens: 1000}
+        expect: {path: response, contains: "2"}
+
+  - id: bench_format_echo
+    tier: 2
+    problem_class: benchmark.format
+    description: "Instruction-following — echo an exact token."
+    side_effects: read_only
+    steps:
+      - tool: llm_think
+        version: "1"
+        args: {prompt: "Reply with exactly this single word and nothing else: ACKNOWLEDGED", max_tokens: 1000}
+        expect: {path: response, contains: "ACKNOWLEDGED"}
