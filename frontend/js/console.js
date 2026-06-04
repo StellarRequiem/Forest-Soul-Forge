@@ -1,14 +1,18 @@
 // Operator Console — ADR-0096.
 //
 // The clickable surface over the task exchange + the synaptic layer:
-//   1. Run training ladder — POST /training/run -> the report (per-tier scores).
-//   2. Task ladder         — GET /training/tasks (the tiered catalog).
-//   3. Fleet trust         — GET /synapse/trust (live synaptic layer readout).
-//   4. Routing             — GET /synapse/route?problem_class=... (trust-ranked).
+//   1. Mission board       — GET /synapse/bounties (uncertainty-ranked); click a
+//                            mission → it assigns the class + opens its receipts.
+//   2. Assign              — GET /synapse/route?problem_class=... (trust-ranked).
+//   3. Receipts            — GET /synapse/why (every audited outcome behind a
+//                            trust value) — tamper-evident evidence, not assertion.
+//   4. Run training ladder — POST /training/run -> the report (per-tier scores).
+//   5. Task ladder         — GET /training/tasks (the tiered catalog).
+//   6. Fleet trust         — GET /synapse/trust; click a row → its receipts.
 //
-// Safe by design: the ladder is deterministic + read-only; routing INFORMS
-// (capability stays human-gated, ADR-0095). Polling-based (v1) — an SSE live
-// stream is the v2 upgrade. Sibling shape to orchestrator.js.
+// Safe by design: every endpoint here is read-only; routing INFORMS (capability
+// stays human-gated, ADR-0095). Polling-based (v1) — an SSE live stream is the
+// v2 upgrade. Sibling shape to orchestrator.js.
 
 import { api } from "./api.js";
 import { toast } from "./toast.js";
@@ -122,12 +126,14 @@ async function refreshTrust() {
     const tb = el("tbody");
     for (const s of r.scores) {
       const col = s.trust >= 0.66 ? "#aef0ae" : (s.trust <= 0.4 ? "#f0aeae" : "#f0d8ae");
-      const tr = el("tr", "border-bottom:1px solid #1c2028;");
+      const tr = el("tr", "border-bottom:1px solid #1c2028;cursor:pointer;");
+      tr.title = `receipts for ${s.node} @ ${s.problem_class}`;
       tr.innerHTML =
         `<td style='padding:4px 8px;font-family:var(--mono,monospace);color:#aaa'>${s.node}</td>` +
         `<td style='padding:4px 8px'>${s.problem_class}</td>` +
         `<td style='padding:4px 8px;color:${col}'>${Number(s.trust).toFixed(2)}</td>` +
         `<td style='padding:4px 8px;color:#888'>${s.observations}</td>`;
+      tr.addEventListener("click", () => showWhy(s.node, s.problem_class));
       tb.appendChild(tr);
     }
     table.appendChild(tb);
@@ -155,15 +161,68 @@ async function refreshBounties() {
     }
     root.appendChild(el("div", "color:var(--muted,#888);font-size:11px;margin-bottom:6px;", r.note || ""));
     for (const b of r.bounties) {
-      const row = el("div", "padding:3px 0;border-bottom:1px solid #1c2028;font-size:12px;");
+      const row = el("div", "padding:5px 0;border-bottom:1px solid #1c2028;font-size:12px;cursor:pointer;");
+      row.title = `assign ${b.problem_class} + show ${b.node}'s receipts`;
       row.innerHTML =
         `<span style="font-family:var(--mono,monospace);color:#9fc5ff">${b.node}</span> @ ${b.problem_class} — ` +
         `uncertainty <strong style="color:#f0d8ae">${Number(b.uncertainty).toFixed(2)}</strong> ` +
-        `<span style="color:#888">(trust ${Number(b.trust).toFixed(2)}, n ${b.observations})</span>`;
+        `<span style="color:#888">(trust ${Number(b.trust).toFixed(2)}, n ${b.observations})</span> ` +
+        `<span style="color:#4a6b5a">▸ assign · why</span>`;
+      row.addEventListener("click", () => { assignTo(b.problem_class); showWhy(b.node, b.problem_class); });
       root.appendChild(row);
     }
   } catch (e) {
     root.textContent = "failed to load bounties: " + e.message;
+    root.style.color = "var(--danger,#ff6b6b)";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Receipts — the audited outcomes behind a trust value (GET /synapse/why).
+// The trust thesis made tangible: every number traces to tamper-evident
+// evidence the operator can read. Invoked by clicking a mission or trust row.
+// ---------------------------------------------------------------------------
+function assignTo(problem_class) {
+  const input = document.getElementById("console-route-pc");
+  if (input) input.value = problem_class;
+  recommend();
+}
+
+async function showWhy(node, problem_class) {
+  const root = document.getElementById("console-why");
+  if (!root) return;
+  root.style.color = "";
+  root.textContent = `loading receipts for ${node} @ ${problem_class}…`;
+  try {
+    const r = await api.get(
+      `/synapse/why?node=${encodeURIComponent(node)}&problem_class=${encodeURIComponent(problem_class)}`);
+    root.innerHTML = "";
+    const head = el("div", "margin-bottom:6px;font-size:12px;");
+    head.innerHTML =
+      `<span style="font-family:var(--mono,monospace);color:#9fc5ff">${node}</span> @ ${problem_class} — ` +
+      `<strong>${r.n}</strong> audited outcome${r.n === 1 ? "" : "s"} on the hash-chained ledger`;
+    root.appendChild(head);
+    if (!(r.outcomes || []).length) {
+      root.appendChild(el("div", "color:var(--muted,#888);font-size:12px;",
+        "No outcomes yet — this pair is untested, which is exactly why it surfaces as a mission."));
+      return;
+    }
+    for (const o of r.outcomes) {
+      const row = el("div", "padding:3px 0;border-bottom:1px solid #1c2028;font-family:var(--mono,monospace);font-size:12px;");
+      const col = o.success ? "#aef0ae" : "#f0aeae";
+      row.innerHTML =
+        `<span style="color:#666">#${Number(o.seq)}</span> ${o.success ? "✅" : "❌"} ` +
+        `<span style="color:${col}">${o.success ? "succeeded" : "failed"}</span> ` +
+        `<span style="color:#888">· weight ${Number(o.weight).toFixed(2)}</span>`;
+      if (o.evidence != null && o.evidence !== "") {
+        // evidence is free-form → textContent (el's 3rd arg) so it can't inject markup.
+        row.appendChild(el("span", "color:#9aa",
+          " — " + (typeof o.evidence === "string" ? o.evidence : JSON.stringify(o.evidence))));
+      }
+      root.appendChild(row);
+    }
+  } catch (e) {
+    root.textContent = "failed to load receipts: " + e.message;
     root.style.color = "var(--danger,#ff6b6b)";
   }
 }
