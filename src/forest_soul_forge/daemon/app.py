@@ -34,6 +34,7 @@ from forest_soul_forge.daemon.providers.local import LocalProvider
 from forest_soul_forge.daemon.routers import agents as agents_router
 from forest_soul_forge.daemon.routers import audit as audit_router
 from forest_soul_forge.daemon.routers import synapse as synapse_router
+from forest_soul_forge.daemon.routers import training as training_router
 from forest_soul_forge.daemon.routers import health as health_router
 from forest_soul_forge.daemon.routers import character_sheet as character_sheet_router
 from forest_soul_forge.daemon.routers import genres as genres_router
@@ -1221,6 +1222,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(agents_router.router)
     app.include_router(audit_router.router)
     app.include_router(synapse_router.router)
+    app.include_router(training_router.router)
     app.include_router(runtime_router.router)
     app.include_router(traits_router.router)
     app.include_router(tools_router.router)

@@ -88,6 +88,7 @@ def test_route_recommends_and_is_reproducible_with_seed():
     b = c.get("/synapse/route", params={"problem_class": "regulatory", "seed": 7}).json()
     assert a == b                                         # same seed → identical ranking
     assert {r["node"] for r in a["ranking"]} == {"claude", "rotten"}
+    assert all({"node", "sample", "trust", "observations"} <= r.keys() for r in a["ranking"])
     # claude (mean 0.6, n=3) should be exploited over rotten (confidently bad) across seeds
     wins = sum(
         c.get("/synapse/route", params={"problem_class": "regulatory", "seed": s})

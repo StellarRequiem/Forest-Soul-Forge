@@ -158,6 +158,11 @@
           <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="3" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="3" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="13" cy="13" r="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M6.5 6.5 L4 4 M9.5 6.5 L12 4 M6.5 9.5 L4 12 M9.5 9.5 L12 12" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
           <span class="tab__label">Orchestrator</span>
         </button>
+        <!-- ADR-0096 — Operator Console: tasks + trust-ranked assignment + live readouts. -->
+        <button class="tab" data-tab="console" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M4.5 6.5 L6.5 8 L4.5 9.5 M8.5 9.5 L11 9.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="tab__label">Console</span>
+        </button>
         <!-- ADR-0068 T7b (B318) — Operator-context wizard pane. -->
         <button class="tab" data-tab="operator-wizard" role="tab" aria-selected="false">
           <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 7 L7 10 L12 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
@@ -791,6 +796,46 @@
     <!-- recent routes. Read-only; operator edits config/domains/*    -->
     <!-- + config/handoffs.yaml on disk and clicks reload.            -->
     <!-- ========================================================== -->
+    <!-- ADR-0096 — Operator Console: training ladder + fleet trust + trust-ranked routing. -->
+    <section class="tab-panel" data-panel="console" role="tabpanel" hidden>
+      <div class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Operator Console</h2>
+          <div class="panel__actions">
+            <button class="btn btn--ghost btn--sm" id="console-run-btn" type="button">▶ run training ladder</button>
+            <button class="btn btn--ghost btn--sm" id="console-refresh-btn" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="console-run" class="ra-section">Click <em>run training ladder</em> to execute the Baseline → L4 self-test and see the live readout. Deterministic + read-only (ADR-0096).</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Task ladder</h3>
+          <div class="panel__actions"><span class="lbl ra-note">deterministic, read-only — safe to run anytime</span></div>
+        </div>
+        <div class="panel__body"><div id="console-tasks" class="ra-section">loading…</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Fleet trust</h3>
+          <div class="panel__actions"><span class="lbl ra-note">live synaptic layer · per (agent, problem_class)</span></div>
+        </div>
+        <div class="panel__body"><div id="console-trust" class="ra-section">loading…</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel__header">
+          <h3 class="panel__title">Routing — who should handle a class?</h3>
+          <div class="panel__actions">
+            <input id="console-route-pc" type="text" placeholder="problem_class e.g. llm_think.v1" style="width:220px;padding:4px 8px;background:#0e1117;border:1px solid #2c303a;border-radius:4px;color:#ddd;font-size:12px;" />
+            <button class="btn btn--ghost btn--sm" id="console-route-btn" type="button">recommend</button>
+          </div>
+        </div>
+        <div class="panel__body"><div id="console-route" class="ra-section">Enter a problem_class and click <em>recommend</em> — trust ranks; you decide (capability stays human-gated, ADR-0095).</div></div>
+      </div>
+    </section>
+
     <section class="tab-panel" data-panel="orchestrator" role="tabpanel" hidden>
       <div class="panel">
         <div class="panel__header">

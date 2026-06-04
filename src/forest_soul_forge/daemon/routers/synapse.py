@@ -88,11 +88,15 @@ def route(request: Request, problem_class: str,
                 "note": "no candidates with a track record for this problem_class"}
     rng = random.Random(seed) if seed is not None else None
     ranked = tg.rank(cand, problem_class, rng=rng)
+    ranking = []
+    for n, s in ranked:
+        sc = tg.trust(n, problem_class)
+        ranking.append({"node": n, "sample": round(s, 4),
+                        "trust": round(sc.mean, 4), "observations": round(sc.n, 2)})
     return {
         "problem_class": problem_class,
         "recommended": ranked[0][0],
-        "ranking": [{"node": n, "sample": round(s, 4),
-                     "trust": round(tg.trust(n, problem_class).mean, 4)} for n, s in ranked],
+        "ranking": ranking,
         "candidates": cand,
         "note": "routing informs; capability stays human-gated (ADR-0095)",
     }
