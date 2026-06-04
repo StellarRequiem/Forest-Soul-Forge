@@ -134,6 +134,13 @@ class ToolContext:
     # constraints["audit_chain"] still works as a back-compat fallback
     # for the existing test_b1_tools.py fixture.
     audit_chain: Any = None
+    # ADR-0095 — bound synaptic trust graph for route_recommend.v1 (and any
+    # future tool that consults trust). The dispatcher populates this from its
+    # own ``trust_graph`` reference. None when the daemon failed to build the
+    # synaptic layer (or in test contexts); the tool refuses cleanly. Read-only
+    # use: tools may READ trust to inform routing, never write it or convert it
+    # into capability — that boundary is human-gated.
+    trust_graph: Any = None
 
 
 @dataclass(frozen=True)

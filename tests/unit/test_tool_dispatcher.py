@@ -1857,3 +1857,28 @@ class TestSynapticTrustRecording:
         d = dispatcher_env["dispatcher"]
         assert d.trust_graph is None
         d._record_call_safe(status="succeeded", instance_id="a", tool_key="x.v1", audit_seq=1)  # no raise
+
+    def test_route_recommend_reads_trust_graph_via_ctx(self, dispatcher_env):
+        """End-to-end: the dispatcher injects its trust_graph into ToolContext,
+        so route_recommend.v1 ranks against the LIVE graph through a real
+        dispatch — not just in a hand-built context."""
+        from forest_soul_forge.synapse import TrustGraph
+        from forest_soul_forge.tools.builtin.route_recommend import RouteRecommendTool
+        d = dispatcher_env["dispatcher"]
+        dispatcher_env["registry"].register(RouteRecommendTool())
+        g = TrustGraph()
+        for _ in range(15):
+            g.record("good_agent", "code_review", True)
+            g.record("bad_agent", "code_review", False)
+        d.trust_graph = g
+        constitution = dispatcher_env["tmp_path"] / "rr_constitution.yaml"
+        _write_constitution(constitution, tool_name="route_recommend")
+        outcome = _run(d.dispatch(
+            instance_id="i1", agent_dna="d" * 12, role="network_watcher",
+            genre="observer", session_id="s1", constitution_path=constitution,
+            tool_name="route_recommend", tool_version="1",
+            args={"problem_class": "code_review", "seed": 3}))
+        assert isinstance(outcome, DispatchSucceeded)
+        out = outcome.result.output
+        assert out["recommended"] == "good_agent"            # read the live graph via ctx
+        assert set(out["candidates"]) == {"good_agent", "bad_agent"}

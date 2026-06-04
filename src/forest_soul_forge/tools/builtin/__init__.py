@@ -160,6 +160,7 @@ from forest_soul_forge.tools.builtin.action_items_extract import ActionItemsExtr
 from forest_soul_forge.tools.builtin.tone_shift import ToneShiftTool
 from forest_soul_forge.tools.builtin.shell_exec import ShellExecTool
 from forest_soul_forge.tools.builtin.suggest_agent import SuggestAgentTool
+from forest_soul_forge.tools.builtin.route_recommend import RouteRecommendTool
 from forest_soul_forge.tools.builtin.usb_device_audit import UsbDeviceAuditTool
 from forest_soul_forge.tools.builtin.web_fetch import WebFetchTool
 
@@ -220,6 +221,7 @@ __all__ = [
     "BrowserActionTool",
     "McpCallTool",
     "SuggestAgentTool",
+    "RouteRecommendTool",
     "LlmThinkTool",
     "TextSummarizeTool",
     "CodeExplainTool",
@@ -335,6 +337,10 @@ def register_builtins(registry) -> None:  # noqa: ANN001 — circular import dan
     # cleanly when the dispatcher wasn't given a registry handle.
     # Read-only; no audit gating.
     registry.register(SuggestAgentTool())
+    # ADR-0095 — route_recommend.v1. Reads ctx.trust_graph and returns a
+    # Thompson-ranked routing recommendation. Read-only; routing informs,
+    # capability stays human-gated.
+    registry.register(RouteRecommendTool())
     # SW-track — llm_think.v1. The bridge tool that turns Forest
     # agents into entities you can actually ask things of. Wraps
     # provider.complete() inside the dispatcher so every LLM call

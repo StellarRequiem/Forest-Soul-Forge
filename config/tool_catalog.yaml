@@ -2111,6 +2111,42 @@ tools:
     side_effects: read_only
     archetype_tags: [operator_companion, web_researcher]
 
+  route_recommend.v1:
+    name: route_recommend
+    version: "1"
+    description: |
+      Trust-based routing recommendation (ADR-0095). Given a problem_class
+      and a candidate set, Thompson-samples each candidate's trust posterior
+      — from the live synaptic layer the daemon feeds on every dispatch — and
+      returns a ranked recommendation: explore under-tested nodes, exploit
+      proven ones. Candidates default to every node with a track record for
+      the problem_class. Reads ctx.trust_graph; refuses cleanly if the
+      synaptic layer isn't wired. Read-only: routing INFORMS — the tool ranks,
+      it never selects an agent, delegates, or runs anything. Converting trust
+      into capability stays human-gated.
+    input_schema:
+      type: object
+      required: [problem_class]
+      properties:
+        problem_class:
+          type: string
+          description: "Class to route (e.g. a tool key 'llm_think.v1', or any label trust is tracked under)."
+        candidates:
+          type: array
+          items:
+            type: string
+          description: "Node ids to rank. Default: every node with a track record for this problem_class."
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 5
+        seed:
+          type: integer
+          description: "Seed the Thompson sampling for a reproducible ranking. Omit for live exploratory routing."
+    side_effects: read_only
+    archetype_tags: [operator_companion]
+
   mcp_call.v1:
     name: mcp_call
     version: "1"

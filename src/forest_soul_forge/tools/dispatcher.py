@@ -1056,6 +1056,9 @@ class ToolDispatcher:
             delegate=delegate_fn,
             priv_client=self.priv_client,
             agent_registry=self.agent_registry,
+            # ADR-0095 — expose the synaptic trust graph to read-only tools
+            # (route_recommend.v1). Same pattern as agent_registry/audit_chain.
+            trust_graph=self.trust_graph,
             procedural_shortcuts=self.procedural_shortcuts_table,
             personal_index=self.personal_index,
             # B350 — surface the dispatcher's bound AuditChain so
@@ -2430,6 +2433,7 @@ class ToolDispatcher:
             priv_client=self.priv_client,
             procedural_shortcuts=self.procedural_shortcuts_table,
             personal_index=self.personal_index,
+            trust_graph=self.trust_graph,  # ADR-0095 — read-only trust for route_recommend.v1
         )
         # ADR-0051 T4: same sandbox-aware path as the primary dispatch.
         # When FSF_TOOL_SANDBOX=off this is bit-identical to in-process.
