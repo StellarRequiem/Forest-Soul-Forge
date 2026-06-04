@@ -79,6 +79,9 @@ from typing import Any, Protocol
 import yaml
 
 from forest_soul_forge.core.audit_chain import AuditChain
+from forest_soul_forge.core.tool_policy import (
+    unconditional_approval_side_effects as _unconditional_approval_side_effects,
+)
 from forest_soul_forge.tools.base import (
     ToolError,
     ToolRegistry,
@@ -1113,12 +1116,25 @@ class ApprovalGateStep:
             or dctx.tool.side_effects
         )
         genre_requires = self.genre_requires_approval_fn(dctx.genre, side_effects)
-        if constraint_requires or genre_requires:
-            gate_source = (
-                "constraint+genre" if (constraint_requires and genre_requires)
-                else ("genre" if genre_requires else "constraint")
+        # ADR-0094: enforce the core/tool_policy invariant HERE, at the dispatch
+        # choke point. Filesystem + external (mutating) side-effects ALWAYS
+        # require human approval — the constitution bakes this at birth via
+        # tool_policy.resolve_constraints, but a runtime-granted tool (ADR-0060)
+        # resolves to catalog defaults and would otherwise slip the gate. The
+        # side-effect set is derived from the unconditional tool_policy rules so
+        # the two can't drift. Defense in depth: no resolution path can defeat it.
+        policy_requires = side_effects in _unconditional_approval_side_effects()
+        if constraint_requires or genre_requires or policy_requires:
+            sources = []
+            if constraint_requires:
+                sources.append("constraint")
+            if genre_requires:
+                sources.append("genre")
+            if policy_requires:
+                sources.append("side_effect_policy")
+            return StepResult.pending(
+                gate_source="+".join(sources), side_effects=side_effects,
             )
-            return StepResult.pending(gate_source=gate_source, side_effects=side_effects)
         return StepResult.go()
 
 

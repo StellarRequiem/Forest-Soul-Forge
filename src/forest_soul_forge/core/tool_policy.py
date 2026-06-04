@@ -202,6 +202,23 @@ _RULES: tuple[_Rule, ...] = (
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+def unconditional_approval_side_effects() -> frozenset[str]:
+    """Side-effect classes that ALWAYS require human approval, derived from
+    the unconditional (``when_trait=None``) rules above.
+
+    These are baked into the constitution at birth via :func:`resolve_constraints`.
+    The dispatch approval gate (ADR-0094) enforces this SAME set at the choke
+    point so a runtime-granted tool (ADR-0060) — which resolves to catalog
+    defaults and never re-runs this resolver — cannot slip the invariant.
+    Single source of truth: change a rule here and both paths honor it.
+    """
+    out: set[str] = set()
+    for rule in _RULES:
+        if rule.when_trait is None and rule.set_.get("requires_human_approval") is True:
+            out.update(rule.target_side_effects_in or ())
+    return frozenset(out)
+
+
 def resolve_constraints(
     profile: "TraitProfile",
     tool: "ToolDef",

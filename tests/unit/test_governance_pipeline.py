@@ -773,29 +773,68 @@ class TestApprovalGateStep:
             genre_requires_approval_fn=lambda genre, side_effects: True,
         )
         dctx = _ctx(genre="security_high")
-        dctx.tool = mock.Mock(side_effects="external")
+        # network side-effects: genre fires, but NOT the ADR-0094 always-approval
+        # policy (which covers only filesystem/external) — so 'genre' stands alone.
+        dctx.tool = mock.Mock(side_effects="network")
         dctx.resolved = _StubResolved(
             constraints={"requires_human_approval": False},
-            side_effects="external",
+            side_effects="network",
         )
         result = step.evaluate(dctx)
         assert result.is_pending
         assert result.gate_source == "genre"
-        assert result.side_effects == "external"
+        assert result.side_effects == "network"
 
     def test_both_paths_pend_with_combined_source(self):
         step = ApprovalGateStep(
             genre_requires_approval_fn=lambda *a: True,
         )
         dctx = _ctx(genre="security_high")
-        dctx.tool = mock.Mock(side_effects="filesystem")
+        # network isolates constraint+genre from the ADR-0094 side-effect policy.
+        dctx.tool = mock.Mock(side_effects="network")
         dctx.resolved = _StubResolved(
             constraints={"requires_human_approval": True},
-            side_effects="filesystem",
+            side_effects="network",
         )
         result = step.evaluate(dctx)
         assert result.is_pending
         assert result.gate_source == "constraint+genre"
+
+    def test_side_effect_policy_gates_filesystem_with_no_other_reason(self):
+        """ADR-0094 regression: a filesystem tool with NO per-tool constraint and
+        NO genre elevation STILL pends — the unconditional tool_policy invariant
+        is enforced at the dispatch gate. This is the exact runtime-grant bypass
+        that let a granted filesystem tool run un-approved under green/yellow."""
+        step = ApprovalGateStep(genre_requires_approval_fn=lambda *a: False)
+        dctx = _ctx()
+        dctx.tool = mock.Mock(side_effects="filesystem")
+        dctx.resolved = _StubResolved(
+            constraints={"requires_human_approval": False}, side_effects="filesystem",
+        )
+        result = step.evaluate(dctx)
+        assert result.is_pending
+        assert result.gate_source == "side_effect_policy"
+
+    def test_side_effect_policy_gates_external_with_no_other_reason(self):
+        step = ApprovalGateStep(genre_requires_approval_fn=lambda *a: False)
+        dctx = _ctx()
+        dctx.tool = mock.Mock(side_effects="external")
+        dctx.resolved = _StubResolved(
+            constraints={"requires_human_approval": False}, side_effects="external",
+        )
+        assert step.evaluate(dctx).gate_source == "side_effect_policy"
+
+    def test_side_effect_policy_leaves_readonly_and_network_alone(self):
+        """The invariant covers ONLY filesystem/external (mutating). read_only and
+        network fall through to per-tool / genre policy — no over-gating."""
+        step = ApprovalGateStep(genre_requires_approval_fn=lambda *a: False)
+        for se in ("read_only", "network"):
+            dctx = _ctx()
+            dctx.tool = mock.Mock(side_effects=se)
+            dctx.resolved = _StubResolved(
+                constraints={"requires_human_approval": False}, side_effects=se,
+            )
+            assert step.evaluate(dctx).verdict == "GO", se
 
     def test_resolved_side_effects_overrides_tool_side_effects(self):
         """Per the original dispatcher contract — resolved-side-effects

@@ -10,9 +10,10 @@ gap by reading recent ledger entries.
 side_effects=filesystem. The actuator-style external classification
 isn't right (no network egress) but the ledger drives future
 operator-facing behavior, so the per-call human-approval gate is
-load-bearing regardless of agent posture (the assessor role is
-YELLOW + this tool carries ``requires_human_approval=True`` at the
-catalog layer).
+load-bearing regardless of agent posture. As a filesystem tool it is
+gated by the unconditional always-approval invariant the dispatch gate
+enforces (ADR-0094 / ``tool_policy.filesystem_always_human_approval``) —
+it carries no per-tool ``requires_human_approval`` flag of its own.
 
 ADR-0089 Decision 3 — assessor (YELLOW posture) is the only role
 with this in its kit. Same two-layer pattern as time_steward's
