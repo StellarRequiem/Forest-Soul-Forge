@@ -138,3 +138,17 @@ def test_record_rejects_bad_input():
             g.record(*bad, True)
     with pytest.raises(ValueError):
         g.record("a", "fx", True, weight=0)
+
+
+def test_persistent_ledger_appends_and_survives_reopen(tmp_path):
+    p = tmp_path / "live.jsonl"
+    g = TrustGraph.load_or_create(p)
+    g.record("a", "fx", True); g.record("a", "fx", True)
+    assert p.exists() and len(p.read_text().splitlines()) == 2
+    # reopen continues from the persisted ledger (the daemon-restart path)
+    g2 = TrustGraph.load_or_create(p)
+    assert g2.trust("a", "fx").n == 2 and g2.verify()[0]
+    g2.record("a", "fx", False)
+    assert len(p.read_text().splitlines()) == 3
+    g3 = TrustGraph.load_or_create(p)
+    assert g3.trust("a", "fx").n == 3 and g3.verify()[0]

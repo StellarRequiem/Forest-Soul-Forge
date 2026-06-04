@@ -33,6 +33,7 @@ from forest_soul_forge.daemon.providers.frontier import FrontierProvider
 from forest_soul_forge.daemon.providers.local import LocalProvider
 from forest_soul_forge.daemon.routers import agents as agents_router
 from forest_soul_forge.daemon.routers import audit as audit_router
+from forest_soul_forge.daemon.routers import synapse as synapse_router
 from forest_soul_forge.daemon.routers import health as health_router
 from forest_soul_forge.daemon.routers import character_sheet as character_sheet_router
 from forest_soul_forge.daemon.routers import genres as genres_router
@@ -648,6 +649,16 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
         app.state.providers = providers
         app.state.trait_engine = trait_engine
         app.state.audit_chain = audit_chain
+        # ADR-0095 — the synaptic layer: a persistent, tamper-evident trust graph
+        # the dispatch path feeds (every concrete tool outcome moves an agent's
+        # trust for that tool class). Lives next to the audit chain; decoupled
+        # like it. Non-fatal — dispatch works without it.
+        try:
+            from forest_soul_forge.synapse import TrustGraph as _TrustGraph
+            app.state.trust_graph = _TrustGraph.load_or_create(
+                settings.audit_chain_path.parent / "trust_ledger.jsonl")
+        except Exception:
+            app.state.trust_graph = None
 
         # ADR-0050 T1 (B266) — resolve the at-rest encryption master
         # key. The substrate is opt-in by ADR Decision 6 ("mixed legacy
@@ -1209,6 +1220,7 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
     app.include_router(health_router.router)
     app.include_router(agents_router.router)
     app.include_router(audit_router.router)
+    app.include_router(synapse_router.router)
     app.include_router(runtime_router.router)
     app.include_router(traits_router.router)
     app.include_router(tools_router.router)

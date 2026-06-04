@@ -129,7 +129,8 @@ class TrustGraph:
     ledger alone. The ledger is the truth; the posteriors are a cache of it.
     """
 
-    def __init__(self, prior: tuple[float, float] = (1.0, 1.0)) -> None:
+    def __init__(self, prior: tuple[float, float] = (1.0, 1.0), *,
+                 ledger_path: str | Path | None = None) -> None:
         if prior[0] <= 0 or prior[1] <= 0:
             raise ValueError("Beta prior parameters must be > 0")
         self._prior = prior
@@ -137,6 +138,9 @@ class TrustGraph:
         self._post: dict[tuple[str, str], list[float]] = {}  # (node,class) -> [alpha, beta]
         self._head = GENESIS_PREV_HASH
         self._seq = -1
+        #: When set, record() appends each new outcome to this JSONL file so the
+        #: graph is durable across daemon restarts (the ledger stays the truth).
+        self._ledger_path = Path(ledger_path) if ledger_path else None
 
     # -- write ------------------------------------------------------------
     def record(self, node: str, problem_class: str, success: bool, *,
@@ -162,6 +166,9 @@ class TrustGraph:
         self._ledger.append(entry)
         self._head = entry_hash
         self._seq = seq
+        if self._ledger_path is not None:
+            with self._ledger_path.open("a", encoding="utf-8") as f:
+                f.write(entry.to_json_line() + "\n")
         return entry
 
     def _apply(self, e: Outcome) -> None:
@@ -224,6 +231,10 @@ class TrustGraph:
     def problem_classes(self) -> list[str]:
         return sorted({pc for (_n, pc) in self._post})
 
+    def scores(self) -> list[TrustScore]:
+        """Every (node, problem_class) trust score currently held, for display."""
+        return [TrustScore(n, pc, a, b) for (n, pc), (a, b) in self._post.items()]
+
     # -- integrity --------------------------------------------------------
     def verify(self) -> tuple[bool, str | None]:
         """Replay the hash chain. Returns (ok, reason). A single edited past
@@ -267,3 +278,16 @@ class TrustGraph:
              prior: tuple[float, float] = (1.0, 1.0)) -> "TrustGraph":
         lines = [l for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
         return cls.replay((json.loads(l) for l in lines), prior=prior)
+
+    @classmethod
+    def load_or_create(cls, path: str | Path, *,
+                       prior: tuple[float, float] = (1.0, 1.0)) -> "TrustGraph":
+        """Open a PERSISTENT trust graph: replay an existing ledger (verifying
+        integrity) or start fresh, then bind ``record()`` to append to it. This
+        is the live, durable form the daemon uses — the ledger survives restarts
+        and stays the single source of truth."""
+        p = Path(path)
+        g = cls.load(p, prior=prior) if p.exists() else cls(prior=prior)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        g._ledger_path = p
+        return g
