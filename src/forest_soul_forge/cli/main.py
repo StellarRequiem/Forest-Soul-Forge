@@ -341,6 +341,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _verify_add_subparser(sub)
 
+    # `fsf proof` — the standing scorecard: score the repo against STANDARD.md,
+    # each line with an independent-verify pointer. Sibling of `fsf verify`.
+    from forest_soul_forge.cli.proof_cmd import (
+        add_subparser as _proof_add_subparser,
+    )
+    _proof_add_subparser(sub)
+
     return parser
 
 
