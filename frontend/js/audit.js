@@ -4,6 +4,7 @@
 import { api } from "./api.js";
 import * as state from "./state.js";
 import { toast } from "./toast.js";
+import { startLive, onChainEntryDebounced } from "./live.js";
 
 function fmtTime(iso) {
   if (!iso) return "—";
@@ -204,4 +205,14 @@ export function start() {
     search.addEventListener("input", () => renderEvents(applyAuditFilter(_lastEvents)));
   }
   refresh();
+
+  // Live audit stream — the LOG is the natural home for it: it *is* the chain the
+  // stream carries. New entries appear within a tick instead of on manual refresh.
+  // Visibility-gated + debounced so off-screen tabs don't refetch; the manual
+  // refresh + the search filter still work (refresh re-applies the active filter).
+  startLive();
+  onChainEntryDebounced(() => {
+    const panel = document.querySelector('.tab-panel[data-panel="audit"]');
+    if (panel && !panel.hidden) refresh();
+  }, 1800);
 }
