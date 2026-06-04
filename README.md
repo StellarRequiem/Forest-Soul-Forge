@@ -41,6 +41,17 @@ Provenance, not just credentials — proof of *what an agent did, under whose ap
 
 And the **synaptic layer** — trust that learns from audited outcomes, contextual and tamper-evident (`.venv/bin/python demo/synapse/synapse_demo.py`): the substrate behind the [north-star thesis](docs/vision/polymorphic-cognitive-mesh.md) and [ADR-0095](docs/decisions/ADR-0095-cognitive-mesh-genesis-governance.md).
 
+## ✅ Proof of standing
+
+This repo is held to **[The Standard](STANDARD.md)** — and it proves itself. Don't trust it; re-run it:
+
+```sh
+fsf proof      # scores this repo 0–5 against the Standard — each line with a "verify yourself" pointer
+fsf verify     # audit-chain hash integrity + registry-DB integrity (no daemon required)
+```
+
+Every push is CI-gated (the "N passing" proof + the canon-drift gate). Nothing here asks for trust: re-run the commands, read the [audit chain](examples/audit_chain.jsonl), check the CI. The same bar spans the ecosystem — Yggdrasil and the public capstones each carry a `STANDARD.md`. Built pseudonymously (**StellarRequiem**) on verifiable work.
+
 ## 🧮 By the numbers
 
 _The core counts here are gated against disk by [`dev-tools/state_canon.py`](dev-tools/state_canon.py) `--check` (CI per ADR-0093). The machine-generated source of truth is the **CANON** block in [`STATE.md`](STATE.md); narrative context (the `was N at B199` deltas) is human-maintained._
