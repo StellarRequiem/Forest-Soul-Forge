@@ -105,6 +105,10 @@
 
       <div class="tabs__group" data-group="run">
         <div class="tabs__group-title">Run</div>
+        <button class="tab" data-tab="fleet" role="tab" aria-selected="false">
+          <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/><rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/><rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/><rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          <span class="tab__label">Fleet</span>
+        </button>
         <button class="tab" data-tab="agents" role="tab" aria-selected="false">
           <svg class="tab__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="6" r="2.2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="11" cy="6" r="2.2" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M1.5 13 C1.5 10.5 3.5 9.5 5 9.5 C6.5 9.5 8.5 10.5 8.5 13 M7.5 13 C7.5 10.5 9.5 9.5 11 9.5 C12.5 9.5 14.5 10.5 14.5 13" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
           <span class="tab__label">Agents</span>
@@ -221,6 +225,41 @@
           <div class="hud-cell" id="hud-activity"><div class="hud-cell__label">Activity</div><div class="hud-cell__value">…</div></div>
         </div>
         <div class="hub-tiles" id="hub-tiles"></div>
+      </div>
+    </section>
+
+    <!-- FLEET — the roster screen (ops-console unit cards with trust-levels). -->
+    <style id="fleet-styles">
+      .fleet-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; margin-top:14px; }
+      .unit { text-align:left; font-family:inherit; color:inherit; background:linear-gradient(160deg,#0c1018,#0e131c); border:1px solid #1c2733; border-radius:10px; padding:14px 14px 30px; cursor:pointer; position:relative; overflow:hidden; transition:transform .15s,border-color .15s,box-shadow .15s; }
+      .unit--veteran { border-color:#23323c; }
+      .unit::before { content:""; position:absolute; inset:0; background:radial-gradient(130% 80% at 100% 0%,rgba(120,220,255,.05),transparent 55%); pointer-events:none; }
+      .unit:hover { transform:translateY(-2px); border-color:#2dd4bf; box-shadow:0 0 0 1px rgba(45,212,191,.35),0 8px 24px rgba(45,212,191,.1); }
+      .unit__head { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+      .unit__name { font-size:14px; color:#e8f5ff; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .unit__class { font-family:var(--mono,ui-monospace,monospace); font-size:9px; letter-spacing:1.5px; padding:2px 6px; border:1px solid; border-radius:4px; white-space:nowrap; flex-shrink:0; }
+      .unit__role { font-size:11px; color:#7a8a99; margin:3px 0 10px; }
+      .unit__dna { font-family:var(--mono,ui-monospace,monospace); color:#46586a; }
+      .unit__skill { margin-bottom:7px; }
+      .unit__skill-row { display:flex; justify-content:space-between; font-family:var(--mono,ui-monospace,monospace); font-size:10px; color:#8aa0b0; margin-bottom:3px; }
+      .unit__bar { height:4px; background:#10161e; border-radius:3px; overflow:hidden; }
+      .unit__bar-fill { height:100%; border-radius:3px; }
+      .unit__untested { font-family:var(--mono,ui-monospace,monospace); font-size:10px; letter-spacing:1px; color:#4a5a68; padding:6px 0; }
+      .unit__enter { position:absolute; bottom:11px; right:14px; font-family:var(--mono,ui-monospace,monospace); font-size:10px; letter-spacing:1px; color:#3a4b5a; transition:color .15s; }
+      .unit:hover .unit__enter { color:#2dd4bf; }
+    </style>
+    <section class="tab-panel" data-panel="fleet" role="tabpanel" hidden>
+      <div class="panel" style="background:transparent;border:none;box-shadow:none;">
+        <div class="panel__header">
+          <h2 class="panel__title" style="letter-spacing:2px;">FLEET · <span id="fleet-count" style="color:#2dd4bf">…</span></h2>
+          <div class="panel__actions">
+            <input id="fleet-search" type="text" placeholder="filter units…" style="width:170px;padding:4px 8px;background:#0e1117;border:1px solid #2c303a;border-radius:4px;color:#ddd;font-size:12px;" />
+            <button class="btn btn--ghost btn--sm" id="fleet-refresh-btn" type="button">refresh</button>
+          </div>
+        </div>
+        <div class="panel__body" style="background:transparent;">
+          <div class="fleet-grid" id="fleet-grid">loading…</div>
+        </div>
       </div>
     </section>
 

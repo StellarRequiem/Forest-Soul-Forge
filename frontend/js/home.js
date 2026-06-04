@@ -64,7 +64,7 @@ async function refreshHud() {
 // ---------------------------------------------------------------------------
 const TILES = [
   { label: "COMMAND", tab: "console", desc: "mission board · trials · live readouts", stat: (s) => `${s.missions ?? "—"} open` },
-  { label: "FLEET", tab: "agents", desc: "your units + their trust-levels", stat: (s) => `${s.agents ?? "—"} units` },
+  { label: "FLEET", tab: "fleet", desc: "your units + their trust-levels", stat: (s) => `${s.agents ?? "—"} units` },
   { label: "BUILD", tab: "forge", desc: "recruit units · smith tools & skills", stat: () => "forge ▸" },
   { label: "LOG", tab: "audit", desc: "the append-only run history", stat: (s) => (s.chain != null ? `#${s.chain}` : "—") },
   { label: "RULES", tab: "security", desc: "posture · gates · reality checks", stat: () => "gates ▸" },
