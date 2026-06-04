@@ -1,0 +1,81 @@
+schema: fsf.training.v1
+# ADR-0096 — the tiered, repeatable, autonomous self-test ladder. Every task is
+# deterministic + read_only, so the harness may run it on its own (the auto-run
+# rail). Graded by composition/coverage, NOT by blast radius. Each tier exercises
+# a deeper slice of the stack; outcomes feed the synaptic layer under the stable
+# training.tN.* problem_class so per-tier competence trends over time.
+tasks:
+  # ---- Baseline (T0): dispatch a pure-function tool, assert the known output. --
+  - id: t0_baseline_timestamp
+    tier: 0
+    problem_class: training.t0.dispatch
+    description: "Baseline — dispatch a pure-function read-only tool; assert the known output. Proves dispatch -> audit -> acceptance end to end."
+    side_effects: read_only
+    steps:
+      - tool: timestamp_window
+        version: "1"
+        args: {expression: "last 5 minutes", anchor: "2026-01-01T00:00:00Z"}
+        expect: {path: span_seconds, equals: 300}
+
+  # ---- L1: same tool, different known inputs — determinism. --------------------
+  - id: t1_determinism_hours
+    tier: 1
+    problem_class: training.t1.determinism
+    description: "L1 — a different known input. Proves determinism, not luck."
+    side_effects: read_only
+    steps:
+      - tool: timestamp_window
+        version: "1"
+        args: {expression: "last 2 hours", anchor: "2026-01-01T00:00:00Z"}
+        expect: {path: span_seconds, equals: 7200}
+
+  - id: t1_determinism_days
+    tier: 1
+    problem_class: training.t1.determinism
+    description: "L1 — a third known input. Repeatability across the input space."
+    side_effects: read_only
+    steps:
+      - tool: timestamp_window
+        version: "1"
+        args: {expression: "last 3 days", anchor: "2026-01-01T00:00:00Z"}
+        expect: {path: span_seconds, equals: 259200}
+
+  # ---- L2 — the AUDIT system: verify the hash-chained log. --------------------
+  - id: t2_audit_verify
+    tier: 2
+    problem_class: training.t2.audit
+    description: "L2 — the audit system. Dispatch audit_chain_verify; assert the chain verifies."
+    side_effects: read_only
+    steps:
+      - tool: audit_chain_verify
+        version: "1"
+        args: {}
+        expect: {path: ok, truthy: true}
+
+  # ---- L3 — composition + provenance: two tools, both pass, chain carries them.
+  - id: t3_composition
+    tier: 3
+    problem_class: training.t3.composition
+    description: "L3 — composition. A multi-step sequence; every step passes and the audit chain carries the work."
+    side_effects: read_only
+    steps:
+      - tool: timestamp_window
+        version: "1"
+        args: {expression: "last 10 minutes", anchor: "2026-01-01T00:00:00Z"}
+        expect: {path: span_seconds, equals: 600}
+      - tool: audit_chain_verify
+        version: "1"
+        args: {}
+        expect: {path: ok, truthy: true}
+
+  # ---- L4 — documentation + integrity: the run is itself audited; report emitted.
+  - id: t4_doc_integrity
+    tier: 4
+    problem_class: training.t4.docintegrity
+    description: "L4 — documentation + integrity. Re-verify after a full run; assert the chain accumulated the run's own entries (the training is documented). The harness also asserts trust-graph integrity and emits the run report."
+    side_effects: read_only
+    steps:
+      - tool: audit_chain_verify
+        version: "1"
+        args: {}
+        expect: {path: entries_verified, truthy: true}

@@ -80,6 +80,10 @@ audit_logs/
 # Operator's live chain lives at audit/chain.jsonl — never commit it.
 # The demo fixture at examples/audit_chain.jsonl (underscore) is intentionally tracked.
 audit/chain.jsonl
+# ADR-0095 — the live synaptic trust ledger is runtime state (sits next to the
+# live chain at examples/trust_ledger.jsonl by default); never commit it.
+examples/trust_ledger.jsonl
+trust_ledger.jsonl
 soul_generated/
 local_state/
 # SQLite registry is an index rebuildable from canonical artifacts — never commit.
