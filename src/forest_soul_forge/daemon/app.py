@@ -144,6 +144,21 @@ def build_app(settings: DaemonSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Single-writer guard (ADR-0005 follow-up). Claim the cross-process
+        # writer lock BEFORE touching the registry DB or audit chain. A
+        # concurrent writer (a write-CLI run while the daemon is live) once
+        # interleaved seq counters and corrupted both stores; refuse to boot if
+        # another writer already holds the lock. flock auto-releases on process
+        # death, so a crashed prior daemon never leaves a stale lock behind.
+        from forest_soul_forge.core.single_writer import (
+            SingleWriterError as _SingleWriterError,
+            WriterLock as _WriterLock,
+        )
+        try:
+            app.state.writer_lock = _WriterLock(role="daemon").acquire()
+        except _SingleWriterError as _e:
+            raise RuntimeError(f"refusing to boot — {_e}") from _e
+
         # ADR-0050 T2 (B267): at-rest encryption gate. When
         # FSF_AT_REST_ENCRYPTION=true the registry bootstrap uses
         # SQLCipher with the resolved master key. Default off

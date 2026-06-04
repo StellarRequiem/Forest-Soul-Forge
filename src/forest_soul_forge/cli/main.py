@@ -332,6 +332,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _index_add_subparser(sub)
 
+    # `fsf verify` — operator-facing independent verification: audit-chain
+    # hash-check + registry DB integrity + recent agent activity, read from
+    # on-disk artifacts with no daemon required. The out-of-band "check what
+    # the agent actually did" surface (operator-extension reframe).
+    from forest_soul_forge.cli.verify_cmd import (
+        add_subparser as _verify_add_subparser,
+    )
+    _verify_add_subparser(sub)
+
     return parser
 
 
@@ -369,6 +378,15 @@ def _version_string() -> str:
         return "fsf (version unknown)"
 
 
+# CLI commands that mutate the registry DB / audit chain. They must hold the
+# cross-process writer lock — i.e. they must NOT run while the daemon (the lock
+# holder) is live. A bulk `plugin install` run during a live daemon once
+# interleaved seq counters and corrupted both stores (ADR-0005 follow-up). Read
+# commands (verify, chronicle, provenance, agent show, ...) are absent here and
+# run freely alongside the daemon.
+_WRITER_CMDS = {"forge", "install", "plugin"}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -376,11 +394,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     if runner is None:
         parser.print_help()
         return 2
+
+    # Single-writer guard: refuse a write command if the daemon (or another
+    # writer) holds the lock. Held for the command's duration, released after.
+    _lock = None
+    if getattr(args, "cmd", None) in _WRITER_CMDS:
+        from forest_soul_forge.core.single_writer import (
+            SingleWriterError,
+            assert_single_writer,
+        )
+        try:
+            _lock = assert_single_writer(role=f"cli:{args.cmd}")
+        except SingleWriterError as e:
+            print(f"refusing to run — {e}", file=sys.stderr)
+            return 3
+
     try:
         return int(runner(args) or 0)
     except KeyboardInterrupt:
         print("\n(interrupted)", file=sys.stderr)
         return 130
+    finally:
+        if _lock is not None:
+            _lock.release()
 
 
 if __name__ == "__main__":
