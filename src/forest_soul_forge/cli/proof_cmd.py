@@ -24,7 +24,11 @@ def add_subparser(sub) -> None:
         "proof",
         help="Score this repo against The Standard (STANDARD.md) — runnable by anyone.",
     )
-    p.add_argument("--chain", default="examples/audit_chain.jsonl")
+    p.add_argument(
+        "--chain", default=None,
+        help="Audit chain JSONL (default: live chain if present, "
+             "else the committed examples/audit_chain.sample.jsonl fixture).",
+    )
     p.add_argument("--db", default="data/registry.sqlite")
     p.add_argument("--json", action="store_true", help="Machine-readable scorecard.")
     p.set_defaults(_run=run)
@@ -100,7 +104,8 @@ def _gather(chain_path: str, db_path: str) -> list[dict]:
 
 
 def run(args: argparse.Namespace) -> int:
-    crit = _gather(args.chain, args.db)
+    from forest_soul_forge.cli.chronicle import _resolve_chain_path
+    crit = _gather(str(_resolve_chain_path(args.chain)), args.db)
     score = sum(1 for c in crit if c["pass"])
     total = len(crit)
 

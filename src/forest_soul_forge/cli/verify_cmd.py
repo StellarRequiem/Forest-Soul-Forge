@@ -35,8 +35,9 @@ def add_subparser(sub) -> None:
         help="Independently verify system integrity + recent agent activity (no daemon needed).",
     )
     p.add_argument(
-        "--chain", default="examples/audit_chain.jsonl",
-        help="Audit chain JSONL path (default: examples/audit_chain.jsonl).",
+        "--chain", default=None,
+        help="Audit chain JSONL path (default: the live chain if present, "
+             "else the committed examples/audit_chain.sample.jsonl fixture).",
     )
     p.add_argument(
         "--db", default="data/registry.sqlite",
@@ -129,7 +130,9 @@ def _git_state() -> dict[str, Any]:
 
 
 def run(args: argparse.Namespace) -> int:
-    chain, recent = _check_chain(args.chain, args.recent)
+    from forest_soul_forge.cli.chronicle import _resolve_chain_path
+    chain_path = str(_resolve_chain_path(args.chain))
+    chain, recent = _check_chain(chain_path, args.recent)
     db = _check_db(args.db)
     git = _git_state()
     all_ok = bool(chain["ok"]) and bool(db["ok"])

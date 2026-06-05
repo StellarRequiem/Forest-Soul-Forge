@@ -23,9 +23,19 @@ from typing import Any
 
 def _resolve_chain_path(explicit: str | None) -> Path:
     """Pick the audit chain path. Order:
-       1. --chain-path flag
+       1. --chain / --chain-path flag
        2. FSF_AUDIT_CHAIN_PATH env var
-       3. examples/audit_chain.jsonl (default daemon path)
+       3. the LIVE runtime chain if present — examples/audit_chain.jsonl (local
+          daemon) or data/audit_chain.jsonl (container). This is the operator's
+          real, growing history.
+       4. the committed frozen fixture examples/audit_chain.sample.jsonl — what a
+          fresh clone ships (the live chain is gitignored), so `fsf verify` /
+          `fsf proof` still pass on a clone.
+       5. last resort: the live path, so a "not found" error names a concrete file.
+
+    Resolving live-first keeps the operator's proof honest (it reflects the
+    running system, per the OPS red line), while the fixture fallback keeps the
+    public standing surface verifiable on a clone.
     """
     import os
     if explicit:
@@ -33,18 +43,16 @@ def _resolve_chain_path(explicit: str | None) -> Path:
     env = os.environ.get("FSF_AUDIT_CHAIN_PATH")
     if env:
         return Path(env)
-    # The daemon writes to examples/audit_chain.jsonl by default per the
-    # current settings; fall back gracefully if it's not there.
-    candidates = [
-        Path("examples/audit_chain.jsonl"),
-        Path("data/audit_chain.jsonl"),
+    live = [
+        Path("examples/audit_chain.jsonl"),   # local daemon default (gitignored)
+        Path("data/audit_chain.jsonl"),       # container default (FSF_AUDIT_CHAIN_PATH)
     ]
-    for p in candidates:
+    fixture = Path("examples/audit_chain.sample.jsonl")  # committed, frozen
+    for p in (*live, fixture):
         if p.exists():
             return p
-    # No file found; return the first candidate so the caller's "file
-    # not found" error mentions a concrete path.
-    return candidates[0]
+    # Nothing on disk; name the live path so the error is concrete.
+    return live[0]
 
 
 def _load_agent_dna(instance_id: str) -> tuple[str, str]:

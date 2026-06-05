@@ -145,18 +145,31 @@ class TestResolveChainPath:
         monkeypatch.setenv("FSF_AUDIT_CHAIN_PATH", str(env_path))
         assert _resolve_chain_path(None) == env_path
 
-    def test_falls_through_to_examples_default(self, tmp_path, monkeypatch):
-        """No flag, no env → returns examples/audit_chain.jsonl
-        candidate. We can't easily prove cwd-relative paths in tests
-        without changing cwd, so we just assert the returned name
-        matches the expected fallback."""
+    def test_live_chain_preferred_over_fixture(self, tmp_path, monkeypatch):
+        """Operator machine: the live chain exists → resolve to it (the real
+        running history), not the committed .sample fixture."""
         monkeypatch.delenv("FSF_AUDIT_CHAIN_PATH", raising=False)
-        # When neither candidate exists, the helper returns the FIRST
-        # candidate (examples/audit_chain.jsonl) so the caller's "file
-        # not found" error mentions a concrete path.
-        result = _resolve_chain_path(None)
-        # Either a valid existing path OR the first candidate.
-        assert result.name == "audit_chain.jsonl"
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "examples").mkdir()
+        (tmp_path / "examples" / "audit_chain.jsonl").write_text("")
+        (tmp_path / "examples" / "audit_chain.sample.jsonl").write_text("")
+        assert _resolve_chain_path(None).name == "audit_chain.jsonl"
+
+    def test_falls_back_to_sample_fixture_on_clone(self, tmp_path, monkeypatch):
+        """Fresh clone: the live chain is gitignored (absent), only the committed
+        .sample fixture is present → resolve to it so fsf verify/proof pass."""
+        monkeypatch.delenv("FSF_AUDIT_CHAIN_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "examples").mkdir()
+        (tmp_path / "examples" / "audit_chain.sample.jsonl").write_text("")
+        assert _resolve_chain_path(None).name == "audit_chain.sample.jsonl"
+
+    def test_nothing_present_returns_live_path_for_error(self, tmp_path, monkeypatch):
+        """Neither live nor fixture on disk → return the live path so the
+        downstream 'not found' error names a concrete file."""
+        monkeypatch.delenv("FSF_AUDIT_CHAIN_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_chain_path(None).name == "audit_chain.jsonl"
 
 
 # ===========================================================================

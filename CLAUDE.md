@@ -360,12 +360,16 @@ is the durable fix.
   `allowed_paths` can grant scoped access. memory/ and writes/
   are the canonical decompositions; new code follows the same
   pattern.
-- **Live audit chain is at `examples/audit_chain.jsonl`, not
-  `data/audit_chain.jsonl`.** Per `daemon/config.py` the default
-  `audit_chain_path` points to examples/. Override via
-  `FSF_AUDIT_CHAIN_PATH`. The data/ chain is a stale dev fixture.
-  Verify chain integrity via `dev-tools/check-drift.sh` (which
-  also runs every numeric drift check before tagging).
+- **Live audit chain is at `examples/audit_chain.jsonl` — gitignored
+  RUNTIME state the daemon appends to (not committed, as of 2026-06-04).**
+  Per `daemon/config.py` the local default `audit_chain_path` points
+  there; containers override to a `data/` path via `FSF_AUDIT_CHAIN_PATH`.
+  The committed, frozen demo + `fsf verify` fixture is the sibling
+  `examples/audit_chain.sample.jsonl` (never written by the daemon, so it
+  can't drift or carry corruption into the public repo). `fsf verify` /
+  `fsf proof` resolve the LIVE chain first (the operator's real history),
+  falling back to the `.sample` fixture on a fresh clone. Verify chain
+  integrity directly: `fsf verify`.
 
 ## Live-test driver gotchas (Run 001 lessons)
 

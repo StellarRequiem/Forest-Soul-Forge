@@ -77,8 +77,13 @@ coverage.xml
 agents/instances/
 audit_logs/
 *.audit.jsonl
-# Operator's live chain lives at audit/chain.jsonl — never commit it.
-# The demo fixture at examples/audit_chain.jsonl (underscore) is intentionally tracked.
+# The live audit chain is RUNTIME state the daemon appends to — never commit it.
+# A committed live chain drifts on every tick and lets corruption reach the PUBLIC
+# repo (see 1847c30 / 1c13c8c — two re-seals of a corrupted *tracked* chain). The
+# local daemon writes examples/audit_chain.jsonl; containers write data/ via
+# FSF_AUDIT_CHAIN_PATH. The committed, frozen demo + `fsf verify` fixture is
+# examples/audit_chain.sample.jsonl (tracked, never written by the daemon).
+examples/audit_chain.jsonl
 audit/chain.jsonl
 # ADR-0095 — the live synaptic trust ledger is runtime state (sits next to the
 # live chain at examples/trust_ledger.jsonl by default); never commit it.

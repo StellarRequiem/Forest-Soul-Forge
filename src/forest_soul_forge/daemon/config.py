@@ -58,21 +58,23 @@ class DaemonSettings(BaseSettings):
         default=Path("examples"),
         description="Canonical artifacts root (soul.md / constitution.yaml files).",
     )
-    # NOTE (2026-06-01 harden pass): this default is the *tracked* canonical
-    # chain at examples/audit_chain.jsonl, which the live daemon also writes
-    # to — so a running daemon shows it as git-modified (cosmetic drift). That
-    # is intentional, not a bug to "fix" by repointing: the path is load-bearing
-    # as the live chain across the test suite + ~15 dev-tools/ ops scripts that
-    # read it, so changing the default is a breaking change, and untracking it
-    # breaks fresh-clone reproducibility (tests read the committed file).
-    # Operators who want a clean working tree override FSF_AUDIT_CHAIN_PATH to
-    # an ignored path; the drift also stops whenever the daemon is paused.
+    # The live chain is RUNTIME state the daemon appends to. It lives at
+    # examples/audit_chain.jsonl but is now GITIGNORED (2026-06-04) — the prior
+    # "tracked + also-written" arrangement (the 2026-06-01 harden pass kept it,
+    # calling the git-drift "cosmetic") let a running daemon drift a committed
+    # file and, worse, let corruption reach the PUBLIC repo (1847c30, 1c13c8c —
+    # two re-seals of a corrupted *tracked* chain; a fresh clone failed its own
+    # `fsf verify`). The path is unchanged (load-bearing across the test suite +
+    # ~20 dev-tools/ops scripts that read the live chain there); only its
+    # git-tracked status changed. The committed, frozen demo + `fsf verify`
+    # fixture is the sibling examples/audit_chain.sample.jsonl (never written by
+    # the daemon). Containers override FSF_AUDIT_CHAIN_PATH to a data/ path.
     audit_chain_path: Path = Field(
         default=Path("examples/audit_chain.jsonl"),
         description=(
-            "Audit chain JSONL file. Default is the tracked canonical chain "
-            "(also the live write target — see note above). Override via "
-            "FSF_AUDIT_CHAIN_PATH to write the live chain to an ignored path."
+            "Audit chain JSONL file the daemon appends to (gitignored runtime "
+            "state). Override via FSF_AUDIT_CHAIN_PATH. The committed fixture is "
+            "examples/audit_chain.sample.jsonl."
         ),
     )
     scheduled_tasks_path: Path = Field(
